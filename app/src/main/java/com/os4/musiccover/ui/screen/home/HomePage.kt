@@ -31,7 +31,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -319,8 +319,11 @@ private fun RestartMenu() {
 
     Box {
         IconButton(onClick = { showMenu = true }) {
+            // Refresh, not RestartAlt: RestartAlt is drawn as two subpaths that stop short of
+            // each other at the bottom centre, and at 24dp that gap reads as a piece missing
+            // out of the icon rather than as part of the glyph. Refresh is one closed path.
             Icon(
-                imageVector = Icons.Rounded.RestartAlt,
+                imageVector = Icons.Rounded.Refresh,
                 contentDescription = stringResource(R.string.restart_menu),
                 tint = MiuixTheme.colorScheme.onBackground,
             )
