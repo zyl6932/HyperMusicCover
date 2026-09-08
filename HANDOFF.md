@@ -699,6 +699,16 @@ adb shell am broadcast -a com.os4.musiccover.PROBE --es op lockwp --ez clear tru
 - **改完自己 kill SystemUI，会清掉所有静态状态**，很容易把自己造成的现象误判成 bug。
 - **量尺寸要用差分法**（截一张隐藏目标的底图再截一张，相减取 bbox），
   直接对壁纸做阈值分割会被背景污染。
+- **AOD 不能用 adb 验证。** 这台机器 `aod_show_style=3` 是「智能显示」——AOD 亮起来约 7 秒后
+  `MiuiShowStyleController.checkAttention` 发现没人在看，就 `hideDoze` 把 AOD 关掉
+  （`DOZE_AOD → DOZE`）。**手机放在桌上用 adb 按电源键，永远是"没人在看"**，
+  所以看起来必定像「AOD 消失了」。实测：重启 SystemUI 之后锁屏、和不重启直接锁屏，
+  日志序列一模一样，都是 7 秒后 `hideDoze from checkAttention`。
+  查 AOD 相关的问题只能让用户拿着手机看。相关设置：
+  `settings get secure aod_show_style / aod_start / aod_end / doze_always_on`。
+  另外 `dumpsys power | grep mWakefulness` 是 `Dozing` 不代表屏幕在亮——
+  要看 `dumpsys display` 里那块屏的 `state`（AOD 是 DOZE，真息屏是 OFF）。
+
 - **测试是用户的事，不要自己截图验证效果。** 改完代码 → 构建 → 安装 → kill 对应进程 →
   然后**停下来**，说清楚装了什么、要看哪里，让用户在手机上看。截图只用来**量尺寸/坐标**
   （差分法量 bbox 那种），不用来"看看效果对不对"——静态图看不出动效，而且手机是用户在用的。
