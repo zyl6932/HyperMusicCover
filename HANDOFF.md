@@ -304,7 +304,47 @@ worker 线程提到 `THREAD_PRIORITY_DISPLAY`（默认优先级会被排到小�
 在 1MB 事务限制里。合成本身那 70~150ms 里，`saveLayer` 开的离屏层（1200x1200，5.7MB）
 和每次重新 `createBitmap` 整屏位图也都还有得省。
 
-### 13. 所有权模型（贯穿全部功能）
+### 13. 换锁屏时钟样式后时间跑到屏幕外——pivot 不能写死
+
+**症状**：换了一种锁屏时钟样式（上下两行的堆叠式，"00" 在上 "29" 在下）之后，
+进入 cover 模式时间整个跑到屏幕顶上看不见了，日期也顶到状态栏里。
+
+**原因有两个，都是把某一种样式量出来的常数当成了通用值：**
+
+**① `pivotY = 325f` 写死了。** 每种时钟样式的字形画在 `time_group` 里的位置完全不同。
+用 `--es op bounds` 量出来（`TimeView.getTextBoundsWithPosition()`）：
+
+| | 单行样式 | 堆叠样式（natural） | 堆叠样式（y=740） |
+|---|---|---|---|
+| hour 字形 top | ~325 | 650 | 650 |
+| minute 字形 top | ~325（并排） | 1373 | 909 |
+
+按 325 缩放堆叠样式，字形被拉到 `325 + (650-325)*0.335 ≈ 434` 局部坐标，
+再加上容器 `ty=-467`，直接跑到屏幕外。
+
+**改成从字形自己的 top 推**：`glyphTop()` 取两棵树里所有可见 `TimeView` 的
+`getTextBoundsWithPosition().top` 的最小值当 pivot。这样缩放后字形顶边**不动**，
+OEM 把它挤到哪它就留在哪，跟样式无关。两棵树用**同一个** pivot，
+堆叠样式的上下两行才会一起收拢（各用各的 top 的话中间会留个大空隙）。
+
+实测这个样式推出来 `pivotY=650.02`。而单行样式的 clamp 值是 674/337/317、字形高 332，
+说明它的字形 top 差不多就是 325——也就是新算法在老样式上会得出跟原常数一样的结果。
+
+**② `SQUEEZE_FLOOR = 740` 也是按单行样式定的。** 堆叠样式在 y=740 时 OEM 把整组
+往上搬 `ty=-467`，日期落到 y=65，**压在状态栏底下**（单行样式落在 ~260，没事）。
+
+加了个兜底：`keepClockClearOfStatusBar()` 量日期实际的屏幕 y，低于
+`status_bar_height + 24` 就把整组往下推回去，**只在压到状态栏时才动**，
+单行样式算出来是 0，行为不变。推的是 `time_group` 和 `text_area` 的 `translationY`
+（两棵树都要），**不能推它们的父容器** `clock_animation_container`——那是 OEM
+自己的动画通道，写它会跟弹簧打架。用 `sClockNudge` 记住推了多少，
+下一帧减掉再算，避免累加成正反馈。
+
+实测这个样式推了 103px，日期从 65 回到 168。
+
+**注意**：只在堆叠样式上实测过。单行样式按上面的推理应该行为不变，但没回去验证过。
+
+### 14. 所有权模型（贯穿全部功能）
 
 系统会抢回一切。凡是接管都要**持续断言**，不能一次性设置。同时：
 
@@ -339,6 +379,7 @@ adb shell am broadcast -a com.os4.musiccover.PROBE --es op pushart --ez on true
 --es op release / abandon
 --es op depth --ez on false         # 单独隐藏景深抠图
 --es op views [--ez root true]      # dump 视图树
+--es op bounds                     # 时钟各部件的屏幕坐标 + 字形 bbox（换样式排错必用）
 --es op api --es id hour_view|clock # dump 某个 View 的接口
 --es op cls --es name <fqcn> [--es grep x]
 --es op params --ef h/--ef weight/--ef sizei   # 直接驱动 TimeView 字体轴

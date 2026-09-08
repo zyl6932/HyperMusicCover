@@ -609,6 +609,8 @@ public class Main implements IXposedHookLoadPackage {
                         MediaController mc = sWatched;
                         out.putString("player", mc == null ? "" : mc.getPackageName());
                         setResultExtras(out);
+                    } else if ("bounds".equals(op)) {
+                        dumpClockBounds();
                     } else if ("state".equals(op)) {
                         XposedBridge.log(TAG + "state: holdY=" + sHoldY + " currentY=" + sCurrentY
                                 + " lastSystemY=" + sLastSystemY + " animating=" + (sFrameCb != null || sRamp != null)
@@ -719,6 +721,10 @@ public class Main implements IXposedHookLoadPackage {
             sCollapseMin = Float.NaN;
             sAppliedK = Float.NaN;
             groupScale("time_group", 1f, -1f, 0f, 0f);
+        }
+        if (sClockNudge != 0f) {
+            sClockNudge = 0f;
+            setClockNudge(0f);
         }
         if (sTint != null) {
             sTint = null;
@@ -1108,6 +1114,40 @@ public class Main implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * Where the clock actually sits on screen. Every lock screen clock style lays its glyphs out
+     * somewhere different, so anything that positions the collapsed clock has to come from these
+     * numbers rather than from a constant measured against one style.
+     */
+    private static void dumpClockBounds() {
+        for (View root : clockRoots()) {
+            android.content.res.Resources r = root.getResources();
+            for (String id : new String[]{"clock_animation_container", "time_group", "text_area",
+                    "hour_view", "minute_view"}) {
+                int i = r.getIdentifier(id, "id", "com.android.systemui");
+                View v = i == 0 ? null : root.findViewById(i);
+                if (v == null) continue;
+                int[] loc = new int[2];
+                v.getLocationOnScreen(loc);
+                StringBuilder sb = new StringBuilder(viewIdOf(root)).append(' ').append(id)
+                        .append(" screen=").append(loc[0]).append(',').append(loc[1])
+                        .append(' ').append(v.getWidth()).append('x').append(v.getHeight())
+                        .append(" ty=").append(v.getTranslationY())
+                        .append(" sy=").append(v.getScaleY())
+                        .append(" pivotY=").append(v.getPivotY())
+                        .append(" vis=").append(v.getVisibility());
+                try {
+                    sb.append(" textBounds=")
+                            .append(XposedHelpers.callMethod(v, "getTextBoundsWithPosition"))
+                            .append(" drawY=").append(XposedHelpers.callMethod(v, "getDrawTextY"))
+                            .append(" textTop=").append(XposedHelpers.callMethod(v, "getTextTop"));
+                } catch (Throwable ignored) {
+                }
+                XposedBridge.log(TAG + sb);
+            }
+        }
+    }
+
     private static void invalidateClocks() {
         View v = sContainer;
         if (v == null) return;
@@ -1163,21 +1203,112 @@ public class Main implements IXposedHookLoadPackage {
         if (Float.isNaN(min)) { applyGlassMorph(p); return; }
         applyGlassMorph(p);
         float k = 1f - p * (1f - min);
-        if (!Float.isNaN(sAppliedK) && Math.abs(k - sAppliedK) < 0.001f) return;
-        sAppliedK = k;
-        for (View root : clockRoots()) {
-            int id = root.getResources().getIdentifier("time_group", "id", "com.android.systemui");
-            View g = id == 0 ? null : root.findViewById(id);
-            if (g == null) continue;
-            // Not g.getWidth()/2: this runs from the setNotifY hook, which can fire before the
-            // group is laid out, and a width of 0 puts the pivot on the left edge - the clock
-            // then collapses into the corner instead of staying centred under the date.
-            g.setPivotX(g.getResources().getDisplayMetrics().widthPixels / 2f);
-            g.setPivotY(325f);
-            g.setScaleX(k);
-            g.setScaleY(k);
+        if (Float.isNaN(sAppliedK) || Math.abs(k - sAppliedK) >= 0.001f) {
+            sAppliedK = k;
+            float pivotY = glyphTop();
+            for (View root : clockRoots()) {
+                int id = root.getResources()
+                        .getIdentifier("time_group", "id", "com.android.systemui");
+                View g = id == 0 ? null : root.findViewById(id);
+                if (g == null) continue;
+                // Not g.getWidth()/2: this runs from the setNotifY hook, which can fire before
+                // the group is laid out, and a width of 0 puts the pivot on the left edge - the
+                // clock then collapses into the corner instead of staying centred under the date.
+                g.setPivotX(g.getResources().getDisplayMetrics().widthPixels / 2f);
+                g.setPivotY(pivotY);
+                g.setScaleX(k);
+                g.setScaleY(k);
+            }
+            if (sVerbose) {
+                XposedBridge.log(TAG + "collapse y=" + y + " p=" + p + " k=" + k
+                        + " pivotY=" + pivotY);
+            }
         }
-        if (sVerbose) XposedBridge.log(TAG + "collapse y=" + y + " p=" + p + " k=" + k);
+        keepClockClearOfStatusBar();
+    }
+
+    /**
+     * The top of the drawn digits, in time_group's coordinates, across both clock trees.
+     *
+     * This was the constant 325, measured against the single-line clock. Every lock screen clock
+     * style lays its glyphs out somewhere else - the stacked one draws the hour at 650 and the
+     * minute at 909 - and scaling about 325 threw those clean off the top of the screen. Scaling
+     * about the block's own top instead leaves the collapsed clock where the OEM's squeeze
+     * already put it, whatever the style, and keeps the two lines of a stacked clock together
+     * because both trees get the same pivot.
+     */
+    private static float glyphTop() {
+        float top = Float.MAX_VALUE;
+        for (View root : clockRoots()) {
+            for (String id : new String[]{"hour_view", "minute_view"}) {
+                int i = root.getResources().getIdentifier(id, "id", "com.android.systemui");
+                View v = i == 0 ? null : root.findViewById(i);
+                if (v == null || v.getVisibility() != View.VISIBLE) continue;
+                try {
+                    RectF r = (RectF) XposedHelpers.callMethod(v, "getTextBoundsWithPosition");
+                    if (r == null || r.height() <= 0f) continue;
+                    top = Math.min(top, v.getTop() + r.top);
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        // Nothing measurable yet (the views can be unlaid-out this early): the old constant is
+        // still the right answer for the style it was measured on.
+        return top == Float.MAX_VALUE ? 325f : top;
+    }
+
+    /** How far we have pushed the clock group down, so the correction never accumulates. */
+    private static volatile float sClockNudge;
+
+    /**
+     * The OEM translates the whole clock group up as it squeezes, and how far depends on the
+     * style. At the squeeze floor the stacked clock puts the date at y=65 - under the status bar,
+     * colliding with the icons. Push the group back down when that happens, and only then: the
+     * single-line style lands clear of the status bar on its own and must not move.
+     *
+     * The nudge goes on time_group and text_area rather than their parent, because the parent's
+     * translationY is the OEM's own animation channel and writing to it would fight the spring.
+     */
+    private static void keepClockClearOfStatusBar() {
+        View date = null;
+        for (View root : clockRoots()) {
+            int i = root.getResources().getIdentifier("text_area", "id", "com.android.systemui");
+            View v = i == 0 ? null : root.findViewById(i);
+            if (v != null && v.getVisibility() == View.VISIBLE && v.getHeight() > 0) {
+                date = v;
+                break;
+            }
+        }
+        if (date == null) return;
+        int[] loc = new int[2];
+        date.getLocationOnScreen(loc);
+        float uncorrected = loc[1] - sClockNudge;
+        float nudge = Math.max(0f, minClockTop(date) - uncorrected);
+        if (Math.abs(nudge - sClockNudge) < 0.5f) return;
+        sClockNudge = nudge;
+        setClockNudge(nudge);
+        if (sVerbose) XposedBridge.log(TAG + "clock nudged down " + nudge + "px");
+    }
+
+    private static void setClockNudge(float ty) {
+        for (View root : clockRoots()) {
+            for (String id : new String[]{"time_group", "text_area"}) {
+                int i = root.getResources().getIdentifier(id, "id", "com.android.systemui");
+                View v = i == 0 ? null : root.findViewById(i);
+                if (v != null) v.setTranslationY(ty);
+            }
+        }
+    }
+
+    /** Status bar height plus a little air, in px. */
+    private static float minClockTop(View any) {
+        try {
+            android.content.res.Resources r = any.getResources();
+            int id = r.getIdentifier("status_bar_height", "dimen", "android");
+            if (id != 0) return r.getDimensionPixelSize(id) + 24f;
+        } catch (Throwable ignored) {
+        }
+        return 132f;
     }
 
     /**
