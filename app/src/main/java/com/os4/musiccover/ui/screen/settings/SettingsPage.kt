@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -30,9 +31,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.os4.musiccover.AppSettings
 import com.os4.musiccover.LocaleHelper
 import com.os4.musiccover.R
+import com.os4.musiccover.SettingsBackup
+import kotlinx.coroutines.launch
 import com.os4.musiccover.ui.util.BlurredBar
 import com.os4.musiccover.ui.util.pageScrollModifiers
 import com.os4.musiccover.ui.util.rememberBlurBackdrop
@@ -71,18 +73,24 @@ fun SettingsPageView(
     val blurActive = isBlurEnabled && backdrop != null
     val barColor = if (blurActive) Color.Transparent else MiuixTheme.colorScheme.surface
 
+    val scope = rememberCoroutineScope()
+
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri: Uri? ->
         uri?.let {
-            try {
-                val json = AppSettings.load(context).toJson()
-                context.contentResolver.openOutputStream(it)?.use { out ->
-                    out.write(json.toByteArray())
+            // Suspends: the module's own parameters come back over a broadcast, so an export
+            // cannot be assembled synchronously in the picker's callback.
+            scope.launch {
+                try {
+                    val json = SettingsBackup.export(context)
+                    context.contentResolver.openOutputStream(it)?.use { out ->
+                        out.write(json.toByteArray())
+                    }
+                    Toast.makeText(context, R.string.export_success, Toast.LENGTH_SHORT).show()
+                } catch (_: Exception) {
+                    Toast.makeText(context, R.string.export_failed, Toast.LENGTH_SHORT).show()
                 }
-                Toast.makeText(context, R.string.export_success, Toast.LENGTH_SHORT).show()
-            } catch (_: Exception) {
-                Toast.makeText(context, R.string.export_failed, Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -97,7 +105,7 @@ fun SettingsPageView(
                 val json = reader.readText()
                 reader.close()
                 stream?.close()
-                AppSettings.importFromJson(context, json)
+                SettingsBackup.import(context, json)
                 Toast.makeText(context, R.string.import_success, Toast.LENGTH_SHORT).show()
                 activity?.recreate()
             } catch (_: Exception) {

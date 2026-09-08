@@ -73,7 +73,8 @@
     <string name="tab_features">功能</string>
     <string name="home_status_active">模块已激活</string>
     <string name="home_status_inactive">模块未激活</string>
-    <string name="home_status_click_to_retry">点击重新检测</string>
+    <string name="home_status_mode">工作模式：%1$s</string>
+    <string name="home_mode_fullscreen">全屏封面</string>
     <string name="home_status_inactive_hint">请在 LSPosed 中启用并重启系统界面</string>
     <string name="home_device_info">设备信息</string>
     <string name="home_device_name">设备名称</string>

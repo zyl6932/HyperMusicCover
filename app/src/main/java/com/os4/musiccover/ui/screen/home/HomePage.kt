@@ -96,10 +96,10 @@ fun HomePageView(
     LaunchedEffect(Unit) {
         hyperOSVersion = withContext(Dispatchers.IO) { SystemVersion.hyperOs(loadingText) }
     }
-    val moduleVersion = try {
-        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
+    val moduleVersion = "v" + try {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0.0.1"
     } catch (_: Exception) {
-        "1.0"
+        "0.0.1"
     }
 
     var state by remember { mutableStateOf(ModuleBridge.State()) }
@@ -181,12 +181,23 @@ fun HomePageView(
                         } else {
                             stringResource(R.string.home_status_inactive)
                         }
-                        val lineTwo = if (!checked) {
-                            stringResource(R.string.home_loading)
-                        } else if (ok) {
-                            stringResource(R.string.home_status_click_to_retry)
+                        // When it is working there is nothing to instruct the user about,
+                        // so the two lines say what is running instead. When it is not, the
+                        // second line is the one thing worth reading.
+                        val lineTwo = when {
+                            !checked -> stringResource(R.string.home_loading)
+                            ok -> moduleVersion
+                            else -> stringResource(R.string.home_status_inactive_hint)
+                        }
+                        // Hard-coded until there is a second layout to switch to; the album-card
+                        // style is the planned one, and this line is where it will be chosen.
+                        val lineThree = if (checked && ok) {
+                            stringResource(
+                                R.string.home_status_mode,
+                                stringResource(R.string.home_mode_fullscreen),
+                            )
                         } else {
-                            stringResource(R.string.home_status_inactive_hint)
+                            null
                         }
 
                         Card(
@@ -228,6 +239,13 @@ fun HomePageView(
                                         text = lineTwo,
                                         fontSize = 15.sp,
                                     )
+                                    if (lineThree != null) {
+                                        MiuixText(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            text = lineThree,
+                                            fontSize = 15.sp,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -285,15 +303,15 @@ private object SystemVersion {
         ""
     }
 
+    /**
+     * The incremental alone: it already starts with the release name (OS4.0.0.35.XPBCNXM), so
+     * printing the name in front of it just stutters - "OS4.0 · OS4.0.0.35.XPBCNXM".
+     */
     fun hyperOs(fallback: String): String {
-        val name = prop("ro.mi.os.version.name").ifEmpty { prop("ro.miui.ui.version.name") }
         val incremental = prop("ro.mi.os.version.incremental").ifEmpty { Build.DISPLAY }
-        return when {
-            name.isNotEmpty() && incremental.isNotEmpty() -> "$name · $incremental"
-            incremental.isNotEmpty() -> incremental
-            name.isNotEmpty() -> name
-            else -> fallback
-        }
+        if (incremental.isNotEmpty()) return incremental
+        val name = prop("ro.mi.os.version.name").ifEmpty { prop("ro.miui.ui.version.name") }
+        return name.ifEmpty { fallback }
     }
 }
 

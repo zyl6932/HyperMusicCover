@@ -36,7 +36,7 @@ android {
         // CI stamps nightlies with -PmcVersionCode / -PmcVersionSuffix so every build is
         // distinguishable in LSPosed and in the About page; a plain local build keeps 1.0.
         versionCode = (findProperty("mcVersionCode") as String?)?.toInt() ?: 2
-        versionName = "1.0" + ((findProperty("mcVersionSuffix") as String?) ?: "")
+        versionName = "0.0.1" + ((findProperty("mcVersionSuffix") as String?) ?: "")
     }
 
     signingConfigs {

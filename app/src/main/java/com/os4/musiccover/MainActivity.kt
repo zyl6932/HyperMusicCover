@@ -82,6 +82,17 @@ class MainActivity : ComponentActivity() {
     @Volatile
     private var uiReady = false
 
+    /**
+     * Deliberately not applied the moment the theme setting changes: it is a configuration
+     * change, so the activity is recreated and the switch visibly jumps. Doing it once the app
+     * is off screen gets the same result - the splash is right on the next launch - with nobody
+     * watching the recreate.
+     */
+    override fun onStop() {
+        super.onStop()
+        AppNightMode.apply(this, AppSettings.load(this).themeMode)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -129,9 +140,6 @@ class MainActivity : ComponentActivity() {
                         language = LocaleHelper.getSavedLanguage(this@MainActivity).code,
                     )
                 )
-                // Applied here rather than only at startup so the splash is already right the
-                // next time the app is opened, instead of one launch behind the setting.
-                AppNightMode.apply(this@MainActivity, themeMode.name)
             }
 
             AppTheme(themeMode = themeMode) {
