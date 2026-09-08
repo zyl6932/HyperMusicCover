@@ -13,9 +13,9 @@ LSPosed 把它当成一个新模块，**必须重新启用、重新勾作用域*
 而且**旧的 `com.os4.musiccover` 必须卸载或停用**，否则两个模块一起 hook SystemUI。
 （模块状态文件在 SystemUI 的 filesDir 里，改包名不受影响。）
 
-classic Xposed API，**已安装并在 LSPosed 中启用，作用域是
-`com.android.systemui` + `com.miui.miwallpaper`（两个都必须勾选）**。
-模块本体是 Java（`Main.java` / `WallpaperProbe.java`），
+**现代 Xposed API（libxposed，API 102）**，作用域是
+`com.android.systemui` + `com.miui.miwallpaper`（两个都必须勾选）。
+模块本体是 Java（`Main.java` / `WallpaperProbe.java` / `Xp.java`），
 外面套了一层 Kotlin + Compose + miuix 写的设置界面（见第 15 节）。
 
 同目录参考素材：
@@ -480,6 +480,61 @@ Kotlin + Compose + [miuix](https://github.com/miuix-kotlin-multiplatform/miuix)�
   用户随时可能把壁纸改回「同时应用到桌面和锁屏」，缓存说"已经没问题"就永远发现不了，
   只能靠人去点修复。实测：清掉锁屏壁纸后触发一次贴封面，模块自己查、自己复制、自己修好。
 - **立即应用 / 恢复原壁纸**：跟随卡片之后没意义了，adb 还留着 `pushart`。
+
+## 现代 API（102）——2026-09-09 从 classic 迁过来的
+
+依赖是 `compileOnly("io.github.libxposed:api:102.0.0")`（Maven Central；
+classic 那个 `api.xposed.info` 仓库最高只有 **82**，根本没有 102，
+"用 102" 指的就是 libxposed 这套）。**API 版本跟 APK 体积无关**，那个 jar 一个字节都不进包。
+
+**入口和注册全变了**：
+
+| classic | API 102 |
+|---|---|
+| `implements IXposedHookLoadPackage` | `extends XposedModule` |
+| `handleLoadPackage(lpp)` | `onPackageLoaded(PackageLoadedParam)` |
+| `lpp.classLoader` | `param.getDefaultClassLoader()` |
+| `assets/xposed_init` | `META-INF/xposed/java_init.list` |
+| manifest 的 `xposedscope` | `META-INF/xposed/scope.list` |
+| manifest 的 `xposedminversion` | `META-INF/xposed/module.prop` 的 `minApiVersion` |
+
+这些文件放在 `app/src/main/resources/META-INF/xposed/`，Gradle 自动打进 APK。
+manifest 里那几条 meta-data **留着**（管理器还靠它列出模块），
+`xposedminversion` 改成 102——只懂 classic 的框架会直接拒绝，
+而不是加载到一半去找已经不存在的 `assets/xposed_init`。
+
+**hook 模型从 before/after 变成了拦截器链**（像 OkHttp 的 interceptor）：
+
+```java
+Xp.hookAll(cls, "name", chain -> {
+    Object result = chain.proceed();   // after 钩子：先跑原方法
+    ...
+    return result;
+});
+```
+
+`Hooker` 是函数式接口，所以原来 13 个匿名 `XC_MethodHook` 全变成了 lambda。三种映射：
+
+- 纯 after → `proceed()` 再干活；
+- **改参数**（`setNotifY` 挟持时钟 Y、壁纸上传换图）→ `chain.proceed(args)`，
+  比原来 `param.args[0] = x` 更直白；
+- **短路**（`getBitmap` 省掉 210ms 的磁盘解码）→ **直接 return，不 proceed**。
+
+**`XposedHelpers` 没了**，现代 API 故意不提供任何 helper。
+`Xp.java` 是把这个模块用到的那几个（`findClass` / `getObjectField` / `callMethod` /
+`setBooleanField` / `hookAll` / `log`）用普通反射重写了一遍。
+**`Xp.hookAll` 只看 `getDeclaredMethods()`，不往父类走**——classic 的 `hookAllMethods` 就是这个语义，
+而且这里是性命攸关的：哪天 OEM 类不再 override `onAttachedToWindow`，
+往上走就会 hook 到 `View.onAttachedToWindow`，等于给 SystemUI 里每一个 View 都挂钩子。
+
+**LSPosed 1.11.0 确认支持**：`/data/adb/modules/zygisk_lsposed/framework.dex` 里能搜到
+`XposedModule` / `attachFramework` / `HookBuilder` / `Chain` / `intercept`
+（102 的拦截器模型），而且日志里有 `New modules detected, hook preferences: pkg=...`。
+`java_init.list` 这些字符串在 framework.dex / daemon.apk / .so 里都搜不到，
+应该是在原生 daemon 里，**没验证到，只是按官方 spec 写的**。
+
+**换 API 之后必须做的事**：LSPosed 里重新启用、重新勾作用域，
+**并且卸载或停用旧的 `com.os4.musiccover`**，否则两套都在 hook SystemUI。
 
 ## 发布：签名、R8、CI
 
