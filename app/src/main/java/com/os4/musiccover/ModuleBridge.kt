@@ -33,7 +33,6 @@ object ModuleBridge {
         val bias: Float = 0.34f,
         val clockScale: Float = 0.335f,
         val glassEnd: Float = 0.75f,
-        val hideDepth: Boolean = true,
         val cardShowing: Boolean = false,
         val lockWallpaperOk: Boolean = false,
         val track: String = "",
@@ -69,11 +68,6 @@ object ModuleBridge {
     fun setClockScale(context: Context, v: Float) = send(context, "clockscale") { putExtra("v", v) }
 
     fun setGlassEnd(context: Context, v: Float) = send(context, "glassend") { putExtra("v", v) }
-
-    fun setHideDepth(context: Context, on: Boolean) =
-        send(context, "depthpref") { putExtra("on", on) }
-
-    fun repairLockWallpaper(context: Context) = send(context, "lockwp")
 
     /**
      * Asks the module for everything at once. Returns a dead State rather than throwing when the
@@ -121,7 +115,6 @@ object ModuleBridge {
             bias = b.getFloat("bias", 0.34f),
             clockScale = b.getFloat("clock", 0.335f),
             glassEnd = b.getFloat("glass", 0.75f),
-            hideDepth = b.getBoolean("depth", true),
             cardShowing = b.getBoolean("card", false),
             lockWallpaperOk = b.getBoolean("lockwp", false),
             track = b.getString("track") ?: "",

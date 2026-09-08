@@ -121,8 +121,6 @@ public class Main implements IXposedHookLoadPackage {
      * album cover - the leftover the cover swap does not otherwise explain.
      */
     private static volatile boolean sDepthHidden;
-    /** Whether cover mode should hide the cut-out at all. Off is a deliberate (odd) look. */
-    private static volatile boolean sDepthWanted = true;
     /** SystemUI restarts on its own (observed, with no crash recorded), which used to drop the
      *  hidden flag and bring the old wallpaper's subject back over the album cover. Cover mode
      *  is a property of the phone, not of this process, so it has to outlive the process. */
@@ -400,8 +398,7 @@ public class Main implements IXposedHookLoadPackage {
                     + "\nauto=" + (sAuto ? 1 : 0)
                     + "\nbias=" + sBias
                     + "\nclock=" + sClockScale
-                    + "\nglass=" + sGlassEnd
-                    + "\ndepth=" + (sDepthWanted ? 1 : 0) + "\n").getBytes());
+                    + "\nglass=" + sGlassEnd + "\n").getBytes());
             f.close();
         } catch (Throwable t) {
             XposedBridge.log(TAG + "saveState failed: " + t);
@@ -433,7 +430,6 @@ public class Main implements IXposedHookLoadPackage {
                     else if ("bias".equals(k)) sBias = Float.parseFloat(v);
                     else if ("clock".equals(k)) sClockScale = Float.parseFloat(v);
                     else if ("glass".equals(k)) sGlassEnd = Float.parseFloat(v);
-                    else if ("depth".equals(k)) sDepthWanted = "1".equals(v);
                     // "offdelay" was the pause timer, before the card became the switch.
                 }
             }
@@ -514,7 +510,7 @@ public class Main implements IXposedHookLoadPackage {
                         boolean on = i.getBooleanExtra("on", true);
                         if (i.hasExtra("bias")) sBias = clamp01(i.getFloatExtra("bias", sBias));
                         sTrackKey = on ? trackKey(pickController(c)) : "";
-                        setCoverEnabled(on, anim);
+                        setCoverEnabled(on, anim, false);
                     } else if ("bias".equals(op)) {
                         setBias(i.getFloatExtra("v", DEFAULT_BIAS));
                     } else if ("clockscale".equals(op)) {
@@ -530,10 +526,6 @@ public class Main implements IXposedHookLoadPackage {
                         XposedBridge.log(TAG + "glass end = " + sGlassEnd);
                         if (sCoverMode) { sGlassV1 = sGlassEnd; sAppliedGlassV = Float.NaN;
                             reassertCoverClock(); }
-                    } else if ("depthpref".equals(op)) {
-                        sDepthWanted = i.getBooleanExtra("on", true);
-                        saveState();
-                        if (sCoverMode) setDepthHidden(sDepthWanted);
                     } else if ("auto".equals(op)) {
                         setAuto(i.getBooleanExtra("on", true));
                     } else if ("reload".equals(op)) {
@@ -546,7 +538,7 @@ public class Main implements IXposedHookLoadPackage {
                             @Override
                             public void run() {
                                 if (clear) clearLockWallpaper(cc);
-                                else sLockWpOk = ensureLockWallpaper(cc, force);
+                                else ensureLockWallpaper(cc, force);
                             }
                         });
                     } else if ("cover".equals(op)) {
@@ -606,7 +598,6 @@ public class Main implements IXposedHookLoadPackage {
                         out.putFloat("bias", sBias);
                         out.putFloat("clock", sClockScale);
                         out.putFloat("glass", sGlassEnd);
-                        out.putBoolean("depth", sDepthWanted);
                         out.putBoolean("card", sCardShowing);
                         // Checked live rather than reported from the cached flag: the user can
                         // change the wallpaper at any time and that is what breaks the feature.
@@ -1440,8 +1431,6 @@ public class Main implements IXposedHookLoadPackage {
      * retry that finally found artwork would put the cover back after cover mode had ended.
      */
     private static volatile int sPushGen;
-    /** Checked once per process: the lock screen needs a wallpaper of its own (see below). */
-    private static volatile boolean sLockWpOk;
 
     private static void pushArtAsync(final boolean on, final boolean fresh) {
         final Context ctx = sAppCtx;
@@ -1455,12 +1444,15 @@ public class Main implements IXposedHookLoadPackage {
             });
             return;
         }
-        if (!sLockWpOk) {
-            worker().post(new Runnable() {
-                @Override
-                public void run() { sLockWpOk = ensureLockWallpaper(ctx); }
-            });
-        }
+        // Checked before every push rather than once per process. The user can send the
+        // wallpaper back to "follow home" at any moment - from Settings, a theme, the wallpaper
+        // carousel - and that silently removes the keyguard renderer this whole thing hangs off.
+        // A cached "already fine" would mean the module never noticed and the user had to go
+        // press a repair button, which is exactly what should not be necessary.
+        worker().post(new Runnable() {
+            @Override
+            public void run() { ensureLockWallpaper(ctx); }
+        });
         // Not a track change (a bias tweak, a manual pushart): take whatever is there now.
         tryPushArt(ctx, fresh ? 0 : ART_TRIES - 1, fresh, gen);
     }
@@ -1620,7 +1612,6 @@ public class Main implements IXposedHookLoadPackage {
             android.app.WallpaperManager wm = (android.app.WallpaperManager)
                     ctx.getSystemService(Context.WALLPAPER_SERVICE);
             wm.clear(android.app.WallpaperManager.FLAG_LOCK);
-            sLockWpOk = false;
             XposedBridge.log(TAG + "lock wallpaper cleared, back to following the home one");
         } catch (Throwable t) {
             XposedBridge.log(TAG + "clearLockWallpaper failed: " + t);
@@ -1646,7 +1637,7 @@ public class Main implements IXposedHookLoadPackage {
      */
     private static void enterCoverMode(boolean animate) {
         sCoverMode = true;
-        setDepthHidden(sDepthWanted);
+        setDepthHidden(true);
         sCollapseMin = sClockScale;
         sGlassV0 = 0f;
         sGlassV1 = sGlassEnd;
@@ -2108,7 +2099,17 @@ public class Main implements IXposedHookLoadPackage {
      * wallpaper is composed on the worker, the clock is taken on the main thread.
      */
     private static void setCoverEnabled(final boolean on, final boolean animate) {
-        pushArtAsync(on, on);
+        setCoverEnabled(on, animate, true);
+    }
+
+    /**
+     * fresh says whether this is a track change. On one, artwork identical to what is already on
+     * the wallpaper means the source has not caught up yet and is worth waiting for; on a manual
+     * push it just means the same song, and waiting 1.7s to conclude that is pure delay.
+     */
+    private static void setCoverEnabled(final boolean on, final boolean animate,
+                                        final boolean fresh) {
+        pushArtAsync(on, on && fresh);
         Runnable r = new Runnable() {
             @Override
             public void run() {

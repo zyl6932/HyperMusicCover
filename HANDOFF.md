@@ -250,7 +250,7 @@ adb logcat -d | grep getEngineService
 **用户看不出区别**——锁屏还是那张图，只是它自己有了一份，于是 keyguard engine 得以存在。
 
 ```bash
---es op lockwp                 # 手动检查/修复
+--es op lockwp                 # 手动检查/修复（正常不需要：每次贴封面前都会自动查一遍）
 --es op lockwp --ez force true # 按屏幕尺寸重设一次（纹理尺寸不对时用）
 --es op lockwp --ez clear true # 还原成"锁屏跟随桌面"（会再次让功能失效）
 ```

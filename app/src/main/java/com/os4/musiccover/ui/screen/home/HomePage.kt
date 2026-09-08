@@ -10,21 +10,17 @@ package com.os4.musiccover.ui.screen.home
 import android.annotation.SuppressLint
 import android.os.Build
 import android.provider.Settings
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.displayCutout
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -143,14 +139,11 @@ fun HomePageView(
                 )
             ) {
                 item {
-                    Row(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp)
                             .padding(top = 12.dp)
-                            .height(IntrinsicSize.Min),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         val darkTheme = isInDarkTheme()
                         val dynamicColor = MiuixTheme.isDynamicColor
@@ -187,18 +180,9 @@ fun HomePageView(
                         } else {
                             stringResource(R.string.home_status_inactive_hint)
                         }
-                        val lineThree = stringResource(
-                            R.string.home_lock_wallpaper_state,
-                            stringResource(
-                                if (state.lockWallpaperOk) R.string.home_lock_wallpaper_ok
-                                else R.string.home_lock_wallpaper_missing
-                            )
-                        )
 
                         Card(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
+                            modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.defaultColors(color = statusColor),
                             onClick = { scope.launch { refresh() } },
                             showIndication = true,
@@ -237,42 +221,10 @@ fun HomePageView(
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Medium
                                     )
-                                    Spacer(Modifier.height(2.dp))
-                                    MiuixText(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        text = lineThree,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
                                 }
                             }
                         }
 
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                        ) {
-                            StatCard(
-                                label = stringResource(R.string.home_cover_state),
-                                value = stringResource(
-                                    if (state.cover) R.string.home_on else R.string.home_off
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            StatCard(
-                                label = stringResource(R.string.home_auto_state),
-                                value = stringResource(
-                                    if (state.auto) R.string.home_on else R.string.home_off
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                            )
-                        }
                     }
                 }
 
@@ -311,36 +263,6 @@ fun HomePageView(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier,
-        insideMargin = PaddingValues(16.dp),
-        showIndication = true,
-        pressFeedbackType = PressFeedbackType.Tilt
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.Start
-        ) {
-            MiuixText(
-                modifier = Modifier.fillMaxWidth(),
-                text = label,
-                fontWeight = FontWeight.Medium,
-                fontSize = 15.sp,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-            )
-            MiuixText(
-                modifier = Modifier.fillMaxWidth(),
-                text = value,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MiuixTheme.colorScheme.onSurface
-            )
         }
     }
 }

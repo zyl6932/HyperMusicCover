@@ -1,9 +1,11 @@
 package com.os4.musiccover.ui.screen.features
 
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
@@ -21,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -40,18 +43,23 @@ import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.preference.ArrowPreference
-import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 
 /**
  * Everything the module itself can be told to do. These are not app preferences: each one is a
  * command to the hook inside SystemUI, and the values shown are the ones it reports back.
+ *
+ * Deliberately absent are the things that should never need a button. Hiding the wallpaper's
+ * subject cut-out and giving the lock screen its own wallpaper are not choices - without them
+ * cover mode renders wrong - so the module does both on its own.
  */
 @Composable
 fun FeaturesPageView(
@@ -137,36 +145,16 @@ fun FeaturesPageView(
                                 .padding(horizontal = 12.dp)
                                 .padding(bottom = 12.dp)
                         ) {
-                            Column {
-                                SwitchPreference(
-                                    title = stringResource(R.string.home_master),
-                                    summary = stringResource(R.string.home_master_summary),
-                                    checked = module.auto,
-                                    enabled = enabled,
-                                    onCheckedChange = {
-                                        module = module.copy(auto = it)
-                                        ModuleBridge.setAuto(context, it)
-                                    },
-                                )
-                                ArrowPreference(
-                                    title = stringResource(R.string.home_apply_now),
-                                    summary = stringResource(R.string.home_apply_now_summary),
-                                    enabled = enabled,
-                                    onClick = {
-                                        ModuleBridge.setCover(context, true)
-                                        scope.launch { module = ModuleBridge.query(context) }
-                                    },
-                                )
-                                ArrowPreference(
-                                    title = stringResource(R.string.home_restore),
-                                    summary = stringResource(R.string.home_restore_summary),
-                                    enabled = enabled,
-                                    onClick = {
-                                        ModuleBridge.setCover(context, false)
-                                        scope.launch { module = ModuleBridge.query(context) }
-                                    },
-                                )
-                            }
+                            SwitchPreference(
+                                title = stringResource(R.string.home_master),
+                                summary = stringResource(R.string.home_master_summary),
+                                checked = module.auto,
+                                enabled = enabled,
+                                onCheckedChange = {
+                                    module = module.copy(auto = it)
+                                    ModuleBridge.setAuto(context, it)
+                                },
+                            )
                         }
 
                         SmallTitle(text = stringResource(R.string.cover_section))
@@ -176,16 +164,16 @@ fun FeaturesPageView(
                                 .padding(horizontal = 12.dp)
                                 .padding(bottom = 12.dp)
                         ) {
-                            SliderPreference(
+                            ValueSlider(
                                 title = stringResource(R.string.cover_bias),
                                 summary = stringResource(R.string.cover_bias_summary),
                                 value = module.bias,
+                                valueRange = 0f..1f,
+                                enabled = enabled,
                                 onValueChange = {
                                     module = module.copy(bias = it)
                                     ModuleBridge.setBias(context, it)
                                 },
-                                valueRange = 0f..1f,
-                                enabled = enabled,
                             )
                         }
 
@@ -197,36 +185,26 @@ fun FeaturesPageView(
                                 .padding(bottom = 12.dp)
                         ) {
                             Column {
-                                SliderPreference(
+                                ValueSlider(
                                     title = stringResource(R.string.clock_scale),
                                     summary = stringResource(R.string.clock_scale_summary),
                                     value = module.clockScale,
+                                    valueRange = 0.1f..1f,
+                                    enabled = enabled,
                                     onValueChange = {
                                         module = module.copy(clockScale = it)
                                         ModuleBridge.setClockScale(context, it)
                                     },
-                                    valueRange = 0.1f..1f,
-                                    enabled = enabled,
                                 )
-                                SliderPreference(
+                                ValueSlider(
                                     title = stringResource(R.string.clock_glass),
                                     summary = stringResource(R.string.clock_glass_summary),
                                     value = module.glassEnd,
+                                    valueRange = 0f..1f,
+                                    enabled = enabled,
                                     onValueChange = {
                                         module = module.copy(glassEnd = it)
                                         ModuleBridge.setGlassEnd(context, it)
-                                    },
-                                    valueRange = 0f..1f,
-                                    enabled = enabled,
-                                )
-                                SwitchPreference(
-                                    title = stringResource(R.string.clock_depth),
-                                    summary = stringResource(R.string.clock_depth_summary),
-                                    checked = module.hideDepth,
-                                    enabled = enabled,
-                                    onCheckedChange = {
-                                        module = module.copy(hideDepth = it)
-                                        ModuleBridge.setHideDepth(context, it)
                                     },
                                 )
                             }
@@ -239,41 +217,87 @@ fun FeaturesPageView(
                                 .padding(horizontal = 12.dp)
                                 .padding(bottom = 12.dp)
                         ) {
-                            Column {
-                                ArrowPreference(
-                                    title = stringResource(R.string.lock_wallpaper),
-                                    summary = stringResource(R.string.lock_wallpaper_summary),
-                                    enabled = enabled,
-                                    onClick = {
-                                        ModuleBridge.repairLockWallpaper(context)
+                            ArrowPreference(
+                                title = stringResource(R.string.restart_systemui),
+                                summary = stringResource(R.string.restart_systemui_summary),
+                                onClick = {
+                                    scope.launch {
+                                        val ok = withContext(Dispatchers.IO) {
+                                            ModuleBridge.restartSystemUi()
+                                        }
                                         Toast.makeText(
                                             context,
-                                            R.string.lock_wallpaper_done,
+                                            if (ok) R.string.restart_done else R.string.restart_failed,
                                             Toast.LENGTH_SHORT
                                         ).show()
-                                    },
-                                )
-                                ArrowPreference(
-                                    title = stringResource(R.string.restart_systemui),
-                                    summary = stringResource(R.string.restart_systemui_summary),
-                                    onClick = {
-                                        scope.launch {
-                                            val ok = withContext(Dispatchers.IO) {
-                                                ModuleBridge.restartSystemUi()
-                                            }
-                                            Toast.makeText(
-                                                context,
-                                                if (ok) R.string.restart_done else R.string.restart_failed,
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                    },
-                                )
-                            }
+                                    }
+                                },
+                            )
                         }
                     }
                 }
             }
         }
     }
+}
+
+/**
+ * A slider with its current value printed opposite the title. Without the number there is no way
+ * to tell where you have dragged to, which matters here because these values get compared against
+ * ones written down in the notes.
+ */
+@Composable
+private fun ValueSlider(
+    title: String,
+    summary: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    enabled: Boolean,
+    onValueChange: (Float) -> Unit,
+) {
+    val alpha = if (enabled) 1f else 0.5f
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MiuixText(
+                text = title,
+                fontSize = 17.sp,
+                color = MiuixTheme.colorScheme.onSurface.copy(alpha = alpha),
+            )
+            MiuixText(
+                text = format(value),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = alpha),
+            )
+        }
+        MiuixText(
+            modifier = Modifier.padding(top = 2.dp),
+            text = summary,
+            fontSize = 13.sp,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = alpha),
+        )
+        Slider(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            enabled = enabled,
+        )
+    }
+}
+
+/** Two decimals, without dragging java.util.Formatter's locale into it. */
+private fun format(v: Float): String {
+    val hundredths = (v * 100f).roundToInt()
+    return "${hundredths / 100}.${(hundredths % 100).toString().padStart(2, '0')}"
 }
