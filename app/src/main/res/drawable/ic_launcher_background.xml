@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    The gradient runs 18..90, not 0..108: the launcher's mask only ever shows the middle 72x72,
+    so a ramp across the full canvas would show only its middle two thirds and come out paler
+    than the same gradient does on the About page, which spans its whole visible square.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -7,8 +12,8 @@
     <path android:pathData="M0,0h108v108h-108z">
         <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
             <gradient
-                android:startX="0" android:startY="0"
-                android:endX="108" android:endY="108"
+                android:startX="18" android:startY="18"
+                android:endX="90" android:endY="90"
                 android:type="linear">
                 <item android:offset="0" android:color="#FF2B3A8F" />
                 <item android:offset="0.55" android:color="#FF6C3BC4" />

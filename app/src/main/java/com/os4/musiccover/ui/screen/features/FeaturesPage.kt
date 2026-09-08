@@ -97,37 +97,6 @@ fun FeaturesPageView(
             ) {
                 item {
                     Column {
-                        SmallTitle(text = stringResource(R.string.home_now_playing))
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp)
-                                .padding(bottom = 12.dp)
-                        ) {
-                            Column(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 14.dp)
-                            ) {
-                                val label = module.trackLabel
-                                MiuixText(
-                                    text = label.ifEmpty { stringResource(R.string.home_no_track) },
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MiuixTheme.colorScheme.onSurface,
-                                )
-                                MiuixText(
-                                    modifier = Modifier.padding(top = 4.dp),
-                                    text = stringResource(
-                                        if (module.cover) R.string.home_cover_on
-                                        else R.string.home_cover_off
-                                    ),
-                                    fontSize = 13.sp,
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                )
-                            }
-                        }
-
                         SmallTitle(text = stringResource(R.string.cover_section))
                         Card(
                             modifier = Modifier
