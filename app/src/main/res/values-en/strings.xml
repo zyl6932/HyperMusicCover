@@ -73,7 +73,6 @@
     <string name="tab_features">Features</string>
     <string name="home_status_active">Module active</string>
     <string name="home_status_inactive">Module not active</string>
-    <string name="home_status_mode">Mode: %1$s</string>
     <string name="home_mode_fullscreen">Full-screen cover</string>
     <string name="home_status_inactive_hint">Enable it in LSPosed and restart System UI</string>
     <string name="home_device_info">Device</string>

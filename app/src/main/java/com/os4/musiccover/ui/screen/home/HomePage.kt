@@ -13,7 +13,9 @@ import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -189,62 +191,85 @@ fun HomePageView(
                             ok -> moduleVersion
                             else -> stringResource(R.string.home_status_inactive_hint)
                         }
-                        // Hard-coded until there is a second layout to switch to; the album-card
-                        // style is the planned one, and this line is where it will be chosen.
-                        val lineThree = if (checked && ok) {
-                            stringResource(
-                                R.string.home_status_mode,
-                                stringResource(R.string.home_mode_fullscreen),
-                            )
+                        // Hard-coded until there is a second layout to switch to; the
+                        // album-card style is the planned one, and this is where it gets chosen.
+                        val workingMode = if (checked && ok) {
+                            stringResource(R.string.home_mode_fullscreen)
                         } else {
                             null
                         }
 
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.defaultColors(color = statusColor),
-                            onClick = { scope.launch { refresh() } },
-                            showIndication = true,
-                            pressFeedbackType = PressFeedbackType.Tilt
+                        // Laid out the way KernelSU's HomeMiuix card is: three boxes stacked
+                        // on top of each other rather than three lines in a column. The title and
+                        // version sit top-left, the working mode is pinned bottom-left, and the
+                        // oversized icon bleeds off the bottom-right corner - the mode and the
+                        // icon balance each other diagonally, and the empty middle is what stops
+                        // it looking cramped. Stacking all three as a column instead put them in
+                        // a huddle at the top with the icon crowding them.
+                        //
+                        // The height comes from Row(IntrinsicSize.Min): the boxes inside all
+                        // fillMaxSize and so contribute none of their own, and without this the
+                        // card collapses to the height of the text.
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(IntrinsicSize.Min),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .offset(27.dp, 31.dp),
-                                    contentAlignment = Alignment.BottomEnd
-                                ) {
-                                    Icon(
-                                        modifier = Modifier.size(110.dp),
-                                        imageVector = if (ok) Icons.Rounded.CheckCircleOutline
-                                        else Icons.Rounded.ErrorOutline,
-                                        tint = iconTint,
-                                        contentDescription = null
-                                    )
-                                }
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(16.dp, 14.dp)
-                                ) {
-                                    MiuixText(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        text = titleText,
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Spacer(Modifier.height(1.dp))
-                                    MiuixText(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        text = lineTwo,
-                                        fontSize = 15.sp,
-                                    )
-                                    if (lineThree != null) {
-                                        MiuixText(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            text = lineThree,
-                                            fontSize = 15.sp,
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.defaultColors(color = statusColor),
+                                onClick = { scope.launch { refresh() } },
+                                showIndication = true,
+                                pressFeedbackType = PressFeedbackType.Tilt
+                            ) {
+                                Box {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .offset(27.dp, 31.dp),
+                                        contentAlignment = Alignment.BottomEnd
+                                    ) {
+                                        Icon(
+                                            modifier = Modifier.size(110.dp),
+                                            imageVector = if (ok) Icons.Rounded.CheckCircleOutline
+                                            else Icons.Rounded.ErrorOutline,
+                                            tint = iconTint,
+                                            contentDescription = null
                                         )
+                                    }
+                                    if (workingMode != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(16.dp, 10.dp),
+                                            contentAlignment = Alignment.BottomStart,
+                                        ) {
+                                            MiuixText(
+                                                text = workingMode,
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.Medium,
+                                            )
+                                        }
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(16.dp, 14.dp),
+                                        contentAlignment = Alignment.TopStart,
+                                    ) {
+                                        Column {
+                                            MiuixText(
+                                                text = titleText,
+                                                fontSize = 22.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Spacer(Modifier.height(1.dp))
+                                            MiuixText(
+                                                text = lineTwo,
+                                                fontSize = 15.sp,
+                                            )
+                                        }
                                     }
                                 }
                             }

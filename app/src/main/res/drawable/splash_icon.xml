@@ -34,16 +34,23 @@
     </path>
 
     <!--
-        The launcher artwork is drawn at its original coordinates and shrunk as a whole, so the
-        two icons stay the same drawing. 0.74 is what puts the sleeve's far corner (39.2 from
-        the centre) just inside the disc.
+        The launcher artwork at its original coordinates and its original size, so this icon and
+        the one on the home screen are the same drawing framed the same way. An adaptive icon's
+        visible area is the middle 72x72 of the 108 canvas - the outer 18 on each side is bleed
+        the launcher's mask eats - and the disc above is exactly that: r=36, centred. So drawing
+        the artwork unscaled inside it reproduces what the launcher shows.
+
+        The clip is the mask's job done by hand, since a splash icon is not an adaptive icon and
+        nothing masks it for us. It trims the sleeve's left corners, which sit 39.2 from the
+        centre; the launcher's own mask trims them too.
     -->
     <group
         android:name="art"
         android:pivotX="54"
-        android:pivotY="54"
-        android:scaleX="0.74"
-        android:scaleY="0.74">
+        android:pivotY="54">
+        <clip-path
+            android:name="mask"
+            android:pathData="M54,54m-36,0a36,36 0 1,0 72,0a36,36 0 1,0 -72,0" />
 
         <!-- the sleeve, peeking out behind the record -->
         <path
