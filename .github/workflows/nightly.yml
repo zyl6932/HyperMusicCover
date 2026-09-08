@@ -1,0 +1,154 @@
+name: Nightly
+
+# One pre-release a night, from whatever is on main. It skips itself when nothing has been
+# pushed since the last one, so the release list stays a list of actual changes rather than a
+# calendar.
+on:
+  schedule:
+    # 18:00 UTC = 02:00 Asia/Shanghai. GitHub runs scheduled jobs late under load, which is
+    # why "has anything changed" is decided by commit sha and not by the clock.
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Publish even if nothing changed since the last nightly'
+        type: boolean
+        default: false
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  nightly:
+    # Forks inherit the schedule but must not publish releases of their own.
+    if: github.repository == 'zyl6932/HyperMusicCover'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether there is anything to publish
+        id: check
+        run: |
+          set -euo pipefail
+          previous_tag=$(gh release list --limit 50 --json tagName \
+            --jq '[.[] | select(.tagName | startswith("nightly-"))][0].tagName // ""')
+          previous_sha=""
+          if [ -n "$previous_tag" ]; then
+            previous_sha=$(gh api "repos/${{ github.repository }}/git/refs/tags/$previous_tag" \
+              --jq '.object.sha' 2>/dev/null || echo "")
+          fi
+          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
+          echo "previous_sha=$previous_sha" >> "$GITHUB_OUTPUT"
+          if [ "$previous_sha" = "$GITHUB_SHA" ] && [ "${{ inputs.force }}" != "true" ]; then
+            echo "Nothing new since $previous_tag ($previous_sha)."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.check.outputs.publish == 'true'
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+        if: steps.check.outputs.publish == 'true'
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.check.outputs.publish == 'true'
+
+      # Without the secrets the build still succeeds, but it is signed with the throwaway debug
+      # key - a different signature, which Android refuses to install over a properly signed
+      # build. The release notes say so rather than letting someone find out on their phone.
+      - name: Restore the signing key
+        if: steps.check.outputs.publish == 'true'
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > release.jks
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::SIGNING_KEYSTORE_BASE64 is not set; falling back to the debug key."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build release
+        if: steps.check.outputs.publish == 'true'
+        id: build
+        env:
+          SIGNING_STORE_FILE: ${{ steps.signing.outputs.signed == 'true' && 'release.jks' || '' }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          date_tag=$(date -u +'%Y%m%d')
+          short_sha=$(git rev-parse --short HEAD)
+          echo "date_tag=$date_tag" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          ./gradlew --no-daemon assembleRelease \
+            "-PmcVersionSuffix=-nightly.${date_tag}.${short_sha}" \
+            "-PmcVersionCode=${{ github.run_number }}"
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk \
+             "dist/HyperMusicCover-nightly-${date_tag}-${short_sha}.apk"
+
+      - name: Publish the pre-release
+        if: steps.check.outputs.publish == 'true'
+        env:
+          TAG: nightly-${{ steps.build.outputs.date_tag }}
+          PREVIOUS_SHA: ${{ steps.check.outputs.previous_sha }}
+          SIGNED: ${{ steps.signing.outputs.signed }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Automatic nightly build of \`main\` at ${GITHUB_SHA}."
+            echo
+            if [ "$SIGNED" != "true" ]; then
+              echo "> **Warning**"
+              echo "> Built with the debug key - it will not install over a properly signed"
+              echo "> release. Set the SIGNING_* repository secrets to fix this."
+              echo
+            fi
+            echo "### Changes"
+            echo
+            if [ -n "$PREVIOUS_SHA" ] && git cat-file -e "${PREVIOUS_SHA}^{commit}" 2>/dev/null; then
+              git log --no-merges --pretty='- %s (%h)' "${PREVIOUS_SHA}..${GITHUB_SHA}"
+            else
+              git log --no-merges --pretty='- %s (%h)' -n 20 "${GITHUB_SHA}"
+            fi
+          } > notes.md
+          # A tag may already exist if the day's build is re-run; replace it rather than fail.
+          gh release delete "$TAG" --cleanup-tag --yes 2>/dev/null || true
+          gh release create "$TAG" dist/*.apk \
+            --prerelease \
+            --title "Nightly ${{ steps.build.outputs.date_tag }}" \
+            --notes-file notes.md \
+            --target "$GITHUB_SHA"
+
+      # Keeps the release page readable. Stable releases are never touched: only tags that
+      # start with nightly- are considered.
+      - name: Prune old nightlies
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          gh release list --limit 100 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | startswith("nightly-"))]
+                  | sort_by(.createdAt) | reverse | .[7:] | .[].tagName' \
+          | while read -r old; do
+              [ -n "$old" ] || continue
+              echo "Deleting $old"
+              gh release delete "$old" --cleanup-tag --yes
+            done
