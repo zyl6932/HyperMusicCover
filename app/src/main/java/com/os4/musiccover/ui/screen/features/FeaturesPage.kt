@@ -138,15 +138,22 @@ fun FeaturesPageView(
                                         ModuleBridge.setClockScale(context, it)
                                     },
                                 )
+                                // Shown inverted. The module stores the OEM's own number, where
+                                // updateGlassValue(0) is transparent refracting glass and (1) is
+                                // a solid fill - so as "glass strength" it runs backwards, and
+                                // dragging right made the effect weaker. The stored value, the
+                                // adb glassend op and the exported JSON all keep the OEM's
+                                // meaning; only this slider is flipped.
                                 ValueSlider(
                                     title = stringResource(R.string.clock_glass),
                                     summary = null,
-                                    value = module.glassEnd,
+                                    value = 1f - module.glassEnd,
                                     valueRange = 0f..1f,
                                     enabled = enabled,
                                     onValueChange = {
-                                        module = module.copy(glassEnd = it)
-                                        ModuleBridge.setGlassEnd(context, it)
+                                        val glassEnd = 1f - it
+                                        module = module.copy(glassEnd = glassEnd)
+                                        ModuleBridge.setGlassEnd(context, glassEnd)
                                     },
                                 )
                             }
