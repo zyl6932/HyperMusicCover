@@ -9,6 +9,7 @@ import android.os.SystemClock
 import android.view.View
 import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.EaseInOut
@@ -243,6 +244,55 @@ private fun MainScreen(
     }
     val navBarMode = if (!isFloatingNavbar) 0 else if (!isLiquidGlass) 1 else 2
 
+    fun goToPage(index: Int) {
+        if (index == selectedIndex) return
+        refreshKey++
+        navJob?.cancel()
+        selectedIndex = index
+        isNavigating = true
+        navJob = scope.launch {
+            val myJob = coroutineContext.job
+            try {
+                pagerState.scroll(MutatePriority.UserInput) {
+                    val distance = abs(index - pagerState.currentPage).coerceAtLeast(2)
+                    val duration = 100 * distance + 100
+                    val layoutInfo = pagerState.layoutInfo
+                    val pageSize = layoutInfo.pageSize + layoutInfo.pageSpacing
+                    val currentDistanceInPages =
+                        index - pagerState.currentPage - pagerState.currentPageOffsetFraction
+                    val scrollPixels = currentDistanceInPages * pageSize
+                    var previousValue = 0f
+                    animate(
+                        initialValue = 0f,
+                        targetValue = scrollPixels,
+                        animationSpec = tween(
+                            easing = EaseInOut,
+                            durationMillis = duration
+                        ),
+                    ) { currentValue, _ ->
+                        previousValue += scrollBy(currentValue - previousValue)
+                    }
+                }
+                if (pagerState.currentPage != index) {
+                    pagerState.scrollToPage(index)
+                }
+            } finally {
+                if (navJob == myJob) {
+                    isNavigating = false
+                    if (pagerState.currentPage != index) {
+                        selectedIndex = pagerState.currentPage
+                    }
+                }
+            }
+        }
+    }
+
+    // Back goes to the first page before it leaves the app, the way KernelSU's does: enabled
+    // only off the first page, so on the first one the system handles it as usual. Going through
+    // goToPage rather than the pager directly means back and tapping the tab are the same
+    // action, down to the refresh the pages do when they come to the front.
+    BackHandler(enabled = selectedIndex != 0) { goToPage(0) }
+
     Scaffold(
         popupHost = { },
         bottomBar = {
@@ -253,49 +303,7 @@ private fun MainScreen(
                 selectedIndex = selectedIndex,
                 backdrop = backdrop,
                 blurActive = isBlurEnabled,
-                onItemSelected = { index ->
-                    if (index == selectedIndex) return@BottomNavigationBar
-                    refreshKey++
-                    navJob?.cancel()
-                    selectedIndex = index
-                    isNavigating = true
-                    navJob = scope.launch {
-                        val myJob = coroutineContext.job
-                        try {
-                            pagerState.scroll(MutatePriority.UserInput) {
-                                val distance =
-                                    abs(index - pagerState.currentPage).coerceAtLeast(2)
-                                val duration = 100 * distance + 100
-                                val layoutInfo = pagerState.layoutInfo
-                                val pageSize = layoutInfo.pageSize + layoutInfo.pageSpacing
-                                val currentDistanceInPages =
-                                    index - pagerState.currentPage - pagerState.currentPageOffsetFraction
-                                val scrollPixels = currentDistanceInPages * pageSize
-                                var previousValue = 0f
-                                animate(
-                                    initialValue = 0f,
-                                    targetValue = scrollPixels,
-                                    animationSpec = tween(
-                                        easing = EaseInOut,
-                                        durationMillis = duration
-                                    ),
-                                ) { currentValue, _ ->
-                                    previousValue += scrollBy(currentValue - previousValue)
-                                }
-                            }
-                            if (pagerState.currentPage != index) {
-                                pagerState.scrollToPage(index)
-                            }
-                        } finally {
-                            if (navJob == myJob) {
-                                isNavigating = false
-                                if (pagerState.currentPage != index) {
-                                    selectedIndex = pagerState.currentPage
-                                }
-                            }
-                        }
-                    }
-                },
+                onItemSelected = { index -> goToPage(index) },
             )
         }
     ) { globalPadding ->
@@ -309,6 +317,7 @@ private fun MainScreen(
             HorizontalPager(
                 state = pagerState,
                 beyondViewportPageCount = 1,
+                overscrollEffect = null,
                 modifier = Modifier.fillMaxSize(),
             ) { page ->
                 when (page) {
