@@ -1,6 +1,7 @@
 package com.os4.musiccover;
 
 import android.animation.ValueAnimator;
+import android.annotation.SuppressLint;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -25,6 +26,7 @@ import java.util.List;
 import android.util.Log;
 import android.view.Choreographer;
 import android.view.View;
+import android.view.ViewTreeObserver;
 import android.view.animation.PathInterpolator;
 
 import java.lang.reflect.Method;
@@ -121,6 +123,19 @@ public class Main implements IXposedHookLoadPackage {
      * album cover - the leftover the cover swap does not otherwise explain.
      */
     private static volatile boolean sDepthHidden;
+    /**
+     * Hiding the cut-out once is not ownership. The OEM re-shows it from more than one place -
+     * updateDeductedImageView is only the one we caught first, and the Folme alpha animators on
+     * the same view (setDepthTransitionAlpha / deductedTranslateAlphaFolmeAnimator) reach it
+     * without passing through any method we hook. Rather than chase each path, assert the state
+     * every frame the keyguard draws, the same way notifY and glassData are asserted: a
+     * pre-draw listener on the view itself costs one visibility check per keyguard frame and is
+     * blind to whichever route put it back.
+     */
+    private static ViewTreeObserver.OnPreDrawListener sDepthGuard;
+    private static View sDepthGuarded;
+    /** How many times the system took the cut-out back, so the log says so without shouting. */
+    private static int sDepthTakebacks;
     /** SystemUI restarts on its own (observed, with no crash recorded), which used to drop the
      *  hidden flag and bring the old wallpaper's subject back over the album cover. Cover mode
      *  is a property of the phone, not of this process, so it has to outlive the process. */
@@ -664,6 +679,9 @@ public class Main implements IXposedHookLoadPackage {
                 String a = i.getAction();
                 if (Intent.ACTION_SCREEN_ON.equals(a)) {
                     reassertCoverClock();
+                    // Waking re-runs the OEM's depth pipeline, and if the keyguard was rebuilt
+                    // while the screen was off the guard went away with the old view.
+                    if (sDepthHidden) setDepthHidden(true);
                     return;
                 }
                 // Cover mode deliberately survives the screen going off. Releasing and then
@@ -1685,6 +1703,10 @@ public class Main implements IXposedHookLoadPackage {
         return ensureLockWallpaper(ctx, false);
     }
 
+    // Runs inside com.android.systemui, which holds SET_WALLPAPER and
+    // READ_WALLPAPER_INTERNAL. This APK neither has nor needs them - it is a library
+    // for someone else's process, and lint has no way to know that.
+    @SuppressLint("MissingPermission")
     private static boolean ensureLockWallpaper(Context ctx, boolean force) {
         android.app.WallpaperManager wm = (android.app.WallpaperManager)
                 ctx.getSystemService(Context.WALLPAPER_SERVICE);
@@ -1733,6 +1755,10 @@ public class Main implements IXposedHookLoadPackage {
     }
 
     /** The home wallpaper, decoded no larger than it needs to be for this screen. */
+    // Runs inside com.android.systemui, which holds SET_WALLPAPER and
+    // READ_WALLPAPER_INTERNAL. This APK neither has nor needs them - it is a library
+    // for someone else's process, and lint has no way to know that.
+    @SuppressLint("MissingPermission")
     private static Bitmap homeWallpaper(android.app.WallpaperManager wm) {
         try {
             android.os.ParcelFileDescriptor sys =
@@ -1769,6 +1795,10 @@ public class Main implements IXposedHookLoadPackage {
      * not the picture: a copy of the home wallpaper counts, which is exactly what
      * ensureLockWallpaper() installs.
      */
+    // Runs inside com.android.systemui, which holds SET_WALLPAPER and
+    // READ_WALLPAPER_INTERNAL. This APK neither has nor needs them - it is a library
+    // for someone else's process, and lint has no way to know that.
+    @SuppressLint("MissingPermission")
     private static boolean hasLockWallpaper(Context ctx) {
         try {
             android.app.WallpaperManager wm = (android.app.WallpaperManager)
@@ -1787,6 +1817,10 @@ public class Main implements IXposedHookLoadPackage {
     }
 
     /** Puts the lock screen back to following the home wallpaper. Undoes ensureLockWallpaper. */
+    // Runs inside com.android.systemui, which holds SET_WALLPAPER and
+    // READ_WALLPAPER_INTERNAL. This APK neither has nor needs them - it is a library
+    // for someone else's process, and lint has no way to know that.
+    @SuppressLint("MissingPermission")
     private static void clearLockWallpaper(Context ctx) {
         try {
             android.app.WallpaperManager wm = (android.app.WallpaperManager)
@@ -1860,19 +1894,95 @@ public class Main implements IXposedHookLoadPackage {
     }
 
     private static void setDepthHidden(final boolean hide) {
+        setDepthHidden(hide, 0);
+    }
+
+    /**
+     * attempt exists because this runs on a SystemUI that has just started: cover mode is
+     * restored the moment the clock container attaches, and the foreground layer that holds the
+     * cut-out is not necessarily inflated yet. The old code logged "not found" once and gave up,
+     * which left the old wallpaper's subject sitting on top of the album cover until something
+     * else happened to call it again.
+     */
+    private static void setDepthHidden(final boolean hide, final int attempt) {
         sDepthHidden = hide;
         final View v = sContainer;
-        if (v == null) { XposedBridge.log(TAG + "no clock container"); return; }
+        if (v == null) {
+            retryDepth(hide, attempt, "no clock container");
+            return;
+        }
         v.post(new Runnable() {
             @Override
             public void run() {
                 View d = findDeductedImageView();
-                if (d == null) { XposedBridge.log(TAG + "deducted_image_view not found"); return; }
+                if (d == null) {
+                    retryDepth(hide, attempt, "deducted_image_view not found");
+                    return;
+                }
                 d.setVisibility(hide ? View.INVISIBLE : View.VISIBLE);
+                if (hide) guardDepth(d); else releaseDepthGuard();
                 XposedBridge.log(TAG + "deducted_image_view " + (hide ? "hidden" : "shown"));
                 saveState();
             }
         });
+    }
+
+    private static final int DEPTH_RETRIES = 12;
+    private static final long DEPTH_RETRY_MS = 250L;
+
+    private static void retryDepth(final boolean hide, final int attempt, String why) {
+        if (attempt >= DEPTH_RETRIES) {
+            XposedBridge.log(TAG + why + ", giving up after " + attempt + " tries");
+            return;
+        }
+        if (attempt == 0) XposedBridge.log(TAG + why + ", retrying");
+        main().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                // Only still wanted if nothing has changed its mind in the meantime.
+                if (sDepthHidden == hide) setDepthHidden(hide, attempt + 1);
+            }
+        }, DEPTH_RETRY_MS);
+    }
+
+    /**
+     * Keeps the cut-out hidden for as long as cover mode wants it hidden. Installed on the view
+     * itself, so a keyguard rebuild takes it away with the view and the next hide installs a
+     * fresh one.
+     */
+    private static void guardDepth(final View d) {
+        if (sDepthGuarded == d && sDepthGuard != null) return;
+        releaseDepthGuard();
+        sDepthGuard = new ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                if (sDepthHidden && d.getVisibility() == View.VISIBLE) {
+                    // VISIBLE -> INVISIBLE only invalidates, it does not request a layout, so
+                    // this cannot start a traversal loop.
+                    d.setVisibility(View.INVISIBLE);
+                    if (++sDepthTakebacks <= 5 || sDepthTakebacks % 100 == 0) {
+                        XposedBridge.log(TAG + "system re-showed the cut-out, re-hidden ("
+                                + sDepthTakebacks + ")");
+                    }
+                }
+                return true;
+            }
+        };
+        d.getViewTreeObserver().addOnPreDrawListener(sDepthGuard);
+        sDepthGuarded = d;
+        XposedBridge.log(TAG + "depth guard installed");
+    }
+
+    private static void releaseDepthGuard() {
+        View d = sDepthGuarded;
+        ViewTreeObserver.OnPreDrawListener g = sDepthGuard;
+        sDepthGuarded = null;
+        sDepthGuard = null;
+        if (d == null || g == null) return;
+        try {
+            d.getViewTreeObserver().removeOnPreDrawListener(g);
+        } catch (Throwable ignored) {
+        }
     }
 
     private static View findDeductedImageView() {
