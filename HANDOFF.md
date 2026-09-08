@@ -440,6 +440,17 @@ Kotlin + Compose + [miuix](https://github.com/miuix-kotlin-multiplatform/miuix)�
   所以 `LaunchBackground`（SharedPreferences）**把 app 真正画的 `MiuixTheme.colorScheme.surface`
   记下来**，按「主题模式 + 系统深浅」做 key，下次冷启动在 `onCreate` 里
   `window.setBackgroundDrawable()` 直接用它。静态那个颜色只有"某个组合第一次启动"才会看到。
+- **splash 的深浅要跟 app 自己的主题走，不是跟系统走**。踩过：系统开了定时深色
+  （HyperOS「19:00–07:00」，`dumpsys uimode` 里 `mComputedNightMode=true`），
+  而用户在 app 里选了浅色 —— 结果 splash 是黑的、app 是白的。
+  `windowSplashScreenBackground` 是**主题属性，系统在我们任何代码跑起来之前就解析完了**，
+  activity 里做什么都救不回来。唯一的杠杆是"拿哪份 configuration 去解析主题"，
+  也就是 `UiModeManager.setApplicationNightMode()`（`AppNightMode.kt`）:
+  Light/MonetLight → `MODE_NIGHT_NO`，Dark/MonetDark → `MODE_NIGHT_YES`，
+  System/MonetSystem → `MODE_NIGHT_AUTO`（框架把 YES/NO 以外的都映射成
+  `UI_MODE_NIGHT_UNDEFINED`，也就是"听系统的"）。
+  **改这个值会触发 configuration change、重建 activity**，所以只在值真的变了时才调用，
+  用 `launch_background` 里的 `night_mode` 记住上次设过的值。
 - **把 splash 留到内容画好**：Android 12+ 的 splash 是"app 画出第一帧就撤"，而 Compose 的
   第一帧是空窗口。`holdSplashUntilContentIsReady()` 在 `android.R.id.content` 上挂
   `OnPreDrawListener`，首次组合完成前一律返回 false，splash 就一直留着，
