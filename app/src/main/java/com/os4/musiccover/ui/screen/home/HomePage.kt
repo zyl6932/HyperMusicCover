@@ -1,24 +1,39 @@
+/*
+ * Layout adapted from HyperNavBar (https://github.com/HyperNavBar/HyperNavBar),
+ * licensed under the Apache License, Version 2.0.
+ *
+ * Changes in HyperMusicCover: the status card reports whether the hook answered rather than
+ * root/immersion state, and the two figures beside it are this module's own.
+ */
 package com.os4.musiccover.ui.screen.home
 
+import android.annotation.SuppressLint
 import android.os.Build
-import androidx.compose.foundation.background
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CheckCircleOutline
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,25 +53,26 @@ import androidx.compose.ui.unit.sp
 import com.os4.musiccover.ModuleBridge
 import com.os4.musiccover.R
 import com.os4.musiccover.ui.util.BlurredBar
+import com.os4.musiccover.ui.util.isInDarkTheme
 import com.os4.musiccover.ui.util.pageScrollModifiers
 import com.os4.musiccover.ui.util.rememberBlurBackdrop
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 
-/** Green when the hook answered, amber while asking, red when nothing came back. */
-private val ActiveGreen = Color(0xFF34C759)
-private val CheckingAmber = Color(0xFFFF9F0A)
-private val InactiveRed = Color(0xFFFF453A)
-
+@SuppressLint("LocalContext")
 @Composable
 fun HomePageView(
     isBlurEnabled: Boolean,
@@ -66,30 +82,45 @@ fun HomePageView(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val scrollBehavior = MiuixScrollBehavior()
-    val backdrop = rememberBlurBackdrop()
-    val blurActive = isBlurEnabled && backdrop != null
-    val barColor = if (blurActive) Color.Transparent else MiuixTheme.colorScheme.surface
+    val title = stringResource(R.string.tab_home)
+
+    val deviceModel = Build.MODEL.ifEmpty { stringResource(R.string.home_unknown) }
+    val deviceName = Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)
+        ?: deviceModel
+    val systemVersion = "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
+    val loadingText = stringResource(R.string.home_loading)
+    var hyperOSVersion by remember { mutableStateOf(loadingText) }
+    LaunchedEffect(Unit) {
+        hyperOSVersion = withContext(Dispatchers.IO) { SystemVersion.hyperOs(loadingText) }
+    }
+    val moduleVersion = try {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
+    } catch (_: Exception) {
+        "1.0"
+    }
 
     var state by remember { mutableStateOf(ModuleBridge.State()) }
-    var checking by remember { mutableStateOf(true) }
+    var checked by remember { mutableStateOf(false) }
 
     suspend fun refresh() {
-        checking = true
+        checked = false
         state = ModuleBridge.query(context)
-        checking = false
+        checked = true
     }
 
     // The module can be enabled, disabled or restarted behind the app's back, so ask again every
     // time this page comes to the front rather than caching the answer from launch.
     LaunchedEffect(refreshKey) { refresh() }
 
-    val info = remember { DeviceInfo.collect(context) }
+    val backdrop = rememberBlurBackdrop()
+    val blurActive = isBlurEnabled && backdrop != null
+    val barColor = if (blurActive) Color.Transparent else MiuixTheme.colorScheme.surface
 
     Scaffold(
         topBar = {
             BlurredBar(backdrop, blurActive, scrollBehavior) {
                 TopAppBar(
-                    title = stringResource(R.string.app_name),
+                    title = title,
                     color = barColor,
                     scrollBehavior = scrollBehavior,
                 )
@@ -108,29 +139,174 @@ fun HomePageView(
                     ),
                 contentPadding = PaddingValues(
                     top = innerPadding.calculateTopPadding(),
-                    bottom = innerPadding.calculateBottomPadding() + extraBottomPadding,
-                ),
+                    bottom = innerPadding.calculateBottomPadding() + extraBottomPadding
+                )
             ) {
                 item {
-                    Column {
-                        StatusCard(
-                            checking = checking,
-                            alive = state.alive,
-                            onRetry = { scope.launch { refresh() } },
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp)
+                            .padding(top = 12.dp)
+                            .height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val darkTheme = isInDarkTheme()
+                        val dynamicColor = MiuixTheme.isDynamicColor
+                        val ok = state.alive
+                        val statusColor = if (ok) {
+                            when {
+                                dynamicColor -> MiuixTheme.colorScheme.secondaryContainer
+                                darkTheme -> Color(0xFF1A3825)
+                                else -> Color(0xFFDFFAE4)
+                            }
+                        } else {
+                            when {
+                                dynamicColor -> MiuixTheme.colorScheme.errorContainer
+                                darkTheme -> Color(0xFF3D1C1C)
+                                else -> Color(0xFFFDE8E8)
+                            }
+                        }
+                        val iconTint = if (ok) {
+                            if (dynamicColor) MiuixTheme.colorScheme.primary.copy(alpha = 0.8f)
+                            else Color(0xFF36D167)
+                        } else {
+                            if (dynamicColor) MiuixTheme.colorScheme.error.copy(alpha = 0.8f)
+                            else Color(0xFFDC3545)
+                        }
+                        val titleText = if (ok) {
+                            stringResource(R.string.home_status_active)
+                        } else {
+                            stringResource(R.string.home_status_inactive)
+                        }
+                        val lineTwo = if (!checked) {
+                            stringResource(R.string.home_loading)
+                        } else if (ok) {
+                            stringResource(R.string.home_status_click_to_retry)
+                        } else {
+                            stringResource(R.string.home_status_inactive_hint)
+                        }
+                        val lineThree = stringResource(
+                            R.string.home_lock_wallpaper_state,
+                            stringResource(
+                                if (state.lockWallpaperOk) R.string.home_lock_wallpaper_ok
+                                else R.string.home_lock_wallpaper_missing
+                            )
                         )
 
-                        SmallTitle(text = stringResource(R.string.device_info))
                         Card(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp)
-                                .padding(bottom = 12.dp)
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            colors = CardDefaults.defaultColors(color = statusColor),
+                            onClick = { scope.launch { refresh() } },
+                            showIndication = true,
+                            pressFeedbackType = PressFeedbackType.Tilt
                         ) {
-                            Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                                info.forEach { (label, value) ->
-                                    InfoRow(label, value)
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .offset(38.dp, 45.dp),
+                                    contentAlignment = Alignment.BottomEnd
+                                ) {
+                                    Icon(
+                                        modifier = Modifier.size(170.dp),
+                                        imageVector = if (ok) Icons.Rounded.CheckCircleOutline
+                                        else Icons.Rounded.ErrorOutline,
+                                        tint = iconTint,
+                                        contentDescription = null
+                                    )
+                                }
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(all = 16.dp)
+                                ) {
+                                    MiuixText(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        text = titleText,
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    MiuixText(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        text = lineTwo,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    MiuixText(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        text = lineThree,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
                                 }
                             }
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        ) {
+                            StatCard(
+                                label = stringResource(R.string.home_cover_state),
+                                value = stringResource(
+                                    if (state.cover) R.string.home_on else R.string.home_off
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            StatCard(
+                                label = stringResource(R.string.home_auto_state),
+                                value = stringResource(
+                                    if (state.auto) R.string.home_on else R.string.home_off
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    SmallTitle(
+                        text = stringResource(R.string.home_device_info),
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                    Card(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .padding(bottom = 12.dp)
+                    ) {
+                        Column {
+                            BasicComponent(
+                                title = stringResource(R.string.home_device_name),
+                                summary = deviceName,
+                            )
+                            BasicComponent(
+                                title = stringResource(R.string.home_device_model),
+                                summary = deviceModel,
+                            )
+                            BasicComponent(
+                                title = stringResource(R.string.home_hyperos_version),
+                                summary = hyperOSVersion,
+                            )
+                            BasicComponent(
+                                title = stringResource(R.string.home_android_version),
+                                summary = systemVersion,
+                            )
+                            BasicComponent(
+                                title = stringResource(R.string.home_module_version),
+                                summary = moduleVersion,
+                            )
                         }
                     }
                 }
@@ -140,87 +316,36 @@ fun HomePageView(
 }
 
 @Composable
-private fun StatusCard(
-    checking: Boolean,
-    alive: Boolean,
-    onRetry: () -> Unit,
-) {
-    val accent = when {
-        checking -> CheckingAmber
-        alive -> ActiveGreen
-        else -> InactiveRed
-    }
+private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .padding(top = 12.dp, bottom = 12.dp),
-        colors = CardDefaults.defaultColors(color = accent.copy(alpha = 0.14f)),
+        modifier = modifier,
+        insideMargin = PaddingValues(16.dp),
+        showIndication = true,
+        pressFeedbackType = PressFeedbackType.Tilt
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(10.dp)
-                        .background(accent, CircleShape)
-                )
-                MiuixText(
-                    modifier = Modifier.padding(start = 10.dp),
-                    text = when {
-                        checking -> stringResource(R.string.status_checking)
-                        alive -> stringResource(R.string.status_active)
-                        else -> stringResource(R.string.status_inactive)
-                    },
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MiuixTheme.colorScheme.onSurface,
-                )
-            }
-            if (!checking) {
-                MiuixText(
-                    modifier = Modifier.padding(top = 8.dp),
-                    text = if (alive) {
-                        stringResource(R.string.status_active_summary)
-                    } else {
-                        stringResource(R.string.status_inactive_summary)
-                    },
-                    fontSize = 13.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.Start
+        ) {
+            MiuixText(
+                modifier = Modifier.fillMaxWidth(),
+                text = label,
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+            )
+            MiuixText(
+                modifier = Modifier.fillMaxWidth(),
+                text = value,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.onSurface
+            )
         }
-        ArrowPreference(
-            title = stringResource(R.string.status_refresh),
-            onClick = onRetry,
-        )
     }
 }
 
-@Composable
-private fun InfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top,
-    ) {
-        MiuixText(
-            text = label,
-            fontSize = 15.sp,
-            color = MiuixTheme.colorScheme.onSurface,
-        )
-        MiuixText(
-            modifier = Modifier.padding(start = 16.dp),
-            text = value,
-            fontSize = 15.sp,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
-    }
-}
-
-private object DeviceInfo {
-
+private object SystemVersion {
     /** ro.* properties are the only place the HyperOS version is written down. */
     private fun prop(key: String): String = try {
         @Suppress("PrivateApi")
@@ -231,30 +356,14 @@ private object DeviceInfo {
         ""
     }
 
-    fun collect(context: android.content.Context): List<Pair<String, String>> {
-        val res = context.resources
-        val dm = res.displayMetrics
-        val version = try {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "-"
-        } catch (_: Throwable) {
-            "-"
-        }
-        val hyperOs = prop("ro.mi.os.version.name").ifEmpty { prop("ro.miui.ui.version.name") }
-        val build = prop("ro.mi.os.version.incremental").ifEmpty { Build.DISPLAY }
-
-        return buildList {
-            add(context.getString(R.string.info_device) to "${Build.MODEL} (${Build.DEVICE})")
-            if (hyperOs.isNotEmpty()) add(context.getString(R.string.info_hyperos) to hyperOs)
-            add(context.getString(R.string.info_build) to build)
-            add(
-                context.getString(R.string.info_android)
-                        to "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
-            )
-            add(
-                context.getString(R.string.info_screen)
-                        to "${dm.widthPixels}×${dm.heightPixels} · ${dm.densityDpi}dpi"
-            )
-            add(context.getString(R.string.info_module_version) to version)
+    fun hyperOs(fallback: String): String {
+        val name = prop("ro.mi.os.version.name").ifEmpty { prop("ro.miui.ui.version.name") }
+        val incremental = prop("ro.mi.os.version.incremental").ifEmpty { Build.DISPLAY }
+        return when {
+            name.isNotEmpty() && incremental.isNotEmpty() -> "$name · $incremental"
+            incremental.isNotEmpty() -> incremental
+            name.isNotEmpty() -> name
+            else -> fallback
         }
     }
 }

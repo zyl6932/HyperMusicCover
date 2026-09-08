@@ -35,6 +35,7 @@ object ModuleBridge {
         val glassEnd: Float = 0.75f,
         val hideDepth: Boolean = true,
         val cardShowing: Boolean = false,
+        val lockWallpaperOk: Boolean = false,
         val track: String = "",
         val player: String = "",
     ) {
@@ -122,6 +123,7 @@ object ModuleBridge {
             glassEnd = b.getFloat("glass", 0.75f),
             hideDepth = b.getBoolean("depth", true),
             cardShowing = b.getBoolean("card", false),
+            lockWallpaperOk = b.getBoolean("lockwp", false),
             track = b.getString("track") ?: "",
             player = b.getString("player") ?: "",
         )

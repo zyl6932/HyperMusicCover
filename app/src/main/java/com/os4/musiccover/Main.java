@@ -608,6 +608,9 @@ public class Main implements IXposedHookLoadPackage {
                         out.putFloat("glass", sGlassEnd);
                         out.putBoolean("depth", sDepthWanted);
                         out.putBoolean("card", sCardShowing);
+                        // Checked live rather than reported from the cached flag: the user can
+                        // change the wallpaper at any time and that is what breaks the feature.
+                        out.putBoolean("lockwp", hasLockWallpaper(c));
                         out.putString("track", sCardKey);
                         MediaController mc = sWatched;
                         out.putString("player", mc == null ? "" : mc.getPackageName());
@@ -1587,6 +1590,28 @@ public class Main implements IXposedHookLoadPackage {
         } catch (Throwable ignored) {
         }
         return null;
+    }
+
+    /**
+     * Whether the lock screen has a wallpaper entry of its own. Note this is about the ENTRY,
+     * not the picture: a copy of the home wallpaper counts, which is exactly what
+     * ensureLockWallpaper() installs.
+     */
+    private static boolean hasLockWallpaper(Context ctx) {
+        try {
+            android.app.WallpaperManager wm = (android.app.WallpaperManager)
+                    ctx.getSystemService(Context.WALLPAPER_SERVICE);
+            android.os.ParcelFileDescriptor f =
+                    wm.getWallpaperFile(android.app.WallpaperManager.FLAG_LOCK);
+            if (f == null) return false;
+            try {
+                f.close();
+            } catch (Throwable ignored) {
+            }
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** Puts the lock screen back to following the home wallpaper. Undoes ensureLockWallpaper. */

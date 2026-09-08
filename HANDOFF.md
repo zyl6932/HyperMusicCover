@@ -117,8 +117,11 @@ onSurfaceCreated() → mTexture.use(consumer)
 （本机 596x1296），`updateDimensions`/`updateMatrix` 按位图尺寸算 GL 矩阵。
 
 前提和限制：
-- **锁屏壁纸必须和桌面壁纸是不同的两张**，否则 `KeyguardAnimImageWallpaperRenderer`
-  根本不会被实例化，只有 Desktop 那个，改它会连桌面一起改
+- **锁屏必须"自己有一张"壁纸**（存在独立的 `FLAG_LOCK` 记录），否则
+  `KeyguardAnimImageWallpaperRenderer` 根本不会被实例化，只有 Desktop 那个，改它会连桌面一起改。
+  **注意：内容可以和桌面壁纸一模一样**，要的只是那条独立记录——模块的
+  `ensureLockWallpaper()` 就是把桌面壁纸原样复制一份设过去，照样能工作。
+  （这里以前写的是"必须是不同的两张图"，是没验证就下的结论，错的。）
 - **纹理只在 GL surface 创建时读一次**，息屏亮屏不重读。所以图要先落盘到壁纸进程的
   `getFilesDir()`，在 `Application.onCreate` 读回，**改图后必须 kill 壁纸进程才生效**
 - `getBitmap()` 不是上传路径，别 hook
@@ -163,7 +166,8 @@ engine.T(false);               // 请求一帧
 所以走这条路刷新，连通知卡/媒体卡拿去模糊的那张磨砂副本也一起更新了。
 
 拿 engine 实例：hook `KeyguardImageEngineImpl` 的构造函数（进程启动时就有）。
-前提仍然是"锁屏壁纸和桌面壁纸是两张不同的图"，否则这个 engine 根本不会被创建。
+前提仍然是"锁屏自己有一张壁纸"（独立的 `FLAG_LOCK` 记录，内容可以和桌面完全相同），
+否则这个 engine 根本不会被创建。
 
 实测：`[MCWall] reload requested on KeyguardImageEngineImpl` →
 `wallpaper texture REPLACED`，全程不杀进程。
@@ -224,7 +228,9 @@ session 侧仍然留着 `addOnActiveSessionsChangedListener` + `MediaController.
 但 SystemUI 侧一切正常（`cover: on=true`、`pushart` 成功、`reload requested` 也发了），
 就是屏幕上什么都没变。
 
-原因：锁屏壁纸被重置成"跟桌面同一张"了。判断方法：
+原因：锁屏壁纸被重置成"跟随桌面"了——注意准确的说法是**锁屏没有自己的壁纸记录**
+（`FLAG_LOCK` 为空、System 那条是 `mWhich=3`），**不是"两张图不能一样"**。
+两张图完全可以是同一张，只要锁屏那份是独立存在的。判断方法：
 
 ```bash
 adb shell dumpsys wallpaper | sed -n '/^Lock wallpaper state:/,+3p'
@@ -234,7 +240,7 @@ adb logcat -d | grep getEngineService
 # 只有一行 isLockScreen = false → KeyguardImageEngineImpl 根本没被创建
 ```
 
-共用一张时 MIUI 只建一个 `isLockScreen=false` 的 engine，
+没有独立锁屏壁纸时 MIUI 只建一个 `isLockScreen=false` 的 engine，
 `KeyguardAnimImageWallpaperRenderer` 不存在，我们没有任何可以挂的东西，
 **而且所有日志都显示成功**，非常容易误判成别的地方坏了。
 
@@ -398,7 +404,8 @@ adb shell am broadcast -a com.os4.musiccover.PROBE --es op lockwp --ez clear tru
 ```
 
 **另外：锁屏壁纸现在是模块自己设的一张（桌面壁纸的副本，肉眼看不出）**，
-因为原来的被重置成"跟随桌面"了。这是功能的前提，别再改回同一张。
+因为原来的被重置成"跟随桌面"了。功能要求的是这条独立记录，不是两张图长得不一样，
+所以副本完全够用——但别在系统设置里把壁纸"同时应用到桌面和锁屏"，那会把这条记录抹掉。
 
 为了测试不息屏做的改动**已经还原**（`svc power stayon false` /
 `dumpsys battery reset` / `screen_off_timeout 600000`），充电状态现在是真实的。

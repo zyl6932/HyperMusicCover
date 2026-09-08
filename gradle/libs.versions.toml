@@ -22,6 +22,7 @@ miuix-shader = { group = "top.yukonga.miuix.kmp", name = "miuix-shader-android",
 miuix-blur = { group = "top.yukonga.miuix.kmp", name = "miuix-blur-android", version.ref = "miuix" }
 miuix-preference = { group = "top.yukonga.miuix.kmp", name = "miuix-preference-android", version.ref = "miuix" }
 miuix-icons = { group = "top.yukonga.miuix.kmp", name = "miuix-icons-android", version.ref = "miuix" }
+material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 miuix-squircle = { group = "top.yukonga.miuix.kmp", name = "miuix-squircle-android", version.ref = "miuix" }
 
 [plugins]
