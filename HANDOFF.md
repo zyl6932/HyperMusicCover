@@ -6,8 +6,12 @@
 工程在 `C:\Users\。\Desktop\music lockscreen\MusicCover`，
 **已经是个 git 仓库并推到了 <https://github.com/zyl6932/HyperMusicCover>（public，Apache 2.0）**。
 
-包名仍然是 `com.os4.musiccover`——**故意没跟着改**：改了 LSPosed 会当成新模块，
-要重新启用、重新勾作用域，状态文件和所有探针广播也全部失效。
+**applicationId 现在是 `com.github.zyl6932.HyperMusicCover`**（2026-09-09 改的）。
+**Java 包名和探针广播 action 仍然是 `com.os4.musiccover`**——改了没有任何好处，
+而文档里每一条 adb 命令都挂在上面。改 applicationId 的代价要记住：
+LSPosed 把它当成一个新模块，**必须重新启用、重新勾作用域**，
+而且**旧的 `com.os4.musiccover` 必须卸载或停用**，否则两个模块一起 hook SystemUI。
+（模块状态文件在 SystemUI 的 filesDir 里，改包名不受影响。）
 
 classic Xposed API，**已安装并在 LSPosed 中启用，作用域是
 `com.android.systemui` + `com.miui.miwallpaper`（两个都必须勾选）**。
@@ -28,11 +32,12 @@ classic Xposed API，**已安装并在 LSPosed 中启用，作用域是
 
 ### 构建部署
 
+**现在有 gradle wrapper 了**（CI 需要），本地直接 `./gradlew`：
+
 ```bash
 export ANDROID_HOME=/c/android-sdk
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.11.10-hotspot"
-GR=$(ls -d ~/.gradle/wrapper/dists/gradle-9.7.1-bin/*/gradle-9.7.1/bin/gradle)
-"$GR" --no-daemon assembleDebug
+./gradlew --no-daemon assembleDebug     # 或 assembleRelease
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell "su -c 'kill \$(pidof com.android.systemui)'"      # 改 Main.java 后
 adb shell "su -c 'kill \$(pidof com.miui.miwallpaper)'"      # 改 WallpaperProbe.java 后
@@ -142,6 +147,24 @@ HyperOS 把壁纸主体抠图画在 **SystemUI** 里：`KeyguardDepthInteractor`
 
 要 hook `KeyguardDepthInteractor.updateDeductedImageView()` 在 after 里重新隐藏
 （系统会重新显示它）。**不要 hook `View.setVisibility`**——那是 SystemUI 最热的方法之一。
+
+**但只挂这一个钩子不够，SystemUI 重启后会失效。** `updateDeductedImageView` 只是**其中一条**
+重显路径；同一个 view 上还挂着 Folme 的透明度动画（`setDepthTransitionAlpha`、
+`deductedTranslateAlphaFolmeAnimator`，用 `--es op cls --es name
+com.android.keyguard.depth.KeyguardDepthInteractor` 能看到），它们够不着我们钩的任何方法。
+按第 14 节的所有权模型，这里本来就该是**持续断言**而不是一次性设置。现在的做法：
+
+- `guardDepth()` 在 deducted_image_view 上装一个 `OnPreDrawListener`，
+  cover 模式下**每帧**检查一次可见性，被系统翻回来就再按下去。
+  代价是锁屏每帧一次 `getVisibility()`；`VISIBLE→INVISIBLE` 只 invalidate 不 requestLayout，
+  不会自己把自己循环起来。guard 挂在 view 上，keyguard 重建时跟着 view 一起没，
+  下一次 `setDepthHidden(true)` 装新的。
+- **抓不到 view 就重试**（12 次 × 250ms）。原来"找不到"只打一行日志就放弃：SystemUI 刚起来时
+  前景层不一定已经 inflate 完，正好是重启后失效的另一半原因。
+- `ACTION_SCREEN_ON` 里也补一次 `setDepthHidden(true)`（息屏期间 keyguard 可能被重建过）。
+
+**日志里 `system re-showed the cut-out, re-hidden (n)` 就是系统抢回来的次数**（前 5 次
+每次都打，之后每 100 次打一行）。下次要查是哪条路径抢的，从这行的时间点往前对日志。
 
 ### 7. 壁纸排版：镜像延展 + 模糊（Apple 那种）
 
@@ -406,6 +429,47 @@ Kotlin + Compose + [miuix](https://github.com/miuix-kotlin-multiplatform/miuix)�
 - 读状态 = 发**有序广播** `op=query`，模块在 `setResultExtras()` 里回
 - **回不回得来，本身就是"模块有没有生效"的判据**（1.5s 超时 = 未生效）
 
+**启动白屏 / splash**：原来主题是 `android:Theme.Material.Light.NoActionBar`，
+`windowBackground` 恒为白色，冷启动从"系统 splash 消失"到"Compose 画出第一帧"这一段就是白屏。
+两半修法：
+
+- **窗口底色**：`themes.xml` / `values-night/themes.xml` 给 `windowBackground` 和
+  `windowSplashScreenBackground` 一个 `@color/window_background`（浅 `#F7F7F7` / 深 `#000000`），
+  splash 图标用 `@mipmap/ic_launcher`。
+  但静态资源盖不全——**用户可以在 app 里把主题强制成跟系统相反的深浅，还有 Monet 动态取色**。
+  所以 `LaunchBackground`（SharedPreferences）**把 app 真正画的 `MiuixTheme.colorScheme.surface`
+  记下来**，按「主题模式 + 系统深浅」做 key，下次冷启动在 `onCreate` 里
+  `window.setBackgroundDrawable()` 直接用它。静态那个颜色只有"某个组合第一次启动"才会看到。
+- **把 splash 留到内容画好**：Android 12+ 的 splash 是"app 画出第一帧就撤"，而 Compose 的
+  第一帧是空窗口。`holdSplashUntilContentIsReady()` 在 `android.R.id.content` 上挂
+  `OnPreDrawListener`，首次组合完成前一律返回 false，splash 就一直留着，
+  于是变成 splash → UI，中间没有空白。返回 false 时 ViewRootImpl 会自己再排一次 traversal，
+  所以不用手动 invalidate 去轮询。`SPLASH_HOLD_MAX_MS = 1500` 是兜底。
+  **`savedInstanceState != null` 时不设最小停留**——转屏/换语言重建 activity 时后面没有 splash，
+  硬停 700ms 只会让用户看见一段空白。
+
+**动效图标**（`drawable/splash_icon.xml` + `splash_icon_animated.xml`）：唱片转起来再停住，
+700ms，一次。几个不显然的点：
+
+- **splash 图标不是自适应图标，没人替你裁圆**。所以渐变底盘是**画在 vector 里**的一个
+  r=36 的圆（108 viewport 居中），不是靠 `windowSplashScreenIconBackgroundColor`。
+  Android 的规范是内容落在中间三分之二，r=36 正好。
+- **但那个方框会裁**：第一版让底盘 scale 0.62→1（overshoot）弹进来，实机上底盘边缘被
+  图标方框切掉了。**能动的东西必须始终待在 r=36 那个圆里**，所以现在整套动画只剩唱片旋转，
+  底盘和套子都是静止的。（唱片"从套里滑出来"那段也一并去掉了。）
+- 启动图标的原始画法整体套在 `<group name="art" scale=0.74>` 里，**路径坐标和 launcher 图标一字不差**，
+  两个图标是同一张画。0.74 是让套子最远的那个角（离中心 39.2）刚好落进圆里。
+- **唱片上必须有个不对称的东西，否则转了等于没转**：纹路是同心圆，旋转在屏幕上没有任何变化。
+  所以加了两道对置的弧线当反光。**弧线是深色的**——唱片本体是白的，白色反光在白盘上什么都不是
+  （第一版就是白的，本地渲染帧序列才看出来）。
+- `windowSplashScreenAnimationDuration=700`，**平台上限 1000ms**，超过就不等了。
+  `MainActivity.SPLASH_ANIMATION_MS` 要跟它保持一致：Compose 通常比动画先就绪，
+  不设这个最小停留的话动画会被拦腰切断。
+
+**改图标不用上机验**：`splash_icon.xml` 里全是圆、圆角矩形和圆弧，用 Pillow 按同样的变换和
+插值器画几帧出来看构图和动效姿势就够了（脚本在 scratchpad，`splash_frames*.png`）。
+这不算"截图测效果"，画的是自己的图，不碰手机。
+
 **故意没有做成开关的东西**（改过一轮又删掉了，别再加回来）：
 
 - **跟随媒体卡片**：关掉之后模块什么都不做，那不是一个值得给的选项。
@@ -416,6 +480,43 @@ Kotlin + Compose + [miuix](https://github.com/miuix-kotlin-multiplatform/miuix)�
   用户随时可能把壁纸改回「同时应用到桌面和锁屏」，缓存说"已经没问题"就永远发现不了，
   只能靠人去点修复。实测：清掉锁屏壁纸后触发一次贴封面，模块自己查、自己复制、自己修好。
 - **立即应用 / 恢复原壁纸**：跟随卡片之后没意义了，adb 还留着 `pushart`。
+
+## 发布：签名、R8、CI
+
+**release 签名**：`keystore.properties`（**git 忽略，只在本机**）指向 `release.jks`。
+两个文件都不进仓库；CI 从 `SIGNING_*` secrets 读同样的值。
+两者都没有时 release 会**退回 debug 签名**——能装，但跟正式签名的包**签名不一致，互相覆盖不了**。
+
+**R8 是开着的**（`isMinifyEnabled` + `isShrinkResources`）。
+**不开的话 APK 是 47MB，开了 2.7MB**——大头是 `material-icons-extended`，
+那是几十兆生成出来的图标代码，这个 app 只用了几个。模块自己的代码在哪边都是零头。
+`app/proguard-rules.pro` 里 keep 了 `Main` 和 `WallpaperProbe`：
+**LSPosed 是从 `assets/xposed_init` 读类名反射加载的，R8 眼里整个模块都不可达**，
+不 keep 会被削光。改完 release 记得验一下：
+
+```bash
+unzip -p app-release.apk assets/xposed_init          # 应该打印 com.os4.musiccover.Main
+unzip -p app-release.apk classes.dex | grep -c "com/os4/musiccover/Main"
+```
+
+**Xposed API 的版本跟体积无关**——那个 jar 是 `compileOnly`，一个字节都不进 APK。
+
+**CI**（`.github/workflows/`）：
+- `ci.yml`：push / PR 都跑，build debug + release + `lintDebug`，传 debug APK 当 artifact。
+  `lintDebug` 曾经红过 6 条 `MissingPermission`——`Main.java` 调 `WallpaperManager` 的地方
+  跑在 SystemUI 进程里（那边有权限），这个 APK 自己没有也不需要，已经就地
+  `@SuppressLint("MissingPermission")` 并写了原因。
+- `nightly.yml`：每天 18:00 UTC（北京时间凌晨 2 点）出一版 pre-release，tag `nightly-YYYYMMDD`。
+  **上次 nightly 之后没有新提交就自己跳过**，所以 release 列表是"改动"而不是"日历"。
+  只保留最近 7 个 nightly，其余连 tag 一起删；**只认 `nightly-` 开头的 tag，正式 release 不碰**。
+  用的是 runner 自带的 `gh`，没有第三方 action。
+
+要让 nightly 用正式签名，在仓库 Settings → Secrets 里加：
+`SIGNING_KEYSTORE_BASE64`（`base64 -w0 release.jks`）、`SIGNING_STORE_PASSWORD`、
+`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。没加也能跑，只是会退回 debug 签名并在 release 说明里写明。
+
+**README.md 已经从仓库里撤掉了**（`git rm --cached` + 写进 `.gitignore`），
+本地那份还在，是用户要自己重写的草稿，**不要再提交上去**。
 
 ## 探针命令
 
@@ -532,4 +633,7 @@ adb shell am broadcast -a com.os4.musiccover.PROBE --es op lockwp --ez clear tru
 - **改完自己 kill SystemUI，会清掉所有静态状态**，很容易把自己造成的现象误判成 bug。
 - **量尺寸要用差分法**（截一张隐藏目标的底图再截一张，相减取 bbox），
   直接对壁纸做阈值分割会被背景污染。
-- 用户在用手机的时候不要连续截屏。
+- **测试是用户的事，不要自己截图验证效果。** 改完代码 → 构建 → 安装 → kill 对应进程 →
+  然后**停下来**，说清楚装了什么、要看哪里，让用户在手机上看。截图只用来**量尺寸/坐标**
+  （差分法量 bbox 那种），不用来"看看效果对不对"——静态图看不出动效，而且手机是用户在用的。
+  日志不打扰人，`adb logcat` 可以随便抓。
