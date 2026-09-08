@@ -123,8 +123,17 @@ object ModuleBridge {
     }
 
     /** Restarting SystemUI is how most module changes are picked up. Needs root. */
-    fun restartSystemUi(): Boolean = try {
-        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "kill \$(pidof com.android.systemui)"))
+    fun restartSystemUi(): Boolean = kill("com.android.systemui")
+
+    /**
+     * The wallpaper process is the other half of the module and restarts independently. It is
+     * worth its own entry because the texture is read once when the GL surface is created: if a
+     * cover ever ends up wrong on screen, this is what re-reads it from disk.
+     */
+    fun restartWallpaper(): Boolean = kill("com.miui.miwallpaper")
+
+    private fun kill(process: String): Boolean = try {
+        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "kill \$(pidof $process)"))
         p.waitFor() == 0
     } catch (_: Throwable) {
         false

@@ -417,8 +417,8 @@ Kotlin + Compose + [miuix](https://github.com/miuix-kotlin-multiplatform/miuix)�
 
 | 页签 | 内容 |
 |---|---|
-| 主页 | 模块是否生效的状态卡（配色/尺寸抄 KernelSU 的 `HomeMiuix.kt`：110dp 图标 offset(27,31)、16×14 内边距、22sp 标题）+ 设备信息 |
-| 功能 | 当前曲目、封面纵向位置、时钟缩放、玻璃强度、重启系统界面 |
+| 主页 | 右上角**重启菜单**（重启系统界面 / 重启壁纸，抄 KernelSU 把重启放顶栏的做法）+ 模块是否生效的状态卡（配色/尺寸抄 KernelSU 的 `HomeMiuix.kt`：110dp 图标 offset(27,31)、16×14 内边距、22sp 标题）+ 设备信息 |
+| 功能 | 当前曲目、封面纵向位置、时钟缩放、玻璃强度 |
 | 设置 | 主题模式（含 Monet）、悬浮导航栏、液态玻璃效果、背景模糊、语言、导入导出 |
 | 关于 | 项目地址、反馈、Apache 2.0、第三方许可证（带 OS3 动态背景效果） |
 
@@ -491,6 +491,16 @@ Kotlin + Compose + [miuix](https://github.com/miuix-kotlin-multiplatform/miuix)�
   用户随时可能把壁纸改回「同时应用到桌面和锁屏」，缓存说"已经没问题"就永远发现不了，
   只能靠人去点修复。实测：清掉锁屏壁纸后触发一次贴封面，模块自己查、自己复制、自己修好。
 - **立即应用 / 恢复原壁纸**：跟随卡片之后没意义了，adb 还留着 `pushart`。
+
+**顶栏的重启菜单**（`HomePage.kt` 的 `RestartMenu`）用 miuix 的 `OverlayListPopup`，有两个坑：
+
+- **popup 锚定的是它的父布局**，所以 `IconButton` 和 popup 必须包在同一个 `Box` 里。
+- **`renderInRootScaffold` 必须传 `false`**。默认 `true` 会渲染到最外层 Scaffold，
+  而 `MainActivity` 那个根 Scaffold 是 `popupHost = { }`（故意清空的），popup 会直接不见。
+  传 false 就渲染在 HomePage 自己的 Scaffold 里。
+
+miuix 的函数签名 javap 看不到参数名，**别猜**：Maven Central 上有
+`miuix-ui-0.9.4-rc01-sources.jar`，直接下下来读源码。
 
 ## 现代 API（102）——2026-09-09 从 classic 迁过来的
 

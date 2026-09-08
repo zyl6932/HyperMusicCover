@@ -15,10 +15,10 @@
     <string name="clock_scale">Clock scale</string>
     <string name="clock_scale_summary">Size of the collapsed clock</string>
     <string name="clock_glass">Glass strength</string>
-    <string name="advanced_section">Advanced</string>
+    <string name="restart_menu">Restart</string>
     <string name="restart_systemui">Restart System UI</string>
-    <string name="restart_systemui_summary">Try this when a change does not take. Needs root</string>
-    <string name="restart_done">System UI restart requested</string>
+    <string name="restart_wallpaper">Restart wallpaper</string>
+    <string name="restart_done">Restart requested</string>
     <string name="restart_failed">Restart failed, root required</string>
 
     <string name="tab_home">Home</string>

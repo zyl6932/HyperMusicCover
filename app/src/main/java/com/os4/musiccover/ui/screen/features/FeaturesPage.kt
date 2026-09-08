@@ -1,6 +1,5 @@
 package com.os4.musiccover.ui.screen.features
 
-import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,7 +18,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,9 +32,6 @@ import com.os4.musiccover.R
 import com.os4.musiccover.ui.util.BlurredBar
 import com.os4.musiccover.ui.util.pageScrollModifiers
 import com.os4.musiccover.ui.util.rememberBlurBackdrop
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -45,7 +40,6 @@ import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -65,7 +59,6 @@ fun FeaturesPageView(
     extraBottomPadding: Dp = 0.dp,
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val scrollBehavior = MiuixScrollBehavior()
     val backdrop = rememberBlurBackdrop()
     val blurActive = isBlurEnabled && backdrop != null
@@ -188,30 +181,6 @@ fun FeaturesPageView(
                             }
                         }
 
-                        SmallTitle(text = stringResource(R.string.advanced_section))
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp)
-                                .padding(bottom = 12.dp)
-                        ) {
-                            ArrowPreference(
-                                title = stringResource(R.string.restart_systemui),
-                                summary = stringResource(R.string.restart_systemui_summary),
-                                onClick = {
-                                    scope.launch {
-                                        val ok = withContext(Dispatchers.IO) {
-                                            ModuleBridge.restartSystemUi()
-                                        }
-                                        Toast.makeText(
-                                            context,
-                                            if (ok) R.string.restart_done else R.string.restart_failed,
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                },
-                            )
-                        }
                     }
                 }
             }

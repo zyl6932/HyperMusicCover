@@ -8,6 +8,7 @@
 package com.os4.musiccover.ui.screen.home
 
 import android.annotation.SuppressLint
+import android.widget.Toast
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -59,11 +61,16 @@ import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.ListPopupColumn
+import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -119,6 +126,7 @@ fun HomePageView(
                     title = title,
                     color = barColor,
                     scrollBehavior = scrollBehavior,
+                    actions = { RestartMenu() },
                 )
             }
         },
@@ -285,6 +293,65 @@ private object SystemVersion {
             incremental.isNotEmpty() -> incremental
             name.isNotEmpty() -> name
             else -> fallback
+        }
+    }
+}
+
+/**
+ * The two processes this module lives in, restartable from the one place a user would look for
+ * them. They are not settings, so they do not belong on a settings page - they are the "have you
+ * tried turning it off and on again" of an Xposed module, which is why they sit in the top bar
+ * the way KernelSU puts its reboot menu there.
+ *
+ * The popup anchors to its parent, hence the Box around the button, and it renders inside this
+ * page's Scaffold rather than the root one, whose popup host the app deliberately empties.
+ */
+@Composable
+private fun RestartMenu() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var showMenu by remember { mutableStateOf(false) }
+
+    val entries = listOf(
+        stringResource(R.string.restart_systemui) to ModuleBridge::restartSystemUi,
+        stringResource(R.string.restart_wallpaper) to ModuleBridge::restartWallpaper,
+    )
+
+    Box {
+        IconButton(onClick = { showMenu = true }) {
+            Icon(
+                imageVector = Icons.Rounded.RestartAlt,
+                contentDescription = stringResource(R.string.restart_menu),
+                tint = MiuixTheme.colorScheme.onBackground,
+            )
+        }
+        OverlayListPopup(
+            show = showMenu,
+            alignment = PopupPositionProvider.Align.End,
+            onDismissRequest = { showMenu = false },
+            renderInRootScaffold = false,
+        ) {
+            ListPopupColumn {
+                entries.forEachIndexed { index, entry ->
+                    DropdownImpl(
+                        text = entry.first,
+                        optionSize = entries.size,
+                        isSelected = false,
+                        index = index,
+                        onSelectedIndexChange = {
+                            showMenu = false
+                            scope.launch {
+                                val ok = withContext(Dispatchers.IO) { entry.second() }
+                                Toast.makeText(
+                                    context,
+                                    if (ok) R.string.restart_done else R.string.restart_failed,
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
 }
