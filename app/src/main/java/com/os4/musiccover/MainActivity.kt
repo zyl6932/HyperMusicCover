@@ -2,8 +2,12 @@ package com.os4.musiccover
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.view.View
+import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -31,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -73,6 +78,10 @@ class MainActivity : ComponentActivity() {
         super.attachBaseContext(LocaleHelper.wrapContext(newBase, language))
     }
 
+    /** Set once the first composition has run, so the splash can hand over to real content. */
+    @Volatile
+    private var uiReady = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -81,6 +90,15 @@ class MainActivity : ComponentActivity() {
         }
 
         val savedSettings = AppSettings.load(this)
+
+        // Two halves of the same fix for the white flash on launch: paint the window with the
+        // colour the UI is about to draw on, and keep the system splash up until it has drawn.
+        LaunchBackground.peek(this, savedSettings.themeMode)?.let {
+            window.setBackgroundDrawable(ColorDrawable(it))
+        }
+        // A config change (rotation, language) re-runs onCreate with no splash behind it,
+        // and holding a blank window then would be a delay the user just sees.
+        holdSplashUntilContentIsReady(splashIsShowing = savedInstanceState == null)
 
         setContent {
             var themeMode by remember {
@@ -110,6 +128,14 @@ class MainActivity : ComponentActivity() {
             }
 
             AppTheme(themeMode = themeMode) {
+                // What the pages actually draw on. Recording it here is what lets the next cold
+                // start paint the same colour before Compose exists - including the Monet modes
+                // and a theme forced against the system's.
+                val surface = MiuixTheme.colorScheme.surface
+                LaunchedEffect(surface, themeMode) {
+                    LaunchBackground.remember(this@MainActivity, themeMode.name, surface.toArgb())
+                    uiReady = true
+                }
                 MainScreen(
                     themeMode = themeMode,
                     isFloatingNavbar = isFloatingNavbar,
@@ -122,6 +148,43 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    /**
+     * Android 12+ shows a splash screen on a cold start and takes it away as soon as the app
+     * draws its first frame - which, with Compose, is an empty window. Refusing that first draw
+     * until the content is composed keeps the splash up instead, so the launch goes straight
+     * from the splash to the UI with nothing blank in between.
+     *
+     * The timeout is the escape hatch: a launch must never be held hostage by a composition that
+     * is slower than expected, so past it the window is shown with whatever it has.
+     */
+    private fun holdSplashUntilContentIsReady(splashIsShowing: Boolean) {
+        val content = findViewById<View>(android.R.id.content)
+        val start = SystemClock.uptimeMillis()
+        // Compose is usually ready before the record has finished spinning. Handing over then
+        // would cut the icon animation off mid-turn, so the splash also stays for as long as the
+        // animation lasts - it is the whole point of having drawn one.
+        val minimumHold = if (splashIsShowing) SPLASH_ANIMATION_MS else 0L
+        content.viewTreeObserver.addOnPreDrawListener(
+            object : ViewTreeObserver.OnPreDrawListener {
+                override fun onPreDraw(): Boolean {
+                    // Cancelling the draw makes ViewRootImpl schedule another traversal, so this
+                    // re-asks every frame on its own until both conditions hold.
+                    if (!uiReady) return false
+                    if (SystemClock.uptimeMillis() - start < minimumHold) return false
+                    content.viewTreeObserver.removeOnPreDrawListener(this)
+                    return true
+                }
+            }
+        )
+        content.postDelayed({ uiReady = true }, SPLASH_HOLD_MAX_MS)
+    }
+
+    private companion object {
+        /** Matches windowSplashScreenAnimationDuration in themes.xml. */
+        const val SPLASH_ANIMATION_MS = 700L
+        const val SPLASH_HOLD_MAX_MS = 1500L
     }
 }
 

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The splash screen's animated icon: the record spins up and settles, 700ms, once.
+
+    Nothing else moves. The disc used to scale in as well, but the splash frame clips the icon to
+    a square, so anything that grows past the resting artwork gets its edges cut off - the disc
+    lost its rim on the way up. Whatever is animated here has to stay inside the r=36 circle
+    splash_icon.xml draws.
+
+    Keep the duration under windowSplashScreenAnimationDuration in themes.xml, and keep that under
+    the platform's 1000ms ceiling - past it the system stops waiting and the tail is never seen.
+-->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:drawable="@drawable/splash_icon">
+
+    <target android:name="record">
+        <aapt:attr name="android:animation">
+            <!-- just under one turn, easing out, so it reads as spinning up and settling -->
+            <objectAnimator
+                android:propertyName="rotation"
+                android:valueFrom="0"
+                android:valueTo="330"
+                android:valueType="floatType"
+                android:duration="700"
+                android:interpolator="@android:interpolator/decelerate_quint" />
+        </aapt:attr>
+    </target>
+</animated-vector>

@@ -1,12 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!--
-        The window background is what fills the gap between the splash screen going away and
-        Compose's first frame. Material.Light's default made that gap a white flash; MainActivity
-        paints over this with the surface colour the app last drew (see LaunchBackground), so this
-        value is only what a first-ever launch starts from.
-    -->
-    <style name="Theme.HyperMusicCover" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.HyperMusicCover" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/window_background</item>
         <item name="android:windowSplashScreenBackground">@color/window_background</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_animated</item>

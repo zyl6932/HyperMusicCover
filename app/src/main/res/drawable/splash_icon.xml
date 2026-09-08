@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The launcher icon redrawn for the splash screen: the same record and sleeve, but sitting on
+    a disc of its own instead of a full-bleed square.
+
+    The splash icon is not an adaptive icon, so nothing masks it for us - it is drawn as-is,
+    inside a square frame that clips. Everything therefore lives inside a circle of r=36 centred
+    in the 108 viewport, which is the proportion Android's splash spec expects (content inside
+    the middle two thirds), and the gradient the launcher icon has behind it is painted as that
+    circle. Nothing may animate outside that circle: scaling the disc up ran it into the frame
+    and cut its edges off.
+
+    Only the record moves; see splash_icon_animated.xml.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:name="root"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path android:pathData="M54,54m-36,0a36,36 0 1,0 72,0a36,36 0 1,0 -72,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="18" android:startY="18"
+                android:endX="90" android:endY="90"
+                android:type="linear">
+                <item android:offset="0" android:color="#FF2B3A8F" />
+                <item android:offset="0.55" android:color="#FF6C3BC4" />
+                <item android:offset="1" android:color="#FFC2478F" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!--
+        The launcher artwork is drawn at its original coordinates and shrunk as a whole, so the
+        two icons stay the same drawing. 0.74 is what puts the sleeve's far corner (39.2 from
+        the centre) just inside the disc.
+    -->
+    <group
+        android:name="art"
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.74"
+        android:scaleY="0.74">
+
+        <!-- the sleeve, peeking out behind the record -->
+        <path
+            android:name="sleeve"
+            android:pathData="M28,30h34a5,5 0 0 1 5,5v38a5,5 0 0 1 -5,5h-34a5,5 0 0 1 -5,-5v-38a5,5 0 0 1 5,-5z"
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.32" />
+
+        <!-- the record: the one thing that moves -->
+        <group
+            android:name="record"
+            android:pivotX="62"
+            android:pivotY="54">
+
+            <path
+                android:pathData="M62,54m-26,0a26,26 0 1,0 52,0a26,26 0 1,0 -52,0"
+                android:fillColor="#FFFFFF" />
+
+            <!-- grooves -->
+            <path
+                android:pathData="M62,54m-19,0a19,19 0 1,0 38,0a19,19 0 1,0 -38,0"
+                android:strokeColor="#33000000"
+                android:strokeWidth="1.6"
+                android:fillColor="#00000000" />
+            <path
+                android:pathData="M62,54m-13,0a13,13 0 1,0 26,0a13,13 0 1,0 -26,0"
+                android:strokeColor="#26000000"
+                android:strokeWidth="1.4"
+                android:fillColor="#00000000" />
+
+            <!--
+                Two opposed arcs, dark because the record itself is white - a white highlight
+                on a white disc is nothing at all. They are the only part of the record that
+                is not rotationally symmetric, so without them the spin is invisible: the
+                grooves are perfect circles and turning them changes nothing on screen.
+            -->
+            <path
+                android:pathData="M62,54m0,-24a24,24 0 0,1 17,7"
+                android:strokeColor="#3D000000"
+                android:strokeWidth="3"
+                android:strokeLineCap="round"
+                android:fillColor="#00000000" />
+            <path
+                android:pathData="M62,54m0,24a24,24 0 0,1 -17,-7"
+                android:strokeColor="#26000000"
+                android:strokeWidth="2.4"
+                android:strokeLineCap="round"
+                android:fillColor="#00000000" />
+
+            <!-- spindle hole -->
+            <path
+                android:pathData="M62,54m-5.5,0a5.5,5.5 0 1,0 11,0a5.5,5.5 0 1,0 -11,0"
+                android:fillColor="#FF6C3BC4" />
+        </group>
+    </group>
+</vector>
