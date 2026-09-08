@@ -96,6 +96,10 @@ class MainActivity : ComponentActivity() {
         LaunchBackground.peek(this, savedSettings.themeMode)?.let {
             window.setBackgroundDrawable(ColorDrawable(it))
         }
+        // And the third: the splash's own background is a theme attribute, resolved before any
+        // of this runs, so it can only be steered through the configuration. Normally a no-op -
+        // it only does anything the first launch after the theme mode changes.
+        AppNightMode.apply(this, savedSettings.themeMode)
         // A config change (rotation, language) re-runs onCreate with no splash behind it,
         // and holding a blank window then would be a delay the user just sees.
         holdSplashUntilContentIsReady(splashIsShowing = savedInstanceState == null)
@@ -125,6 +129,9 @@ class MainActivity : ComponentActivity() {
                         language = LocaleHelper.getSavedLanguage(this@MainActivity).code,
                     )
                 )
+                // Applied here rather than only at startup so the splash is already right the
+                // next time the app is opened, instead of one launch behind the setting.
+                AppNightMode.apply(this@MainActivity, themeMode.name)
             }
 
             AppTheme(themeMode = themeMode) {
