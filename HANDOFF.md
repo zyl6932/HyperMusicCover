@@ -417,10 +417,19 @@ Kotlin + Compose + [miuix](https://github.com/miuix-kotlin-multiplatform/miuix)�
 
 | 页签 | 内容 |
 |---|---|
-| 主页 | 右上角**重启菜单**（重启系统界面 / 重启壁纸，抄 KernelSU 把重启放顶栏的做法）+ 模块是否生效的状态卡（配色/尺寸抄 KernelSU 的 `HomeMiuix.kt`：110dp 图标 offset(27,31)、16×14 内边距、22sp 标题）+ 设备信息 |
-| 功能 | 当前曲目、封面纵向位置、时钟缩放、玻璃强度 |
+| 主页 | 右上角**重启菜单**（重启系统界面 / 重启壁纸）+ 状态卡（三行：是否生效 / 版本号 / 工作模式）+ 设备信息 |
+| 功能 | 封面纵向位置、时钟缩放、玻璃强度（「当前曲目」卡片和「重启系统界面」都已删掉） |
 | 设置 | 主题模式（含 Monet）、悬浮导航栏、液态玻璃效果、背景模糊、语言、导入导出 |
 | 关于 | 项目地址、反馈、Apache 2.0、第三方许可证（带 OS3 动态背景效果） |
+
+**版本号**：`versionName = "0.0.1"`，界面上带 `v` 前缀显示。
+CI 的 nightly 用 `-PmcVersionSuffix` / `-PmcVersionCode` 往上叠。
+
+**导入导出**（`SettingsBackup.kt`）：外观设置在 `AppSettings`（SharedPreferences），
+而**模块参数（bias / clockScale / glassEnd）住在 SystemUI 里的钩子中，app 故意不留副本**，
+所以导出要走探针去问、导入要发广播还回去。两个决定别改掉：
+**模块没应答时不写这三个值**（写默认值等于让别人导入你这份文件时被静默重置）；
+老的导出文件没有这几个 key 也能导入，缺就不推。
 
 **app 和模块之间怎么通信**：模块跑在 SystemUI 进程里，跟 app 没有共享存储，
 所以 **app 不读磁盘，直接问**——复用了 adb 探针那套广播协议（`ModuleBridge.kt`）：
@@ -449,8 +458,10 @@ Kotlin + Compose + [miuix](https://github.com/miuix-kotlin-multiplatform/miuix)�
   Light/MonetLight → `MODE_NIGHT_NO`，Dark/MonetDark → `MODE_NIGHT_YES`，
   System/MonetSystem → `MODE_NIGHT_AUTO`（框架把 YES/NO 以外的都映射成
   `UI_MODE_NIGHT_UNDEFINED`，也就是"听系统的"）。
-  **改这个值会触发 configuration change、重建 activity**，所以只在值真的变了时才调用，
-  用 `launch_background` 里的 `night_mode` 记住上次设过的值。
+  **改这个值会触发 configuration change、重建 activity**，所以：只在值真的变了时才调用
+  （用 `launch_background` 里的 `night_mode` 记住上次设过的值），而且**在 `onStop` 里调，
+  不在设置改变的那一刻调**——在前台调等于用户一点主题开关整个界面就跳一下。
+  放到 app 离开屏幕之后，效果一样（下次启动 splash 就是对的），没人看见重建。
 - **把 splash 留到内容画好**：Android 12+ 的 splash 是"app 画出第一帧就撤"，而 Compose 的
   第一帧是空窗口。`holdSplashUntilContentIsReady()` 在 `android.R.id.content` 上挂
   `OnPreDrawListener`，首次组合完成前一律返回 false，splash 就一直留着，
@@ -459,27 +470,38 @@ Kotlin + Compose + [miuix](https://github.com/miuix-kotlin-multiplatform/miuix)�
   **`savedInstanceState != null` 时不设最小停留**——转屏/换语言重建 activity 时后面没有 splash，
   硬停 700ms 只会让用户看见一段空白。
 
-**动效图标**（`drawable/splash_icon.xml` + `splash_icon_animated.xml`）：唱片转起来再停住，
-700ms，一次。几个不显然的点：
+### 三个图标是同一张画
 
-- **splash 图标不是自适应图标，没人替你裁圆**。所以渐变底盘是**画在 vector 里**的一个
-  r=36 的圆（108 viewport 居中），不是靠 `windowSplashScreenIconBackgroundColor`。
-  Android 的规范是内容落在中间三分之二，r=36 正好。
-- **但那个方框会裁**：第一版让底盘 scale 0.62→1（overshoot）弹进来，实机上底盘边缘被
-  图标方框切掉了。**能动的东西必须始终待在 r=36 那个圆里**，所以现在整套动画只剩唱片旋转，
-  底盘和套子都是静止的。（唱片"从套里滑出来"那段也一并去掉了。）
-- 启动图标的原始画法整体套在 `<group name="art" scale=0.74>` 里，**路径坐标和 launcher 图标一字不差**，
-  两个图标是同一张画。0.74 是让套子最远的那个角（离中心 39.2）刚好落进圆里。
-- **唱片上必须有个不对称的东西，否则转了等于没转**：纹路是同心圆，旋转在屏幕上没有任何变化。
-  所以加了两道对置的弧线当反光。**弧线是深色的**——唱片本体是白的，白色反光在白盘上什么都不是
-  （第一版就是白的，本地渲染帧序列才看出来）。
+**`ic_about_logo.xml` 是基准**，桌面图标（`ic_launcher_foreground` + `ic_launcher_background`）
+和 splash（`splash_icon.xml`）都从它推出来。关键那条换算：
+
+> **自适应图标只显示 108 画布正中的 72×72**，四周各 18 是遮罩吃掉的出血。
+> 关于页那张是画满整个 108 的，所以要让桌面/splash 显示出同样的构图，
+> 把它整体缩 **72/108 = 0.6667** 就对了。路径数据一个字都不用改，套一层 `<group scale>` 就行。
+
+- **桌面**：foreground 用关于页的路径 + 那层 0.6667 的 group。background 的渐变**跨 18→90，
+  不是 0→108**——跨全画布的话，遮罩显示出来的只是色带中间三分之二，比关于页那张淡。
+- **splash**：它不是自适应图标，**没人替它裁**，所以遮罩得自己画：一个填满正中 72×72 的圆角方
+  （圆角比例照关于页 `squircleClip(28dp)` 的 28%），加 `<clip-path>`，里面同样是 0.6667 的 group。
+- **那个方框会裁**：早先让底盘 scale 0.62→1（overshoot）弹进来，实机上边缘被切掉了。
+  **能动的东西必须始终待在那个圆角方里**，所以动画只剩唱片旋转，底盘和套子静止。
+- **splash 比另外两张多两道深色反光弧**。唱片上其它元素全是同心圆，
+  **没有偏轴的东西旋转在屏幕上不产生任何变化**，动画等于白做。
+  弧线必须是深色的——唱片本体是白的，白反光在白盘上什么都不是（第一版就是白的，渲染帧序列才看出来）。
 - `windowSplashScreenAnimationDuration=700`，**平台上限 1000ms**，超过就不等了。
-  `MainActivity.SPLASH_ANIMATION_MS` 要跟它保持一致：Compose 通常比动画先就绪，
-  不设这个最小停留的话动画会被拦腰切断。
+  `MainActivity.SPLASH_ANIMATION_MS` 要跟它一致：Compose 通常比动画先就绪，
+  不设这个最小停留动画会被拦腰切断。
 
-**改图标不用上机验**：`splash_icon.xml` 里全是圆、圆角矩形和圆弧，用 Pillow 按同样的变换和
-插值器画几帧出来看构图和动效姿势就够了（脚本在 scratchpad，`splash_frames*.png`）。
+**改图标不用上机验**：这几张里全是圆、圆角矩形和圆弧，用 Pillow 按同样的变换画出来比构图就够了
+（脚本在 scratchpad，`icon_compare*.png` / `splash_frames*.png`）。
 这不算"截图测效果"，画的是自己的图，不碰手机。
+**但渲染器本身会骗你**：我那版手写渐变漏填过一大块，看着像图标缺了个角，
+实际是脚本的 bug——渐变要按 `t = ((p-a)·d)/|d|²` 逐像素算，别用画线去铺。
+
+**Material 的 `Icons.Rounded.RestartAlt` 底部天生有缺口**：它是两条子路径，
+一条绕右侧停在 x=13，一条绕左侧停在 x=11，都在 y≈20，中间差约 2/24。
+24dp 下那个口子看着就像图标掉了一块。**`Icons.Rounded.Refresh` 是单条闭合路径**，换它。
+（查字形有没有缺口的办法：`javap -c` 那个 `*Kt.class`，数 `PathBuilder.moveTo` 有几个。）
 
 **故意没有做成开关的东西**（改过一轮又删掉了，别再加回来）：
 
@@ -492,15 +514,48 @@ Kotlin + Compose + [miuix](https://github.com/miuix-kotlin-multiplatform/miuix)�
   只能靠人去点修复。实测：清掉锁屏壁纸后触发一次贴封面，模块自己查、自己复制、自己修好。
 - **立即应用 / 恢复原壁纸**：跟随卡片之后没意义了，adb 还留着 `pushart`。
 
-**顶栏的重启菜单**（`HomePage.kt` 的 `RestartMenu`）用 miuix 的 `OverlayListPopup`，有两个坑：
+### UI 规范：照 KernelSU 抄，2026-09-09 对齐过一轮
 
+界面整体抄 HyperNavBar，但**交互细节以 KernelSU 的 miuix 版为准**
+（`screen/home/HomeMiuix.kt`、`screen/about/AboutMiuix.kt`、`MainActivity.kt`、
+`component/rebootlistpopup/`、`component/miuix/DropdownItem.kt`、`component/MenuPositionProvider.kt`、
+`component/PagerNavigationSpring.kt`）。**读他们的源码用 `gh api repos/tiann/KernelSU/contents/<path>`
+拿 base64 再解**，别靠印象。抄过来的三个文件在 `ui/component/` 下，都带了 Apache-2.0 出处头注释，
+`NOTICE` 里也有对应段落。
+
+对齐过的几条，**每条都是踩过的**：
+
+- **`overScrollVertical()` 必须配 `overscrollEffect = null`**。前者是 miuix 的阻尼回弹，
+  它**替代**而不是叠加 Compose 原生的拉伸；漏了参数两套一起跑，在边界互相打架。
+  五个列表全带上了，配对关系写在 `pageScrollModifiers` 的文档注释里。
+  pager 同理（`HorizontalPager(overscrollEffect = null)`）。
+- **popupHost 的方向**：**根 Scaffold 保留默认 host，每个页面写 `popupHost = { }`**。
+  反过来（我们原来就是反的）会逼得弹窗传 `renderInRootScaffold = false`，
+  于是遮罩止步于页面边缘、盖不住底栏。现在方向对了，`OverlayListPopup` 用默认值即可。
 - **popup 锚定的是它的父布局**，所以 `IconButton` 和 popup 必须包在同一个 `Box` 里。
-- **`renderInRootScaffold` 必须传 `false`**。默认 `true` 会渲染到最外层 Scaffold，
-  而 `MainActivity` 那个根 Scaffold 是 `popupHost = { }`（故意清空的），popup 会直接不见。
-  传 false 就渲染在 HomePage 自己的 Scaffold 里。
+- **页签切换用 spring 不用 tween**：`ui/component/PagerNavigationSpring.kt`
+  （stiffness 322.2，ζ≈0.9，visibilityThreshold 0.5）。原来是
+  `tween(duration = 100*distance + 100)`，跨得越远越拖沓；spring 没有 duration，距离自己定速度。
+- **菜单不是下拉选择器**：miuix 的 `DropdownImpl` 给勾选留了位、要传 `isSelected`。
+  动作菜单用 `ui/component/DropdownItem.kt`（横向 20dp，首尾 20dp / 中间 12dp，body1 + Medium）。
+  定位用 `MenuPopupDefaults.MenuPositionProvider` + `Align.TopEnd`，
+  miuix 默认那个 provider 是给整行宽度的偏好项写的。
+  按钮传 `holdDownState = 菜单是否打开`，菜单开着时按钮保持按下态。
+- **返回先回第一页**：`BackHandler(enabled = selectedIndex != 0) { goToPage(0) }`，
+  走的是底栏同一个 `goToPage`，所以返回和点页签是同一个动作。第一页时 disabled，交给系统退出。
+  （KSU 用的是 `androidx.navigationevent.NavigationBackHandler`，多一个预测式返回的预览动画，
+  为四页 pager 不值当加依赖。）
+- **状态卡是三个叠起来的 Box，不是三行 Column**：标题+版本在左上，工作模式钉在左下，
+  110dp 图标 `offset(27,31)` 从右下角溢出。高度靠**外面套一层 `Row(Modifier.height(IntrinsicSize.Min))`**
+  撑起来——里面每个 Box 都 `fillMaxSize`，自己不贡献高度，不套的话卡片会塌到文字高度。
 
-miuix 的函数签名 javap 看不到参数名，**别猜**：Maven Central 上有
-`miuix-ui-0.9.4-rc01-sources.jar`，直接下下来读源码。
+**还没对齐的**（审计时列出来，用户暂时没要）：KSU 有 `component/ScrollToTop.kt`（配 hoisted 的
+`lazyListState`）我们没有；我们的 `BlurredBar` 用 `progressiveTextureBlur` + 跟随滚动淡入，
+比 KSU 那个平的 `textureBlur(25f) + surface@0.87` 讲究，是有意的差别。
+
+**miuix 的函数签名 javap 看不到参数名，别猜**：Maven Central 上有
+`miuix-ui-0.9.4-rc01-sources.jar`，直接下下来读源码
+（`OverlayListPopup` / `DropdownImpl` / `PopupPositionProvider.Align` 都是这么查出来的）。
 
 ## 现代 API（102）——2026-09-09 从 classic 迁过来的
 
@@ -656,9 +711,19 @@ adb shell am broadcast -a com.os4.musiccover.PROBE --es op pushart --ez on true
 6. **`DATE_TOP_DP = 76f` 是按这台机器量的**（1200x2608 / density 3.0）。
    换设备大概率要重新量：`--es op bounds` 看 `text_area` 的屏幕 y。
 
-7. **支持另一种封面样式**（用户提过要加）。现在 `composeWallpaper()` 只有"满宽居中 + 镜像模糊"
-   一种排版，bias 控制纵向位置。要加样式的话，模块侧加个 `style` 参数存进状态文件，
-   app 的「功能」页加个 `WindowDropdownPreference`，走 `ModuleBridge` 那条广播就行。
+7. **支持另一种封面样式**（用户提过要加，UI 已经给它留了位置）。现在 `composeWallpaper()`
+   只有"满宽居中 + 镜像模糊"一种排版，bias 控制纵向位置。要加样式的话，模块侧加个 `style`
+   参数存进状态文件，app 的「功能」页加个 `WindowDropdownPreference`，走 `ModuleBridge` 广播。
+   **首页状态卡第三行的「全屏封面」现在是硬编码的**，就是给这个开关留的位
+   （`HomePage.kt` 里的 `workingMode`，计划中的第二种叫「专辑卡片」）。
+
+8. **`ScrollToTop`**。KSU 有 `component/ScrollToTop.kt`（配 hoisted 的 `lazyListState`），
+   我们没有。2026-09-09 那轮 UI 审计列出来了，用户当时只让改前四条。
+
+9. **AOD 那个 bug 不是我们的**（用户确认）：app 里点重启系统界面后立刻锁屏，AOD 会没。
+   查过一轮：`com.miui.aod` 不在模块作用域内，而且**这台机器 `aod_show_style=3` 是智能显示，
+   放桌上用 adb 锁屏必定 7 秒后被 `checkAttention` 关掉**，重不重启日志序列一模一样。
+   要再查只能让用户拿着手机看。
 
 ## 本地资料（scratchpad，避免重复上设备查）
 
@@ -680,6 +745,11 @@ adb pull /product/app/MiWallpaper/MiWallpaper.apk
 `/data/user/0/com.miui.miwallpaper/files/mc_art.jpg`，状态落在
 `/data/user*/0/com.android.systemui/files/mc_cover_state`，现在是
 `cover=` / `bias=` / `clock=` / `glass=` 四行；`auto` 和 `depth` 已经不存了）。
+
+**旧包 `com.os4.musiccover` 可能还装着**。2026-09-09 改了 applicationId，
+新包是 `com.github.zyl6932.HyperMusicCover`。**两个都启用会一起 hook SystemUI**，
+旧的要在 LSPosed 里停用或者 `adb uninstall com.os4.musiccover`。
+（探针 action 没跟着改，还是 `com.os4.musiccover.PROBE`，下面的命令照旧能用。）
 
 **跟随媒体卡片现在是无条件开启的**，所以光关 cover 没用——媒体卡片一出现它自己就回来了。
 要彻底还原：
