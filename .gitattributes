@@ -1,0 +1,13 @@
+# The checkout on a Linux runner must not get CRLF in the Gradle wrapper script: the shell
+# reads "#!/bin/sh\r" and the whole CI job fails on a line ending.
+* text=auto eol=lf
+gradlew text eol=lf
+*.sh text eol=lf
+gradlew.bat text eol=crlf
+
+*.jar binary
+*.jks binary
+*.keystore binary
+*.png binary
+*.jpg binary
+*.apk binary

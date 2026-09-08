@@ -9,3 +9,12 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Release signing - the key and its passwords never go to the repo.
+# CI reads the same values from SIGNING_* secrets instead.
+/keystore.properties
+*.jks
+*.keystore
+
+# The README on GitHub is written by hand; this local copy is not the source of truth.
+/README.md
