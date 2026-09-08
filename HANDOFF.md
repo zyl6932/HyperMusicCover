@@ -320,8 +320,9 @@ worker 线程提到 `THREAD_PRIORITY_DISPLAY`（默认优先级会被排到小�
 SystemUI 侧 `-a com.os4.musiccover.PROBE`：
 
 ```bash
-# 跟着媒体卡片自动开关（推荐的常态）：卡片在就是音乐锁屏，暂停不影响
-adb shell am broadcast -a com.os4.musiccover.PROBE --es op auto --ez on true
+# 跟着媒体卡片自动开关：卡片在就是音乐锁屏，暂停不影响。
+# 现在是无条件开启的（进程起来就打开，状态文件不再存 auto），这条只在调试时用来临时关掉
+adb shell am broadcast -a com.os4.musiccover.PROBE --es op auto --ez on false
 
 # 一键开关整套效果（封面壁纸 + 景深隐藏 + 小时钟 + 玻璃渐变），手动模式
 adb shell am broadcast -a com.os4.musiccover.PROBE --es op pushart --ez on true
@@ -391,9 +392,9 @@ adb pull /product/app/MiWallpaper/MiWallpaper.apk
 **锁屏壁纸会被换成专辑封面，且重启不会自己恢复**（图落在
 `/data/user/0/com.miui.miwallpaper/files/mc_art.jpg`，状态落在
 `/data/user*/0/com.android.systemui/files/mc_cover_state`，现在是
-`cover=` / `auto=` / `bias=` 三行）。
+`cover=` / `bias=` / `clock=` / `glass=` 四行）。
 
-**当前手机上 `auto=1`**，所以光关 cover 没用——媒体卡片一出现它自己就回来了。
+**跟随媒体卡片现在是无条件开启的**，所以光关 cover 没用——媒体卡片一出现它自己就回来了。
 要彻底还原：
 
 ```bash

@@ -8,16 +8,13 @@
     <string name="home_no_track">No media card on the lock screen</string>
     <string name="home_cover_on">Cover lock screen is on</string>
     <string name="home_cover_off">Cover lock screen is off</string>
-    <string name="home_master">Follow the media card</string>
-    <string name="home_master_summary">Cover art takes over while a media card is on the lock screen. Dismissing the card ends it; pausing does not</string>
     <string name="cover_section">Cover</string>
     <string name="cover_bias">Vertical position</string>
-    <string name="cover_bias_summary">0 is flush with the top, 0.5 is centred. Too low and the media card covers it</string>
+    <string name="cover_bias_summary">0 is flush with the top, 0.5 is centred</string>
     <string name="clock_section">Clock</string>
     <string name="clock_scale">Clock scale</string>
-    <string name="clock_scale_summary">Size of the collapsed clock. 0.335 matches OPPO</string>
-    <string name="clock_glass">Glass fill</string>
-    <string name="clock_glass_summary">Fills the liquid glass in as the clock shrinks, or it degenerates into hairlines</string>
+    <string name="clock_scale_summary">Size of the collapsed clock</string>
+    <string name="clock_glass">Glass strength</string>
     <string name="advanced_section">Advanced</string>
     <string name="restart_systemui">Restart System UI</string>
     <string name="restart_systemui_summary">Try this when a change does not take. Needs root</string>
@@ -28,7 +25,6 @@
     <string name="tab_settings">Settings</string>
     <string name="tab_about">About</string>
     <string name="settings_interface">Interface</string>
-    <string name="settings_features">Features</string>
     <string name="settings_language">Language</string>
     <string name="settings_data">Data Management</string>
     <string name="theme_mode">Theme Mode</string>

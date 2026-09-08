@@ -192,11 +192,11 @@ fun HomePageView(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .offset(38.dp, 45.dp),
+                                        .offset(27.dp, 31.dp),
                                     contentAlignment = Alignment.BottomEnd
                                 ) {
                                     Icon(
-                                        modifier = Modifier.size(170.dp),
+                                        modifier = Modifier.size(110.dp),
                                         imageVector = if (ok) Icons.Rounded.CheckCircleOutline
                                         else Icons.Rounded.ErrorOutline,
                                         tint = iconTint,
@@ -206,20 +206,19 @@ fun HomePageView(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(all = 16.dp)
+                                        .padding(16.dp, 14.dp)
                                 ) {
                                     MiuixText(
                                         modifier = Modifier.fillMaxWidth(),
                                         text = titleText,
-                                        fontSize = 20.sp,
+                                        fontSize = 22.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
-                                    Spacer(Modifier.height(4.dp))
+                                    Spacer(Modifier.height(1.dp))
                                     MiuixText(
                                         modifier = Modifier.fillMaxWidth(),
                                         text = lineTwo,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium
+                                        fontSize = 15.sp,
                                     )
                                 }
                             }

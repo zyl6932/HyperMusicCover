@@ -146,8 +146,12 @@ public class Main implements IXposedHookLoadPackage {
     private static final float DEFAULT_BIAS = 0.34f;
     private static volatile float sBias = DEFAULT_BIAS;
 
-    /** Cover mode follows the media card instead of waiting for a pushart broadcast. */
-    private static volatile boolean sAuto;
+    /**
+     * Cover mode follows the media card. Not a setting: with it off the module does nothing at
+     * all, which is not a state worth offering - uninstalling is the way to turn the module off.
+     * The adb "auto" op can still flip it for a debugging session; it comes back on at startup.
+     */
+    private static volatile boolean sAuto = true;
     /**
      * Whether the OEM media card is on the lockscreen. This, not playback state, is the switch:
      * pausing leaves the card up, so it leaves the cover up too, and dismissing the card is the
@@ -395,7 +399,6 @@ public class Main implements IXposedHookLoadPackage {
             java.io.FileOutputStream f =
                     new java.io.FileOutputStream(new java.io.File(sAppCtx.getFilesDir(), STATE_FILE));
             f.write(("cover=" + (sCoverMode ? 1 : 0)
-                    + "\nauto=" + (sAuto ? 1 : 0)
                     + "\nbias=" + sBias
                     + "\nclock=" + sClockScale
                     + "\nglass=" + sGlassEnd + "\n").getBytes());
@@ -409,7 +412,7 @@ public class Main implements IXposedHookLoadPackage {
         if (sAppCtx == null) return;
         java.io.File f = new java.io.File(sAppCtx.getFilesDir(), STATE_FILE);
         if (!f.exists()) return;
-        boolean cover = false, auto = false;
+        boolean cover = false;
         try {
             byte[] buf = new byte[(int) f.length()];
             java.io.FileInputStream in = new java.io.FileInputStream(f);
@@ -426,7 +429,7 @@ public class Main implements IXposedHookLoadPackage {
                     if (eq <= 0) continue;
                     String k = line.substring(0, eq).trim(), v = line.substring(eq + 1).trim();
                     if ("cover".equals(k)) cover = "1".equals(v);
-                    else if ("auto".equals(k)) auto = "1".equals(v);
+                    // "auto" was a stored setting; following the card is unconditional now.
                     else if ("bias".equals(k)) sBias = Float.parseFloat(v);
                     else if ("clock".equals(k)) sClockScale = Float.parseFloat(v);
                     else if ("glass".equals(k)) sGlassEnd = Float.parseFloat(v);
@@ -437,10 +440,10 @@ public class Main implements IXposedHookLoadPackage {
             XposedBridge.log(TAG + "loadState failed: " + t);
             return;
         }
-        XposedBridge.log(TAG + "state restored: cover=" + cover + " auto=" + auto
-                + " bias=" + sBias);
+        XposedBridge.log(TAG + "state restored: cover=" + cover + " bias=" + sBias);
         if (cover) enterCoverMode(false);
-        if (auto) setAuto(true);
+        // Always follow the card, whatever the file said.
+        setAuto(true);
     }
 
     private static synchronized void registerReceiver(Context ctx) {

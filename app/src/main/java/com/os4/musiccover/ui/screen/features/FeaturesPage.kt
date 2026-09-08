@@ -1,11 +1,9 @@
 package com.os4.musiccover.ui.screen.features
 
 import android.widget.Toast
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
@@ -23,7 +21,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -40,6 +37,7 @@ import com.os4.musiccover.ui.util.rememberBlurBackdrop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -48,7 +46,6 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.preference.ArrowPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -138,25 +135,6 @@ fun FeaturesPageView(
                             }
                         }
 
-                        SmallTitle(text = stringResource(R.string.settings_features))
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp)
-                                .padding(bottom = 12.dp)
-                        ) {
-                            SwitchPreference(
-                                title = stringResource(R.string.home_master),
-                                summary = stringResource(R.string.home_master_summary),
-                                checked = module.auto,
-                                enabled = enabled,
-                                onCheckedChange = {
-                                    module = module.copy(auto = it)
-                                    ModuleBridge.setAuto(context, it)
-                                },
-                            )
-                        }
-
                         SmallTitle(text = stringResource(R.string.cover_section))
                         Card(
                             modifier = Modifier
@@ -198,7 +176,7 @@ fun FeaturesPageView(
                                 )
                                 ValueSlider(
                                     title = stringResource(R.string.clock_glass),
-                                    summary = stringResource(R.string.clock_glass_summary),
+                                    summary = null,
                                     value = module.glassEnd,
                                     valueRange = 0f..1f,
                                     enabled = enabled,
@@ -249,45 +227,30 @@ fun FeaturesPageView(
 @Composable
 private fun ValueSlider(
     title: String,
-    summary: String,
+    summary: String?,
     value: Float,
     valueRange: ClosedFloatingPointRange<Float>,
     enabled: Boolean,
     onValueChange: (Float) -> Unit,
 ) {
-    val alpha = if (enabled) 1f else 0.5f
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            MiuixText(
-                text = title,
-                fontSize = 17.sp,
-                color = MiuixTheme.colorScheme.onSurface.copy(alpha = alpha),
-            )
-            MiuixText(
-                text = format(value),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = alpha),
-            )
-        }
-        MiuixText(
-            modifier = Modifier.padding(top = 2.dp),
-            text = summary,
-            fontSize = 13.sp,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = alpha),
+    Column(Modifier.fillMaxWidth()) {
+        BasicComponent(
+            title = title,
+            summary = summary,
+            enabled = enabled,
+            endActions = {
+                MiuixText(
+                    text = format(value),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            },
         )
         Slider(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
