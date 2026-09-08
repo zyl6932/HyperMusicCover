@@ -104,6 +104,7 @@ fun AboutPageContent(
     val blurActive by remember(backdrop, isBlurEnabled) { derivedStateOf { isBlurEnabled && backdrop != null && scrollProgress == 1f } }
 
     Scaffold(
+        popupHost = { },
         topBar = {
             val barColor = if (blurActive) {
                 Color.Transparent
@@ -287,6 +288,7 @@ private fun AboutContent(
 
         // Scrollable content
         LazyColumn(
+            overscrollEffect = null,
             state = lazyListState,
             modifier = Modifier
                 .fillMaxSize()

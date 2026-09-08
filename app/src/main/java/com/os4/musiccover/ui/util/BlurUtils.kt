@@ -126,6 +126,11 @@ fun BlurredBar(
     }
 }
 
+/**
+ * The scroll behaviour every page's list shares. overScrollVertical is miuix's damped overscroll
+ * and it REPLACES Compose's own - every caller must also pass `overscrollEffect = null` to the
+ * list, or the stretch runs on top of the damping and the two fight at the ends.
+ */
 fun Modifier.pageScrollModifiers(
     showTopAppBar: Boolean,
     topAppBarScrollBehavior: ScrollBehavior,

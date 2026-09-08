@@ -12,9 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.core.EaseInOut
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,6 +38,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.os4.musiccover.ui.component.PagerNavigationSpringSpec
 import com.os4.musiccover.ui.component.liquid.IosLiquidGlassNavigationBar
 import com.os4.musiccover.ui.screen.about.AboutPageContent
 import com.os4.musiccover.ui.screen.features.FeaturesPageView
@@ -254,8 +253,6 @@ private fun MainScreen(
             val myJob = coroutineContext.job
             try {
                 pagerState.scroll(MutatePriority.UserInput) {
-                    val distance = abs(index - pagerState.currentPage).coerceAtLeast(2)
-                    val duration = 100 * distance + 100
                     val layoutInfo = pagerState.layoutInfo
                     val pageSize = layoutInfo.pageSize + layoutInfo.pageSpacing
                     val currentDistanceInPages =
@@ -265,10 +262,7 @@ private fun MainScreen(
                     animate(
                         initialValue = 0f,
                         targetValue = scrollPixels,
-                        animationSpec = tween(
-                            easing = EaseInOut,
-                            durationMillis = duration
-                        ),
+                        animationSpec = PagerNavigationSpringSpec,
                     ) { currentValue, _ ->
                         previousValue += scrollBy(currentValue - previousValue)
                     }
@@ -294,7 +288,6 @@ private fun MainScreen(
     BackHandler(enabled = selectedIndex != 0) { goToPage(0) }
 
     Scaffold(
-        popupHost = { },
         bottomBar = {
             BottomNavigationBar(
                 mode = navBarMode,

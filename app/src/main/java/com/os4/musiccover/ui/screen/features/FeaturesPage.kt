@@ -70,6 +70,7 @@ fun FeaturesPageView(
     val enabled = module.alive
 
     Scaffold(
+        popupHost = { },
         topBar = {
             BlurredBar(backdrop, blurActive, scrollBehavior) {
                 TopAppBar(
@@ -84,6 +85,7 @@ fun FeaturesPageView(
     ) { innerPadding ->
         Box(modifier = if (blurActive) Modifier.layerBackdrop(backdrop) else Modifier) {
             LazyColumn(
+                overscrollEffect = null,
                 modifier = Modifier
                     .fillMaxSize()
                     .pageScrollModifiers(

@@ -132,6 +132,7 @@ fun LicensePageContent(
             modifier = if (isBlurEnabled && backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier
         ) {
             LazyColumn(
+                overscrollEffect = null,
                 state = lazyListState,
                 modifier = Modifier
                     .fillMaxSize()

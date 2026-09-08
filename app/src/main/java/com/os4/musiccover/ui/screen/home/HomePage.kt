@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.os4.musiccover.ModuleBridge
 import com.os4.musiccover.R
+import com.os4.musiccover.ui.component.DropdownItem
+import com.os4.musiccover.ui.component.MenuPopupDefaults
 import com.os4.musiccover.ui.util.BlurredBar
 import com.os4.musiccover.ui.util.isInDarkTheme
 import com.os4.musiccover.ui.util.pageScrollModifiers
@@ -65,7 +67,6 @@ import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
-import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -122,6 +123,7 @@ fun HomePageView(
     val barColor = if (blurActive) Color.Transparent else MiuixTheme.colorScheme.surface
 
     Scaffold(
+        popupHost = { },
         topBar = {
             BlurredBar(backdrop, blurActive, scrollBehavior) {
                 TopAppBar(
@@ -137,6 +139,7 @@ fun HomePageView(
     ) { innerPadding ->
         Box(modifier = if (blurActive) Modifier.layerBackdrop(backdrop) else Modifier) {
             LazyColumn(
+                overscrollEffect = null,
                 modifier = Modifier
                     .fillMaxSize()
                     .pageScrollModifiers(
@@ -346,8 +349,8 @@ private object SystemVersion {
  * tried turning it off and on again" of an Xposed module, which is why they sit in the top bar
  * the way KernelSU puts its reboot menu there.
  *
- * The popup anchors to its parent, hence the Box around the button, and it renders inside this
- * page's Scaffold rather than the root one, whose popup host the app deliberately empties.
+ * The popup anchors to its parent, hence the Box around the button, and it is drawn by the
+ * root Scaffold, so it covers the window rather than being clipped to this page.
  */
 @Composable
 private fun RestartMenu() {
@@ -361,7 +364,9 @@ private fun RestartMenu() {
     )
 
     Box {
-        IconButton(onClick = { showMenu = true }) {
+        // holdDownState keeps the button looking pressed while its menu is open, which is
+        // the one thing tying the two together now that the popup is drawn by the root.
+        IconButton(onClick = { showMenu = true }, holdDownState = showMenu) {
             // Refresh, not RestartAlt: RestartAlt is drawn as two subpaths that stop short of
             // each other at the bottom centre, and at 24dp that gap reads as a piece missing
             // out of the icon rather than as part of the glyph. Refresh is one closed path.
@@ -373,16 +378,15 @@ private fun RestartMenu() {
         }
         OverlayListPopup(
             show = showMenu,
-            alignment = PopupPositionProvider.Align.End,
+            popupPositionProvider = MenuPopupDefaults.MenuPositionProvider,
+            alignment = PopupPositionProvider.Align.TopEnd,
             onDismissRequest = { showMenu = false },
-            renderInRootScaffold = false,
         ) {
             ListPopupColumn {
                 entries.forEachIndexed { index, entry ->
-                    DropdownImpl(
+                    DropdownItem(
                         text = entry.first,
                         optionSize = entries.size,
-                        isSelected = false,
                         index = index,
                         onSelectedIndexChange = {
                             showMenu = false
