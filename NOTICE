@@ -1,0 +1,15 @@
+HyperMusicCover
+Copyright 2026 zyl6932
+
+This product includes software developed as part of HyperNavBar
+(https://github.com/HyperNavBar/HyperNavBar), licensed under the
+Apache License, Version 2.0.
+
+The user interface scaffolding - theme handling, the floating and liquid-glass
+navigation bars, the progressive background blur, the animated background effect,
+the About and licence pages and the locale helper - is adapted from that project.
+Files carrying those changes are marked in their headers.
+
+This product includes miuix
+(https://github.com/miuix-kotlin-multiplatform/miuix), licensed under the
+Apache License, Version 2.0.

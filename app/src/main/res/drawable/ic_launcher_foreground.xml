@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A record sitting on its sleeve: the album art is what this module puts on the lock screen. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- the sleeve, peeking out behind the record -->
+    <path
+        android:pathData="M28,30h34a5,5 0 0 1 5,5v38a5,5 0 0 1 -5,5h-34a5,5 0 0 1 -5,-5v-38a5,5 0 0 1 5,-5z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.32" />
+
+    <!-- the record -->
+    <path
+        android:pathData="M62,54m-26,0a26,26 0 1,0 52,0a26,26 0 1,0 -52,0"
+        android:fillColor="#FFFFFF" />
+
+    <!-- grooves -->
+    <path
+        android:pathData="M62,54m-19,0a19,19 0 1,0 38,0a19,19 0 1,0 -38,0"
+        android:strokeColor="#33000000"
+        android:strokeWidth="1.6"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M62,54m-13,0a13,13 0 1,0 26,0a13,13 0 1,0 -26,0"
+        android:strokeColor="#26000000"
+        android:strokeWidth="1.4"
+        android:fillColor="#00000000" />
+
+    <!-- spindle hole -->
+    <path
+        android:pathData="M62,54m-5.5,0a5.5,5.5 0 1,0 11,0a5.5,5.5 0 1,0 -11,0"
+        android:fillColor="#FF6C3BC4" />
+</vector>
