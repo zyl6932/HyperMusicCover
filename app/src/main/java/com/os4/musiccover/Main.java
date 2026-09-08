@@ -1253,45 +1253,52 @@ public class Main implements IXposedHookLoadPackage {
 
     /** Air between the date and the collapsed clock. */
     private static final float CLOCK_GAP_DP = 10f;
-    /** Air between the status bar and the date, when the group has to be pushed clear of it. */
-    private static final float STATUS_BAR_GAP_DP = 8f;
+    /**
+     * Where cover mode puts the date, in dp from the top of the screen.
+     *
+     * A fixed target rather than a "don't collide with the status bar" rule, because the OEM's
+     * squeeze leaves each clock style's date at a different height and they should all agree.
+     * The value is where the single-line style already lands - measured 240px for the glyphs on
+     * this 1200x2608 480dpi screen, i.e. 228px for the view that draws them - while the stacked
+     * style was arriving 61px higher.
+     *
+     * Deliberately not derived from status_bar_height: that resource reads 182px here, which is
+     * the whole cutout band rather than anything the eye lines up against.
+     */
+    private static final float DATE_TOP_DP = 76f;
 
-    /** The nudge in force. Held across frames on purpose - see updateStatusBarNudge(). */
+    /** The offset in force. Held across frames on purpose - see updateDateOffset(). */
     private static volatile float sNudge;
     /** Previous raw reading, to tell a settled one from a stale one. */
     private static float sNudgeSample = Float.NaN;
 
     /**
-     * How far the whole group has to come back down to clear the status bar, in px.
+     * How far the whole group has to move so the date lands on the target, in px.
      *
-     * The OEM translates the clock group up as it squeezes, and how far depends on the style: at
-     * the squeeze floor the stacked clock puts the date at y=67, right under the status bar
-     * icons, while the single-line style lands clear on its own and must not move.
+     * The OEM translates the clock group up as it squeezes, and how far depends on the style, so
+     * left alone the date ends up at a different height for each one - the glyphs land at 240px
+     * on the single-line style and 179px on the stacked one. This pulls them onto the same line.
      *
-     * The subtlety is WHEN this can be measured. We run from the setNotifY hook, and the OEM
+     * The subtlety is WHEN it can be measured. We run from the setNotifY hook, and the OEM
      * applies the frame's translation only after setNotifY returns - so a reading taken here is
      * always one frame behind, and on the first frames after waking from AOD it still describes
      * the AOD layout. Acting on that reading is exactly what threw the clock to the top of the
      * screen before it slid back down.
      *
-     * So the nudge is not recomputed from whatever the last frame happened to look like. It is
-     * only adopted once two consecutive readings agree, which means the OEM has stopped moving
-     * and the geometry being measured is the settled one. Until then the value already in force
-     * keeps being used, which is the right answer anyway: it was measured on the same clock in
-     * the same state before the screen went off.
+     * So this is not recomputed from whatever the last frame happened to look like. It is only
+     * adopted once two consecutive readings agree, which means the OEM has stopped moving and the
+     * geometry being measured is the settled one. Until then the value already in force keeps
+     * being used, which is the right answer anyway: it was measured on the same clock in the same
+     * state before the screen went off.
      */
-    private static void updateStatusBarNudge(View date, float p) {
+    private static void updateDateOffset(View date, float p) {
         // Only the fully collapsed state is worth measuring; anything else is mid-animation.
-        if (p < 0.995f) return;
+        if (p < 0.999f) return;
         int[] loc = new int[2];
         date.getLocationOnScreen(loc);
         float uncorrected = loc[1] - date.getTranslationY();
-        android.content.res.Resources r = date.getResources();
-        float statusBar = 0f;
-        int id = r.getIdentifier("status_bar_height", "dimen", "android");
-        if (id != 0) statusBar = r.getDimensionPixelSize(id);
-        float measured = Math.max(0f,
-                statusBar + STATUS_BAR_GAP_DP * r.getDisplayMetrics().density - uncorrected);
+        float target = DATE_TOP_DP * date.getResources().getDisplayMetrics().density;
+        float measured = target - uncorrected;
         if (!Float.isNaN(sNudgeSample) && Math.abs(measured - sNudgeSample) < 1f) {
             sNudge = measured;
         }
@@ -1322,8 +1329,11 @@ public class Main implements IXposedHookLoadPackage {
 
         // Both containers are laid out identically and sit at the same screen position, so the
         // date's offset inside its own parent is usable against either tree's time_group.
-        updateStatusBarNudge(date, p);
-        float nudge = sNudge;
+        updateDateOffset(date, p);
+        // Faded in with the squeeze, so entering cover mode stays one continuous motion instead
+        // of stepping the date sideways at the start. At p=1 - which is where AOD wakes up - the
+        // whole offset is already in force on the first frame.
+        float nudge = sNudge * p;
         date.setTranslationY(nudge);
         float dateBottom = date.getTop() + date.getHeight() + nudge;
         for (View root : clockRoots()) {

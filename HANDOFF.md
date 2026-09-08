@@ -2,10 +2,17 @@
 
 ---
 
-我在给澎湃 OS4（HyperOS 4）做音乐锁屏的 LSPosed 模块。工程在
-`C:\Users\。\Desktop\music lockscreen\MusicCover`，包名 `com.os4.musiccover`，
+我在给澎湃 OS4（HyperOS 4）做音乐锁屏的 LSPosed 模块 **HyperMusicCover**，作者 zyl6932。
+工程在 `C:\Users\。\Desktop\music lockscreen\MusicCover`，
+**已经是个 git 仓库并推到了 <https://github.com/zyl6932/HyperMusicCover>（public，Apache 2.0）**。
+
+包名仍然是 `com.os4.musiccover`——**故意没跟着改**：改了 LSPosed 会当成新模块，
+要重新启用、重新勾作用域，状态文件和所有探针广播也全部失效。
+
 classic Xposed API，**已安装并在 LSPosed 中启用，作用域是
 `com.android.systemui` + `com.miui.miwallpaper`（两个都必须勾选）**。
+模块本体是 Java（`Main.java` / `WallpaperProbe.java`），
+外面套了一层 Kotlin + Compose + miuix 写的设置界面（见第 15 节）。
 
 同目录参考素材：
 - `apple.jpg` / `oppo.jpg` / `oppo2.jpg` / `honor.jpg` / `huawei.jpg` / `Samsung.jpg` — 各家的音乐锁屏
@@ -317,7 +324,7 @@ worker 线程提到 `THREAD_PRIORITY_DISPLAY`（默认优先级会被排到小�
 | 容器高 | 1773 | 2163 |
 | hour 字形 top | 351 | 650 |
 | minute 字形 top | 354（并排） | 909 |
-| y=740 时日期屏幕 y | ~270 | **67** |
+| y=740 时日期字形屏幕 y | 240 | **179** |
 
 #### 试过的两版错误做法
 
@@ -328,40 +335,43 @@ worker 线程提到 `THREAD_PRIORITY_DISPLAY`（默认优先级会被排到小�
 看着讲得通，但**锚错了对象**：OEM 在不同样式下把时钟放哪本来就不一样，
 所以单行式太靠下、另一种跑到日期上面。
 
-#### 正确做法：锚在日期上
+#### 正确做法：时钟锚在日期上，日期锚在固定位置上
 
 `text_area`（日期）和 `time_group` 是 `clock_animation_container` 里的**兄弟节点**，
 所以 OEM 那个挤压平移会同时作用在两者身上、**在计算里自动抵消**，
 剩下的是一个跟样式无关的布局关系：
 
 ```java
-pivotY = glyphTop()                      // 两棵树里所有可见 TimeView 字形 top 的最小值
+pivotY       = glyphTop()                                   // 两棵树里所有可见 TimeView 字形 top 的最小值
 translationY = dateBottom + 10dp - (time_group.getTop() + glyphTop)
 ```
 
-pivot 取在字形顶边，缩放后顶边不动，所以这个平移量**跟缩放系数 k 无关**，
-一次算完就是对的。两棵树用同一个 pivot 和同一个平移，堆叠样式的上下两行才会一起收拢。
+pivot 取在字形顶边，缩放后顶边不动，所以这个平移量**跟缩放系数 k 无关**，一次算完就是对的。
+两棵树用同一个 pivot 和同一个平移，堆叠样式的上下两行才会一起收拢
+（各用各的 top 的话中间会留个大空隙）。
 
-#### 还要防止整组顶到状态栏
+日期本身则被拉到一个**固定目标**上：`DATE_TOP_DP = 76f`（屏幕顶往下 76dp = 228px，
+字形落在 240px）。这是单行样式本来就落的位置，堆叠样式原本高了 61px。
+**不要用 `status_bar_height` 去推**——这台机器上它读出来是 182px，
+是整个挖孔带的高度，不是眼睛会去对齐的那条线。
 
-堆叠样式在 y=740 时 OEM 把整组搬到日期 y=67，压在状态栏图标底下
-（单行样式落在 ~270，不用动）。`updateStatusBarNudge()` 把整组往下推回来，
-推的是 `time_group` 和 `text_area` 的 `translationY`（两棵树都要），
-**不能推父容器** `clock_animation_container`——那是 OEM 自己的动画通道。
+偏移量按 `p` 淡入（`sNudge * p`），进 cover 模式时是一段连续动作而不是开头闪一下。
 
-**这里有个必须知道的时序坑，踩了两次：**
+#### 时序坑：钩子里量到的坐标永远慢一帧（踩了两次）
+
 我们跑在 `setNotifY` 的钩子里，而 **OEM 是在 setNotifY 返回之后才把这一帧的平移写下去的**。
 所以在这里 `getLocationOnScreen()` 量到的永远慢一帧，
 **从 AOD 亮屏的头几帧量到的还是 AOD 的布局**。拿这个读数去纠正，
 就是"时钟先跳到顶端再滑下来"的成因。
 
-所以 nudge **不是每帧重算**的：只在 `p >= 0.995`（完全收起）时采样，
-而且**连续两次读数一致才采纳**——一致说明 OEM 已经不动了，量到的是稳定态。
-在那之前一直用已经在用的值，那个值本来就是对的（息屏前在同一个时钟同一个状态下量的）。
-时钟容器重新 attach（换样式/keyguard 重建）时把采样清掉重新量。
+所以偏移量**不是每帧重算**的（`updateDateOffset()`）：
+只在 `p >= 0.999`（完全收起）时采样，而且**连续两次读数一致才采纳**——
+一致说明 OEM 已经不动了，量到的是稳定态。在那之前一直用已经在用的值，
+那个值本来就是对的（息屏前在同一个时钟同一个状态下量的）。
+时钟容器重新 attach（换样式 / keyguard 重建）时把 `sNudgeSample` 清成 NaN 重新量。
 
-实测堆叠样式：nudge=103，日期从 67 回到 172，字形块从 278 开始。
-单行样式算出来 nudge=0，行为不变。
+**实测**：堆叠样式偏移 195，日期字形从 179 落到 239；单行样式算出来 ≈0，行为不变。
+两种样式的日期现在对齐在同一条线上。
 
 ### 14. 所有权模型（贯穿全部功能）
 
@@ -373,6 +383,39 @@ pivot 取在字形顶边，缩放后顶边不动，所以这个平移量**跟缩
 - **cover 模式下息屏不释放**，否则亮屏时会从大时钟瞬变到小时钟（就是"AOD 点亮跳变"）
 - **SystemUI 会自己重启**（实测有一次，无任何崩溃记录），所以 cover 状态必须落盘到
   `getFilesDir()/mc_cover_state`
+
+### 15. 设置界面（HyperMusicCover app）
+
+Kotlin + Compose + [miuix](https://github.com/miuix-kotlin-multiplatform/miuix)，
+**界面整套抄的 [HyperNavBar](https://github.com/HyperNavBar/HyperNavBar)**（Apache 2.0，
+搬过来的 20 个文件都加了出处头注释，仓库里有 NOTICE）。
+
+四个页签：
+
+| 页签 | 内容 |
+|---|---|
+| 主页 | 模块是否生效的状态卡（配色/尺寸抄 KernelSU 的 `HomeMiuix.kt`：110dp 图标 offset(27,31)、16×14 内边距、22sp 标题）+ 设备信息 |
+| 功能 | 当前曲目、封面纵向位置、时钟缩放、玻璃强度、重启系统界面 |
+| 设置 | 主题模式（含 Monet）、悬浮导航栏、液态玻璃效果、背景模糊、语言、导入导出 |
+| 关于 | 项目地址、反馈、Apache 2.0、第三方许可证（带 OS3 动态背景效果） |
+
+**app 和模块之间怎么通信**：模块跑在 SystemUI 进程里，跟 app 没有共享存储，
+所以 **app 不读磁盘，直接问**——复用了 adb 探针那套广播协议（`ModuleBridge.kt`）：
+
+- 改设置 = 发一条普通广播（`auto` / `bias` / `clockscale` / `glassend` / `lockwp`…）
+- 读状态 = 发**有序广播** `op=query`，模块在 `setResultExtras()` 里回
+- **回不回得来，本身就是"模块有没有生效"的判据**（1.5s 超时 = 未生效）
+
+**故意没有做成开关的东西**（改过一轮又删掉了，别再加回来）：
+
+- **跟随媒体卡片**：关掉之后模块什么都不做，那不是一个值得给的选项。
+  无条件开启，状态文件不再存 `auto`，adb 的 `auto` op 只留给调试临时关。
+- **隐藏景深抠图**：不隐藏就是渲染错的（旧壁纸主体浮在封面上）。
+  cover 模式无条件执行，字段删了——以前存盘的 `depth=0` 会让它启动就错，界面上还没法解释。
+- **修复锁屏壁纸**：改成**每次贴封面前都查一遍**（原来是每进程只查一次的缓存标志）。
+  用户随时可能把壁纸改回「同时应用到桌面和锁屏」，缓存说"已经没问题"就永远发现不了，
+  只能靠人去点修复。实测：清掉锁屏壁纸后触发一次贴封面，模块自己查、自己复制、自己修好。
+- **立即应用 / 恢复原壁纸**：跟随卡片之后没意义了，adb 还留着 `pushart`。
 
 ## 探针命令
 
@@ -433,6 +476,13 @@ adb shell am broadcast -a com.os4.musiccover.PROBE --es op pushart --ez on true
 4. **卡片关掉的 600ms 防抖**是按"切歌 remove/add 间隔"拍的，实际用久了如果发现
    切歌还是会闪一下，就加大它（`CARD_GONE_MS`）。
 
+6. **`DATE_TOP_DP = 76f` 是按这台机器量的**（1200x2608 / density 3.0）。
+   换设备大概率要重新量：`--es op bounds` 看 `text_area` 的屏幕 y。
+
+7. **支持另一种封面样式**（用户提过要加）。现在 `composeWallpaper()` 只有"满宽居中 + 镜像模糊"
+   一种排版，bias 控制纵向位置。要加样式的话，模块侧加个 `style` 参数存进状态文件，
+   app 的「功能」页加个 `WindowDropdownPreference`，走 `ModuleBridge` 那条广播就行。
+
 ## 本地资料（scratchpad，避免重复上设备查）
 
 `C:\Users\。\AppData\Local\Temp\claude\C--Users---Desktop-music-lockscreen\<session>\scratchpad\`
@@ -452,7 +502,7 @@ adb pull /product/app/MiWallpaper/MiWallpaper.apk
 **锁屏壁纸会被换成专辑封面，且重启不会自己恢复**（图落在
 `/data/user/0/com.miui.miwallpaper/files/mc_art.jpg`，状态落在
 `/data/user*/0/com.android.systemui/files/mc_cover_state`，现在是
-`cover=` / `bias=` / `clock=` / `glass=` 四行）。
+`cover=` / `bias=` / `clock=` / `glass=` 四行；`auto` 和 `depth` 已经不存了）。
 
 **跟随媒体卡片现在是无条件开启的**，所以光关 cover 没用——媒体卡片一出现它自己就回来了。
 要彻底还原：
