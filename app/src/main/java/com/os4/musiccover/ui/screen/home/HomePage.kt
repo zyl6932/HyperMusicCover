@@ -186,17 +186,22 @@ fun HomePageView(
                         } else {
                             stringResource(R.string.home_status_inactive)
                         }
-                        // When it is working there is nothing to instruct the user about,
-                        // so the two lines say what is running instead. When it is not, the
-                        // second line is the one thing worth reading.
-                        val lineTwo = when {
-                            !checked -> stringResource(R.string.home_loading)
-                            ok -> moduleVersion
-                            else -> stringResource(R.string.home_status_inactive_hint)
+                        // When it is working there is nothing to instruct the user about, so
+                        // the lines say what is running instead; when it is not, the hint is the
+                        // one thing worth reading.
+                        //
+                        // Neither line reacts to a re-check being in flight. Tapping the card
+                        // used to blank this one to "loading", and since a re-check keeps the
+                        // previous answer until the new one arrives, that was a flicker showing
+                        // nothing the previous answer had not already said.
+                        val lineTwo = if (checked && !ok) {
+                            stringResource(R.string.home_status_inactive_hint)
+                        } else {
+                            moduleVersion
                         }
                         // Hard-coded until there is a second layout to switch to; the
                         // album-card style is the planned one, and this is where it gets chosen.
-                        val workingMode = if (checked && ok) {
+                        val workingMode = if (ok) {
                             stringResource(R.string.home_mode_fullscreen)
                         } else {
                             null

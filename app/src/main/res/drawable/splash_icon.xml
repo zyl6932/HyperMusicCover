@@ -46,28 +46,28 @@
         <!-- the sleeve, peeking out behind the record -->
         <path
             android:name="sleeve"
-            android:pathData="M24,26h32a5,5 0 0 1 5,5v36a5,5 0 0 1 -5,5h-32a5,5 0 0 1 -5,-5v-36a5,5 0 0 1 5,-5z"
+            android:pathData="M26,27.5h32a5,5 0 0 1 5,5v36a5,5 0 0 1 -5,5h-32a5,5 0 0 1 -5,-5v-36a5,5 0 0 1 5,-5z"
             android:fillColor="#FFFFFF"
             android:fillAlpha="0.32" />
 
         <!-- the record: the one thing that moves -->
         <group
             android:name="record"
-            android:pivotX="60"
-            android:pivotY="54">
+            android:pivotX="62"
+            android:pivotY="55.5">
 
             <path
-                android:pathData="M60,54m-25,0a25,25 0 1,0 50,0a25,25 0 1,0 -50,0"
+                android:pathData="M62,55.5m-25,0a25,25 0 1,0 50,0a25,25 0 1,0 -50,0"
                 android:fillColor="#FFFFFF" />
 
             <!-- grooves -->
             <path
-                android:pathData="M60,54m-18,0a18,18 0 1,0 36,0a18,18 0 1,0 -36,0"
+                android:pathData="M62,55.5m-18,0a18,18 0 1,0 36,0a18,18 0 1,0 -36,0"
                 android:strokeColor="#33000000"
                 android:strokeWidth="1.6"
                 android:fillColor="#00000000" />
             <path
-                android:pathData="M60,54m-12,0a12,12 0 1,0 24,0a12,12 0 1,0 -24,0"
+                android:pathData="M62,55.5m-12,0a12,12 0 1,0 24,0a12,12 0 1,0 -24,0"
                 android:strokeColor="#26000000"
                 android:strokeWidth="1.4"
                 android:fillColor="#00000000" />
@@ -79,13 +79,13 @@
                 changes nothing on screen and the animation is invisible.
             -->
             <path
-                android:pathData="M60,54m0,-23a23,23 0 0,1 16.26,6.74"
+                android:pathData="M62,55.5m0,-23a23,23 0 0,1 16.26,6.74"
                 android:strokeColor="#3D000000"
                 android:strokeWidth="2.9"
                 android:strokeLineCap="round"
                 android:fillColor="#00000000" />
             <path
-                android:pathData="M60,54m0,23a23,23 0 0,1 -16.26,-6.74"
+                android:pathData="M62,55.5m0,23a23,23 0 0,1 -16.26,-6.74"
                 android:strokeColor="#26000000"
                 android:strokeWidth="2.3"
                 android:strokeLineCap="round"
@@ -93,7 +93,7 @@
 
             <!-- spindle hole -->
             <path
-                android:pathData="M60,54m-5,0a5,5 0 1,0 10,0a5,5 0 1,0 -10,0"
+                android:pathData="M62,55.5m-5,0a5,5 0 1,0 10,0a5,5 0 1,0 -10,0"
                 android:fillColor="#FF6C3BC4" />
         </group>
     </group>
