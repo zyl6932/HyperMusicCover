@@ -29,10 +29,17 @@
             android:label="@string/third_party_licenses_title"
             android:theme="@style/Theme.HyperMusicCover" />
 
+        <!--
+            The module declares itself through META-INF/xposed/ now (java_init.list, module.prop,
+            scope.list), which is how API 102 does it. These stay so a manager still lists the app
+            as a module, and minversion is 102 so anything that only understands the classic API
+            refuses it outright rather than loading it half way and failing at the entry point,
+            which no longer exists in the old shape.
+        -->
         <meta-data android:name="xposedmodule" android:value="true" />
         <meta-data android:name="xposeddescription"
             android:value="HyperMusicCover by zyl6932 - album art as the HyperOS lock screen wallpaper, with the clock collapsed" />
-        <meta-data android:name="xposedminversion" android:value="93" />
+        <meta-data android:name="xposedminversion" android:value="102" />
         <meta-data android:name="xposedscope" android:resource="@array/xposedscope" />
     </application>
 </manifest>

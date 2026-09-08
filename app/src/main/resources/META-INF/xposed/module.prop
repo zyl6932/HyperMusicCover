@@ -1,0 +1,7 @@
+# Modern Xposed module metadata (API 102). The name and description come from the app's own
+# android:label / android:description; only the API versions belong here.
+minApiVersion=102
+targetApiVersion=102
+# The module hooks two specific system packages and does nothing anywhere else, so the scope
+# is not something a user should widen.
+staticScope=true

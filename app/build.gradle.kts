@@ -78,7 +78,9 @@ android {
 }
 
 dependencies {
-    compileOnly("de.robv.android.xposed:api:82")
+    // Modern Xposed API. compileOnly on purpose: the framework provides it at runtime and
+    // packaging it would shadow the real one. Zero bytes in the APK either way.
+    compileOnly("io.github.libxposed:api:102.0.0")
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

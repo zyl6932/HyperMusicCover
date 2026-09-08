@@ -16,12 +16,11 @@ import java.io.FileOutputStream;
 import android.util.Log;
 
 import java.lang.reflect.Method;
+
+import io.github.libxposed.api.XposedInterface;
+import io.github.libxposed.api.XposedModuleInterface;
 import java.lang.reflect.Modifier;
 
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
  * Probe for com.miui.miwallpaper, the separate process that actually draws the lockscreen
@@ -64,56 +63,57 @@ public class WallpaperProbe {
     private static final String CLS_KEYGUARD_ENGINE =
             "com.miui.miwallpaper.wallpaperservice.impl.keyguard.KeyguardImageEngineImpl";
 
-    public static void handle(XC_LoadPackage.LoadPackageParam lpp) {
-        sCl = lpp.classLoader;
-        XposedBridge.log(TAG + "loaded into " + PKG + " (proc " + lpp.processName + ")");
+    public static void handle(XposedModuleInterface.PackageLoadedParam param) {
+        sCl = param.getDefaultClassLoader();
+        Xp.log(TAG + "loaded into " + PKG);
 
         // Must be installed at load time: getBitmap() runs when the GL surface is created and
         // the texture is then cached, so a hook added later never sees it.
         try {
-            Class<?> base = XposedHelpers.findClass(
+            Class<?> base = Xp.findClass(
                     "com.miui.miwallpaper.opengl.ImageWallpaperRenderer", sCl);
             // The one place the wallpaper bitmap reaches the GL upload:
             //   onSurfaceCreated() -> mTexture.use(c) -> lambda$onSurfaceCreated$0(Bitmap)
             // Hooking here rather than on WallpaperTexture.getWallpaperBitmap() because
             // thisObject is the renderer, so we can tell the keyguard one from the desktop one
             // and leave the home wallpaper alone.
-            XposedBridge.hookAllMethods(base, "lambda$onSurfaceCreated$0", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) {
-                    boolean keyguard = param.thisObject.getClass().getName().contains("Keyguard");
-                    if (!keyguard || !(param.args[0] instanceof Bitmap)) return;
-                    Bitmap orig = (Bitmap) param.args[0];
+            Xp.hookAll(base, "lambda$onSurfaceCreated$0", chain -> {
+                Object[] args = chain.getArgs().toArray();
+                boolean keyguard = chain.getThisObject().getClass().getName().contains("Keyguard");
+                if (keyguard && args.length > 0 && args[0] instanceof Bitmap) {
+                    Bitmap orig = (Bitmap) args[0];
                     int w = orig.getWidth(), h = orig.getHeight();
                     if (w != sReportedW || h != sReportedH) {
                         sReportedW = w;
                         sReportedH = h;
-                        XposedBridge.log(TAG + "keyguard texture is " + w + "x" + h);
+                        Xp.log(TAG + "keyguard texture is " + w + "x" + h);
                     }
                     Bitmap art = sArt;
-                    if (art == null) return;
-                    // Match the original exactly: updateDimensions/updateMatrix derive the GL
-                    // matrix from these, so a different size lands the wallpaper askew.
-                    Bitmap fitted;
-                    if (art.getWidth() == w && art.getHeight() == h) {
-                        fitted = art;                       // composed at exactly this size
-                    } else if (sFitted != null && sFittedOf == art
-                            && sFitted.getWidth() == w && sFitted.getHeight() == h) {
-                        fitted = sFitted;                   // already fitted for this texture
-                    } else {
-                        fitted = centerCrop(art, w, h);
-                        sFitted = fitted;
-                        sFittedOf = art;
+                    if (art != null) {
+                        // Match the original exactly: updateDimensions/updateMatrix derive
+                        // the GL matrix from these, so another size lands the wallpaper askew.
+                        Bitmap fitted;
+                        if (art.getWidth() == w && art.getHeight() == h) {
+                            fitted = art;                   // composed at exactly this size
+                        } else if (sFitted != null && sFittedOf == art
+                                && sFitted.getWidth() == w && sFitted.getHeight() == h) {
+                            fitted = sFitted;               // already fitted for this texture
+                        } else {
+                            fitted = centerCrop(art, w, h);
+                            sFitted = fitted;
+                            sFittedOf = art;
+                        }
+                        args[0] = fitted;
+                        Xp.log(TAG + "wallpaper texture REPLACED " + describe(orig)
+                                + " -> " + describe(fitted)
+                                + (fitted == art ? " (no rescale)" : ""));
                     }
-                    param.args[0] = fitted;
-                    XposedBridge.log(TAG + "wallpaper texture REPLACED " + describe(orig)
-                            + " -> " + describe(fitted)
-                            + (fitted == art ? " (no rescale)" : ""));
                 }
+                return chain.proceed(args);
             });
-            XposedBridge.log(TAG + "upload path hooked on ImageWallpaperRenderer");
+            Xp.log(TAG + "upload path hooked on ImageWallpaperRenderer");
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "getBitmap hook failed: " + t);
+            Xp.log(TAG + "getBitmap hook failed: " + t);
         }
 
         // Measured: of the ~380ms a track change took, 210ms was the OEM's own getBitmap()
@@ -123,19 +123,18 @@ public class WallpaperProbe {
         // below; this only short-circuits the source, and only once the texture size is known,
         // so a cold start still learns the real dimensions first.
         try {
-            Class<?> kg = XposedHelpers.findClass(
+            Class<?> kg = Xp.findClass(
                     "com.miui.miwallpaper.container.openGL.KeyguardAnimImageWallpaperRenderer",
                     sCl);
-            XposedBridge.hookAllMethods(kg, "getBitmap", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) {
-                    Bitmap fitted = fittedArt();
-                    if (fitted != null) param.setResult(fitted);
-                }
+            Xp.hookAll(kg, "getBitmap", chain -> {
+                Bitmap fitted = fittedArt();
+                // Returning without proceeding IS the short-circuit: the OEM never decodes
+                // the real lock wallpaper off disk, which is the 210ms this buys back.
+                return fitted != null ? fitted : chain.proceed();
             });
-            XposedBridge.log(TAG + "keyguard getBitmap short-circuit installed");
+            Xp.log(TAG + "keyguard getBitmap short-circuit installed");
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "getBitmap short-circuit failed: " + t);
+            Xp.log(TAG + "getBitmap short-circuit failed: " + t);
         }
 
         // Runtime refresh. ImageEngineImpl.U() ("preRender", on the GL thread) re-runs
@@ -145,17 +144,16 @@ public class WallpaperProbe {
         // has to set that flag and ask for a frame; the OEM does the upload itself, including the
         // frosted copy the notification cards blur against.
         try {
-            Class<?> eng = XposedHelpers.findClass(CLS_KEYGUARD_ENGINE, sCl);
-            XposedBridge.hookAllConstructors(eng, new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    sKeyguardEngine = param.thisObject;
-                    XposedBridge.log(TAG + "keyguard engine captured: " + param.thisObject);
-                }
+            Class<?> eng = Xp.findClass(CLS_KEYGUARD_ENGINE, sCl);
+            Xp.hookAllConstructors(eng, chain -> {
+                Object result = chain.proceed();
+                sKeyguardEngine = chain.getThisObject();
+                Xp.log(TAG + "keyguard engine captured: " + sKeyguardEngine);
+                return result;
             });
-            XposedBridge.log(TAG + "keyguard engine hooked");
+            Xp.log(TAG + "keyguard engine hooked");
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "keyguard engine hook failed: " + t);
+            Xp.log(TAG + "keyguard engine hook failed: " + t);
         }
 
         // getBitmap() turned out never to be called - the texture does not travel that way - so
@@ -168,15 +166,14 @@ public class WallpaperProbe {
             traceBitmaps(cn);
         }
 
-        XposedHelpers.findAndHookMethod(Application.class, "onCreate", new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) {
-                try {
-                    register((Application) param.thisObject);
-                } catch (Throwable t) {
-                    XposedBridge.log(TAG + "register failed: " + t);
-                }
+        Xp.hook(Xp.findMethodExact(Application.class, "onCreate"), chain -> {
+            Object result = chain.proceed();
+            try {
+                register((Application) chain.getThisObject());
+            } catch (Throwable t) {
+                Xp.log(TAG + "register failed: " + t);
             }
+            return result;
         });
     }
 
@@ -238,7 +235,7 @@ public class WallpaperProbe {
             fos.write(jpg);
             fos.close();
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "saveArt failed: " + t);
+            Xp.log(TAG + "saveArt failed: " + t);
         }
     }
 
@@ -253,7 +250,7 @@ public class WallpaperProbe {
         Bitmap b = BitmapFactory.decodeFile(f.getAbsolutePath());
         if (b != null) {
             sArt = b;
-            XposedBridge.log(TAG + "art restored from disk " + describe(b));
+            Xp.log(TAG + "art restored from disk " + describe(b));
         }
     }
 
@@ -278,7 +275,7 @@ public class WallpaperProbe {
             public void onReceive(Context c, Intent i) {
                 String op = i.getStringExtra("op");
                 byte[] carried = i.getByteArrayExtra("jpg");
-                XposedBridge.log(TAG + "recv op=" + op
+                Xp.log(TAG + "recv op=" + op
                         + (carried == null ? " " + i.getExtras() : " jpg=" + carried.length + "B"));
                 try {
                     if ("cls".equals(op)) {
@@ -289,7 +286,7 @@ public class WallpaperProbe {
                         if (i.getBooleanExtra("off", false)) {
                             sArt = null;
                             new File(c.getFilesDir(), ART_FILE).delete();
-                            XposedBridge.log(TAG + "art cleared");
+                            Xp.log(TAG + "art cleared");
                         } else {
                             byte[] jpg = i.getByteArrayExtra("jpg");
                             String file = i.getStringExtra("file");
@@ -297,7 +294,7 @@ public class WallpaperProbe {
                             if (jpg != null) b = decodeToTextureSize(jpg);
                             else if (file != null) b = BitmapFactory.decodeFile(file);
                             if (b == null) {
-                                XposedBridge.log(TAG + "art decode failed (jpg="
+                                Xp.log(TAG + "art decode failed (jpg="
                                         + (jpg == null ? "null" : jpg.length + "B")
                                         + " file=" + file + ")");
                             } else {
@@ -305,7 +302,7 @@ public class WallpaperProbe {
                                 sFitted = null;
                                 sFittedOf = null;
                                 fittedArt();   // scale here, not on the GL thread
-                                XposedBridge.log(TAG + "art set " + describe(b));
+                                Xp.log(TAG + "art set " + describe(b));
                                 // Show it first, write it to disk afterwards: the file only
                                 // matters for the next cold start of this process, and a 100KB
                                 // write in front of the upload is pure added latency.
@@ -318,19 +315,19 @@ public class WallpaperProbe {
                     } else if ("reload".equals(op)) {
                         reloadTexture();
                     } else if ("state".equals(op)) {
-                        XposedBridge.log(TAG + "art=" + describe(sArt)
+                        Xp.log(TAG + "art=" + describe(sArt)
                                 + " engine=" + sKeyguardEngine);
                     } else {
-                        XposedBridge.log(TAG + "ops: cls --es name <fqcn> [--es grep x]"
+                        Xp.log(TAG + "ops: cls --es name <fqcn> [--es grep x]"
                                 + " | bmp --es name <fqcn>");
                     }
                 } catch (Throwable t) {
-                    XposedBridge.log(TAG + "op failed: " + Log.getStackTraceString(t));
+                    Xp.log(TAG + "op failed: " + Log.getStackTraceString(t));
                 }
             }
         };
         ctx.registerReceiver(r, new IntentFilter(ACTION), Context.RECEIVER_EXPORTED);
-        XposedBridge.log(TAG + "receiver registered for " + ACTION);
+        Xp.log(TAG + "receiver registered for " + ACTION);
     }
 
     /**
@@ -343,34 +340,34 @@ public class WallpaperProbe {
     private static void reloadTexture() {
         Object eng = sKeyguardEngine;
         if (eng == null) {
-            XposedBridge.log(TAG + "reload: no keyguard engine (is the lockscreen wallpaper "
+            Xp.log(TAG + "reload: no keyguard engine (is the lockscreen wallpaper "
                     + "still the same image as the desktop one?)");
             return;
         }
         try {
             try {
-                XposedHelpers.callMethod(eng, "u");
+                Xp.callMethod(eng, "u");
             } catch (Throwable t) {
-                XposedBridge.log(TAG + "reload: u() failed: " + t);
+                Xp.log(TAG + "reload: u() failed: " + t);
             }
-            XposedHelpers.setBooleanField(eng, "b", true);
-            XposedHelpers.callMethod(eng, "T", false);
-            XposedBridge.log(TAG + "reload requested on " + eng.getClass().getSimpleName());
+            Xp.setBooleanField(eng, "b", true);
+            Xp.callMethod(eng, "T", false);
+            Xp.log(TAG + "reload requested on " + eng.getClass().getSimpleName());
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "reload failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "reload failed: " + Log.getStackTraceString(t));
         }
     }
 
     private static void dumpClass(String name, String grep) {
-        if (name == null) { XposedBridge.log(TAG + "need --es name"); return; }
+        if (name == null) { Xp.log(TAG + "need --es name"); return; }
         Class<?> c;
         try {
-            c = XposedHelpers.findClass(name, sCl);
+            c = Xp.findClass(name, sCl);
         } catch (Throwable t) {
-            XposedBridge.log(TAG + name + " NOT FOUND");
+            Xp.log(TAG + name + " NOT FOUND");
             return;
         }
-        XposedBridge.log(TAG + "=== " + c.getName());
+        Xp.log(TAG + "=== " + c.getName());
         String g = grep == null ? null : grep.toLowerCase();
         for (Class<?> k = c; k != null && k != Object.class; k = k.getSuperclass()) {
             for (Method m : k.getDeclaredMethods()) {
@@ -383,16 +380,16 @@ public class WallpaperProbe {
                 }
                 sb.append(')');
                 if (g == null || sb.toString().toLowerCase().contains(g)) {
-                    XposedBridge.log(TAG + "  " + sb);
+                    Xp.log(TAG + "  " + sb);
                 }
             }
             for (java.lang.reflect.Field f : k.getDeclaredFields()) {
                 String line = f.getType().getSimpleName() + " ." + f.getName();
                 if (g == null || line.toLowerCase().contains(g)) {
-                    XposedBridge.log(TAG + "  " + line);
+                    Xp.log(TAG + "  " + line);
                 }
             }
-            XposedBridge.log(TAG + "  --- ^ " + k.getName());
+            Xp.log(TAG + "  --- ^ " + k.getName());
         }
     }
 
@@ -401,12 +398,12 @@ public class WallpaperProbe {
      * we find where the wallpaper texture actually enters the renderer.
      */
     private static void traceBitmaps(String name) {
-        if (name == null) { XposedBridge.log(TAG + "need --es name"); return; }
+        if (name == null) { Xp.log(TAG + "need --es name"); return; }
         Class<?> c;
         try {
-            c = XposedHelpers.findClass(name, sCl);
+            c = Xp.findClass(name, sCl);
         } catch (Throwable t) {
-            XposedBridge.log(TAG + name + " NOT FOUND");
+            Xp.log(TAG + name + " NOT FOUND");
             return;
         }
         int n = 0;
@@ -417,7 +414,7 @@ public class WallpaperProbe {
             }
             if (!touches) continue;
             try {
-                XposedBridge.hookMethod(ct, argLogger("<init>"));
+                Xp.hook(ct, argLogger("<init>"));
                 n++;
             } catch (Throwable ignored) {
             }
@@ -431,30 +428,30 @@ public class WallpaperProbe {
                 }
                 if (!touches) continue;
                 try {
-                    XposedBridge.hookMethod(m, argLogger(m.getName()));
+                    Xp.hook(m, argLogger(m.getName()));
                     n++;
                 } catch (Throwable ignored) {
                 }
             }
         }
-        XposedBridge.log(TAG + "traced " + n + " bitmap-carrying methods on " + c.getName());
+        Xp.log(TAG + "traced " + n + " bitmap-carrying methods on " + c.getName());
     }
 
-    private static XC_MethodHook argLogger(final String name) {
-        return new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) {
-                StringBuilder sb = new StringBuilder(TAG)
-                        .append(param.thisObject == null ? "?"
-                                : param.thisObject.getClass().getSimpleName())
-                        .append('.').append(name).append('(');
-                for (int j = 0; j < param.args.length; j++) {
-                    if (j > 0) sb.append(", ");
-                    sb.append(describe(param.args[j]));
-                }
-                sb.append(") -> ").append(describe(param.getResult()));
-                XposedBridge.log(sb.toString());
+    private static XposedInterface.Hooker argLogger(final String name) {
+        return chain -> {
+            Object result = chain.proceed();
+            StringBuilder sb = new StringBuilder(TAG)
+                    .append(chain.getThisObject() == null ? "?"
+                            : chain.getThisObject().getClass().getSimpleName())
+                    .append('.').append(name).append('(');
+            java.util.List<Object> args = chain.getArgs();
+            for (int j = 0; j < args.size(); j++) {
+                if (j > 0) sb.append(", ");
+                sb.append(describe(args.get(j)));
             }
+            sb.append(") -> ").append(describe(result));
+            Xp.log(sb.toString());
+            return result;
         };
     }
 

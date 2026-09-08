@@ -31,11 +31,9 @@ import android.view.animation.PathInterpolator;
 
 import java.lang.reflect.Method;
 
-import de.robv.android.xposed.IXposedHookLoadPackage;
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import io.github.libxposed.api.XposedInterface;
+import io.github.libxposed.api.XposedModule;
+
 
 /**
  * Probe module: verifies that the HyperOS keyguard clock squeeze can be driven on
@@ -47,7 +45,16 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  *     -> AllInOneClockAnimation: KeyguardClockNotifInteractor.setNotifY(y) -> ClockResult
  *                                updateClockComponentStyle(result, withAnim, type)
  */
-public class Main implements IXposedHookLoadPackage {
+public class Main extends XposedModule {
+
+    /**
+     * The framework instantiates this once per process it injects us into and attaches itself
+     * before any callback runs. Everything below is static - the module is one piece of state
+     * per process - so the interface is handed to {@link Xp} rather than kept as a field.
+     */
+    public Main() {
+    }
+
 
     private static final String TAG = "[MCProbe] ";
     private static final String ACTION = "com.os4.musiccover.PROBE";
@@ -215,94 +222,105 @@ public class Main implements IXposedHookLoadPackage {
     private static final float[] EASE_RUNNING       = {1.00f, 0.18f}; // k=1218.5 c=69.8
 
     @Override
-    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpp) {
-        if ("com.miui.miwallpaper".equals(lpp.packageName)) {
-            WallpaperProbe.handle(lpp);
+    public void onModuleLoaded(ModuleLoadedParam param) {
+        Xp.attach(this);
+    }
+
+    /**
+     * The modern API's equivalent of handleLoadPackage: called once the default class loader
+     * exists, before the app's own components are built. The scope list narrows what we are
+     * injected into, but the framework still reports every package loaded in those processes,
+     * so the package name is checked here rather than trusted.
+     */
+    @Override
+    public void onPackageLoaded(PackageLoadedParam param) {
+        Xp.attach(this);
+        String pkg = param.getPackageName();
+        if ("com.miui.miwallpaper".equals(pkg)) {
+            WallpaperProbe.handle(param);
             return;
         }
-        if (!"com.android.systemui".equals(lpp.packageName)) return;
+        if (!"com.android.systemui".equals(pkg)) return;
 
-        final ClassLoader cl = lpp.classLoader;
-        XposedBridge.log(TAG + "loaded into SystemUI");
+        final ClassLoader cl = param.getDefaultClassLoader();
+        Xp.log(TAG + "loaded into SystemUI");
 
         try {
-            sContainerCls = XposedHelpers.findClass(CLS_CONTAINER, cl);
-            sTypeCls = XposedHelpers.findClass(CLS_TOP_CHANGE_TYPE, cl);
+            sContainerCls = Xp.findClass(CLS_CONTAINER, cl);
+            sTypeCls = Xp.findClass(CLS_TOP_CHANGE_TYPE, cl);
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "class lookup FAILED: " + t);
+            Xp.log(TAG + "class lookup FAILED: " + t);
             return;
         }
 
-        XposedBridge.hookAllMethods(sContainerCls, "onAttachedToWindow", new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) {
-                sContainer = (View) param.thisObject;
-                captureScreenSize(sContainer);
-                XposedBridge.log(TAG + "clock container attached: " + sContainer);
-                try {
-                    registerReceiver(sContainer.getContext().getApplicationContext());
-                } catch (Throwable t) {
-                    XposedBridge.log(TAG + "registerReceiver failed: " + t);
-                }
-                // The keyguard is rebuilt on some transitions, taking our cover with it, so
-                // re-attach rather than assume the view is still in the tree.
-                if (sCoverWanted) {
-                    sCover = null;
-                    attachCover();
-                }
-                // Re-apply on keyguard rebuild. Measured: the system never re-shows the
-                // cut-out on its own, so no per-call ownership hook is warranted - hooking
-                // View.setVisibility process-wide cost every visibility change in SystemUI and
-                // fired zero times. What actually lost the state was SystemUI restarting.
-                if (sDepthHidden) setDepthHidden(true);
-                // A rebuilt keyguard can be a different clock style, so the nudge measured
-                // against the old one means nothing.
-                sNudgeSample = Float.NaN;
-                if (sCoverMode) reassertCoverClock();
+        Xp.hookAll(sContainerCls, "onAttachedToWindow", chain -> {
+            Object result = chain.proceed();
+            sContainer = (View) chain.getThisObject();
+            captureScreenSize(sContainer);
+            Xp.log(TAG + "clock container attached: " + sContainer);
+            try {
+                registerReceiver(sContainer.getContext().getApplicationContext());
+            } catch (Throwable t) {
+                Xp.log(TAG + "registerReceiver failed: " + t);
             }
+            // The keyguard is rebuilt on some transitions, taking our cover with it, so
+            // re-attach rather than assume the view is still in the tree.
+            if (sCoverWanted) {
+                sCover = null;
+                attachCover();
+            }
+            // Re-apply on keyguard rebuild. Measured: the system never re-shows the
+            // cut-out on its own, so no per-call ownership hook is warranted - hooking
+            // View.setVisibility process-wide cost every visibility change in SystemUI and
+            // fired zero times. What actually lost the state was SystemUI restarting.
+            if (sDepthHidden) setDepthHidden(true);
+            // A rebuilt keyguard can be a different clock style, so the nudge measured
+            // against the old one means nothing.
+            sNudgeSample = Float.NaN;
+            if (sCoverMode) reassertCoverClock();
+            return result;
         });
 
         // The keyguard is rebuilt on every screen-off/on, so a captured instance goes
         // stale. Drop it on detach and always drive the currently attached one.
-        XposedBridge.hookAllMethods(sContainerCls, "onDetachedFromWindow", new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) {
-                if (sContainer == param.thisObject) {
-                    sContainer = null;
-                    XposedBridge.log(TAG + "clock container detached");
-                }
-                // Ownership must never outlive the keyguard that granted it. The keyguard
-                // is torn down and rebuilt on every screen off/on, and a hold left standing
-                // across that boundary rewrites the *new* clock's Y - which is what made the
-                // clock size differ between awake/AOD and with/without a media card.
-                abandonHold("keyguard torn down", false);
+        Xp.hookAll(sContainerCls, "onDetachedFromWindow", chain -> {
+            Object result = chain.proceed();
+            if (sContainer == chain.getThisObject()) {
+                sContainer = null;
+                Xp.log(TAG + "clock container detached");
             }
+            // Ownership must never outlive the keyguard that granted it. The keyguard
+            // is torn down and rebuilt on every screen off/on, and a hold left standing
+            // across that boundary rewrites the *new* clock's Y - which is what made the
+            // clock size differ between awake/AOD and with/without a media card.
+            abandonHold("keyguard torn down", false);
+            return result;
         });
 
         // The system does re-show the cut-out - verified: it came back right after we restored
         // cover mode across a SystemUI restart. Re-hide after the OEM's own update instead of
         // hooking View.setVisibility process-wide, which would tax every view in SystemUI.
         try {
-            Class<?> depth = XposedHelpers.findClass(
+            Class<?> depth = Xp.findClass(
                     "com.android.keyguard.depth.KeyguardDepthInteractor", cl);
-            XposedBridge.hookAllMethods(depth, "updateDeductedImageView", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    if (!sDepthHidden) return;
+            Xp.hookAll(depth, "updateDeductedImageView", chain -> {
+                Object result = chain.proceed();
+                if (sDepthHidden) {
                     try {
-                        View d = (View) XposedHelpers.getObjectField(param.thisObject,
+                        View d = (View) Xp.getObjectField(chain.getThisObject(),
                                 "deductedImageView");
                         if (d != null && d.getVisibility() == View.VISIBLE) {
                             d.setVisibility(View.INVISIBLE);
-                            XposedBridge.log(TAG + "depth re-hidden after updateDeductedImageView");
+                            Xp.log(TAG + "depth re-hidden after updateDeductedImageView");
                         }
                     } catch (Throwable ignored) {
                     }
                 }
+                return result;
             });
-            XposedBridge.log(TAG + "depth ownership hooked");
+            Xp.log(TAG + "depth ownership hooked");
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "depth ownership hook failed: " + t);
+            Xp.log(TAG + "depth ownership hook failed: " + t);
         }
 
         // The media card is the switch. Every add, track change and dismissal of the
@@ -310,104 +328,100 @@ public class Main implements IXposedHookLoadPackage {
         // screen (and which track), null means it has gone. Playback state never reaches it,
         // which is exactly what we want: pausing leaves the card up, so it leaves the cover up.
         try {
-            Class<?> card = XposedHelpers.findClass(CLS_MEDIA_CARD, cl);
-            XposedBridge.hookAllMethods(card, "access$setTopMediaData", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    onCardChanged(param.args.length > 1 ? param.args[1] : null);
-                }
+            Class<?> card = Xp.findClass(CLS_MEDIA_CARD, cl);
+            Xp.hookAll(card, "access$setTopMediaData", chain -> {
+                Object result = chain.proceed();
+                java.util.List<Object> args = chain.getArgs();
+                onCardChanged(args.size() > 1 ? args.get(1) : null);
+                return result;
             });
-            XposedBridge.log(TAG + "media card hooked");
+            Xp.log(TAG + "media card hooked");
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "media card hook failed: " + t);
+            Xp.log(TAG + "media card hook failed: " + t);
         }
 
         // Track the live container. Ownership is NOT enforced here: the system's own
         // re-assertions come in through KeyguardClockNotifInteractor.setNotifY directly
         // and never pass through this method, so coercing here only produced a race
         // between our value and the system's. The single chokepoint is setNotifY.
-        XposedBridge.hookAllMethods(sContainerCls, "notifStateChange", new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) {
-                // Anyone calling this is by definition the live instance.
-                sContainer = (View) param.thisObject;
-            }
+        Xp.hookAll(sContainerCls, "notifStateChange", chain -> {
+            // Anyone calling this is by definition the live instance.
+            sContainer = (View) chain.getThisObject();
+            return chain.proceed();
         });
 
         // The OEM squeezes the clock through these four setters on TimeView. Scaling
         // setSizeInternal's argument shrinks the whole clock without touching the animation:
         // the OEM still computes and drives every frame, we just rescale the last mile.
         try {
-            Class<?> timeView = XposedHelpers.findClass(CLS_TIME_VIEW, cl);
-            XC_MethodHook axisLog = new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) {
-                    boolean scaled = false;
-                    if ("setSizeInternal".equals(param.method.getName()) && !Float.isNaN(sSizeScale)) {
-                        param.args[0] = ((Float) param.args[0]) * sSizeScale;
-                        scaled = true;
-                    }
-                    if (sVerbose) {
-                        XposedBridge.log(TAG + "TimeView." + param.method.getName()
-                                + "(" + param.args[0] + ")" + (scaled ? " [scaled]" : "")
-                                + " on " + viewIdOf((View) param.thisObject));
-                    }
+            Class<?> timeView = Xp.findClass(CLS_TIME_VIEW, cl);
+            XposedInterface.Hooker axisLog = chain -> {
+                String name = chain.getExecutable().getName();
+                Object[] args = chain.getArgs().toArray();
+                boolean scaled = false;
+                if ("setSizeInternal".equals(name) && !Float.isNaN(sSizeScale)) {
+                    args[0] = ((Float) args[0]) * sSizeScale;
+                    scaled = true;
                 }
+                if (sVerbose) {
+                    Xp.log(TAG + "TimeView." + name
+                            + "(" + args[0] + ")" + (scaled ? " [scaled]" : "")
+                            + " on " + viewIdOf((View) chain.getThisObject()));
+                }
+                return chain.proceed(args);
             };
             for (String m : new String[]{"setSizeInternal", "setWidth", "setHeight", "setWeight"}) {
-                XposedBridge.hookAllMethods(timeView, m, axisLog);
+                Xp.hookAll(timeView, m, axisLog);
             }
 
             // Own the colour the same way we own notifY. Setting glassData once does not
             // survive - the OEM rewrites it on every re-render (verified: the clock reverted
             // to the glass look right after a spring animation) - so re-assert per draw.
-            XposedBridge.hookAllMethods(timeView, "onDraw", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) {
-                    float[] t = sTint;
-                    if (t == null) return;
+            Xp.hookAll(timeView, "onDraw", chain -> {
+                float[] t = sTint;
+                if (t != null) {
                     try {
-                        float[] g = (float[]) XposedHelpers.getObjectField(param.thisObject, "glassData");
-                        if (g == null || g.length <= GLASS_COLOR_MIX) return;
-                        g[GLASS_COLOR_R] = t[0];
-                        g[GLASS_COLOR_G] = t[1];
-                        g[GLASS_COLOR_B] = t[2];
-                        g[GLASS_COLOR_A] = t[3];
-                        g[GLASS_COLOR_MIX] = t[4];
+                        float[] g = (float[]) Xp.getObjectField(chain.getThisObject(), "glassData");
+                        if (g != null && g.length > GLASS_COLOR_MIX) {
+                            g[GLASS_COLOR_R] = t[0];
+                            g[GLASS_COLOR_G] = t[1];
+                            g[GLASS_COLOR_B] = t[2];
+                            g[GLASS_COLOR_A] = t[3];
+                            g[GLASS_COLOR_MIX] = t[4];
+                        }
                     } catch (Throwable ignored) {
                     }
                 }
+                return chain.proceed();
             });
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "TimeView hook failed: " + t);
+            Xp.log(TAG + "TimeView hook failed: " + t);
         }
 
         // The real chokepoint. Everything that squeezes the clock - the OEM's own
         // notification-Y flow, KeyguardClockContainer.notifStateChange, and our own
         // per-frame driving - lands here, so this is where ownership is enforced.
         try {
-            Class<?> interactor = XposedHelpers.findClass(CLS_INTERACTOR, cl);
-            XposedBridge.hookAllMethods(interactor, "setNotifY", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) {
-                    float requested = (Float) param.args[0];
-                    // Only the system's own emissions tell us where the clock really
-                    // belongs; our own frames must not be mistaken for that.
-                    if (!sSelfDriving) sLastSystemY = requested;
-                    Float hold = sHoldY;
-                    if (hold != null && requested != hold) param.args[0] = hold;
-                    applyCollapse((Float) param.args[0]);
+            Class<?> interactor = Xp.findClass(CLS_INTERACTOR, cl);
+            Xp.hookAll(interactor, "setNotifY", chain -> {
+                Object[] args = chain.getArgs().toArray();
+                float requested = (Float) args[0];
+                // Only the system's own emissions tell us where the clock really
+                // belongs; our own frames must not be mistaken for that.
+                if (!sSelfDriving) sLastSystemY = requested;
+                Float hold = sHoldY;
+                if (hold != null && requested != hold) args[0] = hold;
+                applyCollapse((Float) args[0]);
+                // The coerced Y has to reach the original, which is what proceed(args) is for:
+                // this is the one hook whose whole purpose is rewriting an argument.
+                Object result = chain.proceed(args);
+                if (sVerbose) {
+                    Xp.log(TAG + "setNotifY(" + args[0] + ") -> " + result);
                 }
-
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    if (sVerbose) {
-                        XposedBridge.log(TAG + "setNotifY(" + param.args[0] + ") -> " + param.getResult());
-                    }
-                }
+                return result;
             });
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "interactor hook failed: " + t);
+            Xp.log(TAG + "interactor hook failed: " + t);
         }
     }
 
@@ -422,7 +436,7 @@ public class Main implements IXposedHookLoadPackage {
                     + "\nglass=" + sGlassEnd + "\n").getBytes());
             f.close();
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "saveState failed: " + t);
+            Xp.log(TAG + "saveState failed: " + t);
         }
     }
 
@@ -455,10 +469,10 @@ public class Main implements IXposedHookLoadPackage {
                 }
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "loadState failed: " + t);
+            Xp.log(TAG + "loadState failed: " + t);
             return;
         }
-        XposedBridge.log(TAG + "state restored: cover=" + cover + " bias=" + sBias);
+        Xp.log(TAG + "state restored: cover=" + cover + " bias=" + sBias);
         if (cover) enterCoverMode(false);
         // Always follow the card, whatever the file said.
         setAuto(true);
@@ -476,7 +490,7 @@ public class Main implements IXposedHookLoadPackage {
             public void onReceive(Context c, Intent i) {
                 String op = i.getStringExtra("op");
                 if (op == null) op = "drive";
-                XposedBridge.log(TAG + "recv op=" + op + " extras=" + i.getExtras());
+                Xp.log(TAG + "recv op=" + op + " extras=" + i.getExtras());
                 try {
                     boolean anim = i.getBooleanExtra("anim", true);
                     String type = i.getStringExtra("type");
@@ -495,7 +509,7 @@ public class Main implements IXposedHookLoadPackage {
                         dumpAnimConfigs();
                     } else if ("hold".equals(op)) {
                         float y = i.getFloatExtra("y", -1f);
-                        XposedBridge.log(TAG + "hold -> y=" + y + " from " + currentY()
+                        Xp.log(TAG + "hold -> y=" + y + " from " + currentY()
                                 + (ms > 0 ? " over " + ms + "ms" : " spring zeta=" + zeta + " response=" + response));
                         if (!anim) { sHoldY = y; drive(y, false, type); }
                         else if (ms > 0) rampTo(y, ms, type);
@@ -512,14 +526,14 @@ public class Main implements IXposedHookLoadPackage {
                     } else if ("tint".equals(op)) {
                         if (i.getBooleanExtra("off", false)) {
                             sTint = null;
-                            XposedBridge.log(TAG + "tint released");
+                            Xp.log(TAG + "tint released");
                         } else {
                             int argb = i.getIntExtra("color", 0xFFFFFFFF);
                             sTint = new float[]{
                                     ((argb >> 16) & 0xFF) / 255f, ((argb >> 8) & 0xFF) / 255f,
                                     (argb & 0xFF) / 255f, i.getFloatExtra("a", 1f),
                                     i.getFloatExtra("mix", 1f)};
-                            XposedBridge.log(TAG + "tint rgb=" + sTint[0] + "," + sTint[1] + ","
+                            Xp.log(TAG + "tint rgb=" + sTint[0] + "," + sTint[1] + ","
                                     + sTint[2] + " a=" + sTint[3] + " mix=" + sTint[4]);
                         }
                         invalidateClocks();
@@ -538,13 +552,13 @@ public class Main implements IXposedHookLoadPackage {
                         sClockScale = clamp01(i.getFloatExtra("v", DEFAULT_CLOCK_SCALE));
                         if (sClockScale < 0.05f) sClockScale = 0.05f;
                         saveState();
-                        XposedBridge.log(TAG + "clock scale = " + sClockScale);
+                        Xp.log(TAG + "clock scale = " + sClockScale);
                         if (sCoverMode) { sCollapseMin = sClockScale; sAppliedK = Float.NaN;
                             reassertCoverClock(); }
                     } else if ("glassend".equals(op)) {
                         sGlassEnd = clamp01(i.getFloatExtra("v", DEFAULT_GLASS_END));
                         saveState();
-                        XposedBridge.log(TAG + "glass end = " + sGlassEnd);
+                        Xp.log(TAG + "glass end = " + sGlassEnd);
                         if (sCoverMode) { sGlassV1 = sGlassEnd; sAppliedGlassV = Float.NaN;
                             reassertCoverClock(); }
                     } else if ("auto".equals(op)) {
@@ -575,16 +589,16 @@ public class Main implements IXposedHookLoadPackage {
                             sGlassV0 = sGlassV1 = Float.NaN;
                             sAppliedGlassV = Float.NaN;
                             callOnClockViews("updateGlassValue", "f", 0f, 0, false);
-                            XposedBridge.log(TAG + "glass morph off");
+                            Xp.log(TAG + "glass morph off");
                         } else {
                             sGlassV0 = i.getFloatExtra("v0", 0f);
                             sGlassV1 = i.getFloatExtra("v1", 1f);
-                            XposedBridge.log(TAG + "glass morph " + sGlassV0 + " -> " + sGlassV1);
+                            Xp.log(TAG + "glass morph " + sGlassV0 + " -> " + sGlassV1);
                         }
                     } else if ("collapse".equals(op)) {
                         float k = i.getFloatExtra("k", -1f);
                         sCollapseMin = k > 0 ? k : Float.NaN;
-                        XposedBridge.log(TAG + "collapse min scale = " + sCollapseMin);
+                        Xp.log(TAG + "collapse min scale = " + sCollapseMin);
                         if (Float.isNaN(sCollapseMin)) groupScale("time_group", 1f, -1f, 0f, 0f);
                     } else if ("callclock".equals(op)) {
                         callOnClockViews(i.getStringExtra("m"), i.getStringExtra("kind"),
@@ -599,7 +613,7 @@ public class Main implements IXposedHookLoadPackage {
                     } else if ("scale".equals(op)) {
                         float k = i.getFloatExtra("k", -1f);
                         sSizeScale = k > 0 ? k : Float.NaN;
-                        XposedBridge.log(TAG + "size scale = " + sSizeScale);
+                        Xp.log(TAG + "size scale = " + sSizeScale);
                     } else if ("params".equals(op)) {
                         setClockParams(i.getFloatExtra("w", -1f), i.getFloatExtra("h", -1f),
                                 i.getFloatExtra("weight", -1f), i.getIntExtra("size", -1),
@@ -630,17 +644,17 @@ public class Main implements IXposedHookLoadPackage {
                     } else if ("bounds".equals(op)) {
                         dumpClockBounds();
                     } else if ("state".equals(op)) {
-                        XposedBridge.log(TAG + "state: holdY=" + sHoldY + " currentY=" + sCurrentY
+                        Xp.log(TAG + "state: holdY=" + sHoldY + " currentY=" + sCurrentY
                                 + " lastSystemY=" + sLastSystemY + " animating=" + (sFrameCb != null || sRamp != null)
                                 + " container=" + (sContainer != null) + " verbose=" + sVerbose);
-                        XposedBridge.log(TAG + "cover: on=" + sCoverMode + " auto=" + sAuto
+                        Xp.log(TAG + "cover: on=" + sCoverMode + " auto=" + sAuto
                                 + " bias=" + sBias + " screen=" + sScreenW + "x" + sScreenH
                                 + " card=" + (sCardKnown ? (sCardShowing ? sCardKey : "gone") : "unknown")
                                 + " following=" + (sWatched == null ? "none" : sWatched.getPackageName())
                                 + " track=" + sTrackKey);
                     } else if ("verbose".equals(op)) {
                         sVerbose = i.getBooleanExtra("on", !sVerbose);
-                        XposedBridge.log(TAG + "verbose=" + sVerbose);
+                        Xp.log(TAG + "verbose=" + sVerbose);
                     } else if ("abandon".equals(op)) {
                         abandonHold("requested");
                     } else if ("release".equals(op)) {
@@ -651,7 +665,7 @@ public class Main implements IXposedHookLoadPackage {
                             abandonHold("release with no observed system Y", true);
                             return;
                         }
-                        XposedBridge.log(TAG + "release -> y=" + back
+                        Xp.log(TAG + "release -> y=" + back
                                 + (ms > 0 ? " over " + ms + "ms" : " spring zeta=" + zeta + " response=" + response));
                         if (!anim) { abandonHold("release"); drive(back, false, type); }
                         else if (ms > 0) rampTo(back, ms, type, true);
@@ -661,12 +675,12 @@ public class Main implements IXposedHookLoadPackage {
                         drive(i.getFloatExtra("y", -1f), anim, type);
                     }
                 } catch (Throwable t) {
-                    XposedBridge.log(TAG + "op failed: " + Log.getStackTraceString(t));
+                    Xp.log(TAG + "op failed: " + Log.getStackTraceString(t));
                 }
             }
         };
         ctx.registerReceiver(r, new IntentFilter(ACTION), Context.RECEIVER_EXPORTED);
-        XposedBridge.log(TAG + "receiver registered for " + ACTION);
+        Xp.log(TAG + "receiver registered for " + ACTION);
         loadState();
 
         // The keyguard container is NOT always torn down on screen off - verified on device,
@@ -693,7 +707,7 @@ public class Main implements IXposedHookLoadPackage {
                 // stale hold from leaking into the next keyguard.)
                 if (Intent.ACTION_SCREEN_OFF.equals(a) && sCoverMode) {
                     stopMotion();
-                    XposedBridge.log(TAG + "screen off, cover mode keeps the clock held");
+                    Xp.log(TAG + "screen off, cover mode keeps the clock held");
                     return;
                 }
                 abandonHold(a, true);
@@ -704,7 +718,7 @@ public class Main implements IXposedHookLoadPackage {
         lf.addAction(Intent.ACTION_SCREEN_ON);
         lf.addAction(Intent.ACTION_USER_PRESENT);
         ctx.registerReceiver(lifecycle, lf, Context.RECEIVER_NOT_EXPORTED);
-        XposedBridge.log(TAG + "lifecycle receiver registered (screen off / user present)");
+        Xp.log(TAG + "lifecycle receiver registered (screen off / user present)");
     }
 
     /** Where the clock is right now: our own last frame, else the system's last word. NaN if unknown. */
@@ -760,7 +774,7 @@ public class Main implements IXposedHookLoadPackage {
             callOnClockViews("updateGlassValue", "f", back, 0, false);
         }
         if (!held) return;
-        XposedBridge.log(TAG + "hold abandoned: " + why);
+        Xp.log(TAG + "hold abandoned: " + why);
         // Dropping the coercion alone only stops us rewriting *future* calls; the clock
         // keeps whatever squeeze the last frame left behind until the system happens to
         // emit again, which it may never do if nothing below the clock changes. Snap it
@@ -778,7 +792,7 @@ public class Main implements IXposedHookLoadPackage {
                                  final String typeName, final boolean releaseAtEnd) {
         final View v = sContainer;
         if (v == null) {
-            XposedBridge.log(TAG + "no clock container captured yet");
+            Xp.log(TAG + "no clock container captured yet");
             return;
         }
         v.post(new Runnable() {
@@ -792,7 +806,7 @@ public class Main implements IXposedHookLoadPackage {
                 if (!retarget) {
                     float from = currentY();
                     if (Float.isNaN(from)) {
-                        XposedBridge.log(TAG + "no Y observed yet, snapping to " + target);
+                        Xp.log(TAG + "no Y observed yet, snapping to " + target);
                         sHoldY = target;
                         applyY(target, typeName);
                         return;
@@ -835,7 +849,7 @@ public class Main implements IXposedHookLoadPackage {
                         if (releaseAtEnd) {
                             abandonHold("spring settled in " + ms + "ms, control handed back");
                         } else {
-                            XposedBridge.log(TAG + "spring settled in " + ms + "ms, holding at " + target);
+                            Xp.log(TAG + "spring settled in " + ms + "ms, holding at " + target);
                         }
                     }
                 };
@@ -863,7 +877,7 @@ public class Main implements IXposedHookLoadPackage {
                                final boolean releaseAtEnd) {
         final View v = sContainer;
         if (v == null) {
-            XposedBridge.log(TAG + "no clock container captured yet");
+            Xp.log(TAG + "no clock container captured yet");
             return;
         }
         v.post(new Runnable() {
@@ -872,7 +886,7 @@ public class Main implements IXposedHookLoadPackage {
                 stopMotion();
                 final float from = currentY();
                 if (Float.isNaN(from)) {
-                    XposedBridge.log(TAG + "no Y observed yet, snapping to " + target);
+                    Xp.log(TAG + "no Y observed yet, snapping to " + target);
                     sHoldY = target;
                     applyY(target, typeName);
                     return;
@@ -895,7 +909,7 @@ public class Main implements IXposedHookLoadPackage {
                         if (releaseAtEnd) {
                             abandonHold("ramp done, control handed back");
                         } else {
-                            XposedBridge.log(TAG + "ramp done, holding at " + target);
+                            Xp.log(TAG + "ramp done, holding at " + target);
                         }
                     }
                 });
@@ -912,7 +926,7 @@ public class Main implements IXposedHookLoadPackage {
         try {
             @SuppressWarnings({"unchecked", "rawtypes"})
             Object type = Enum.valueOf((Class<Enum>) sTypeCls, typeName);
-            Method m = XposedHelpers.findMethodExact(sContainerCls,
+            Method m = Xp.findMethodExact(sContainerCls,
                     "notifStateChange", float.class, boolean.class, sTypeCls);
             m.setAccessible(true);
             // NOTE the inversion: KeyguardClockContainer calls this arg "isDragOrFling",
@@ -927,14 +941,14 @@ public class Main implements IXposedHookLoadPackage {
             }
             sCurrentY = y;
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "applyY failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "applyY failed: " + Log.getStackTraceString(t));
         }
     }
 
     private static void drive(final float y, final boolean anim, final String typeName) {
         final View v = sContainer;
         if (v == null) {
-            XposedBridge.log(TAG + "no clock container captured yet");
+            Xp.log(TAG + "no clock container captured yet");
             return;
         }
         v.post(new Runnable() {
@@ -943,7 +957,7 @@ public class Main implements IXposedHookLoadPackage {
             public void run() {
                 try {
                     Object type = Enum.valueOf((Class<Enum>) sTypeCls, typeName);
-                    Method m = XposedHelpers.findMethodExact(sContainerCls,
+                    Method m = Xp.findMethodExact(sContainerCls,
                             "notifStateChange", float.class, boolean.class, sTypeCls);
                     m.setAccessible(true);
                     sSelfDriving = true;
@@ -953,9 +967,9 @@ public class Main implements IXposedHookLoadPackage {
                         sSelfDriving = false;
                     }
                     sCurrentY = y;
-                    XposedBridge.log(TAG + "notifStateChange(" + y + ", " + anim + ", " + typeName + ") OK");
+                    Xp.log(TAG + "notifStateChange(" + y + ", " + anim + ", " + typeName + ") OK");
                 } catch (Throwable t) {
-                    XposedBridge.log(TAG + "drive failed: " + Log.getStackTraceString(t));
+                    Xp.log(TAG + "drive failed: " + Log.getStackTraceString(t));
                 }
             }
         });
@@ -973,7 +987,7 @@ public class Main implements IXposedHookLoadPackage {
     private static void setClockParams(final float w, final float h, final float weight,
                                        final int size, final float sizeInternal) {
         final View v = sContainer;
-        if (v == null) { XposedBridge.log(TAG + "no clock container"); return; }
+        if (v == null) { Xp.log(TAG + "no clock container"); return; }
         v.post(new Runnable() {
             @Override
             public void run() {
@@ -981,27 +995,27 @@ public class Main implements IXposedHookLoadPackage {
                     int id = v.getContext().getResources()
                             .getIdentifier("hour_view", "id", "com.android.systemui");
                     View t = v.getRootView().findViewById(id);
-                    if (t == null) { XposedBridge.log(TAG + "hour_view not found"); return; }
+                    if (t == null) { Xp.log(TAG + "hour_view not found"); return; }
                     // setClockParams()'s argument order is not (width, height, weight) - feeding
                     // it the fields' own values rotated them - so drive the three axes through
                     // their individual setters instead, where the mapping is unambiguous.
-                    if (size >= 0) XposedHelpers.callMethod(t, "setSize", size);
+                    if (size >= 0) Xp.callMethod(t, "setSize", size);
                     // setSize(int) only stores the value; textSizePx - the actual point size,
                     // and the knob that reaches well below the font axes' floor - comes from here.
-                    if (sizeInternal >= 0) XposedHelpers.callMethod(t, "setSizeInternal", sizeInternal);
-                    if (w >= 0) XposedHelpers.callMethod(t, "setWidth", w);
-                    if (h >= 0) XposedHelpers.callMethod(t, "setHeight", h);
-                    if (weight >= 0) XposedHelpers.callMethod(t, "setWeight", weight);
+                    if (sizeInternal >= 0) Xp.callMethod(t, "setSizeInternal", sizeInternal);
+                    if (w >= 0) Xp.callMethod(t, "setWidth", w);
+                    if (h >= 0) Xp.callMethod(t, "setHeight", h);
+                    if (weight >= 0) Xp.callMethod(t, "setWeight", weight);
                     t.invalidate();
-                    RectF b = (RectF) XposedHelpers.getObjectField(t, "mTextBounds");
-                    XposedBridge.log(TAG + "axes width=" + XposedHelpers.getObjectField(t, "width")
-                            + " height=" + XposedHelpers.getObjectField(t, "height")
-                            + " weight=" + XposedHelpers.getObjectField(t, "weight")
-                            + " size=" + XposedHelpers.getObjectField(t, "size")
-                            + " textSizePx=" + XposedHelpers.getObjectField(t, "textSizePx")
+                    RectF b = (RectF) Xp.getObjectField(t, "mTextBounds");
+                    Xp.log(TAG + "axes width=" + Xp.getObjectField(t, "width")
+                            + " height=" + Xp.getObjectField(t, "height")
+                            + " weight=" + Xp.getObjectField(t, "weight")
+                            + " size=" + Xp.getObjectField(t, "size")
+                            + " textSizePx=" + Xp.getObjectField(t, "textSizePx")
                             + " -> glyphs " + Math.round(b.width()) + "x" + Math.round(b.height()));
                 } catch (Throwable e) {
-                    XposedBridge.log(TAG + "setClockParams failed: " + Log.getStackTraceString(e));
+                    Xp.log(TAG + "setClockParams failed: " + Log.getStackTraceString(e));
                 }
             }
         });
@@ -1010,7 +1024,7 @@ public class Main implements IXposedHookLoadPackage {
     /** Dumps the declared API of one view in the clock tree, to find the size knobs. */
     private static void dumpApi(String idName) {
         View v = sContainer;
-        if (v == null) { XposedBridge.log(TAG + "no clock container"); return; }
+        if (v == null) { Xp.log(TAG + "no clock container"); return; }
         if (idName == null) idName = "hour_view";
         int id = v.getContext().getResources().getIdentifier(idName, "id", "com.android.systemui");
         View target = id == 0 ? null : v.getRootView().findViewById(id);
@@ -1019,11 +1033,11 @@ public class Main implements IXposedHookLoadPackage {
             View[] roots = clockRoots();
             target = roots.length == 0 ? null : ((android.view.ViewGroup) roots[0]).getChildAt(0);
         }
-        if (target == null) { XposedBridge.log(TAG + idName + " not found"); return; }
+        if (target == null) { Xp.log(TAG + idName + " not found"); return; }
         Class<?> c = target.getClass();
-        XposedBridge.log(TAG + idName + " = " + c.getName());
+        Xp.log(TAG + idName + " = " + c.getName());
         for (; c != null && c != View.class; c = c.getSuperclass()) {
-            XposedBridge.log(TAG + "--- " + c.getName());
+            Xp.log(TAG + "--- " + c.getName());
             for (Method m : c.getDeclaredMethods()) {
                 StringBuilder sb = new StringBuilder("  ").append(m.getReturnType().getSimpleName())
                         .append(' ').append(m.getName()).append('(');
@@ -1032,7 +1046,7 @@ public class Main implements IXposedHookLoadPackage {
                     if (k > 0) sb.append(", ");
                     sb.append(ps[k].getSimpleName());
                 }
-                XposedBridge.log(TAG + sb.append(')'));
+                Xp.log(TAG + sb.append(')'));
             }
             for (java.lang.reflect.Field f : c.getDeclaredFields()) {
                 if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
@@ -1048,7 +1062,7 @@ public class Main implements IXposedHookLoadPackage {
                     }
                     val = arr.append(']').toString();
                 }
-                XposedBridge.log(TAG + "  ." + f.getName() + " = " + val);
+                Xp.log(TAG + "  ." + f.getName() + " = " + val);
             }
         }
     }
@@ -1056,7 +1070,7 @@ public class Main implements IXposedHookLoadPackage {
     private static void dumpViewTree(boolean fromRoot) {
         View v = sContainer;
         if (v == null) {
-            XposedBridge.log(TAG + "no clock container");
+            Xp.log(TAG + "no clock container");
             return;
         }
         dumpViewTree(fromRoot ? v.getRootView() : v, 0);
@@ -1075,15 +1089,15 @@ public class Main implements IXposedHookLoadPackage {
      */
     private static void dumpClockStyleInfo() {
         try {
-            Class<?> tv = XposedHelpers.findClass(CLS_TIME_VIEW, sContainerCls.getClassLoader());
+            Class<?> tv = Xp.findClass(CLS_TIME_VIEW, sContainerCls.getClassLoader());
             Class<?> info = tv.getDeclaredMethod("getClockStyleInfo").getReturnType();
-            XposedBridge.log(TAG + "ClockStyleInfo = " + info.getName());
+            Xp.log(TAG + "ClockStyleInfo = " + info.getName());
             for (Class<?> c = info; c != null && c != Object.class; c = c.getSuperclass()) {
                 for (java.lang.reflect.Field f : c.getDeclaredFields()) {
                     if (!java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
                     f.setAccessible(true);
                     try {
-                        XposedBridge.log(TAG + "  " + c.getSimpleName() + "." + f.getName()
+                        Xp.log(TAG + "  " + c.getSimpleName() + "." + f.getName()
                                 + " = " + f.get(null));
                     } catch (Throwable ignored) {
                     }
@@ -1094,10 +1108,10 @@ public class Main implements IXposedHookLoadPackage {
                     if (n.toLowerCase().contains("effect") || n.toLowerCase().contains("blend")
                             || n.toLowerCase().contains("color")) ms.append(n).append(' ');
                 }
-                if (ms.length() > 0) XposedBridge.log(TAG + "  " + c.getSimpleName() + " methods: " + ms);
+                if (ms.length() > 0) Xp.log(TAG + "  " + c.getSimpleName() + " methods: " + ms);
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "dumpClockStyleInfo failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "dumpClockStyleInfo failed: " + Log.getStackTraceString(t));
         }
     }
 
@@ -1106,12 +1120,12 @@ public class Main implements IXposedHookLoadPackage {
         ClassLoader cl = sContainerCls == null ? null : sContainerCls.getClassLoader();
         Class<?> c;
         try {
-            c = XposedHelpers.findClass(name, cl);
+            c = Xp.findClass(name, cl);
         } catch (Throwable t) {
-            XposedBridge.log(TAG + name + " NOT FOUND");
+            Xp.log(TAG + name + " NOT FOUND");
             return;
         }
-        XposedBridge.log(TAG + "=== " + c.getName());
+        Xp.log(TAG + "=== " + c.getName());
         String g = grep == null ? null : grep.toLowerCase();
         for (Class<?> k = c; k != null && k != Object.class; k = k.getSuperclass()) {
             for (Method m : k.getDeclaredMethods()) {
@@ -1125,13 +1139,13 @@ public class Main implements IXposedHookLoadPackage {
                 sb.append(')');
                 String line = sb.toString();
                 if (g == null || line.toLowerCase().contains(g)) {
-                    XposedBridge.log(TAG + "  " + line);
+                    Xp.log(TAG + "  " + line);
                 }
             }
             for (java.lang.reflect.Field f : k.getDeclaredFields()) {
                 String line = f.getType().getSimpleName() + " ." + f.getName();
                 if (g == null || line.toLowerCase().contains(g)) {
-                    XposedBridge.log(TAG + "  " + line);
+                    Xp.log(TAG + "  " + line);
                 }
             }
         }
@@ -1161,12 +1175,12 @@ public class Main implements IXposedHookLoadPackage {
                         .append(" vis=").append(v.getVisibility());
                 try {
                     sb.append(" textBounds=")
-                            .append(XposedHelpers.callMethod(v, "getTextBoundsWithPosition"))
-                            .append(" drawY=").append(XposedHelpers.callMethod(v, "getDrawTextY"))
-                            .append(" textTop=").append(XposedHelpers.callMethod(v, "getTextTop"));
+                            .append(Xp.callMethod(v, "getTextBoundsWithPosition"))
+                            .append(" drawY=").append(Xp.callMethod(v, "getDrawTextY"))
+                            .append(" textTop=").append(Xp.callMethod(v, "getTextTop"));
                 } catch (Throwable ignored) {
                 }
-                XposedBridge.log(TAG + sb);
+                Xp.log(TAG + sb);
             }
         }
     }
@@ -1180,7 +1194,7 @@ public class Main implements IXposedHookLoadPackage {
     /** Reads, and optionally pokes, the MiGlass shader parameter array on both clock trees. */
     private static void pokeGlassData(final int idx, final float value) {
         final View v = sContainer;
-        if (v == null) { XposedBridge.log(TAG + "no clock container"); return; }
+        if (v == null) { Xp.log(TAG + "no clock container"); return; }
         v.post(new Runnable() {
             @Override
             public void run() {
@@ -1191,7 +1205,7 @@ public class Main implements IXposedHookLoadPackage {
                                     .getIdentifier(id, "id", "com.android.systemui");
                             View t = rid == 0 ? null : root.findViewById(rid);
                             if (t == null || t.getVisibility() != View.VISIBLE) continue;
-                            float[] g = (float[]) XposedHelpers.getObjectField(t, "glassData");
+                            float[] g = (float[]) Xp.getObjectField(t, "glassData");
                             if (g == null) continue;
                             if (idx >= 0 && idx < g.length) g[idx] = value;
                             t.invalidate();
@@ -1200,9 +1214,9 @@ public class Main implements IXposedHookLoadPackage {
                                 if (j > 0) sb.append(", ");
                                 sb.append(j).append(':').append(g[j]);
                             }
-                            XposedBridge.log(TAG + viewIdOf(root) + "/" + id + " glassData=[" + sb + "]");
+                            Xp.log(TAG + viewIdOf(root) + "/" + id + " glassData=[" + sb + "]");
                         } catch (Throwable e) {
-                            XposedBridge.log(TAG + "pokeGlassData " + id + ": " + e);
+                            Xp.log(TAG + "pokeGlassData " + id + ": " + e);
                         }
                     }
                 }
@@ -1245,7 +1259,7 @@ public class Main implements IXposedHookLoadPackage {
                 View v = findClockView(root, id);
                 if (v == null || v.getVisibility() != View.VISIBLE) continue;
                 try {
-                    RectF r = (RectF) XposedHelpers.callMethod(v, "getTextBoundsWithPosition");
+                    RectF r = (RectF) Xp.callMethod(v, "getTextBoundsWithPosition");
                     if (r == null || r.height() <= 0f) continue;
                     top = Math.min(top, v.getTop() + r.top);
                 } catch (Throwable ignored) {
@@ -1370,7 +1384,7 @@ public class Main implements IXposedHookLoadPackage {
             g.setTranslationY(dateBottom + gap - (g.getTop() + glyph));
         }
         if (sVerbose) {
-            XposedBridge.log(TAG + "collapse y=" + y + " p=" + p + " k=" + k
+            Xp.log(TAG + "collapse y=" + y + " p=" + p + " k=" + k
                     + " glyphTop=" + glyph + " dateBottom=" + dateBottom + " nudge=" + nudge);
         }
     }
@@ -1405,12 +1419,12 @@ public class Main implements IXposedHookLoadPackage {
                 }
             }
             if (best != null) {
-                XposedBridge.log(TAG + "media session -> " + best.getPackageName()
+                Xp.log(TAG + "media session -> " + best.getPackageName()
                         + " (of " + cs.size() + ")");
             }
             return best;
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "getActiveSessions failed: " + t);
+            Xp.log(TAG + "getActiveSessions failed: " + t);
             return null;
         }
     }
@@ -1435,12 +1449,12 @@ public class Main implements IXposedHookLoadPackage {
                     b = md.getDescription().getIconBitmap();
                 }
                 if (b != null) {
-                    XposedBridge.log(TAG + "album art from " + c.getPackageName()
+                    Xp.log(TAG + "album art from " + c.getPackageName()
                             + " " + b.getWidth() + "x" + b.getHeight() + " \""
                             + md.getString(MediaMetadata.METADATA_KEY_TITLE) + "\"");
                     return b;
                 }
-                XposedBridge.log(TAG + c.getPackageName() + " carries no art bitmap (uri="
+                Xp.log(TAG + c.getPackageName() + " carries no art bitmap (uri="
                         + md.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI) + ")");
             }
         }
@@ -1484,7 +1498,7 @@ public class Main implements IXposedHookLoadPackage {
             }
         }
         if (out[0] != null) {
-            XposedBridge.log(TAG + "album art from media card thumbnail "
+            Xp.log(TAG + "album art from media card thumbnail "
                     + out[0].getWidth() + "x" + out[0].getHeight());
         }
         return out[0];
@@ -1509,10 +1523,10 @@ public class Main implements IXposedHookLoadPackage {
             out.putExtra("off", true);
             ctx.sendBroadcast(out);
             sTrackKey = "";
-            XposedBridge.log(TAG + "pushart off");
+            Xp.log(TAG + "pushart off");
             return;
         }
-        if (art == null) { XposedBridge.log(TAG + "pushart: no album art"); return; }
+        if (art == null) { Xp.log(TAG + "pushart: no album art"); return; }
         int w = sScreenW, h = sScreenH;
         Bitmap full = composeWallpaper(art, w, h, sBias);
         long tc = android.os.SystemClock.uptimeMillis();
@@ -1528,7 +1542,7 @@ public class Main implements IXposedHookLoadPackage {
         full.recycle();
         out.putExtra("jpg", jpg);
         ctx.sendBroadcast(out);
-        XposedBridge.log(TAG + "pushart " + w + "x" + h + " bias=" + sBias
+        Xp.log(TAG + "pushart " + w + "x" + h + " bias=" + sBias
                 + " as " + jpg.length + "B jpeg, draw " + (tc - t0) + "ms encode "
                 + (android.os.SystemClock.uptimeMillis() - tc) + "ms");
     }
@@ -1559,14 +1573,14 @@ public class Main implements IXposedHookLoadPackage {
     private static void setBias(float v) {
         sBias = clamp01(v);
         saveState();
-        XposedBridge.log(TAG + "cover bias = " + sBias);
+        Xp.log(TAG + "cover bias = " + sBias);
         if (sCoverMode) pushArtAsync(true, false);
     }
 
     /** Asks the wallpaper process to re-upload the art it already has on disk. */
     private static void requestWallpaperReload(Context ctx) {
         ctx.sendBroadcast(wallpaperIntent("reload"));
-        XposedBridge.log(TAG + "wallpaper reload requested");
+        Xp.log(TAG + "wallpaper reload requested");
     }
 
     /**
@@ -1661,7 +1675,7 @@ public class Main implements IXposedHookLoadPackage {
             @Override
             public void run() {
                 if (gen != sPushGen) {
-                    XposedBridge.log(TAG + "art push superseded, dropping it");
+                    Xp.log(TAG + "art push superseded, dropping it");
                     return;
                 }
                 boolean last = attempt >= ART_TRIES - 1;
@@ -1669,14 +1683,14 @@ public class Main implements IXposedHookLoadPackage {
                 int print = art == null ? 0 : artPrint(art);
                 boolean stale = fresh && art != null && sArtPrint != 0 && print == sArtPrint;
                 if ((art == null || stale) && !last) {
-                    XposedBridge.log(TAG + "art " + (art == null ? "not ready" : "still the old one")
+                    Xp.log(TAG + "art " + (art == null ? "not ready" : "still the old one")
                             + ", retrying (" + (attempt + 2) + "/" + ART_TRIES + ")");
                     tryPushArt(ctx, attempt + 1, fresh, gen);
                     return;
                 }
                 if (stale) {
                     // The next track off the same album really does have the same cover.
-                    XposedBridge.log(TAG + "same artwork as the last track, wallpaper left alone");
+                    Xp.log(TAG + "same artwork as the last track, wallpaper left alone");
                     return;
                 }
                 sArtPrint = print;
@@ -1723,17 +1737,17 @@ public class Main implements IXposedHookLoadPackage {
                     return true;
                 }
             } catch (Throwable t) {
-                XposedBridge.log(TAG + "cannot read the lock wallpaper slot: " + t);
+                Xp.log(TAG + "cannot read the lock wallpaper slot: " + t);
                 return false;
             }
-            XposedBridge.log(TAG + "lock screen has no wallpaper of its own - the keyguard "
+            Xp.log(TAG + "lock screen has no wallpaper of its own - the keyguard "
                     + "wallpaper engine cannot exist, so the cover has nowhere to go. Giving it a "
                     + "copy of the home wallpaper.");
         }
         try {
             Bitmap home = homeWallpaper(wm);
             if (home == null) {
-                XposedBridge.log(TAG + "no home wallpaper bitmap to copy");
+                Xp.log(TAG + "no home wallpaper bitmap to copy");
                 return false;
             }
             // At the screen's own size, deliberately. Whatever goes in this slot becomes the
@@ -1745,11 +1759,11 @@ public class Main implements IXposedHookLoadPackage {
             wm.setBitmap(fitted, null, true, android.app.WallpaperManager.FLAG_LOCK);
             if (fitted != home) fitted.recycle();
             home.recycle();
-            XposedBridge.log(TAG + "lock wallpaper set at " + sScreenW + "x" + sScreenH
+            Xp.log(TAG + "lock wallpaper set at " + sScreenW + "x" + sScreenH
                     + "; the keyguard engine will be rebuilt");
             return true;
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "could not set a lock wallpaper: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "could not set a lock wallpaper: " + Log.getStackTraceString(t));
             return false;
         }
     }
@@ -1779,7 +1793,7 @@ public class Main implements IXposedHookLoadPackage {
                 }
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "reading the home wallpaper file failed: " + t);
+            Xp.log(TAG + "reading the home wallpaper file failed: " + t);
         }
         // A live or default home wallpaper has no file; render whatever is showing instead.
         try {
@@ -1826,9 +1840,9 @@ public class Main implements IXposedHookLoadPackage {
             android.app.WallpaperManager wm = (android.app.WallpaperManager)
                     ctx.getSystemService(Context.WALLPAPER_SERVICE);
             wm.clear(android.app.WallpaperManager.FLAG_LOCK);
-            XposedBridge.log(TAG + "lock wallpaper cleared, back to following the home one");
+            Xp.log(TAG + "lock wallpaper cleared, back to following the home one");
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "clearLockWallpaper failed: " + t);
+            Xp.log(TAG + "clearLockWallpaper failed: " + t);
         }
     }
 
@@ -1890,7 +1904,7 @@ public class Main implements IXposedHookLoadPackage {
         sAppliedGlassV = Float.NaN;
         sHoldY = SQUEEZE_FLOOR;
         drive(SQUEEZE_FLOOR, false, "STATE_CHANGED");
-        XposedBridge.log(TAG + "cover clock re-collapsed after wake");
+        Xp.log(TAG + "cover clock re-collapsed after wake");
     }
 
     private static void setDepthHidden(final boolean hide) {
@@ -1921,7 +1935,7 @@ public class Main implements IXposedHookLoadPackage {
                 }
                 d.setVisibility(hide ? View.INVISIBLE : View.VISIBLE);
                 if (hide) guardDepth(d); else releaseDepthGuard();
-                XposedBridge.log(TAG + "deducted_image_view " + (hide ? "hidden" : "shown"));
+                Xp.log(TAG + "deducted_image_view " + (hide ? "hidden" : "shown"));
                 saveState();
             }
         });
@@ -1932,10 +1946,10 @@ public class Main implements IXposedHookLoadPackage {
 
     private static void retryDepth(final boolean hide, final int attempt, String why) {
         if (attempt >= DEPTH_RETRIES) {
-            XposedBridge.log(TAG + why + ", giving up after " + attempt + " tries");
+            Xp.log(TAG + why + ", giving up after " + attempt + " tries");
             return;
         }
-        if (attempt == 0) XposedBridge.log(TAG + why + ", retrying");
+        if (attempt == 0) Xp.log(TAG + why + ", retrying");
         main().postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -1961,7 +1975,7 @@ public class Main implements IXposedHookLoadPackage {
                     // this cannot start a traversal loop.
                     d.setVisibility(View.INVISIBLE);
                     if (++sDepthTakebacks <= 5 || sDepthTakebacks % 100 == 0) {
-                        XposedBridge.log(TAG + "system re-showed the cut-out, re-hidden ("
+                        Xp.log(TAG + "system re-showed the cut-out, re-hidden ("
                                 + sDepthTakebacks + ")");
                     }
                 }
@@ -1970,7 +1984,7 @@ public class Main implements IXposedHookLoadPackage {
         };
         d.getViewTreeObserver().addOnPreDrawListener(sDepthGuard);
         sDepthGuarded = d;
-        XposedBridge.log(TAG + "depth guard installed");
+        Xp.log(TAG + "depth guard installed");
     }
 
     private static void releaseDepthGuard() {
@@ -2147,7 +2161,7 @@ public class Main implements IXposedHookLoadPackage {
     private static void attachCover() {
         final View v = sContainer;
         if (v == null) {
-            XposedBridge.log(TAG + "no clock container");
+            Xp.log(TAG + "no clock container");
             return;
         }
         v.post(new Runnable() {
@@ -2159,12 +2173,12 @@ public class Main implements IXposedHookLoadPackage {
                             "keyguard_background_layer", "id", "com.android.systemui");
                     View layer = id == 0 ? null : v.getRootView().findViewById(id);
                     if (!(layer instanceof ViewGroup)) {
-                        XposedBridge.log(TAG + "keyguard_background_layer not found");
+                        Xp.log(TAG + "keyguard_background_layer not found");
                         return;
                     }
                     Bitmap art = albumArt(ctx);
                     if (art == null) {
-                        XposedBridge.log(TAG + "no album art available");
+                        Xp.log(TAG + "no album art available");
                         return;
                     }
                     ImageView iv = sCover;
@@ -2179,10 +2193,10 @@ public class Main implements IXposedHookLoadPackage {
                     }
                     iv.setImageBitmap(art);
                     rebindSession();
-                    XposedBridge.log(TAG + "cover attached, layer "
+                    Xp.log(TAG + "cover attached, layer "
                             + layer.getWidth() + "x" + layer.getHeight());
                 } catch (Throwable t) {
-                    XposedBridge.log(TAG + "attachCover failed: " + Log.getStackTraceString(t));
+                    Xp.log(TAG + "attachCover failed: " + Log.getStackTraceString(t));
                 }
             }
         });
@@ -2194,7 +2208,7 @@ public class Main implements IXposedHookLoadPackage {
      */
     private static synchronized void setAuto(boolean on) {
         sAuto = on;
-        XposedBridge.log(TAG + "auto mode " + (on ? "on" : "off"));
+        Xp.log(TAG + "auto mode " + (on ? "on" : "off"));
         saveState();
         if (!on) {
             main().removeCallbacks(sCardGone);
@@ -2215,7 +2229,7 @@ public class Main implements IXposedHookLoadPackage {
         if (showing) {
             try {
                 sCardToken = (android.media.session.MediaSession.Token)
-                        XposedHelpers.getObjectField(mediaData, "token");
+                        Xp.getObjectField(mediaData, "token");
             } catch (Throwable t) {
                 sCardToken = null;
             }
@@ -2224,7 +2238,7 @@ public class Main implements IXposedHookLoadPackage {
             sCardToken = null;
             sCardKey = "";
         }
-        XposedBridge.log(TAG + "media card " + (showing ? "-> " + sCardKey : "gone"));
+        Xp.log(TAG + "media card " + (showing ? "-> " + sCardKey : "gone"));
         main().removeCallbacks(sCardGone);
         if (!sAuto) {
             sCardShowing = showing;
@@ -2254,7 +2268,7 @@ public class Main implements IXposedHookLoadPackage {
         if (!sCardShowing) {
             sTrackKey = "";
             if (sCoverMode) {
-                XposedBridge.log(TAG + "media card dismissed, leaving cover mode");
+                Xp.log(TAG + "media card dismissed, leaving cover mode");
                 setCoverEnabled(false, true);
             }
             return;
@@ -2265,9 +2279,9 @@ public class Main implements IXposedHookLoadPackage {
     /** Track identity as the card itself sees it. */
     private static String cardKey(Object mediaData) {
         try {
-            return XposedHelpers.getObjectField(mediaData, "packageName")
-                    + "|" + XposedHelpers.getObjectField(mediaData, "song")
-                    + "|" + XposedHelpers.getObjectField(mediaData, "artist");
+            return Xp.getObjectField(mediaData, "packageName")
+                    + "|" + Xp.getObjectField(mediaData, "song")
+                    + "|" + Xp.getObjectField(mediaData, "artist");
         } catch (Throwable t) {
             return String.valueOf(mediaData);
         }
@@ -2291,10 +2305,10 @@ public class Main implements IXposedHookLoadPackage {
                     }
                 };
                 sMsm.addOnActiveSessionsChangedListener(sSessionsCb, null, main());
-                XposedBridge.log(TAG + "active-session listener registered");
+                Xp.log(TAG + "active-session listener registered");
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "session listener failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "session listener failed: " + Log.getStackTraceString(t));
         }
         rebindSession();
     }
@@ -2335,12 +2349,12 @@ public class Main implements IXposedHookLoadPackage {
                 };
                 try {
                     c.registerCallback(sMediaCb, main());
-                    XposedBridge.log(TAG + "following " + c.getPackageName());
+                    Xp.log(TAG + "following " + c.getPackageName());
                 } catch (Throwable t) {
-                    XposedBridge.log(TAG + "registerCallback failed: " + t);
+                    Xp.log(TAG + "registerCallback failed: " + t);
                 }
             } else {
-                XposedBridge.log(TAG + "no active media session");
+                Xp.log(TAG + "no active media session");
             }
         }
         onMediaUpdate();
@@ -2363,7 +2377,7 @@ public class Main implements IXposedHookLoadPackage {
         try {
             return new MediaController(ctx, t);
         } catch (Throwable e) {
-            XposedBridge.log(TAG + "card token unusable: " + e);
+            Xp.log(TAG + "card token unusable: " + e);
             return null;
         }
     }
@@ -2379,7 +2393,7 @@ public class Main implements IXposedHookLoadPackage {
         String key = sCardKey.isEmpty() ? trackKey(sWatched) : sCardKey;
         if (sCoverMode && key.equals(sTrackKey)) return;
         sTrackKey = key;
-        XposedBridge.log(TAG + "card track: " + key);
+        Xp.log(TAG + "card track: " + key);
         if (sCoverMode) pushArtAsync(true, true);
         else setCoverEnabled(true, true);
     }
@@ -2445,9 +2459,9 @@ public class Main implements IXposedHookLoadPackage {
                     ViewGroup p = (ViewGroup) iv.getParent();
                     if (p != null) p.removeView(iv);
                     iv.setImageDrawable(null);
-                    XposedBridge.log(TAG + "cover detached");
+                    Xp.log(TAG + "cover detached");
                 } catch (Throwable t) {
-                    XposedBridge.log(TAG + "detachCover failed: " + t);
+                    Xp.log(TAG + "detachCover failed: " + t);
                 }
             }
         });
@@ -2463,7 +2477,7 @@ public class Main implements IXposedHookLoadPackage {
             try {
                 View c = ((android.view.ViewGroup) root).getChildAt(0);
                 if (c == null) continue;
-                XposedHelpers.callMethod(c, "updateGlassValue", g);
+                Xp.callMethod(c, "updateGlassValue", g);
             } catch (Throwable ignored) {
             }
         }
@@ -2473,7 +2487,7 @@ public class Main implements IXposedHookLoadPackage {
     private static void callOnClockViews(final String method, final String kind, final float f,
                                          final int n, final boolean b) {
         final View v = sContainer;
-        if (v == null || method == null) { XposedBridge.log(TAG + "callclock: need m="); return; }
+        if (v == null || method == null) { Xp.log(TAG + "callclock: need m="); return; }
         v.post(new Runnable() {
             @Override
             public void run() {
@@ -2482,12 +2496,12 @@ public class Main implements IXposedHookLoadPackage {
                     try {
                         View c = ((android.view.ViewGroup) root).getChildAt(0);
                         if (c == null) continue;
-                        XposedHelpers.callMethod(c, method, arg);
+                        Xp.callMethod(c, method, arg);
                         c.invalidate();
-                        XposedBridge.log(TAG + viewIdOf(root) + " " + c.getClass().getSimpleName()
+                        Xp.log(TAG + viewIdOf(root) + " " + c.getClass().getSimpleName()
                                 + "." + method + "(" + arg + ") ok");
                     } catch (Throwable e) {
-                        XposedBridge.log(TAG + "callclock " + method + ": " + e);
+                        Xp.log(TAG + "callclock " + method + ": " + e);
                     }
                 }
             }
@@ -2498,7 +2512,7 @@ public class Main implements IXposedHookLoadPackage {
     private static void callOnTimeViews(final String method, final String kind, final float f,
                                         final int n, final boolean b) {
         final View v = sContainer;
-        if (v == null || method == null) { XposedBridge.log(TAG + "call: need m="); return; }
+        if (v == null || method == null) { Xp.log(TAG + "call: need m="); return; }
         v.post(new Runnable() {
             @Override
             public void run() {
@@ -2511,15 +2525,15 @@ public class Main implements IXposedHookLoadPackage {
                                     .getIdentifier(id, "id", "com.android.systemui");
                             View t = rid == 0 ? null : root.findViewById(rid);
                             if (t == null) continue;
-                            XposedHelpers.callMethod(t, method, arg);
+                            Xp.callMethod(t, method, arg);
                             t.invalidate();
                             hits++;
                         } catch (Throwable e) {
-                            XposedBridge.log(TAG + "call " + method + " on " + id + ": " + e);
+                            Xp.log(TAG + "call " + method + " on " + id + ": " + e);
                         }
                     }
                 }
-                XposedBridge.log(TAG + "call " + method + "(" + arg + ") applied to " + hits + " views");
+                Xp.log(TAG + "call " + method + "(" + arg + ") applied to " + hits + " views");
             }
         });
     }
@@ -2527,7 +2541,7 @@ public class Main implements IXposedHookLoadPackage {
     /** The MiGlass shader samples the wallpaper and does not follow a child View's scale. */
     private static void setGlass(final boolean on) {
         final View v = sContainer;
-        if (v == null) { XposedBridge.log(TAG + "no clock container"); return; }
+        if (v == null) { Xp.log(TAG + "no clock container"); return; }
         v.post(new Runnable() {
             @Override
             public void run() {
@@ -2538,14 +2552,14 @@ public class Main implements IXposedHookLoadPackage {
                                     .getIdentifier(id, "id", "com.android.systemui");
                             View t = rid == 0 ? null : root.findViewById(rid);
                             if (t == null) continue;
-                            XposedHelpers.callMethod(t, "setMiGlassEffectEnable", on);
+                            Xp.callMethod(t, "setMiGlassEffectEnable", on);
                             t.invalidate();
                         } catch (Throwable e) {
-                            XposedBridge.log(TAG + "setGlass " + id + " failed: " + e);
+                            Xp.log(TAG + "setGlass " + id + " failed: " + e);
                         }
                     }
                 }
-                XposedBridge.log(TAG + "glass=" + on);
+                Xp.log(TAG + "glass=" + on);
             }
         });
     }
@@ -2553,7 +2567,7 @@ public class Main implements IXposedHookLoadPackage {
     private static void groupScale(final String idName, final float k, final float px,
                                    final float py, final float ty) {
         final View v = sContainer;
-        if (v == null) { XposedBridge.log(TAG + "no clock container"); return; }
+        if (v == null) { Xp.log(TAG + "no clock container"); return; }
         v.post(new Runnable() {
             @Override
             public void run() {
@@ -2570,13 +2584,13 @@ public class Main implements IXposedHookLoadPackage {
                         g.setScaleY(k);
                         g.setTranslationY(ty);
                         n++;
-                        XposedBridge.log(TAG + idName + " in " + viewIdOf(root) + " scale=" + k
+                        Xp.log(TAG + idName + " in " + viewIdOf(root) + " scale=" + k
                                 + " pivot=" + g.getPivotX() + "," + g.getPivotY() + " ty=" + ty
                                 + " size=" + g.getWidth() + "x" + g.getHeight());
                     }
-                    if (n == 0) XposedBridge.log(TAG + idName + " not found in either clock root");
+                    if (n == 0) Xp.log(TAG + idName + " not found in either clock root");
                 } catch (Throwable e) {
-                    XposedBridge.log(TAG + "groupScale failed: " + Log.getStackTraceString(e));
+                    Xp.log(TAG + "groupScale failed: " + Log.getStackTraceString(e));
                 }
             }
         });
@@ -2636,7 +2650,7 @@ public class Main implements IXposedHookLoadPackage {
               .append(" fontVar=").append(t.getFontVariationSettings())
               .append(" text=\"").append(t.getText()).append('"');
         }
-        XposedBridge.log(TAG + sb);
+        Xp.log(TAG + sb);
         if (v instanceof android.view.ViewGroup) {
             android.view.ViewGroup g = (android.view.ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) dumpViewTree(g.getChildAt(i), depth + 1);
@@ -2646,23 +2660,23 @@ public class Main implements IXposedHookLoadPackage {
     private static void dumpInfo() {
         View v = sContainer;
         if (v == null) {
-            XposedBridge.log(TAG + "no clock container");
+            Xp.log(TAG + "no clock container");
             return;
         }
         int[] loc = new int[2];
         v.getLocationOnScreen(loc);
-        XposedBridge.log(TAG + "container onScreen=[" + loc[0] + "," + loc[1] + "] size="
+        Xp.log(TAG + "container onScreen=[" + loc[0] + "," + loc[1] + "] size="
                 + v.getWidth() + "x" + v.getHeight());
         try {
-            XposedBridge.log(TAG + "getClockBottom()=" + XposedHelpers.callMethod(v, "getClockBottom"));
+            Xp.log(TAG + "getClockBottom()=" + Xp.callMethod(v, "getClockBottom"));
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "getClockBottom failed: " + t);
+            Xp.log(TAG + "getClockBottom failed: " + t);
         }
         try {
-            XposedBridge.log(TAG + "getNotificationClockTop()="
-                    + XposedHelpers.callMethod(v, "getNotificationClockTop"));
+            Xp.log(TAG + "getNotificationClockTop()="
+                    + Xp.callMethod(v, "getNotificationClockTop"));
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "getNotificationClockTop failed: " + t);
+            Xp.log(TAG + "getNotificationClockTop failed: " + t);
         }
         logViewById(v, "mi_media_controls");
         logViewById(v, "album_art_image");
@@ -2676,24 +2690,24 @@ public class Main implements IXposedHookLoadPackage {
     private static void dumpAnimConfigs() {
         View v = sContainer;
         if (v == null) {
-            XposedBridge.log(TAG + "no clock container");
+            Xp.log(TAG + "no clock container");
             return;
         }
         try {
-            Object helper = XposedHelpers.getObjectField(v, "mAnimationHelper");
-            Object anim = XposedHelpers.getObjectField(helper, "mClockAnima");
-            XposedBridge.log(TAG + "clock animation impl = " + anim.getClass().getName());
+            Object helper = Xp.getObjectField(v, "mAnimationHelper");
+            Object anim = Xp.getObjectField(helper, "mClockAnima");
+            Xp.log(TAG + "clock animation impl = " + anim.getClass().getName());
             for (String f : new String[]{"stateChangedAnimConfig", "notifsChangedAnimConfig",
                     "defaultAnimConfig", "animRunningConfig"}) {
                 try {
-                    Object cfg = XposedHelpers.getObjectField(anim, f);
-                    XposedBridge.log(TAG + f + " = " + describe(cfg));
+                    Object cfg = Xp.getObjectField(anim, f);
+                    Xp.log(TAG + f + " = " + describe(cfg));
                 } catch (Throwable t) {
-                    XposedBridge.log(TAG + f + " unavailable: " + t);
+                    Xp.log(TAG + f + " unavailable: " + t);
                 }
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "dumpAnimConfigs failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "dumpAnimConfigs failed: " + Log.getStackTraceString(t));
         }
     }
 
@@ -2756,20 +2770,20 @@ public class Main implements IXposedHookLoadPackage {
             Context c = anchor.getContext();
             int id = c.getResources().getIdentifier(idName, "id", "com.android.systemui");
             if (id == 0) {
-                XposedBridge.log(TAG + idName + ": id not found");
+                Xp.log(TAG + idName + ": id not found");
                 return;
             }
             View found = anchor.getRootView().findViewById(id);
             if (found == null) {
-                XposedBridge.log(TAG + idName + ": view not present");
+                Xp.log(TAG + idName + ": view not present");
                 return;
             }
             int[] loc = new int[2];
             found.getLocationOnScreen(loc);
             Rect r = new Rect(loc[0], loc[1], loc[0] + found.getWidth(), loc[1] + found.getHeight());
-            XposedBridge.log(TAG + idName + ": " + r + " vis=" + found.getVisibility());
+            Xp.log(TAG + idName + ": " + r + " vis=" + found.getVisibility());
         } catch (Throwable t) {
-            XposedBridge.log(TAG + idName + " lookup failed: " + t);
+            Xp.log(TAG + idName + " lookup failed: " + t);
         }
     }
 }
