@@ -1,0 +1,116 @@
+name: Release
+
+# A stable release is cut from a tag and from nothing else. Pushing vMAJOR.MINOR.PATCH builds
+# that commit, signs it with the real key and publishes it; the tag is the single source of the
+# version, so nothing here has to be kept in step with build.gradle.kts by hand.
+#
+# Notes are GitHub's own generated ones. Nightlies live in nightly.yml and are pruned by tag
+# prefix, so nothing there ever touches what this publishes.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and publish'
+        required: true
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Forks inherit the workflow but must not publish releases of their own.
+    if: github.repository == 'zyl6932/HyperMusicCover'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Read the version out of the tag
+        id: v
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          name="${tag#v}"
+          major="${name%%.*}"
+          rest="${name#*.}"
+          minor="${rest%%.*}"
+          patch="${rest#*.}"
+          for part in "$major" "$minor" "$patch"; do
+            case "$part" in
+              ''|*[!0-9]*)
+                echo "::error::tag '$tag' is not vMAJOR.MINOR.PATCH"
+                exit 1 ;;
+            esac
+          done
+          # Monotonic across every tag this scheme can produce, so a later release always
+          # installs over an earlier one without anyone having to remember a counter.
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$((major * 10000 + minor * 100 + patch))" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Unlike the nightly, a missing key is fatal here. A debug-signed stable release would
+      # carry a signature no other release shares, and nobody could install it over one.
+      - name: Restore the signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::error::SIGNING_KEYSTORE_BASE64 is not set - refusing to publish a debug-signed release."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > release.jks
+
+      - name: Build
+        env:
+          SIGNING_STORE_FILE: release.jks
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon assembleRelease \
+            "-PmcVersionName=${{ steps.v.outputs.name }}" \
+            "-PmcVersionCode=${{ steps.v.outputs.code }}"
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk \
+             "dist/HyperMusicCover-${{ steps.v.outputs.tag }}.apk"
+
+      # R8 sees the whole module as unreachable - LSPosed loads it by name out of the metadata
+      # below - so a rules mistake produces an APK that installs and does nothing at all. Cheap
+      # to check here, expensive to discover on a phone.
+      - name: Check the module survived R8
+        run: |
+          set -euo pipefail
+          apk=$(ls dist/*.apk)
+          unzip -p "$apk" META-INF/xposed/java_init.list | grep -qx 'com.os4.musiccover.Main'
+          unzip -p "$apk" META-INF/xposed/scope.list | grep -qx 'com.android.systemui'
+          unzip -p "$apk" META-INF/xposed/scope.list | grep -qx 'com.miui.miwallpaper'
+          echo "entry point and scope both present"
+
+      - name: Publish
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.v.outputs.tag }}" dist/*.apk \
+            --title "${{ steps.v.outputs.tag }}" \
+            --generate-notes

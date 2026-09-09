@@ -33,10 +33,12 @@ android {
         applicationId = "com.github.zyl6932.HyperMusicCover"
         minSdk = 35
         targetSdk = 37
-        // CI stamps nightlies with -PmcVersionCode / -PmcVersionSuffix so every build is
-        // distinguishable in LSPosed and in the About page; a plain local build keeps 1.0.
+        // CI stamps builds so every one is distinguishable in LSPosed and in the About page:
+        // release.yml derives -PmcVersionName / -PmcVersionCode from the tag, nightly.yml adds
+        // -PmcVersionSuffix. A plain local build keeps the values below.
         versionCode = (findProperty("mcVersionCode") as String?)?.toInt() ?: 2
-        versionName = "0.0.1" + ((findProperty("mcVersionSuffix") as String?) ?: "")
+        versionName = ((findProperty("mcVersionName") as String?) ?: "0.0.1") +
+                ((findProperty("mcVersionSuffix") as String?) ?: "")
     }
 
     signingConfigs {
