@@ -82,6 +82,12 @@ public class Main extends XposedModule {
      * wallpaper between two songs.
      */
     private static volatile boolean sVideoWallpaper;
+    /** The live wallpaper's cut-out subject, hidden alongside deducted_image_view. */
+    private static volatile View sVideoFg;
+    /** The live wallpaper itself, in the background layer, under our cover. */
+    private static volatile View sVideoBg;
+    /** The bitmap currently on sCover, ours to recycle when it is replaced. */
+    private static volatile Bitmap sCoverBitmap;
 
     private static volatile View sContainer;
     private static volatile Class<?> sContainerCls;
@@ -386,6 +392,14 @@ public class Main extends XposedModule {
                 if (sCoverWanted) {
                     sCover = null;
                     attachCover();
+                }
+                // The video path's cover is a view, so a keyguard rebuild takes it - and the
+                // wallpaper it was covering is hidden, so losing it without putting it back
+                // leaves the lock screen blank. Re-compose rather than re-show the old view:
+                // the track may have moved on while the screen was off.
+                if (sCoverMode && sVideoWallpaper) {
+                    sCover = null;
+                    pushArtAsync(true, false);
                 }
                 // Re-apply on keyguard rebuild. Measured: the system never re-shows the
                 // cut-out on its own, so no per-call ownership hook is warranted - hooking
@@ -963,6 +977,22 @@ public class Main extends XposedModule {
         ctx.registerReceiver(r, new IntentFilter(ACTION), Context.RECEIVER_EXPORTED);
         Xp.log(TAG + "receiver registered for " + ACTION);
         loadState();
+
+        // Which kind of wallpaper is on the lock screen decides where the cover is drawn, and
+        // cover mode can be restored from disk before any push has had a chance to work it
+        // out. Off the main thread: it reads MIUI's files.
+        final Context appCtx = ctx;
+        worker().post(new Runnable() {
+            @Override
+            public void run() {
+                String k = wallpaperKind(appCtx, "lock");
+                sVideoWallpaper = k != null && !KIND_IMAGE.equals(k);
+                if (sVideoWallpaper && sDepthHidden) main().post(new Runnable() {
+                    @Override
+                    public void run() { setDepthHidden(true); }
+                });
+            }
+        });
 
         // The keyguard container is NOT always torn down on screen off - verified on device,
         // onDetachedFromWindow never fired across a full off/on cycle - so detach alone is
@@ -2697,6 +2727,15 @@ public class Main extends XposedModule {
     }
 
     private static void pushArtToWallpaper(Context ctx, boolean on, Bitmap art) {
+        // A live lock wallpaper needs BOTH halves, and returning here after the first was why
+        // the card and the clock glass stayed on the video: this view covers the background,
+        // but those two sample the wallpaper WINDOW, and the only thing that paints it is the
+        // broadcast below. Falling through is what makes the wallpaper process paint it.
+        //
+        // It costs one extra compose per track change on this path - showVideoCover() composes
+        // for the view and the JPEG below composes again. Worth folding into one later; the
+        // correctness of having both matters more than the ~100ms.
+        if (sVideoWallpaper) showVideoCover(ctx, on, art);
         long t0 = android.os.SystemClock.uptimeMillis();
         Intent out = wallpaperIntent("art");
         // Only a request. The wallpaper process falls back to the one-frame swap whenever it
@@ -2730,6 +2769,111 @@ public class Main extends XposedModule {
         Xp.log(TAG + "pushart " + w + "x" + h + " bias=" + sBias
                 + " as " + jpg.length + "B jpeg, draw " + (tc - t0) + "ms encode "
                 + (android.os.SystemClock.uptimeMillis() - tc) + "ms");
+    }
+
+    /**
+     * The cover, for a lock screen whose wallpaper is a video (or any other live one).
+     *
+     * That case looked unreachable - MIUI builds a KeyguardVideoDepthEngineImpl instead of the
+     * image engine, so the GL texture this module replaces never exists - but the video does
+     * not live in the wallpaper process either. Traced on device: the engine decodes into two
+     * SurfaceTextures that SYSTEMUI supplies, drawn by two full-screen TextureViews that
+     * com.miui.keyguard.VideoDepthSurfaceHolder puts in keyguard_background_layer (behind the
+     * clock) and keyguard_foreground_layer (the cut-out subject, in front of it).
+     *
+     * So on this path the wallpaper is already inside our own view tree, and the cover is just
+     * a view above the background one. The rule that sent this module into the wallpaper
+     * process in the first place - that the clock's liquid glass and the card blur sample the
+     * wallpaper WINDOW, so an in-SystemUI cover is never picked up by them - does not hold
+     * here, because MIUI is not using that window either. Confirmed on device: the glass
+     * refracts a video wallpaper normally.
+     *
+     * Cheaper than the image path, too: no JPEG round trip and no cross-process broadcast, so
+     * the composed bitmap goes straight onto the view.
+     */
+    private static void showVideoCover(Context ctx, boolean on, Bitmap art) {
+        if (!on) {
+            detachCover();
+            setDepthHidden(false);
+            Xp.log(TAG + "video cover off");
+            return;
+        }
+        if (art == null) {
+            Xp.log(TAG + "video cover: no album art");
+            return;
+        }
+        long t0 = android.os.SystemClock.uptimeMillis();
+        // Composed here, on the worker, exactly as for the image path - same mirror-extend,
+        // blur and bias, so the two paths produce the same picture.
+        final Bitmap full = composeWallpaper(art, sScreenW, sScreenH, sBias);
+        final long draw = android.os.SystemClock.uptimeMillis() - t0;
+        main().post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    ViewGroup layer = coverLayer();
+                    if (layer == null) {
+                        Xp.log(TAG + "keyguard_background_layer not found for the video cover");
+                        full.recycle();
+                        return;
+                    }
+                    ImageView iv = sCover;
+                    if (iv == null || iv.getParent() != layer) {
+                        detachCover();
+                        iv = new ImageView(ctx);
+                        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                        // Added last, so it draws over the video's TextureView. The layer is
+                        // ordered, and a TextureView draws in the view hierarchy like any other
+                        // view - unlike a SurfaceView, which would punch through whatever we
+                        // put above it.
+                        layer.addView(iv, new ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT));
+                        sCover = iv;
+                    }
+                    iv.setImageBitmap(full);
+                    Bitmap old = sCoverBitmap;
+                    sCoverBitmap = full;
+                    if (old != null && old != full) old.recycle();
+                    // The video's own cut-out subject is a second TextureView in the FOREGROUND
+                    // layer, i.e. in front of the clock. Left alone it floats over the cover
+                    // exactly the way deducted_image_view did on the image path.
+                    setDepthHidden(true);
+                    Xp.log(TAG + "video cover shown " + sScreenW + "x" + sScreenH
+                            + " bias=" + sBias + ", draw " + draw + "ms");
+                } catch (Throwable t) {
+                    Xp.log(TAG + "video cover failed: " + Log.getStackTraceString(t));
+                }
+            }
+        });
+    }
+
+    /** keyguard_background_layer, which sits behind the whole clock stack. */
+    private static ViewGroup coverLayer() {
+        View v = sContainer;
+        if (v == null) return null;
+        int id = v.getResources().getIdentifier(
+                "keyguard_background_layer", "id", "com.android.systemui");
+        View layer = id == 0 ? null : v.getRootView().findViewById(id);
+        return layer instanceof ViewGroup ? (ViewGroup) layer : null;
+    }
+
+    /**
+     * The TextureView a live wallpaper is drawn into, in one of the keyguard's layers. It
+     * carries no id - it is added in code by VideoDepthSurfaceHolder - so it is found by type,
+     * and there is only ever one per layer.
+     */
+    private static View videoSurfaceView(String layerId) {
+        View v = sContainer;
+        if (v == null) return null;
+        int id = v.getResources().getIdentifier(layerId, "id", "com.android.systemui");
+        View layer = id == 0 ? null : v.getRootView().findViewById(id);
+        if (!(layer instanceof ViewGroup)) return null;
+        ViewGroup g = (ViewGroup) layer;
+        for (int i = 0; i < g.getChildCount(); i++) {
+            if (g.getChildAt(i) instanceof android.view.TextureView) return g.getChildAt(i);
+        }
+        return null;
     }
 
     /**
@@ -3394,9 +3538,34 @@ public class Main extends XposedModule {
                     return;
                 }
                 d.setVisibility(hide ? View.INVISIBLE : View.VISIBLE);
+                // On a live wallpaper the cut-out subject is a TextureView in the same layer
+                // rather than this ImageView, and it is in front of the clock just the same.
+                // Resolved every time rather than cached: it is added and removed by MIUI as
+                // the wallpaper type changes.
+                View fg = videoSurfaceView("keyguard_foreground_layer");
+                sVideoFg = fg;
+                if (fg != null) fg.setVisibility(hide ? View.INVISIBLE : View.VISIBLE);
+                // And the video itself, in the background layer. The cover is drawn over it
+                // either way, but leaving it playing under an opaque view decodes a video
+                // nobody can see - and if anything of it is still reaching the screen, this
+                // is what says so.
+                View bg = sVideoWallpaper ? videoSurfaceView("keyguard_background_layer") : null;
+                sVideoBg = bg;
+                if (bg != null) bg.setVisibility(hide ? View.INVISIBLE : View.VISIBLE);
                 if (hide) guardDepth(d); else releaseDepthGuard();
-                Xp.log(TAG + "deducted_image_view " + (hide ? "hidden" : "shown"));
+                Xp.log(TAG + "deducted_image_view " + (hide ? "hidden" : "shown")
+                        + (fg == null ? "" : " (+ the live wallpaper's cut-out)"));
                 saveState();
+                // VideoDepthSurfaceHolder adds its TextureViews after SystemUI has started, so
+                // on a live wallpaper the first pass through here can be too early - measured:
+                // deducted_image_view was already there and the TextureView was not. Same
+                // retry the cut-out itself gets, for the same reason.
+                // Only while the keyguard is actually up. Off the lock screen the TextureViews
+                // are legitimately absent, and retrying then just burns 12 passes and 12 log
+                // lines every time anything asks for a re-hide.
+                if (hide && sVideoWallpaper && fg == null && onKeyguardNow()) {
+                    retryDepth(true, attempt, "the live wallpaper's cut-out is not in the tree yet");
+                }
             }
         });
     }
@@ -3438,6 +3607,16 @@ public class Main extends XposedModule {
                         Xp.log(TAG + "system re-showed the cut-out, re-hidden ("
                                 + sDepthTakebacks + ")");
                     }
+                }
+                // The live wallpaper's cut-out needs the same standing assertion, and for the
+                // same reason: MIUI drives its own animators on it.
+                View fg = sVideoFg;
+                if (sDepthHidden && fg != null && fg.getVisibility() == View.VISIBLE) {
+                    fg.setVisibility(View.INVISIBLE);
+                }
+                View bg = sVideoBg;
+                if (sDepthHidden && bg != null && bg.getVisibility() == View.VISIBLE) {
+                    bg.setVisibility(View.INVISIBLE);
                 }
                 return true;
             }
@@ -4434,7 +4613,23 @@ public class Main extends XposedModule {
                     ViewGroup p = (ViewGroup) iv.getParent();
                     if (p != null) p.removeView(iv);
                     iv.setImageDrawable(null);
-                    Xp.log(TAG + "cover detached");
+                    // Only the composed one is ours - albumArt() hands back a bitmap the media
+                    // session owns, and recycling that would take the card's thumbnail with it.
+                    Bitmap b = sCoverBitmap;
+                    sCoverBitmap = null;
+                    if (b != null) b.recycle();
+                    // The live wallpaper was only hidden because this view was covering it.
+                    // Whatever removed the view - an exit, a keyguard rebuild, a failure part
+                    // way through - the wallpaper has to come back with it, or the lock screen
+                    // is left blank. Unconditional on purpose: this is the safety net, and the
+                    // ordinary exit path having already done it is not something to rely on.
+                    View bg = sVideoBg, fg = sVideoFg;
+                    sVideoBg = null;
+                    sVideoFg = null;
+                    if (bg != null) bg.setVisibility(View.VISIBLE);
+                    if (fg != null) fg.setVisibility(View.VISIBLE);
+                    Xp.log(TAG + "cover detached"
+                            + (bg == null && fg == null ? "" : ", live wallpaper restored"));
                 } catch (Throwable t) {
                     Xp.log(TAG + "detachCover failed: " + t);
                 }
