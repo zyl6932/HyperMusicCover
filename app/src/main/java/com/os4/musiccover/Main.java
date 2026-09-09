@@ -70,6 +70,18 @@ public class Main extends XposedModule {
     private static final String CLS_TIME_VIEW = "com.miui.clock.allInOne.TimeView";
     private static final String CLS_MEDIA_CARD = "com.android.systemui.statusbar.notification"
             + ".mediacontrol.MiuiMediaNotificationControllerImpl";
+    private static final String CLS_KG_WALLPAPER_MANAGER =
+            "com.android.keyguard.wallpaper.MiuiKeyguardWallPaperManager";
+
+    /** SystemUI's own keyguard wallpaper manager, for the wallpaper type. See wallpaperKind(). */
+    private static volatile Object sKgWallpaperMgr;
+    /**
+     * Whether the lock wallpaper is a live one, which decides where the cover is drawn: the
+     * wallpaper process's GL texture for a still, a view in our own keyguard layer for a live
+     * one. See showVideoCover(). Re-read before every push, because the user can change the
+     * wallpaper between two songs.
+     */
+    private static volatile boolean sVideoWallpaper;
 
     private static volatile View sContainer;
     private static volatile Class<?> sContainerCls;
@@ -438,6 +450,24 @@ public class Main extends XposedModule {
             Xp.log(TAG + "depth ownership hooked");
         } catch (Throwable t) {
             Xp.log(TAG + "depth ownership hook failed: " + t);
+        }
+
+        // MIUI's own answer to "what kind of wallpaper is this", which beats every heuristic
+        // below it: SystemUI keeps this class unobfuscated and it holds a live
+        // MiuiWallpaperManager, whose getMiuiWallpaperType(which) is the API MIUI itself asks.
+        // Captured from the constructor the same way the wallpaper engine is - it is a Dagger
+        // singleton built during SystemUI startup, so the hook has to be in before that.
+        try {
+            Class<?> wp = Xp.findClass(CLS_KG_WALLPAPER_MANAGER, cl);
+            Xp.hookAllConstructors(wp, chain -> {
+                Object result = chain.proceed();
+                sKgWallpaperMgr = chain.getThisObject();
+                return result;
+            });
+            Xp.log(TAG + "keyguard wallpaper manager hooked");
+        } catch (Throwable t) {
+            Xp.log(TAG + "keyguard wallpaper manager hook failed, falling back to "
+                    + "MIUI's files for the wallpaper type: " + t);
         }
 
         // The media card is the switch. Every add, track change and dismissal of the
@@ -2876,6 +2906,32 @@ public class Main extends XposedModule {
         android.app.WallpaperManager wm = (android.app.WallpaperManager)
                 ctx.getSystemService(Context.WALLPAPER_SERVICE);
         if (wm == null) return false;
+        // Before anything else, and before `force` too - forcing is the same setBitmap and
+        // does the same damage. See wallpaperKind(): a live wallpaper on either slot cannot
+        // survive being replaced with a still, and this is the only place that could do it.
+        String lockKind = wallpaperKind(ctx, "lock");
+        boolean live = lockKind != null && !KIND_IMAGE.equals(lockKind);
+        sVideoWallpaper = live;
+        if (live) {
+            // Nothing to repair, and nothing that may be written: setBitmap(FLAG_LOCK) would
+            // unbind the live wallpaper for good. The cover still works - it just goes into
+            // our own keyguard layer instead of the wallpaper process. See showVideoCover().
+            Xp.log(TAG + "the lock screen has a " + lockKind + " wallpaper of its own; leaving "
+                    + "the wallpaper alone and drawing the cover in the keyguard layer");
+            return false;
+        }
+        if (lockKind == null) {
+            // Nothing of its own on the lock slot, so it is showing the home wallpaper - and
+            // if that one is live, the lock screen IS that live wallpaper. Copying "the home
+            // wallpaper" would get a still frame of it at best and the stock picture at worst,
+            // and either way the animation is gone.
+            String homeKind = wallpaperKind(ctx, "home");
+            if (homeKind != null && !KIND_IMAGE.equals(homeKind)) {
+                Xp.log(TAG + "the lock screen is following a " + homeKind + " home wallpaper. "
+                        + "Leaving it alone rather than replacing it with a still of itself.");
+                return false;
+            }
+        }
         if (!force) {
             try {
                 android.os.ParcelFileDescriptor lock =
@@ -2919,6 +2975,187 @@ public class Main extends XposedModule {
         }
     }
 
+    /** The one kind of wallpaper this module can work with: a still picture. */
+    private static final String KIND_IMAGE = "image";
+
+    /**
+     * What kind of wallpaper is on a slot - "image", "video", "sensor", "super_wallpaper", or
+     * null when nothing here can say.
+     *
+     * This exists because getWallpaperFile(FLAG_LOCK) cannot tell two very different states
+     * apart. It returns null when the lock screen follows the home wallpaper, and it returns
+     * null when the lock screen has a LIVE wallpaper of its own, because a live wallpaper has
+     * no bitmap file anywhere to hand back. ensureLockWallpaper read that null as the first
+     * case and wrote a still copy of the home wallpaper into the lock slot - which is a
+     * setBitmap(..., FLAG_LOCK), which unbinds the live wallpaper permanently. A user reported
+     * exactly that: set a video lock wallpaper, play one track, and from then on the lock
+     * screen is a still of the home wallpaper. Nothing here recorded what it replaced, so
+     * leaving cover mode could not put it back either.
+     *
+     * Three sources, most authoritative first, all three read off the device:
+     *
+     * 1. MIUI's own record at /data/system/theme_magic/users/<u>/wallpaper/data/{lock,home}.xml.
+     *    The root element is the answer - `wallpaper_data which="2" type="image"` - and the
+     *    rest of the (38KB) tag is colour palettes. The files are 0777, so this needs no root,
+     *    let alone the system uid SystemUI happens to have. Seen carrying last_type="video" on
+     *    the home slot here, which is where the vocabulary is confirmed from.
+     * 2. Settings.Secure `flag_lock_wallpaper_type` - lock only, and there is no home
+     *    equivalent: `desktop_wallpaper_type` is unset in all three namespaces.
+     * 3. Settings.Secure `constant_template_editor_info`, the lock screen editor's JSON, whose
+     *    homeInfo/lockscreenInfo both carry a `resourceType`. The only source that covers home.
+     *
+     * Deliberately NOT WallpaperManager.getWallpaperInfo(FLAG_LOCK): on MIUI every wallpaper,
+     * still or video, is drawn by the same com.miui.miwallpaper ImageWallpaper component, so
+     * it answers "live" for all of them and distinguishes nothing.
+     *
+     * Unknown reads back as null, and null keeps the old behaviour. Being wrong in the shy
+     * direction costs the cover on one phone; being wrong the other way costs someone their
+     * wallpaper.
+     */
+    private static String wallpaperKind(Context ctx, String slot) {
+        boolean lock = "lock".equals(slot);
+        String kind = kindFromMiui(lock);
+        String from = "MiuiWallpaperManager";
+        if (kind == null) {
+            kind = kindFromThemeMagic(slot);
+            from = "MIUI's " + slot + ".xml";
+        }
+        if (kind == null && lock) {
+            kind = kindFromSettings(ctx, "flag_lock_wallpaper_type");
+            from = "flag_lock_wallpaper_type";
+        }
+        if (kind == null) {
+            kind = kindFromEditorInfo(ctx, lock ? "lockscreenInfo" : "homeInfo");
+            from = "constant_template_editor_info";
+        }
+        // On every track change, so only when the answer moves. Which it does: this is
+        // checked before each push precisely because the user can change the wallpaper at
+        // any moment, and the interesting moment is the one where it just became a video.
+        String last = "lock".equals(slot) ? sLockKindLogged : sHomeKindLogged;
+        if (!java.util.Objects.equals(last, kind)) {
+            Xp.log(TAG + slot + " wallpaper is " + (kind == null ? "unknown" : kind)
+                    + (kind == null ? " (neither MIUI's record nor Settings said)"
+                                    : " per " + from));
+            if ("lock".equals(slot)) sLockKindLogged = kind;
+            else sHomeKindLogged = kind;
+        }
+        return kind;
+    }
+
+    private static String sLockKindLogged = "";
+    private static String sHomeKindLogged = "";
+
+    /**
+     * MIUI's own answer, and the one to prefer: `MiuiWallpaperManager.getMiuiWallpaperType(which)`
+     * is what MIUI asks itself, it returns the same vocabulary the files use ("image", "video",
+     * "sensor", "super_wallpaper"), and both it and the SystemUI class holding the instance keep
+     * their real names through R8 - so unlike everything below it, this should not need a new
+     * heuristic per HyperOS version.
+     *
+     * `which` is 1 for home and 2 for lock, read off MiuiWallpaperManager's own constants rather
+     * than assumed - though they do match WallpaperManager's FLAG_SYSTEM/FLAG_LOCK, and the
+     * `which=` attribute in MIUI's XML agrees.
+     */
+    private static String kindFromMiui(boolean lock) {
+        Object mgr = sKgWallpaperMgr;
+        if (mgr == null) return null;
+        try {
+            Object wm = Xp.getObjectField(mgr, "mMiuiWallpaperManager");
+            if (wm == null) return null;
+            int which = miuiWhich(wm.getClass(), lock);
+            Object type = Xp.callMethod(wm, "getMiuiWallpaperType", which);
+            String s = type == null ? null : type.toString();
+            return s == null || s.isEmpty() ? null : s;
+        } catch (Throwable t) {
+            Xp.log(TAG + "MiuiWallpaperManager could not say what the "
+                    + (lock ? "lock" : "home") + " wallpaper is: " + t);
+            return null;
+        }
+    }
+
+    private static int miuiWhich(Class<?> wmCls, boolean lock) {
+        String name = lock ? "MI_WALLPAPER_WHICH_LOCK" : "MI_WALLPAPER_WHICH_HOME";
+        try {
+            java.lang.reflect.Field f = wmCls.getDeclaredField(name);
+            f.setAccessible(true);
+            return f.getInt(null);
+        } catch (Throwable ignored) {
+            return lock ? 2 : 1;
+        }
+    }
+
+    private static String kindFromThemeMagic(String slot) {
+        java.io.InputStream in = null;
+        try {
+            // uid / 100000 is the user id - UserHandle.PER_USER_RANGE, and UserHandle's own
+            // accessors for it are all @hide.
+            java.io.File f = new java.io.File("/data/system/theme_magic/users/"
+                    + (android.os.Process.myUid() / 100000)
+                    + "/wallpaper/data/" + slot + ".xml");
+            if (!f.canRead()) return null;
+            in = new java.io.FileInputStream(f);
+            org.xmlpull.v1.XmlPullParser p = android.util.Xml.newPullParser();
+            p.setInput(in, null);
+            for (int e = p.getEventType(); e != org.xmlpull.v1.XmlPullParser.END_DOCUMENT;
+                    e = p.next()) {
+                if (e != org.xmlpull.v1.XmlPullParser.START_TAG) continue;
+                String type = p.getAttributeValue(null, "type");
+                if (type != null && !type.isEmpty()) return type;
+            }
+        } catch (Throwable t) {
+            Xp.log(TAG + "cannot read MIUI's " + slot + " wallpaper record: " + t);
+        } finally {
+            if (in != null) {
+                try {
+                    in.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String kindFromSettings(Context ctx, String key) {
+        android.content.ContentResolver cr = ctx.getContentResolver();
+        String[] got = new String[3];
+        try {
+            got[0] = android.provider.Settings.Secure.getString(cr, key);
+            got[1] = android.provider.Settings.System.getString(cr, key);
+            got[2] = android.provider.Settings.Global.getString(cr, key);
+        } catch (Throwable ignored) {
+        }
+        for (String v : got) {
+            if (v != null && !v.isEmpty()) return v;
+        }
+        return null;
+    }
+
+    /**
+     * The lock screen editor's own record, which is the only one of these that covers the home
+     * slot: there is no `desktop_wallpaper_type` key - checked on device, all three namespaces.
+     *
+     * `constant_template_editor_info` is a single Settings.Secure JSON blob written by
+     * com.miui.aod, with the same shape under `homeInfo` and `lockscreenInfo`. Its
+     * `resourceType` uses the same vocabulary as the XML's `type` - "image", "video".
+     */
+    private static String kindFromEditorInfo(Context ctx, String section) {
+        try {
+            String raw = android.provider.Settings.Secure.getString(
+                    ctx.getContentResolver(), "constant_template_editor_info");
+            if (raw == null || raw.isEmpty()) return null;
+            org.json.JSONObject info = new org.json.JSONObject(raw)
+                    .optJSONObject(section);
+            if (info == null) return null;
+            org.json.JSONObject wp = info.optJSONObject("wallpaperInfo");
+            if (wp == null) return null;
+            String type = wp.optString("resourceType", "");
+            return type.isEmpty() ? null : type;
+        } catch (Throwable t) {
+            Xp.log(TAG + "cannot read " + section + " from the editor info: " + t);
+            return null;
+        }
+    }
+
     /** The home wallpaper, decoded no larger than it needs to be for this screen. */
     // Runs inside com.android.systemui, which holds SET_WALLPAPER and
     // READ_WALLPAPER_INTERNAL. This APK neither has nor needs them - it is a library
@@ -2956,9 +3193,13 @@ public class Main extends XposedModule {
     }
 
     /**
-     * Whether the lock screen has a wallpaper entry of its own. Note this is about the ENTRY,
-     * not the picture: a copy of the home wallpaper counts, which is exactly what
-     * ensureLockWallpaper() installs.
+     * Whether the cover has somewhere to go.
+     *
+     * Two conditions, and they are not the same one. The lock screen needs a wallpaper entry
+     * of its own - about the ENTRY, not the picture: a copy of the home wallpaper counts, and
+     * is exactly what ensureLockWallpaper() installs. And that wallpaper has to be a still
+     * image, because a video or sensor one is drawn by an engine this module has nothing
+     * hooked in, and ensureLockWallpaper will not (must not) convert it to a still.
      */
     // Runs inside com.android.systemui, which holds SET_WALLPAPER and
     // READ_WALLPAPER_INTERNAL. This APK neither has nor needs them - it is a library
@@ -2966,6 +3207,8 @@ public class Main extends XposedModule {
     @SuppressLint("MissingPermission")
     private static boolean hasLockWallpaper(Context ctx) {
         try {
+            String kind = wallpaperKind(ctx, "lock");
+            if (kind != null && !KIND_IMAGE.equals(kind)) return false;
             android.app.WallpaperManager wm = (android.app.WallpaperManager)
                     ctx.getSystemService(Context.WALLPAPER_SERVICE);
             android.os.ParcelFileDescriptor f =
