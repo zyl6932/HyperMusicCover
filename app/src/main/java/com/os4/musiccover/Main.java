@@ -2453,7 +2453,10 @@ public class Main extends XposedModule {
         if (!cardLaidOutForKeyguard(card)) return null;
         View box = findByName(card, "album_art");
         View img = box == null ? null : findByName(box, "album_art_image");
-        int wasVisible = img == null ? -1 : img.getVisibility();
+        // View.VISIBLE rather than a -1 sentinel for "no view": the null check below already
+        // covers that case, and lint tracks the @Visibility typedef through this assignment -
+        // a sentinel outside the set is a WrongConstant error at the restore.
+        int wasVisible = img == null ? View.VISIBLE : img.getVisibility();
         sCardForced = true;
         try {
             assertMediaCard(card);
@@ -2465,7 +2468,7 @@ public class Main extends XposedModule {
             Xp.log(TAG + "card capture failed: " + t);
             return null;
         } finally {
-            if (img != null && wasVisible != -1) img.setVisibility(wasVisible);
+            if (img != null) img.setVisibility(wasVisible);
             sCardForced = false;
             assertMediaCard(card);
         }
