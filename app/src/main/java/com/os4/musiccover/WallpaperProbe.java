@@ -143,7 +143,7 @@ public class WallpaperProbe {
             // Hooking here rather than on WallpaperTexture.getWallpaperBitmap() because
             // thisObject is the renderer, so we can tell the keyguard one from the desktop one
             // and leave the home wallpaper alone.
-            Xp.hookAll(base, "lambda$onSurfaceCreated$0", chain -> {
+            Xp.hookAllLambdas(base, "lambda$onSurfaceCreated$0", chain -> {
                 Object[] args = chain.getArgs().toArray();
                 boolean keyguard = chain.getThisObject().getClass().getName().contains("Keyguard");
                 if (keyguard && args.length > 0 && args[0] instanceof Bitmap) {
@@ -196,7 +196,10 @@ public class WallpaperProbe {
             });
             Xp.log(TAG + "upload path hooked on ImageWallpaperRenderer");
         } catch (Throwable t) {
-            Xp.log(TAG + "getBitmap hook failed: " + t);
+            // Said "getBitmap hook failed" until a HyperOS 3 report came in naming that and
+            // the short-circuit below in the same breath. This is the one that matters: with
+            // it gone the texture is never replaced, so the cover does nothing at all.
+            Xp.log(TAG + "upload path hook FAILED - the cover cannot be drawn: " + t);
         }
 
         // Measured: of the ~380ms a track change took, 210ms was the OEM's own getBitmap()

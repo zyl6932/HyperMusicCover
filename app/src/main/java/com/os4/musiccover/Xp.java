@@ -102,6 +102,34 @@ final class Xp {
         return handles;
     }
 
+    /**
+     * A lambda body, under either name D8 may have given it.
+     *
+     * A lambda compiles to a synthetic method called lambda$enclosing$N, but when a subclass
+     * has to reach it D8 appends the declaring class instead - lambda$onSurfaceCreated$0
+     * becomes lambda$onSurfaceCreated$0$com-miui-miwallpaper-opengl-ImageWallpaperRenderer.
+     * Which form an OEM's build carries is not something we get to know: OS4 here has the
+     * plain name and a HyperOS 3 report had the mangled one. Matching the plain name exactly
+     * threw there, and the caller logged it and carried on - with the one hook that replaces
+     * the wallpaper texture not installed, so the cover did nothing at all on that phone.
+     */
+    static List<XposedInterface.HookHandle> hookAllLambdas(Class<?> cls, String name,
+                                                           XposedInterface.Hooker hooker) {
+        List<XposedInterface.HookHandle> handles = new ArrayList<>();
+        String mangled = name + "$";
+        for (Method m : cls.getDeclaredMethods()) {
+            String n = m.getName();
+            if (n.equals(name) || n.startsWith(mangled)) {
+                handles.add(api().hook(m).intercept(hooker));
+            }
+        }
+        if (handles.isEmpty()) {
+            throw new IllegalArgumentException("no method " + cls.getName() + "." + name
+                    + " (nor " + mangled + "<class>)");
+        }
+        return handles;
+    }
+
     static XposedInterface.HookHandle hook(Executable target, XposedInterface.Hooker hooker) {
         return api().hook(target).intercept(hooker);
     }
