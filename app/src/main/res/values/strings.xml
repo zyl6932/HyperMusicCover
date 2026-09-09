@@ -83,4 +83,9 @@
     <string name="home_module_version">模块版本</string>
     <string name="home_unknown">未知</string>
     <string name="home_loading">加载中…</string>
+    <string name="card_section">媒体卡片</string>
+    <string name="card_hide_art">隐藏封面缩略图</string>
+    <string name="card_center_text">标题居中</string>
+    <string name="preview_note">时钟和媒体卡片取自实机；磨砂底板和高光描边为近似</string>
+    <string name="preview_note_sample">没有正在播放：封面和媒体卡片为示例，其余取自实机</string>
 </resources>

@@ -19,8 +19,10 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.text.Layout;
 import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.TextView;
 
 import java.util.List;
 import android.util.Log;
@@ -208,6 +210,32 @@ public class Main extends XposedModule {
     /** The screen the wallpaper is composed for. Read off the keyguard, not assumed. */
     private static volatile int sScreenW = 1200, sScreenH = 2608;
 
+    /**
+     * The media card, restyled. This is the first thing the module changes about the card
+     * itself, and it follows the same ownership rule as the cut-out: the card is rebound on
+     * every track change and re-laid out constantly, so the look is asserted every frame from a
+     * guard rather than set once.
+     *
+     * Both are off by default - the card as the OEM draws it is not wrong, only busy - and both
+     * apply in cover mode only, which is when the artwork is already the wallpaper and the
+     * thumbnail is showing it a second time.
+     */
+    private static volatile boolean sMcHideArt;
+    private static volatile boolean sMcCenterText;
+    /**
+     * Where the card lands on the lock screen, in screen pixels. The app draws a preview of the
+     * lock screen and cannot measure this itself - the card belongs to SystemUI - so it is
+     * sampled here, while the keyguard is actually up, and kept for the app to ask about later.
+     */
+    private static volatile int sCardL, sCardT, sCardW, sCardH;
+    /** The reading waiting to be confirmed by holding still. See sampleCardRect(). */
+    private static int sCardSampleL, sCardSampleT, sCardSampleW, sCardSampleH;
+    private static long sCardSampleAt;
+    private static ViewTreeObserver.OnPreDrawListener sCardGuard;
+    private static View sCardGuarded, sCardArt, sCardTitle, sCardArtist;
+    /** Set only around a capture. See shootCard(). */
+    private static volatile boolean sCardForced;
+
     // Indices into TimeView.glassData, read off the class's own constants.
     private static final int GLASS_COLOR_R = 11, GLASS_COLOR_G = 12, GLASS_COLOR_B = 13;
     private static final int GLASS_COLOR_A = 14, GLASS_COLOR_MIX = 16;
@@ -274,10 +302,13 @@ public class Main extends XposedModule {
             // View.setVisibility process-wide cost every visibility change in SystemUI and
             // fired zero times. What actually lost the state was SystemUI restarting.
             if (sDepthHidden) setDepthHidden(true);
+            // Same story for the card: the guard lives on the view, so a rebuild takes it.
+            if (sCoverMode) applyMediaCard();
             // A rebuilt keyguard can be a different clock style, so the nudge measured
-            // against the old one means nothing.
+            // against the old one means nothing - and neither does the clock view we resolved.
             sNudgeSample = Float.NaN;
-            if (sCoverMode) reassertCoverClock();
+            sClockTargets.clear();
+            if (sCoverMode) reassertCoverClock(true);
             return result;
         });
 
@@ -433,11 +464,33 @@ public class Main extends XposedModule {
             f.write(("cover=" + (sCoverMode ? 1 : 0)
                     + "\nbias=" + sBias
                     + "\nclock=" + sClockScale
-                    + "\nglass=" + sGlassEnd + "\n").getBytes());
+                    + "\nglass=" + sGlassEnd
+                    + "\nmcart=" + (sMcHideArt ? 1 : 0)
+                    + "\nmctext=" + (sMcCenterText ? 1 : 0)
+                    // Not a setting - a measurement. Kept so the app's preview is to scale from
+                    // the first frame after a SystemUI restart, instead of only once the phone
+                    // has been locked again.
+                    + "\ncardrect=" + sCardL + "," + sCardT + "," + sCardW + "," + sCardH
+                    + "\n").getBytes());
             f.close();
         } catch (Throwable t) {
             Xp.log(TAG + "saveState failed: " + t);
         }
+    }
+
+    private static final Runnable sSaveState = new Runnable() {
+        @Override
+        public void run() { saveState(); }
+    };
+
+    /**
+     * For values that change as fast as the screen draws. The card rectangle is sampled from a
+     * pre-draw listener while the card is animating in, and writing the file on every frame of
+     * that would be a file write per frame for a number that settles in a few hundred ms.
+     */
+    private static void saveStateSoon() {
+        main().removeCallbacks(sSaveState);
+        main().postDelayed(sSaveState, 500L);
     }
 
     private static void loadState() {
@@ -465,6 +518,17 @@ public class Main extends XposedModule {
                     else if ("bias".equals(k)) sBias = Float.parseFloat(v);
                     else if ("clock".equals(k)) sClockScale = Float.parseFloat(v);
                     else if ("glass".equals(k)) sGlassEnd = Float.parseFloat(v);
+                    else if ("mcart".equals(k)) sMcHideArt = "1".equals(v);
+                    else if ("mctext".equals(k)) sMcCenterText = "1".equals(v);
+                    else if ("cardrect".equals(k)) {
+                        String[] r = v.split(",");
+                        // Same sanity check the sampler applies, because a file written before
+                        // it existed can hold a reading taken from the shade.
+                        if (r.length == 4 && Integer.parseInt(r[1]) >= sScreenH / 3) {
+                            sCardL = Integer.parseInt(r[0]); sCardT = Integer.parseInt(r[1]);
+                            sCardW = Integer.parseInt(r[2]); sCardH = Integer.parseInt(r[3]);
+                        }
+                    }
                     // "offdelay" was the pause timer, before the card became the switch.
                 }
             }
@@ -546,6 +610,23 @@ public class Main extends XposedModule {
                         if (i.hasExtra("bias")) sBias = clamp01(i.getFloatExtra("bias", sBias));
                         sTrackKey = on ? trackKey(pickController(c)) : "";
                         setCoverEnabled(on, anim, false);
+                    } else if ("mediacard".equals(op)) {
+                        if (i.hasExtra("hideart")) sMcHideArt = i.getBooleanExtra("hideart", false);
+                        if (i.hasExtra("centertext")) {
+                            sMcCenterText = i.getBooleanExtra("centertext", false);
+                        }
+                        saveState();
+                        Xp.log(TAG + "media card hideArt=" + sMcHideArt
+                                + " centerText=" + sMcCenterText);
+                        applyMediaCard();
+                    } else if ("clockshot".equals(op)) {
+                        // For telling the two candidate causes apart by hand: with this off the
+                        // module never draws the live clock, and the preview falls back to its
+                        // outline. If the lock screen still breaks up, the capture is innocent.
+                        sClockShot = i.getBooleanExtra("on", true);
+                        Xp.log(TAG + "clock capture " + (sClockShot ? "on" : "off"));
+                    } else if ("preview".equals(op)) {
+                        setResultExtras(previewBundle(c, i));
                     } else if ("bias".equals(op)) {
                         setBias(i.getFloatExtra("v", DEFAULT_BIAS));
                     } else if ("clockscale".equals(op)) {
@@ -640,6 +721,26 @@ public class Main extends XposedModule {
                         out.putString("track", sCardKey);
                         MediaController mc = sWatched;
                         out.putString("player", mc == null ? "" : mc.getPackageName());
+                        out.putBoolean("mcart", sMcHideArt);
+                        out.putBoolean("mctext", sMcCenterText);
+                        // Everything the app's preview needs to be to scale. It draws a lock
+                        // screen it cannot see, and every one of these is device-specific, so
+                        // they are measured here rather than written down twice.
+                        out.putInt("sw", sScreenW);
+                        out.putInt("sh", sScreenH);
+                        out.putInt("cardl", sCardL);
+                        out.putInt("cardt", sCardT);
+                        out.putInt("cardw", sCardW);
+                        out.putInt("cardh", sCardH);
+                        float[] cg = clockGeometry();
+                        if (cg != null) {
+                            out.putFloat("clockw", cg[0]);
+                            out.putFloat("clockh", cg[1]);
+                            out.putFloat("clocky", cg[2]);
+                            out.putFloat("clockpad", CLOCK_PAD);
+                            out.putFloat("clockx", cg[3]);
+                            out.putFloat("clockpivotx", cg[4]);
+                        }
                         setResultExtras(out);
                     } else if ("bounds".equals(op)) {
                         dumpClockBounds();
@@ -652,6 +753,9 @@ public class Main extends XposedModule {
                                 + " card=" + (sCardKnown ? (sCardShowing ? sCardKey : "gone") : "unknown")
                                 + " following=" + (sWatched == null ? "none" : sWatched.getPackageName())
                                 + " track=" + sTrackKey);
+                        Xp.log(TAG + "card rect: " + sCardL + "," + sCardT + " "
+                                + sCardW + "x" + sCardH + " hideArt=" + sMcHideArt
+                                + " centerText=" + sMcCenterText);
                     } else if ("verbose".equals(op)) {
                         sVerbose = i.getBooleanExtra("on", !sVerbose);
                         Xp.log(TAG + "verbose=" + sVerbose);
@@ -696,6 +800,7 @@ public class Main extends XposedModule {
                     // Waking re-runs the OEM's depth pipeline, and if the keyguard was rebuilt
                     // while the screen was off the guard went away with the old view.
                     if (sDepthHidden) setDepthHidden(true);
+                    if (sCoverMode) applyMediaCard();
                     return;
                 }
                 // Cover mode deliberately survives the screen going off. Releasing and then
@@ -1245,28 +1350,312 @@ public class Main extends XposedModule {
     }
 
     /**
-     * The top of the drawn digits, in time_group's coordinates, pooled across both clock trees.
+     * The view a clock style wants scaled, in one tree, or null if this tree draws no time.
      *
-     * Every lock screen clock style lays its glyphs out somewhere else - the single-line style
-     * puts hour and minute side by side, the stacked one draws the hour at 650 and the minute at
-     * 909 - so this has to be measured, not assumed. Both trees share the pooled value so the two
-     * lines of a stacked clock keep their spacing when they shrink.
+     * Two shapes exist on this device and they have nothing in common:
+     *
+     * - **all_in_one** (the OEM's variable-font clock): the digits are TimeViews inside a
+     *   `time_group`, one tree drawing the hour and the other the minute.
+     * - **classic**: one `time_view`, a `com.miui.clock.MiuiTextGlassView`, which is an ordinary
+     *   TextView holding "14:26" - no group, no TimeViews, and only in the background tree.
+     *
+     * Everything the collapse does works on whichever of the two is there, so this is the only
+     * place that has to know the difference. (A style that has neither takes the clock takeover
+     * out of play entirely rather than throwing: the date, and the wallpaper, still work.)
      */
-    private static float glyphTop() {
-        float top = Float.MAX_VALUE;
+    private static View clockTarget(View root) {
+        // Always tried first, and never cached: one resource lookup and a findViewById, and
+        // answering from a cache here is how a style change would go unnoticed.
+        View g = findClockView(root, "time_group");
+        if (usable(g)) return g;
+        View cached = sClockTargets.get(root);
+        // The root standing in for itself means "this tree draws no clock" - some styles put the
+        // whole clock in one tree and only the date in the other, and without remembering that,
+        // every frame of the squeeze would walk a whole layer to fail to find one.
+        if (cached == root) return null;
+        if (usable(cached) && cached.getParent() != null) return cached;
+        View found = resolveTimeTarget(root);
+        sClockTargets.put(root, found == null ? root : found);
+        return found;
+    }
+
+    /**
+     * Finds whatever draws the time, without knowing what the style calls it.
+     *
+     * Looking it up by id does not scale: `time_group` and `hour_view` belong to all_in_one,
+     * `time_view` to the classic style, and the user has more styles than that. What every style
+     * does have in common is a view that draws a clock face, and there are only two kinds:
+     *
+     * - one of com.miui.clock's own TimeViews, recognisable because it can report the bounds of
+     *   the glyphs it strokes (`getTextBoundsWithPosition`);
+     * - an ordinary TextView holding something that reads as a time and nothing else.
+     *
+     * When several turn up - a style that draws the hour and the minute as separate views - the
+     * one to scale is their common parent, so they shrink together. Unless that parent also
+     * holds the date, which would drag the date along with them; then the first one is scaled on
+     * its own, which is wrong-ish but visibly wrong rather than silently absent.
+     */
+    private static View resolveTimeTarget(View root) {
+        java.util.List<View> hits = new java.util.ArrayList<>();
+        collectTimeViews(root, hits);
+        if (hits.isEmpty()) return null;
+        if (hits.size() == 1) return hits.get(0);
+        View top = hits.get(0);
+        for (int guard = 0; guard < 12 && top != null; guard++) {
+            if (containsAll(top, hits)) break;
+            top = top.getParent() instanceof View ? (View) top.getParent() : null;
+        }
+        if (top == null || !containsAll(top, hits)) return hits.get(0);
+        View date = visibleDate();
+        return date != null && isDescendant(top, date) ? hits.get(0) : top;
+    }
+
+    private static void collectTimeViews(View v, java.util.List<View> out) {
+        if (!usable(v)) return;
+        if (isTimeView(v)) {
+            out.add(v);
+            return;
+        }
+        if (!(v instanceof ViewGroup)) return;
+        ViewGroup g = (ViewGroup) v;
+        for (int i = 0; i < g.getChildCount(); i++) collectTimeViews(g.getChildAt(i), out);
+    }
+
+    private static boolean isTimeView(View v) {
+        try {
+            v.getClass().getMethod("getTextBoundsWithPosition");
+            return true;
+        } catch (Throwable ignored) {
+        }
+        return v instanceof TextView && looksLikeTime(((TextView) v).getText());
+    }
+
+    /**
+     * "14:51", "14", "9:05" - and not "9月9日周三 七月廿八", "9/9", "32°" or a signature.
+     * Digits and colons only, and short: the date lines on these styles are none of that.
+     */
+    private static boolean looksLikeTime(CharSequence cs) {
+        if (cs == null) return false;
+        String t = cs.toString().trim();
+        if (t.isEmpty() || t.length() > 5) return false;
+        boolean digit = false;
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            if (c >= '0' && c <= '9') { digit = true; continue; }
+            if (c == ':' || c == '\uFF1A') continue;
+            return false;
+        }
+        return digit;
+    }
+
+    private static boolean containsAll(View ancestor, java.util.List<View> views) {
+        for (View v : views) {
+            if (!isDescendant(ancestor, v)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isDescendant(View ancestor, View v) {
+        for (int guard = 0; guard < 32 && v != null; guard++) {
+            if (v == ancestor) return true;
+            v = v.getParent() instanceof View ? (View) v.getParent() : null;
+        }
+        return false;
+    }
+
+    /**
+     * Resolved clock views, per tree. This is asked for on every frame of the squeeze, and
+     * resolving it means a resource lookup and possibly a walk of the whole layer.
+     *
+     * Dropped when the keyguard is rebuilt, which is also when the clock style can have changed
+     * underneath us - see the onAttachedToWindow hook.
+     */
+    private static final java.util.WeakHashMap<View, View> sClockTargets =
+            new java.util.WeakHashMap<>();
+    /** The date view the cache above was filled against. See placeCollapsedClock(). */
+    private static View sDateView;
+    private static boolean sClockComplained;
+
+    /**
+     * Says, once per style, why a clock style could not be taken over.
+     *
+     * This runs on every frame of the squeeze, so it cannot log freely - but a style it cannot
+     * read is exactly the thing that needs reporting, and asking the user to reproduce it with a
+     * dump is worse than having the answer already in the log. Reset whenever a placement
+     * succeeds, so the next broken style speaks up again.
+     */
+    private static void reportUnknownClock(View date, RectF pooled) {
+        if (sClockComplained) return;
+        sClockComplained = true;
+        StringBuilder sb = new StringBuilder("clock style not understood: date=")
+                .append(date == null ? "MISSING" : "ok").append(" glyphs=")
+                .append(pooled == null ? "MISSING" : pooled.toString());
         for (View root : clockRoots()) {
-            for (String id : new String[]{"hour_view", "minute_view"}) {
-                View v = findClockView(root, id);
-                if (v == null || v.getVisibility() != View.VISIBLE) continue;
-                try {
-                    RectF r = (RectF) Xp.callMethod(v, "getTextBoundsWithPosition");
-                    if (r == null || r.height() <= 0f) continue;
-                    top = Math.min(top, v.getTop() + r.top);
-                } catch (Throwable ignored) {
+            sb.append("\n  tree ").append(idOf(root)).append(':');
+            describeClockTree(root, sb, 0);
+        }
+        Xp.log(TAG + sb);
+    }
+
+    /** Anything on the tree that carries text or draws glyphs, which is all this needs to see. */
+    private static void describeClockTree(View v, StringBuilder sb, int depth) {
+        if (depth > 8 || v == null) return;
+        boolean text = v instanceof TextView && ((TextView) v).getText() != null
+                && ((TextView) v).getText().length() > 0;
+        boolean glyphs = isTimeView(v);
+        if (text || glyphs) {
+            sb.append("\n    ").append(v.getClass().getSimpleName()).append(" #").append(idOf(v))
+              .append(' ').append(v.getWidth()).append('x').append(v.getHeight())
+              .append(" vis=").append(v.getVisibility());
+            if (text) sb.append(" \"").append(((TextView) v).getText()).append('"');
+            if (glyphs) sb.append(" [timeview]");
+        }
+        if (!(v instanceof ViewGroup)) return;
+        ViewGroup g = (ViewGroup) v;
+        for (int i = 0; i < g.getChildCount(); i++) describeClockTree(g.getChildAt(i), sb, depth + 1);
+    }
+
+    private static String idOf(View v) {
+        try {
+            return v.getResources().getResourceEntryName(v.getId());
+        } catch (Throwable t) {
+            return "no-id";
+        }
+    }
+
+    private static boolean usable(View v) {
+        return v != null && v.getVisibility() == View.VISIBLE && v.getWidth() > 0;
+    }
+
+    private static View findVisibleByName(View v, String name) {
+        if (usable(v)) {
+            try {
+                if (v.getId() != View.NO_ID
+                        && name.equals(v.getResources().getResourceEntryName(v.getId()))) {
+                    return v;
                 }
+            } catch (Throwable ignored) {
             }
         }
-        return top == Float.MAX_VALUE ? Float.NaN : top;
+        if (!(v instanceof ViewGroup) || v.getVisibility() != View.VISIBLE) return null;
+        ViewGroup g = (ViewGroup) v;
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View hit = findVisibleByName(g.getChildAt(i), name);
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
+    /**
+     * The box the digits actually ink, in the target view's own coordinates.
+     *
+     * Every clock style lays its glyphs out somewhere else - the single-line style puts hour and
+     * minute side by side, the stacked one draws the hour at 650 and the minute at 909, the
+     * classic one is a single left-aligned line - so this is measured, never assumed.
+     */
+    private static RectF inkBox(View root, View target) {
+        if (target == null) return null;
+        RectF box = null;
+        java.util.List<View> times = new java.util.ArrayList<>();
+        collectTimeViews(target, times);
+        for (View v : times) {
+            RectF r = null;
+            try {
+                r = (RectF) Xp.callMethod(v, "getTextBoundsWithPosition");
+            } catch (Throwable ignored) {
+            }
+            if (r == null || r.height() <= 0f) {
+                r = v instanceof TextView ? textInkBox((TextView) v) : null;
+                if (r == null) continue;
+            } else {
+                r = new RectF(r);
+            }
+            // Offsets accumulated up to the target, not just one level: a style is free to wrap
+            // its digits in as many layouts as it likes between the two.
+            for (View p = v; p != null && p != target; ) {
+                r.offset(p.getLeft(), p.getTop());
+                p = p.getParent() instanceof View ? (View) p.getParent() : null;
+            }
+            if (box == null) box = r; else box.union(r);
+        }
+        return box;
+    }
+
+    /**
+     * The same measurement for a plain TextView, which is what the classic style's clock is.
+     *
+     * Paint.getTextBounds gives the ink relative to the baseline origin, so it has to be put
+     * back together with the layout's baseline and the view's padding. Not getLineTop/Bottom:
+     * those are the line box, ascent and descent included, and anchoring the collapse to a line
+     * box instead of to the ink is exactly the mistake section 13 is about.
+     */
+    private static RectF textInkBox(TextView t) {
+        Layout lay = t.getLayout();
+        CharSequence cs = t.getText();
+        if (lay == null || lay.getLineCount() < 1 || cs == null || cs.length() == 0) return null;
+        String txt = cs.toString();
+        Rect ink = new Rect();
+        t.getPaint().getTextBounds(txt, 0, txt.length(), ink);
+        if (ink.width() <= 0 || ink.height() <= 0) return null;
+        float x = t.getPaddingLeft() + lay.getLineLeft(0) + ink.left;
+        float base = t.getPaddingTop() + lay.getLineBaseline(0);
+        return new RectF(x, base + ink.top, x + ink.width(), base + ink.bottom);
+    }
+
+    /**
+     * The union of the drawn digits across both trees, in the target's coordinates.
+     *
+     * The top anchors the placement, the middle decides the pivot, and the size is what the
+     * preview draws at - all three off this one pooled measurement.
+     */
+    private static RectF glyphBox() {
+        RectF box = null;
+        for (View root : clockRoots()) {
+            RectF r = inkBox(root, clockTarget(root));
+            if (r == null) continue;
+            if (box == null) box = r; else box.union(r);
+        }
+        return box;
+    }
+
+    /**
+     * {width, height, screen y of the top} for the collapsed clock at scale 1, for the app's
+     * preview. Multiplying the first two by the clock scale gives exactly what
+     * placeCollapsedClock() puts on screen: it pivots on the glyph top, so the top edge does
+     * not move with the scale and this y holds for every scale.
+     *
+     * Derived the same way placement is - the date at its fixed target, the clock a gap below
+     * it - so the preview follows the rule instead of a second set of numbers that can drift.
+     */
+    /**
+     * {w, h, y, x, pivotX} for the collapsed clock at scale 1, in screen pixels.
+     *
+     * The box is the padded one, because that is what the captures cover; y and pivotX are the
+     * two anchors the phone actually scales about - the glyph top and clockPivotX() - so the app
+     * can reproduce the same transform: `left = pivotX + (x - pivotX) * scale`. Centred styles
+     * come out centred and left-aligned ones stay left, without the app knowing which is which.
+     */
+    private static float[] clockGeometry() {
+        View date = visibleDate();
+        RectF box = paddedGlyphBox();
+        if (date == null || box == null) return null;
+        View g = null;
+        for (View root : clockRoots()) {
+            View t = clockTarget(root);
+            if (t != null) { g = t; break; }
+        }
+        if (g == null) return null;
+        float d = date.getResources().getDisplayMetrics().density;
+        return new float[]{box.width(), box.height(),
+                DATE_TOP_DP * d + date.getHeight() + CLOCK_GAP_DP * d,
+                g.getLeft() + box.left, g.getLeft() + clockPivotX(g, glyphBox())};
+    }
+
+    private static RectF paddedGlyphBox() {
+        RectF box = glyphBox();
+        if (box == null) return null;
+        box.inset(-CLOCK_PAD, -CLOCK_PAD);
+        return box;
     }
 
     private static View findClockView(View root, String id) {
@@ -1354,10 +1743,28 @@ public class Main extends XposedModule {
      */
     private static void placeCollapsedClock(float k, float y, float p) {
         View date = visibleDate();
-        float glyph = glyphTop();
+        // A different date view means the clock views were re-inflated - a style change - and
+        // anything remembered about the old ones describes a clock that is no longer there.
+        // Cheaper and more reliable than watching for the style setting itself, and it catches
+        // the case where the container was reused rather than re-attached.
+        if (date != sDateView) {
+            sDateView = date;
+            sClockTargets.clear();
+            sNudgeSample = Float.NaN;
+            sAppliedK = Float.NaN;
+            sAppliedGlassV = Float.NaN;
+        }
+        // One measurement per frame, pooled across the trees: the top anchors the placement and
+        // the middle decides the pivot, and both have to describe the WHOLE clock.
+        RectF pooled = glyphBox();
         // Nothing measurable yet - mid-teardown, or before the first layout. Leaving what is
         // already applied alone is right: resetting would itself be a visible jump.
-        if (date == null || Float.isNaN(glyph)) return;
+        if (date == null || pooled == null) {
+            reportUnknownClock(date, pooled);
+            return;
+        }
+        sClockComplained = false;
+        float glyph = pooled.top;
 
         // Both containers are laid out identically and sit at the same screen position, so the
         // date's offset inside its own parent is usable against either tree's time_group.
@@ -1369,13 +1776,10 @@ public class Main extends XposedModule {
         date.setTranslationY(nudge);
         float dateBottom = date.getTop() + date.getHeight() + nudge;
         for (View root : clockRoots()) {
-            View g = findClockView(root, "time_group");
+            View g = clockTarget(root);
             if (g == null) continue;
             float gap = CLOCK_GAP_DP * g.getResources().getDisplayMetrics().density;
-            // Not g.getWidth()/2: this runs from the setNotifY hook, which can fire before the
-            // group is laid out, and a width of 0 puts the pivot on the left edge - the clock
-            // then collapses into the corner instead of staying centred under the date.
-            g.setPivotX(g.getResources().getDisplayMetrics().widthPixels / 2f);
+            g.setPivotX(clockPivotX(g, pooled));
             // Pivoting on the glyph top means the scaled block still starts at `glyph`, so the
             // translation needed to land it under the date does not depend on k.
             g.setPivotY(glyph);
@@ -1387,6 +1791,32 @@ public class Main extends XposedModule {
             Xp.log(TAG + "collapse y=" + y + " p=" + p + " k=" + k
                     + " glyphTop=" + glyph + " dateBottom=" + dateBottom + " nudge=" + nudge);
         }
+    }
+
+    /**
+     * Where the collapse pivots horizontally, in the target's own coordinates.
+     *
+     * A clock that is centred on the screen has to stay centred as it shrinks, and one that is
+     * aligned to the left - as the classic style's is, under a left-aligned date - has to stay
+     * left. So the pivot follows what the style already does rather than being a constant:
+     * centred styles pivot on the middle of the screen, the rest on their own left edge.
+     *
+     * **The box has to be the POOLED one**, across both trees, like the top edge. all_in_one
+     * draws half the clock in each tree - the hour in the background one, the minute in the
+     * foreground one - so each tree on its own looks like an off-centre clock, and giving each
+     * its own pivot made the two halves shrink towards their own left edges and pull apart. On
+     * screen: "14" and "43" with a gap down the middle.
+     *
+     * Not g.getWidth()/2 for the centred case: this runs from the setNotifY hook, which can fire
+     * before the group is laid out, and a width of 0 would put the pivot on the left edge - the
+     * clock then collapses into the corner instead of staying centred under the date.
+     */
+    private static float clockPivotX(View g, RectF pooled) {
+        float screenW = g.getResources().getDisplayMetrics().widthPixels;
+        if (pooled == null) return screenW / 2f - g.getLeft();
+        float inkCentre = g.getLeft() + pooled.centerX();
+        boolean centred = Math.abs(inkCentre - screenW / 2f) < screenW * 0.05f;
+        return centred ? screenW / 2f - g.getLeft() : pooled.left;
     }
 
     /**
@@ -1502,6 +1932,533 @@ public class Main extends XposedModule {
                     + out[0].getWidth() + "x" + out[0].getHeight());
         }
         return out[0];
+    }
+
+    /**
+     * Everything the app's preview needs that only this process can see.
+     *
+     * The app draws a lock screen it has no access to: it cannot read the media session (that
+     * would need notification access), and the media card and the shortcut buttons are
+     * SystemUI's own views. It used to draw its own diagram of the card out of rectangles, which
+     * is exactly as convincing as it sounds. So the real views are captured here instead - one
+     * software draw each - and the app paints the results into its preview at the coordinates
+     * they occupy on the phone.
+     *
+     * Sizes: the artwork is a 256px JPEG, the card is scaled to CARD_SHOT_W and the shortcuts to
+     * SHORTCUT_SHOT_W, all together well inside the ordered broadcast's binder budget. The
+     * shortcuts are only sent when asked for - they never change - and the artwork is skipped
+     * when the caller says it already has this track's.
+     */
+    private static android.os.Bundle previewBundle(Context c, Intent i) {
+        android.os.Bundle out = new android.os.Bundle();
+        // One line per request, in debug builds, saying where every piece of the picture came
+        // from or why it is missing. The preview has six independent sources and a user reports
+        // it as one thing ("the preview is blank"), so without this every report costs a round
+        // trip to find out WHICH source failed.
+        StringBuilder diag = DIAG ? new StringBuilder() : null;
+        out.putBoolean("alive", true);
+        out.putString("track", sCardKey);
+        if (diag != null) {
+            diag.append("preview: cover=").append(sCoverMode)
+                .append(" auto=").append(sAuto)
+                .append(" cardKnown=").append(sCardKnown)
+                .append(" cardShowing=").append(sCardShowing)
+                .append(" keyguard=").append(keyguardShowing())
+                .append(" screenOn=").append(screenOn())
+                .append(" container=").append(sContainer != null)
+                .append(" screen=").append(sScreenW).append('x').append(sScreenH)
+                .append(" track=").append(sCardKey.isEmpty() ? "none" : sCardKey);
+        }
+
+        if (!sCardKey.isEmpty() && sCardKey.equals(i.getStringExtra("have"))) {
+            out.putBoolean("same", true);
+            if (diag != null) diag.append("\n  art: same track, not resent");
+        } else {
+            byte[] thumb = artThumbnail(c, 256);
+            if (thumb != null) out.putByteArray("jpg", thumb);
+            if (diag != null) {
+                diag.append("\n  art: ").append(thumb == null ? "NULL" : thumb.length + "B");
+                if (thumb == null) {
+                    MediaController mc = pickController(c);
+                    diag.append(" (session=")
+                        .append(mc == null ? "none" : mc.getPackageName())
+                        .append(" metadata=")
+                        .append(mc == null || mc.getMetadata() == null ? "none" : "yes")
+                        .append(" cardThumb=").append(cardThumbnail() == null ? "none" : "yes")
+                        .append(')');
+                }
+            }
+        }
+
+        View cardView = cardShotRoot(findSysuiView("mi_media_controls"));
+        View mediaBg = cardView == null ? null : findByName(cardView, "media_bg");
+        // 24dp on this device - notification_item_bg_radius, which media_bg's own outline
+        // agrees with. The app rounds its stand-in frosting to the same number.
+        if (mediaBg != null) out.putFloat("cardradius", outlineRadius(mediaBg));
+        putArtSlot(out, cardView);
+        boolean dump = i.getBooleanExtra("dump", false);
+        // The artwork at full size, for lifting a sample cover out of a running phone.
+        if (dump) {
+            Bitmap raw = albumArt(c);
+            if (raw != null) {
+                try {
+                    java.io.FileOutputStream f = new java.io.FileOutputStream(
+                            new java.io.File(sAppCtx.getFilesDir(), "mc_shot_art.jpg"));
+                    raw.compress(Bitmap.CompressFormat.JPEG, 95, f);
+                    f.close();
+                    Xp.log(TAG + "shot art " + raw.getWidth() + "x" + raw.getHeight());
+                } catch (Throwable t) {
+                    Xp.log(TAG + "art dump failed: " + t);
+                }
+            }
+        }
+        byte[] card = shootCard(cardView);
+        if (dump) dumpShot("card", card);
+        if (card != null) {
+            out.putByteArray("card", card);
+            // The SAMPLED rectangle, not a live reading: on an unlocked phone this same view is
+            // the one at the top of the shade, six hundred pixels higher up.
+            out.putIntArray("cardrect", new int[]{sCardL, sCardT, sCardW, sCardH});
+        }
+        if (diag != null) {
+            diag.append("\n  card: view=");
+            if (cardView == null) {
+                diag.append("NOT FOUND (no media card in the keyguard tree)");
+            } else {
+                diag.append(cardView.getClass().getSimpleName())
+                    .append(' ').append(cardView.getWidth()).append('x')
+                    .append(cardView.getHeight())
+                    .append(" vis=").append(cardView.getVisibility());
+            }
+            diag.append(" shot=").append(card == null ? "NULL" : card.length + "B")
+                .append(" rect=").append(sCardL).append(',').append(sCardT).append(' ')
+                .append(sCardW).append('x').append(sCardH)
+                .append(" artslot=").append(out.containsKey("artfrac") ? "yes" : "no")
+                .append(" hideArt=").append(sMcHideArt)
+                .append(" centerText=").append(sMcCenterText);
+        }
+
+        putDate(out, dump);
+        // Sent with the pictures, not only in answer to a query. The query happens once, when
+        // the page is opened; the clock's geometry changes whenever the user changes the lock
+        // screen clock style, and a stale zero here is the app holding a picture of a clock it
+        // then refuses to draw for want of somewhere to put it.
+        float[] cg = clockGeometry();
+        if (cg != null) {
+            out.putFloat("clockw", cg[0]);
+            out.putFloat("clockh", cg[1]);
+            out.putFloat("clocky", cg[2]);
+            out.putFloat("clockx", cg[3]);
+            out.putFloat("clockpivotx", cg[4]);
+            out.putFloat("clockpad", CLOCK_PAD);
+        }
+        if (diag != null) {
+            View date = visibleDate();
+            diag.append("\n  date: view=").append(date == null ? "NOT FOUND"
+                    : date.getClass().getSimpleName() + " " + date.getWidth() + "x"
+                      + date.getHeight() + " vis=" + date.getVisibility())
+                .append(" shot=").append(out.containsKey("date") ? "yes" : "NULL");
+            diag.append("\n  clock: geom=").append(cg == null ? "NULL (no date or no glyph box)"
+                    : "w" + cg[0] + " h" + cg[1] + " y" + cg[2] + " x" + cg[3] + " pivot" + cg[4]);
+            View[] roots = clockRoots();
+            diag.append(" roots=").append(roots.length);
+            for (int t = 0; t < roots.length; t++) {
+                View g = clockTarget(roots[t]);
+                diag.append(" target").append(t).append('=')
+                    .append(g == null ? "none" : g.getClass().getSimpleName() + "#" + idOf(g));
+            }
+        }
+
+        // Both clock trees: the hour is drawn in the background layer and the minute in the
+        // foreground one, and each carries half the time.
+        for (int t = 0; t < 2; t++) {
+            byte[] png = shootClock(t);
+            if (dump) dumpShot("clock" + t, png);
+            if (png != null) out.putByteArray("clock" + t, png);
+            if (diag != null) {
+                diag.append(" shot").append(t).append('=')
+                    .append(png == null ? "NULL" : png.length + "B");
+            }
+        }
+        if (diag != null && !sClockShot) diag.append(" [clock capture switched OFF]");
+
+        if (i.getBooleanExtra("shortcuts", false)) {
+            putShortcut(out, "sl", "shortcut_view_left", dump);
+            putShortcut(out, "sr", "shortcut_view_right", dump);
+            if (diag != null) {
+                diag.append("\n  shortcuts: asked, left=")
+                    .append(out.containsKey("sl") ? "yes" : "NOT FOUND")
+                    .append(" right=").append(out.containsKey("sr") ? "yes" : "NOT FOUND");
+            }
+        } else if (diag != null) {
+            diag.append("\n  shortcuts: not asked for (the app already has them)");
+        }
+
+        if (diag != null) Xp.log(TAG + diag);
+        return out;
+    }
+
+    /**
+     * Where the card draws the album art, and how rounded it is.
+     *
+     * The artwork is the one part of the card the app has to draw itself. A software canvas does
+     * not apply a view's outline clip - only a hardware one does - so the captured card came
+     * back with a hard-cornered square where the OEM draws a rounded one. Everything else about
+     * it survives the capture, so only the artwork is cut out of the picture and painted back.
+     *
+     * The radius is read off the view's own OutlineProvider rather than a resource: it is the
+     * number actually being clipped with, and it costs one call.
+     */
+    private static void putArtSlot(android.os.Bundle out, View card) {
+        if (card == null || card.getWidth() <= 0 || card.getHeight() <= 0) return;
+        // Resolved off the card rather than read from the guard's cache: the guard is only
+        // installed when one of the two card settings is on, and the app asks for this picture
+        // whether or not anything has been switched on.
+        View box = findByName(card, "album_art");
+        View img = box == null ? null : findByName(box, "album_art_image");
+        if (img == null) return;
+        // Hidden by the user's own setting - nothing to draw, and saying so is how the app knows.
+        if (sMcHideArt || box.getVisibility() != View.VISIBLE) return;
+        if (img.getWidth() <= 0 || img.getHeight() <= 0) return;
+        int[] a = new int[2], b = new int[2];
+        img.getLocationOnScreen(a);
+        card.getLocationOnScreen(b);
+        // FRACTIONS of the card, not pixels. The app pastes the capture into the rectangle the
+        // card occupies on the LOCK screen, but the card it captured may have been laid out at
+        // some other width - pull the shade down over the app and it is the same view, sized for
+        // the shade - and pixels measured there land in the wrong place once the capture has
+        // been stretched to the lock screen's width. Fractions survive the stretch.
+        float w = card.getWidth(), h = card.getHeight();
+        out.putFloatArray("artfrac", new float[]{(a[0] - b[0]) / w, (a[1] - b[1]) / h,
+                img.getWidth() / w, img.getHeight() / h});
+        // Measured on this device: the ImageView is not clipped at all, its CONTAINER is -
+        // clipToOutline with a 30px radius - so the radius has to be looked for on both.
+        float r = img.getClipToOutline() ? outlineRadius(img) : 0f;
+        if (r <= 0f && box.getClipToOutline()) r = outlineRadius(box);
+        out.putFloat("artradius", r / w);
+    }
+
+    private static float outlineRadius(View v) {
+        try {
+            android.graphics.Outline o = new android.graphics.Outline();
+            v.getOutlineProvider().getOutline(v, o);
+            float r = o.getRadius();
+            if (r >= 0f) return r;
+        } catch (Throwable ignored) {
+        }
+        return 0f;
+    }
+
+    private static final int DATE_SHOT_W = 360;
+
+    /**
+     * The date line above the clock, captured like everything else rather than re-typed.
+     *
+     * It has to be the real view: the format, the language, the font and the colour all follow
+     * the lock screen clock style, and a date drawn here would be a second thing to keep in step
+     * with a theme the user can change at any moment. Because the app re-asks every few seconds,
+     * a style change simply arrives with the next picture.
+     *
+     * The y is COMPUTED, not read. Cover mode pins the date to DATE_TOP_DP (placeCollapsedClock
+     * anchors everything else to it), and the app asks for this with the phone unlocked, where
+     * the live position is whatever the hidden keyguard happens to be holding. The x comes off
+     * the view because it does not depend on the squeeze.
+     */
+    private static void putDate(android.os.Bundle out, boolean dump) {
+        View date = visibleDate();
+        if (date == null || date.getWidth() <= 0 || date.getHeight() <= 0) return;
+        byte[] png = shoot(date, DATE_SHOT_W);
+        if (dump) dumpShot("date", png);
+        if (png == null) return;
+        int[] loc = new int[2];
+        date.getLocationOnScreen(loc);
+        float density = date.getResources().getDisplayMetrics().density;
+        out.putByteArray("date", png);
+        out.putIntArray("daterect", new int[]{loc[0], Math.round(DATE_TOP_DP * density),
+                date.getWidth(), date.getHeight()});
+    }
+
+    private static final int CLOCK_SHOT_W = 480;
+    /**
+     * Slack around the glyph box before cropping. getTextBoundsWithPosition() reports the text's
+     * own bounds, but the digits are STROKED - in glass mode they are nothing but stroke - so
+     * half a stroke width falls outside it and the crop shaved the last digit.
+     */
+    private static final float CLOCK_PAD = 10f;
+
+    private static volatile boolean sClockShot = true;
+
+    /**
+     * The clock's digits, cropped to the glyphs, drawn WITHOUT the collapse scale - the app
+     * applies that itself, so dragging the size slider does not need a new picture.
+     *
+     * These are the OEM's own variable-font paths, which is why they can be captured at all:
+     * TimeView.onDraw strokes a Path, and a Path draws into a software canvas like anything
+     * else. The refracting glass is a RuntimeShader and does not, so what comes back is the
+     * digits as they are filled at the moment of the capture.
+     */
+    private static byte[] shootClock(int which) {
+        if (!sClockShot) return null;
+        View[] roots = clockRoots();
+        if (which >= roots.length) return null;
+        View g = clockTarget(roots[which]);
+        RectF box = paddedGlyphBox();
+        if (g == null || box == null || box.width() <= 0 || box.height() <= 0) return null;
+        try {
+            float k = Math.min(1f, CLOCK_SHOT_W / box.width());
+            int w = Math.max(1, Math.round(box.width() * k));
+            int h = Math.max(1, Math.round(box.height() * k));
+            Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas cv = new android.graphics.Canvas(b);
+            cv.scale(k, k);
+            cv.translate(-box.left, -box.top);
+            g.draw(cv);
+            redrawAfterCapture(g);
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            b.compress(Bitmap.CompressFormat.PNG, 100, bos);
+            b.recycle();
+            return bos.toByteArray();
+        } catch (Throwable t) {
+            Xp.log(TAG + "clock capture failed: " + t);
+            return null;
+        }
+    }
+
+    /**
+     * Whether the card is currently laid out the way the lock screen lays it out.
+     *
+     * The app stretches this picture into the rectangle the card occupies on the LOCK screen, so
+     * a picture of the card in any other layout is wrong by construction - and the shade
+     * re-lays-out the very same view for its own panel. Taken there and stretched into the lock
+     * screen's rectangle, the card's content ended up crammed into the top-left corner.
+     *
+     * The test is the sampled size rather than "is the shade open", because it is the size that
+     * the stretch actually depends on: whatever the shade, an AOD or a future panel does to the
+     * card, a picture is only usable if it was taken at the size it will be drawn at. When
+     * nothing has been sampled yet there is no invariant to protect and the picture is taken.
+     */
+    private static boolean cardLaidOutForKeyguard(View card) {
+        if (sCardW <= 0 || sCardH <= 0) return true;
+        boolean ok = Math.abs(card.getWidth() - sCardW) <= 2
+                && Math.abs(card.getHeight() - sCardH) <= 2;
+        if (!ok && !sCardShapeComplained) {
+            sCardShapeComplained = true;
+            Xp.log(TAG + "card is " + card.getWidth() + "x" + card.getHeight()
+                    + ", lock screen says " + sCardW + "x" + sCardH + " - not photographing it");
+        }
+        if (ok) sCardShapeComplained = false;
+        return ok;
+    }
+
+    private static boolean sCardShapeComplained;
+
+    /**
+     * What to photograph for "the media card".
+     *
+     * Not mi_media_controls, which is only the card's contents: the bright rim along the card's
+     * edge is a FOREGROUND drawable on its parent, MiuiMediaHeaderView, and a foreground is
+     * drawn after the children - so starting the capture at the child left the rim out
+     * altogether. The parent has the same bounds, so nothing else about the picture changes.
+     *
+     * Guarded on the bounds matching rather than on the class name, because everything measured
+     * and reported around the card - the sampled rectangle, the artwork's slot - is relative to
+     * mi_media_controls, and only an identically placed parent keeps those true.
+     */
+    private static View cardShotRoot(View card) {
+        if (card == null) return null;
+        if (!(card.getParent() instanceof View)) return card;
+        View p = (View) card.getParent();
+        boolean sameBox = p.getWidth() == card.getWidth() && p.getHeight() == card.getHeight()
+                && card.getLeft() == 0 && card.getTop() == 0;
+        return sameBox ? p : card;
+    }
+
+    /** Torch and camera. Their layout is the same locked or unlocked, so this reads it live. */
+    private static void putShortcut(android.os.Bundle out, String key, String id, boolean dump) {
+        View v = findSysuiView(id);
+        if (v == null) {
+            Xp.log(TAG + id + " not found");
+            return;
+        }
+        if (v.getWidth() <= 0 || v.getHeight() <= 0) return;
+        byte[] png = shoot(v, SHORTCUT_SHOT_W);
+        if (dump) dumpShot(key, png);
+        if (png == null) return;
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        out.putByteArray(key, png);
+        out.putIntArray(key + "rect", new int[]{loc[0], loc[1], v.getWidth(), v.getHeight()});
+    }
+
+    /** Debug builds narrate the preview pipeline; release builds only do so on `op=verbose`. */
+    private static final boolean DIAG = BuildConfig.DEBUG;
+
+    private static final int CARD_SHOT_W = 420;
+    private static final int SHORTCUT_SHOT_W = 160;
+
+    /**
+     * `--es op preview --ez dump true` drops the captures next to the state file, for looking at
+     * when the preview shows the wrong thing. A capture can fail quietly - a view that renders
+     * only on a hardware canvas comes out blank rather than throwing - and the size of the PNG
+     * is not enough to tell that apart from a picture that is simply mostly transparent.
+     */
+    private static void dumpShot(String name, byte[] png) {
+        if (sAppCtx == null) return;
+        try {
+            java.io.File f = new java.io.File(sAppCtx.getFilesDir(), "mc_shot_" + name + ".png");
+            if (png == null) {
+                Xp.log(TAG + "shot " + name + " = null");
+                return;
+            }
+            java.io.FileOutputStream o = new java.io.FileOutputStream(f);
+            o.write(png);
+            o.close();
+            Xp.log(TAG + "shot " + name + " " + png.length + "B -> " + f);
+        } catch (Throwable t) {
+            Xp.log(TAG + "shot dump failed: " + t);
+        }
+    }
+
+    /**
+     * The media card as a picture.
+     *
+     * The two card settings only apply on the keyguard (see assertMediaCard), but the app asks
+     * for this with the phone unlocked and in its own foreground, and what it needs to show is
+     * what the LOCK screen will look like. So they are forced on for the duration of the draw
+     * and put straight back. Nothing can be drawn to the screen in between - this is the main
+     * thread, and a traversal cannot interleave with a broadcast receiver - so the real card
+     * never flickers.
+     */
+    private static byte[] shootCard(View card) {
+        if (card == null) return null;
+        if (!cardLaidOutForKeyguard(card)) return null;
+        View box = findByName(card, "album_art");
+        View img = box == null ? null : findByName(box, "album_art_image");
+        int wasVisible = img == null ? -1 : img.getVisibility();
+        sCardForced = true;
+        try {
+            assertMediaCard(card);
+            // Cut the artwork out of the picture; the app paints it back rounded (putArtSlot).
+            // The badge over its corner is a sibling, so it still lands on top where it belongs.
+            if (img != null) img.setVisibility(View.INVISIBLE);
+            return shoot(card, CARD_SHOT_W);
+        } catch (Throwable t) {
+            Xp.log(TAG + "card capture failed: " + t);
+            return null;
+        } finally {
+            if (img != null && wasVisible != -1) img.setVisibility(wasVisible);
+            sCardForced = false;
+            assertMediaCard(card);
+        }
+    }
+
+    /**
+     * One view, drawn into a bitmap at most maxW wide, as a PNG.
+     *
+     * PNG rather than JPEG because these have to keep their alpha: the card is a rounded
+     * translucent panel and the shortcuts are circles, and squaring either off would put a hard
+     * rectangle on top of the wallpaper in the preview.
+     */
+    private static byte[] shoot(View v, int maxW) {
+        return shoot(v, maxW, null);
+    }
+
+    /**
+     * extraBg is a child whose BACKGROUND has to be drawn by hand, for views MIUI's blur path
+     * skips on a software canvas.
+     */
+    private static byte[] shoot(View v, int maxW, View extraBg) {
+        int w = v.getWidth(), h = v.getHeight();
+        if (w <= 0 || h <= 0) return null;
+        try {
+            float k = Math.min(1f, maxW / (float) w);
+            Bitmap b = Bitmap.createBitmap(Math.max(1, Math.round(w * k)),
+                    Math.max(1, Math.round(h * k)), Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas cv = new android.graphics.Canvas(b);
+            cv.scale(k, k);
+            drawBackgroundOf(extraBg, cv);
+            v.draw(cv);
+            redrawAfterCapture(v);
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            b.compress(Bitmap.CompressFormat.PNG, 100, bos);
+            b.recycle();
+            return bos.toByteArray();
+        } catch (Throwable t) {
+            Xp.log(TAG + "view capture failed: " + t);
+            return null;
+        }
+    }
+
+    /**
+     * Puts a captured view back in line for a real redraw.
+     *
+     * Drawing a live view into an offscreen canvas is not free of consequences: View.draw()
+     * leaves the view marked as drawn, and the framework is then entitled to skip it on the next
+     * real frame, which shows up as stale pixels - half a clock, digits that did not follow the
+     * minute over. Suspected cause of "the lock screen font is sometimes incomplete", reported
+     * after the clock started being captured every few seconds.
+     *
+     * invalidate() does not reach children, and it is a child that draws the glyphs, so this
+     * walks. Cheap: a handful of views, once per capture, and an invalidate on an unchanged view
+     * costs one more draw of something that was going to be drawn anyway.
+     */
+    private static void redrawAfterCapture(View v) {
+        if (v == null) return;
+        v.invalidate();
+        if (!(v instanceof ViewGroup)) return;
+        ViewGroup g = (ViewGroup) v;
+        for (int i = 0; i < g.getChildCount(); i++) redrawAfterCapture(g.getChildAt(i));
+    }
+
+    /** Draws one child's background at its place in the parent, without going through the view. */
+    private static void drawBackgroundOf(View v, android.graphics.Canvas cv) {
+        if (v == null) return;
+        Drawable d = v.getBackground();
+        if (d == null || v.getWidth() <= 0 || v.getHeight() <= 0) return;
+        Rect old = new Rect(d.getBounds());
+        try {
+            cv.save();
+            cv.translate(v.getLeft(), v.getTop());
+            d.setBounds(0, 0, v.getWidth(), v.getHeight());
+            d.draw(cv);
+        } catch (Throwable ignored) {
+        } finally {
+            d.setBounds(old);
+            cv.restore();
+        }
+    }
+
+    /** Keyed on the artwork itself, so the app can re-ask as often as it likes for free. */
+    private static volatile int sThumbPrint;
+    private static volatile byte[] sThumbJpg;
+
+    /**
+     * The current artwork, small, as a JPEG. Runs on the receiver's thread - the main one - so
+     * it stays deliberately cheap: one downscale and one encode of a picture a few hundred
+     * pixels wide, and nothing at all when the artwork has not changed since the last ask.
+     */
+    private static byte[] artThumbnail(Context ctx, int max) {
+        Bitmap b = albumArt(ctx);
+        if (b == null) return null;
+        int print = artPrint(b);
+        byte[] cached = sThumbJpg;
+        if (cached != null && print != 0 && print == sThumbPrint) return cached;
+        try {
+            int w = b.getWidth(), h = b.getHeight();
+            float k = Math.min(1f, max / (float) Math.max(w, h));
+            Bitmap small = k < 1f ? Bitmap.createScaledBitmap(b,
+                    Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)), true) : b;
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            small.compress(Bitmap.CompressFormat.JPEG, 88, bos);
+            if (small != b) small.recycle();
+            byte[] jpg = bos.toByteArray();
+            sThumbPrint = print;
+            sThumbJpg = jpg;
+            return jpg;
+        } catch (Throwable t) {
+            Xp.log(TAG + "art thumbnail failed: " + t);
+            return null;
+        }
     }
 
     /**
@@ -1866,6 +2823,7 @@ public class Main extends XposedModule {
     private static void enterCoverMode(boolean animate) {
         sCoverMode = true;
         setDepthHidden(true);
+        applyMediaCard();
         sCollapseMin = sClockScale;
         sGlassV0 = 0f;
         sGlassV1 = sGlassEnd;
@@ -1885,6 +2843,8 @@ public class Main extends XposedModule {
         sCoverMode = false;
         abandonHold("cover mode off", true);
         setDepthHidden(false);
+        // Hands the card back before the guard goes, or the last frame it drew stays.
+        applyMediaCard();
         saveState();
     }
 
@@ -1894,12 +2854,26 @@ public class Main extends XposedModule {
      * waking from AOD shows no transition at all.
      */
     private static void reassertCoverClock() {
+        reassertCoverClock(false);
+    }
+
+    /**
+     * force is for a clock that has been REBUILT under us - a keyguard re-attach, which is also
+     * what changing the lock screen clock style looks like from here.
+     *
+     * The hold surviving is not enough then. The hold is a number we coerce on the way through
+     * setNotifY; the collapse is a scale and a translation living on the clock views themselves,
+     * and a rebuilt clock is a fresh set of views with neither. Taking the early exit below left
+     * the new clock at full size with the y still pinned - the symptom being a clock that simply
+     * stops collapsing the moment the user picks a different style.
+     */
+    private static void reassertCoverClock(boolean force) {
         if (!sCoverMode) return;
         sCollapseMin = sClockScale;
         sGlassV0 = 0f;
         sGlassV1 = sGlassEnd;
         Float held = sHoldY;
-        if (held != null && Math.abs(held - SQUEEZE_FLOOR) < 1f) return;
+        if (!force && held != null && Math.abs(held - SQUEEZE_FLOOR) < 1f) return;
         sAppliedK = Float.NaN;
         sAppliedGlassV = Float.NaN;
         sHoldY = SQUEEZE_FLOOR;
@@ -1992,6 +2966,222 @@ public class Main extends XposedModule {
         ViewTreeObserver.OnPreDrawListener g = sDepthGuard;
         sDepthGuarded = null;
         sDepthGuard = null;
+        if (d == null || g == null) return;
+        try {
+            d.getViewTreeObserver().removeOnPreDrawListener(g);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    // ---------------------------------------------------------------- media card
+
+    private static final int CARD_RETRIES = 12;
+    private static final long CARD_RETRY_MS = 250L;
+    /** How long the card has to hold still before its position is believed. */
+    private static final long CARD_SETTLE_MS = 400L;
+
+    private static View findSysuiView(String id) {
+        View v = sContainer;
+        if (v == null) return null;
+        View root = v.getRootView();
+        int i = v.getContext().getResources().getIdentifier(id, "id", "com.android.systemui");
+        View hit = i == 0 ? null : root.findViewById(i);
+        return hit != null ? hit : findByName(root, id);
+    }
+
+    /**
+     * Finds a view by its resource entry name, walking the tree instead of resolving an id.
+     *
+     * getIdentifier() only searches the one package it is given, and not everything on the
+     * keyguard comes from com.android.systemui's own resources: the two shortcut buttons at the
+     * bottom came back "not found" by id while a dump of the very same tree listed them by name.
+     * The name is read off each view's own Resources, which is exactly why the dump can see them.
+     */
+    private static View findByName(View v, String name) {
+        try {
+            if (v.getId() != View.NO_ID
+                    && name.equals(v.getResources().getResourceEntryName(v.getId()))) {
+                return v;
+            }
+        } catch (Throwable ignored) {
+        }
+        if (!(v instanceof ViewGroup)) return null;
+        ViewGroup g = (ViewGroup) v;
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View hit = findByName(g.getChildAt(i), name);
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
+    /**
+     * Finds the card, applies the current look and leaves a guard behind to keep it applied.
+     * Called whenever the card or cover mode changes; re-running it is free.
+     *
+     * The retries are the same story as the cut-out's: on a SystemUI that has just started,
+     * cover mode is restored the moment the clock container attaches, which can be before the
+     * notification stack has inflated anything.
+     */
+    private static void applyMediaCard() {
+        applyMediaCard(0);
+    }
+
+    private static void applyMediaCard(final int attempt) {
+        main().post(new Runnable() {
+            @Override
+            public void run() {
+                View card = findSysuiView("mi_media_controls");
+                if (card == null) {
+                    // Only worth waiting for while something still wants the card restyled.
+                    if (attempt < CARD_RETRIES && sCoverMode && (sMcHideArt || sMcCenterText)) {
+                        main().postDelayed(new Runnable() {
+                            @Override
+                            public void run() { applyMediaCard(attempt + 1); }
+                        }, CARD_RETRY_MS);
+                    }
+                    return;
+                }
+                sCardArt = card.findViewById(card.getResources()
+                        .getIdentifier("album_art", "id", "com.android.systemui"));
+                sCardTitle = card.findViewById(card.getResources()
+                        .getIdentifier("header_title", "id", "com.android.systemui"));
+                sCardArtist = card.findViewById(card.getResources()
+                        .getIdentifier("header_artist", "id", "com.android.systemui"));
+                assertMediaCard(card);
+                if (sCoverMode && (sMcHideArt || sMcCenterText)) guardCard(card);
+                else releaseCardGuard();
+            }
+        });
+    }
+
+    /**
+     * One pass of "the card should look like this". Runs from the guard, so every write is
+     * conditional on the value actually being wrong - setVisibility and setTranslationX only
+     * invalidate, but setGravity requests a layout, and doing that unconditionally from a
+     * pre-draw listener is a traversal loop.
+     */
+    private static void assertMediaCard(View card) {
+        // The lock screen and the shade share one media card view, so "is the keyguard up" has
+        // to be part of the condition rather than just cover mode: without it, pulling the shade
+        // down on an unlocked phone would show the same restyled card, and these two settings
+        // are about the lock screen. The clock container is the test - only the keyguard shows
+        // it - and because this runs every frame, the card restores itself on unlock by itself.
+        View c = sContainer;
+        boolean onKeyguard = sCardForced || (keyguardShowing() && c != null && c.isShown());
+        boolean hide = sCoverMode && sMcHideArt && onKeyguard;
+        boolean center = sCoverMode && sMcCenterText && onKeyguard;
+        View art = sCardArt;
+        if (art != null) {
+            // INVISIBLE, not GONE: the constraints around it are the card's whole layout, and
+            // collapsing the artwork would drag the text sideways on its own terms rather than
+            // ours. It also leaves the thumbnail's bitmap in place, which is still the module's
+            // last-resort source for the cover itself.
+            int want = hide ? View.INVISIBLE : View.VISIBLE;
+            if (art.getVisibility() != want) art.setVisibility(want);
+        }
+        centreCardText(card, (TextView) sCardTitle, center);
+        centreCardText(card, (TextView) sCardArtist, center);
+        if (onKeyguard && !sCardForced) sampleCardRect(card);
+    }
+
+    /**
+     * Centres one line of the card's text on the card.
+     *
+     * translationX only - it moves the view without touching the constraints, so the OEM can
+     * re-run its own layout without fighting us and letting go is a single write back to zero.
+     *
+     * What is moved is the GLYPH RUN, not the view. The two obvious approaches both fail here:
+     * the text views are constrained to the space beside the artwork, so centring the view in
+     * the card leaves the text sitting at the left edge of a box that is wider than the words;
+     * and setGravity(CENTER_HORIZONTAL) had no effect on this card at all (reported from the
+     * device: text still hard left). Reading the drawn line straight off the Layout sidesteps
+     * both - it already accounts for whatever gravity, padding and ellipsis are in force, so
+     * the sum below is "where the ink starts now" against "where it should start".
+     */
+    private static void centreCardText(View card, TextView t, boolean centre) {
+        if (t == null) return;
+        if (!centre) {
+            if (t.getTranslationX() != 0f) t.setTranslationX(0f);
+            return;
+        }
+        Layout lay = t.getLayout();
+        if (lay == null || lay.getLineCount() < 1 || card.getWidth() <= 0) return;
+        float ink = lay.getLineWidth(0);
+        if (ink <= 0f) return;
+        float have = t.getLeft() + t.getPaddingLeft() + lay.getLineLeft(0);
+        float dx = (card.getWidth() - ink) / 2f - have;
+        if (t.getTranslationX() != dx) t.setTranslationX(dx);
+    }
+
+    /**
+     * Records where the card is, for the app's preview.
+     *
+     * Only called with the keyguard actually showing: the same card is what the shade puts at
+     * the top of the notification list, at a completely different height, and a preview drawn
+     * from that reading would put the card where it never appears on the lock screen.
+     *
+     * A reading is only believed once it has held still for CARD_SETTLE_MS, which is the same
+     * rule the date offset uses and for the same reason: the card slides in when it appears and
+     * slides away again at unlock, so those frames are readings of a card in flight. Measured
+     * without any settling rule: 62,1676 - the card twenty pixels off centre, caught on its way
+     * out. Two identical frames were not enough either - a card can be laid out at its starting
+     * position and sit there for a few frames before the animation begins, which is how a
+     * reading 244px above the real one got through.
+     */
+    private static void sampleCardRect(View card) {
+        // Not while dozing. AOD shows the keyguard and holds still for as long as it is up, so
+        // it sails past the settle rule below - and it lays the card out somewhere else, which
+        // is how the preview ended up drawing it too high. isInteractive() is false in doze.
+        if (!card.isShown() || !screenOn()) return;
+        int w = card.getWidth(), h = card.getHeight();
+        if (w <= 0 || h <= 0) return;
+        int[] loc = new int[2];
+        card.getLocationOnScreen(loc);
+        // On the lock screen the card lives in the notification area, below a clock pinned near
+        // the top; it is never up by the status bar. Anything that high is the shade's copy of
+        // the same view - the panel can be pulled down over the lock screen too, where the
+        // keyguard test above still passes.
+        if (loc[1] < sScreenH / 3) return;
+        long now = android.os.SystemClock.uptimeMillis();
+        if (loc[0] != sCardSampleL || loc[1] != sCardSampleT
+                || w != sCardSampleW || h != sCardSampleH) {
+            sCardSampleL = loc[0];
+            sCardSampleT = loc[1];
+            sCardSampleW = w;
+            sCardSampleH = h;
+            sCardSampleAt = now;
+            return;
+        }
+        if (now - sCardSampleAt < CARD_SETTLE_MS) return;
+        if (loc[0] == sCardL && loc[1] == sCardT && w == sCardW && h == sCardH) return;
+        sCardL = loc[0];
+        sCardT = loc[1];
+        sCardW = w;
+        sCardH = h;
+        Xp.log(TAG + "media card at " + sCardL + "," + sCardT + " " + sCardW + "x" + sCardH);
+        saveStateSoon();
+    }
+
+    private static void guardCard(final View card) {
+        if (sCardGuarded == card && sCardGuard != null) return;
+        releaseCardGuard();
+        sCardGuard = new ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                assertMediaCard(card);
+                return true;
+            }
+        };
+        card.getViewTreeObserver().addOnPreDrawListener(sCardGuard);
+        sCardGuarded = card;
+        Xp.log(TAG + "media card guard installed");
+    }
+
+    private static void releaseCardGuard() {
+        View d = sCardGuarded;
+        ViewTreeObserver.OnPreDrawListener g = sCardGuard;
+        sCardGuarded = null;
+        sCardGuard = null;
         if (d == null || g == null) return;
         try {
             d.getViewTreeObserver().removeOnPreDrawListener(g);
@@ -2273,6 +3463,8 @@ public class Main extends XposedModule {
             }
             return;
         }
+        // The card is rebuilt around a track change, so this is where a fresh one is found.
+        if (sCoverMode) applyMediaCard();
         rebindSession();
     }
 
@@ -2429,6 +3621,25 @@ public class Main extends XposedModule {
      * Springing the clock needs Choreographer frames, and those stop while the display is off.
      * An animation started then never settles, and leaves the hold pinned half way.
      */
+    /**
+     * Whether the lock screen is actually up.
+     *
+     * The clock container being shown is NOT this test, which is what the card rectangle used to
+     * be sampled on: the keyguard's views can be laid out and VISIBLE with the phone unlocked
+     * and something else in front of them - measured, vis=0 with the app in the foreground - so
+     * pulling the shade down handed us the card at its position in the panel, up in the corner,
+     * and the preview then drew the lock screen's card up there too.
+     */
+    private static boolean keyguardShowing() {
+        try {
+            android.app.KeyguardManager km = (android.app.KeyguardManager)
+                    sAppCtx.getSystemService(Context.KEYGUARD_SERVICE);
+            return km != null && km.isKeyguardLocked();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private static boolean screenOn() {
         try {
             PowerManager pm = (PowerManager) sAppCtx.getSystemService(Context.POWER_SERVICE);

@@ -83,4 +83,9 @@
     <string name="home_module_version">Module version</string>
     <string name="home_unknown">Unknown</string>
     <string name="home_loading">Loading…</string>
+    <string name="card_section">Media card</string>
+    <string name="card_hide_art">Hide the thumbnail</string>
+    <string name="card_center_text">Centre the title</string>
+    <string name="preview_note">Clock and card come from the phone; frosting and rim are approximations</string>
+    <string name="preview_note_sample">Nothing playing: the cover and card are a sample</string>
 </resources>

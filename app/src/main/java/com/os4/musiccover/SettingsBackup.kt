@@ -7,7 +7,8 @@ import org.json.JSONObject
  * Export and import of everything the user has set, which lives in two places.
  *
  * [AppSettings] owns how the app looks. The module's own parameters - where the cover sits, how
- * far the clock collapses, how solid the glass goes - belong to the hook inside SystemUI, and
+ * far the clock collapses, how solid the glass goes, what it does to the media card - belong to
+ * the hook inside SystemUI, and
  * [AppSettings] deliberately keeps no copy of them so there is only ever one truth. That is why
  * exporting has to ask the module for them and importing has to hand them back, rather than
  * reading and writing a local mirror.
@@ -20,6 +21,8 @@ object SettingsBackup {
     private const val KEY_BIAS = "coverBias"
     private const val KEY_CLOCK_SCALE = "clockScale"
     private const val KEY_GLASS_END = "glassEnd"
+    private const val KEY_CARD_HIDE_ART = "cardHideArt"
+    private const val KEY_CARD_CENTER_TEXT = "cardCenterText"
 
     suspend fun export(context: Context): String {
         val json = JSONObject(AppSettings.load(context).toJson())
@@ -30,6 +33,8 @@ object SettingsBackup {
             json.put(KEY_BIAS, module.bias.toDouble())
             json.put(KEY_CLOCK_SCALE, module.clockScale.toDouble())
             json.put(KEY_GLASS_END, module.glassEnd.toDouble())
+            json.put(KEY_CARD_HIDE_ART, module.mcHideArt)
+            json.put(KEY_CARD_CENTER_TEXT, module.mcCenterText)
         }
         return json.toString(2)
     }
@@ -45,6 +50,12 @@ object SettingsBackup {
             }
             if (obj.has(KEY_GLASS_END)) {
                 ModuleBridge.setGlassEnd(context, obj.getDouble(KEY_GLASS_END).toFloat())
+            }
+            if (obj.has(KEY_CARD_HIDE_ART)) {
+                ModuleBridge.setCardHideArt(context, obj.getBoolean(KEY_CARD_HIDE_ART))
+            }
+            if (obj.has(KEY_CARD_CENTER_TEXT)) {
+                ModuleBridge.setCardCenterText(context, obj.getBoolean(KEY_CARD_CENTER_TEXT))
             }
         } catch (_: Exception) {
             // The app half is already applied; a malformed module half is not worth losing it over.

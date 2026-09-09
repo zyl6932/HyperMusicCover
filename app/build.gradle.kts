@@ -74,6 +74,9 @@ android {
 
     buildFeatures {
         compose = true
+        // The module and the app both log a full account of the preview pipeline in debug
+        // builds and stay quiet in release ones, which needs BuildConfig.DEBUG to exist.
+        buildConfig = true
     }
 }
 
