@@ -68,14 +68,24 @@ public class Main extends XposedModule {
     private static final String CLS_INTERACTOR =
             "com.android.keyguard.interactor.KeyguardClockNotifInteractor";
     private static final String CLS_TIME_VIEW = "com.miui.clock.allInOne.TimeView";
-    private static final String CLS_TOP_CHANGE_TYPE =
-            "com.miui.systemui.notification.data.repository.NotificationTopChangeType";
     private static final String CLS_MEDIA_CARD = "com.android.systemui.statusbar.notification"
             + ".mediacontrol.MiuiMediaNotificationControllerImpl";
 
     private static volatile View sContainer;
     private static volatile Class<?> sContainerCls;
+    /**
+     * The enum KeyguardClockContainer.notifStateChange takes as its third argument, read off
+     * that method's own signature rather than looked up by name.
+     *
+     * com.miui.systemui.notification.data.repository.NotificationTopChangeType is only where
+     * it lives on the OS4 build this was written against; a HyperOS 3 device reported no such
+     * class, and looking it up by name there took the whole module down with it - one enum the
+     * clock squeeze needs cost the cover, the media card and the depth hook as well. The
+     * signature is what actually has to match, and it carries the class, so ask it.
+     */
     private static volatile Class<?> sTypeCls;
+    /** notifStateChange(float, boolean, NotificationTopChangeType), or null if it is gone. */
+    private static volatile Method sNotifStateChange;
     private static boolean sReceiverRegistered;
 
     /**
@@ -328,59 +338,81 @@ public class Main extends XposedModule {
 
         try {
             sContainerCls = Xp.findClass(CLS_CONTAINER, cl);
-            sTypeCls = Xp.findClass(CLS_TOP_CHANGE_TYPE, cl);
         } catch (Throwable t) {
-            Xp.log(TAG + "class lookup FAILED: " + t);
+            Xp.log(TAG + "KeyguardClockContainer not found, nothing to hook: " + t);
             return;
         }
+        // Not fatal, and it used to be. A HyperOS 3 report had no class under the name the
+        // enum has here, the lookup threw, and the whole of SystemUI went unhooked - no cover,
+        // no media card, no depth - over one enum only the clock squeeze needs. Every hook
+        // below now installs on its own terms, and each failure says which feature it cost.
+        sNotifStateChange = findNotifStateChange(sContainerCls);
+        if (sNotifStateChange != null) {
+            sTypeCls = sNotifStateChange.getParameterTypes()[2];
+        } else {
+            Xp.log(TAG + "no notifStateChange(float, boolean, enum) on " + CLS_CONTAINER
+                    + " - the clock squeeze cannot be driven on this build");
+        }
 
-        Xp.hookAll(sContainerCls, "onAttachedToWindow", chain -> {
-            Object result = chain.proceed();
-            sContainer = (View) chain.getThisObject();
-            captureScreenSize(sContainer);
-            Xp.log(TAG + "clock container attached: " + sContainer);
-            try {
-                registerReceiver(sContainer.getContext().getApplicationContext());
-            } catch (Throwable t) {
-                Xp.log(TAG + "registerReceiver failed: " + t);
-            }
-            // The keyguard is rebuilt on some transitions, taking our cover with it, so
-            // re-attach rather than assume the view is still in the tree.
-            if (sCoverWanted) {
-                sCover = null;
-                attachCover();
-            }
-            // Re-apply on keyguard rebuild. Measured: the system never re-shows the
-            // cut-out on its own, so no per-call ownership hook is warranted - hooking
-            // View.setVisibility process-wide cost every visibility change in SystemUI and
-            // fired zero times. What actually lost the state was SystemUI restarting.
-            if (sDepthHidden) setDepthHidden(true);
-            // Same story for the card: the guard and the artwork's tap listener both live on
-            // the view, so a rebuild takes them.
-            if (sCoverMode || wantsArtTap()) applyMediaCard();
-            // A rebuilt keyguard can be a different clock style, so the nudge measured
-            // against the old one means nothing - and neither does the clock view we resolved.
-            sNudgeSample = Float.NaN;
-            sClockTargets.clear();
-            if (sCoverMode) reassertCoverClock(true);
-            return result;
-        });
+        try {
+            Xp.hookAll(sContainerCls, "onAttachedToWindow", chain -> {
+                Object result = chain.proceed();
+                sContainer = (View) chain.getThisObject();
+                captureScreenSize(sContainer);
+                Xp.log(TAG + "clock container attached: " + sContainer);
+                try {
+                    registerReceiver(sContainer.getContext().getApplicationContext());
+                } catch (Throwable t) {
+                    Xp.log(TAG + "registerReceiver failed: " + t);
+                }
+                // The keyguard is rebuilt on some transitions, taking our cover with it, so
+                // re-attach rather than assume the view is still in the tree.
+                if (sCoverWanted) {
+                    sCover = null;
+                    attachCover();
+                }
+                // Re-apply on keyguard rebuild. Measured: the system never re-shows the
+                // cut-out on its own, so no per-call ownership hook is warranted - hooking
+                // View.setVisibility process-wide cost every visibility change in SystemUI and
+                // fired zero times. What actually lost the state was SystemUI restarting.
+                if (sDepthHidden) setDepthHidden(true);
+                // Same story for the card: the guard and the artwork's tap listener both live on
+                // the view, so a rebuild takes them.
+                if (sCoverMode || wantsArtTap()) applyMediaCard();
+                // A rebuilt keyguard can be a different clock style, so the nudge measured
+                // against the old one means nothing - and neither does the clock view we resolved.
+                sNudgeSample = Float.NaN;
+                sClockTargets.clear();
+                if (sCoverMode) reassertCoverClock(true);
+                return result;
+            });
+        } catch (Throwable t) {
+            // Everything downstream hangs off this one: it is where the container is captured
+            // and where the broadcast receiver is registered, so without it there is not even
+            // an adb channel to ask what went wrong. Say so plainly rather than throwing out
+            // of onPackageLoaded, which loses the message.
+            Xp.log(TAG + "onAttachedToWindow hook FAILED, the module is inert in SystemUI: " + t);
+        }
 
         // The keyguard is rebuilt on every screen-off/on, so a captured instance goes
         // stale. Drop it on detach and always drive the currently attached one.
-        Xp.hookAll(sContainerCls, "onDetachedFromWindow", chain -> {
-            Object result = chain.proceed();
-            if (sContainer == chain.getThisObject()) {
-                sContainer = null;
-                Xp.log(TAG + "clock container detached");
-            }
-            // Ownership must never outlive the keyguard that granted it. The keyguard
-            // is torn down and rebuilt on every screen off/on, and a hold left standing
-            // across that boundary rewrites the *new* clock's Y - which is what made the
-            // clock size differ between awake/AOD and with/without a media card.
-            abandonHold("keyguard torn down", false);
-            return result;
-        });
+        try {
+            Xp.hookAll(sContainerCls, "onDetachedFromWindow", chain -> {
+                Object result = chain.proceed();
+                if (sContainer == chain.getThisObject()) {
+                    sContainer = null;
+                    Xp.log(TAG + "clock container detached");
+                }
+                // Ownership must never outlive the keyguard that granted it. The keyguard
+                // is torn down and rebuilt on every screen off/on, and a hold left standing
+                // across that boundary rewrites the *new* clock's Y - which is what made the
+                // clock size differ between awake/AOD and with/without a media card.
+                abandonHold("keyguard torn down", false);
+                return result;
+            });
+        } catch (Throwable t) {
+            Xp.log(TAG + "onDetachedFromWindow hook failed: " + t);
+        }
 
         // The system does re-show the cut-out - verified: it came back right after we restored
         // cover mode across a SystemUI restart. Re-hide after the OEM's own update instead of
@@ -465,11 +497,15 @@ public class Main extends XposedModule {
         // re-assertions come in through KeyguardClockNotifInteractor.setNotifY directly
         // and never pass through this method, so coercing here only produced a race
         // between our value and the system's. The single chokepoint is setNotifY.
-        Xp.hookAll(sContainerCls, "notifStateChange", chain -> {
-            // Anyone calling this is by definition the live instance.
-            sContainer = (View) chain.getThisObject();
-            return chain.proceed();
-        });
+        try {
+            Xp.hookAll(sContainerCls, "notifStateChange", chain -> {
+                // Anyone calling this is by definition the live instance.
+                sContainer = (View) chain.getThisObject();
+                return chain.proceed();
+            });
+        } catch (Throwable t) {
+            Xp.log(TAG + "notifStateChange hook failed: " + t);
+        }
 
         // The OEM squeezes the clock through these four setters on TimeView. Scaling
         // setSizeInternal's argument shrinks the whole clock without touching the animation:
@@ -1140,16 +1176,46 @@ public class Main extends XposedModule {
         });
     }
 
+    /**
+     * The clock squeeze's one entry point, resolved by shape.
+     *
+     * Matching on (float, boolean, enum) rather than on the enum's fully qualified name: the
+     * name moved between HyperOS versions and the shape did not, and the only thing this
+     * module ever does with the enum is hand a constant of it straight back.
+     */
+    private static Method findNotifStateChange(Class<?> container) {
+        for (Method m : container.getDeclaredMethods()) {
+            if (!"notifStateChange".equals(m.getName())) continue;
+            Class<?>[] p = m.getParameterTypes();
+            if (p.length == 3 && p[0] == float.class && p[1] == boolean.class && p[2].isEnum()) {
+                m.setAccessible(true);
+                return m;
+            }
+        }
+        return null;
+    }
+
+    /** The named constant of that enum, or its first one if the names have moved too. */
+    private static Object topChangeType(String name) {
+        Class<?> c = sTypeCls;
+        if (c == null) return null;
+        Object[] all = c.getEnumConstants();
+        if (all == null || all.length == 0) return null;
+        for (Object o : all) {
+            if (((Enum<?>) o).name().equals(name)) return o;
+        }
+        Xp.log(TAG + "no " + name + " on " + c.getName() + ", falling back to "
+                + ((Enum<?>) all[0]).name());
+        return all[0];
+    }
+
     /** Applies one frame. Must already be on the view's thread. */
     private static void applyY(float y, String typeName) {
         View v = sContainer;
-        if (v == null) return;
+        Method m = sNotifStateChange;
+        if (v == null || m == null) return;
         try {
-            @SuppressWarnings({"unchecked", "rawtypes"})
-            Object type = Enum.valueOf((Class<Enum>) sTypeCls, typeName);
-            Method m = Xp.findMethodExact(sContainerCls,
-                    "notifStateChange", float.class, boolean.class, sTypeCls);
-            m.setAccessible(true);
+            Object type = topChangeType(typeName);
             // NOTE the inversion: KeyguardClockContainer calls this arg "isDragOrFling",
             // AllInOneClockAnimation reads it as "withAnim" = !isDragOrFling.
             // true  -> drag/fling  -> snap  (what per-frame driving wants)
@@ -1168,19 +1234,20 @@ public class Main extends XposedModule {
 
     private static void drive(final float y, final boolean anim, final String typeName) {
         final View v = sContainer;
+        final Method m = sNotifStateChange;
         if (v == null) {
             Xp.log(TAG + "no clock container captured yet");
             return;
         }
+        if (m == null) {
+            Xp.log(TAG + "no notifStateChange on this build, cannot drive the clock");
+            return;
+        }
         v.post(new Runnable() {
             @Override
-            @SuppressWarnings({"unchecked", "rawtypes"})
             public void run() {
                 try {
-                    Object type = Enum.valueOf((Class<Enum>) sTypeCls, typeName);
-                    Method m = Xp.findMethodExact(sContainerCls,
-                            "notifStateChange", float.class, boolean.class, sTypeCls);
-                    m.setAccessible(true);
+                    Object type = topChangeType(typeName);
                     sSelfDriving = true;
                     try {
                         m.invoke(v, y, anim, type);
