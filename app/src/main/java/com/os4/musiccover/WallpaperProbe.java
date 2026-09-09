@@ -10,6 +10,9 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -63,6 +66,69 @@ public class WallpaperProbe {
     private static final String CLS_KEYGUARD_ENGINE =
             "com.miui.miwallpaper.wallpaperservice.impl.keyguard.KeyguardImageEngineImpl";
 
+    // ------------------------------------------------------------------ the crossfade
+
+    /**
+     * The real lock wallpaper at texture size - the far end of the fade out of cover mode.
+     *
+     * Deliberately not persisted. It is only ever learnt by watching one go past in the upload
+     * hook, so a copy read back from disk could be a wallpaper the user has since changed, and
+     * fading to the wrong picture and then cutting to the right one is worse than not fading at
+     * all. Missing it costs exactly one hard cut - the reload that performs it is the reload
+     * that learns the original - so this heals itself on first use after a process restart.
+     */
+    private static volatile Bitmap sOrig;
+    private static volatile int sOrigPrint;
+    /** The frame the fade is on. Non-null only while one is running. */
+    private static volatile Bitmap sFade;
+    /** Reused across fades: a 12MB allocation per transition is itself a dropped frame. */
+    private static Bitmap sFadeBuf;
+    /**
+     * True from the moment a blended frame is handed to the engine until the GL thread has
+     * finished reading it.
+     *
+     * One buffer is reused for the whole fade, so composing the next frame into it while the
+     * upload is still walking down it puts two different blend fractions in one texture, with a
+     * hard horizontal seam between them. That is not theoretical - it is what the tearing looks
+     * like on video: the top third of the wallpaper a step or two behind the rest, for several
+     * frames in a row. So the fade waits for its frame to be consumed before composing another.
+     */
+    private static volatile boolean sFadeInFlight;
+    private static volatile long sFadeSentAt;
+    /**
+     * How long to wait for that acknowledgement before composing anyway. A reload that never
+     * reaches the upload path - coalesced, or the engine simply not asking for a frame - must
+     * cost a dropped frame, not a fade that stops half way.
+     */
+    private static final long FADE_ACK_MS = 48L;
+    private static final Paint sFadePaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    /** Which fade is the current one, so a track change mid-flight cancels the old one. */
+    private static volatile int sFadeGen;
+    /**
+     * How long the crossfade takes.
+     *
+     * Apple's whole exit is about 300ms, but matching that number is not the same as matching
+     * the feel: the clock is a critically damped spring, so it has covered most of its distance
+     * long before it settles, and a linear-ish wallpaper fade of the same total length reads as
+     * lagging behind it. Hence both the shorter default and the ease-out below.
+     *
+     * Tunable, because it is a taste judgement made against a phone:
+     *   --es op fadems --ei v 240
+     */
+    private static volatile long sFadeMs = 240L;
+    private static final long FADE_STEP_MS = 16L;
+    /**
+     * Whether the OEM's frosted copy is regenerated on the fade's frames.
+     *
+     * On by default, on measurement rather than principle: it is worth 7 -> 9 frames across a
+     * 240ms fade, because the round trip to the GL thread is what paces this and the blur is
+     * part of it. What it costs is the notification and media cards blurring a wallpaper up to
+     * 240ms stale, which nobody can see, and the upload that ends the fade puts it right.
+     */
+    private static volatile boolean sSkipFrost = true;
+    /** Live for the duration of one fade, read by the frosting hook on the GL thread. */
+    private static volatile boolean sFrostSkipping;
+
     public static void handle(XposedModuleInterface.PackageLoadedParam param) {
         sCl = param.getDefaultClassLoader();
         Xp.log(TAG + "loaded into " + PKG);
@@ -88,7 +154,24 @@ public class WallpaperProbe {
                         sReportedH = h;
                         Xp.log(TAG + "keyguard texture is " + w + "x" + h);
                     }
+                    // A fade owns the texture outright while it runs: every frame of it is
+                    // a blend this process composed, and neither the art nor the original is
+                    // what should be uploaded until it lands.
+                    Bitmap fade = sFade;
+                    if (fade != null) {
+                        args[0] = fade;
+                        // proceed() is the upload: once it returns, the buffer has been read
+                        // and the next frame may be composed into it. This is the whole
+                        // handshake, and it is why one buffer is enough.
+                        Object r = chain.proceed(args);
+                        sFadeInFlight = false;
+                        return r;
+                    }
                     Bitmap art = sArt;
+                    // The one moment the real lock wallpaper passes through here. Once the art
+                    // is set the getBitmap short-circuit below means the OEM never decodes it
+                    // again, so this is the only chance to learn what to fade back to.
+                    if (art == null) rememberOriginal(orig);
                     if (art != null) {
                         // Match the original exactly: updateDimensions/updateMatrix derive
                         // the GL matrix from these, so another size lands the wallpaper askew.
@@ -127,6 +210,8 @@ public class WallpaperProbe {
                     "com.miui.miwallpaper.container.openGL.KeyguardAnimImageWallpaperRenderer",
                     sCl);
             Xp.hookAll(kg, "getBitmap", chain -> {
+                Bitmap fading = sFade;
+                if (fading != null) return fading;
                 Bitmap fitted = fittedArt();
                 // Returning without proceeding IS the short-circuit: the OEM never decodes
                 // the real lock wallpaper off disk, which is the 210ms this buys back.
@@ -154,6 +239,22 @@ public class WallpaperProbe {
             Xp.log(TAG + "keyguard engine hooked");
         } catch (Throwable t) {
             Xp.log(TAG + "keyguard engine hook failed: " + t);
+        }
+
+        // The frosted copy the notification and media cards blur against is regenerated on
+        // every texture upload. That is the right trade once per track change and the wrong one
+        // twenty times in a row, so a fade can switch it off for its own frames; the upload that
+        // ends the fade is a normal one and puts it right. Only ever engaged from startFade().
+        try {
+            Class<?> ap = Xp.findClass(
+                    "com.miui.miwallpaper.opengl.ordinary.AnimatorProgram", sCl);
+            Xp.hookAll(ap, "setUpMixFrost", chain -> {
+                if (sFrostSkipping) return null;
+                return chain.proceed();
+            });
+            Xp.log(TAG + "frosting hooked");
+        } catch (Throwable t) {
+            Xp.log(TAG + "frosting hook failed: " + t);
         }
 
         // getBitmap() turned out never to be called - the texture does not travel that way - so
@@ -254,6 +355,138 @@ public class WallpaperProbe {
         }
     }
 
+    /**
+     * Crossfades the keyguard texture from one picture to another.
+     *
+     * Both ends are already at texture size and both live in this process, so a frame costs one
+     * blend and one re-upload and nothing crosses a process boundary - which is the only reason
+     * this is affordable at all.
+     *
+     * The OEM's own reveal animator was the obvious thing to drive and is the wrong shape. Its
+     * shader says so itself: "Reveal is the animation value that goes from 1 (the image is
+     * hidden) to 0 (the image is visible)", and the branch behind it is
+     * blendSrcOver(vec4(0.,0.,0.,uReveal), ori) - one texture fading to black. It can dissolve a
+     * picture; it cannot dissolve between two, which is what Apple's transition is.
+     *
+     * Time-based rather than step-based: a frame that overruns costs a frame, not a longer
+     * transition. The clock is springing to its own curve over in SystemUI and cannot wait.
+     */
+    private static void startFade(final Bitmap from, final Bitmap to, final Runnable done) {
+        final Context ctx = sCtx;
+        if (ctx == null || from == null || to == null || from.isRecycled() || to.isRecycled()
+                || from.getWidth() != to.getWidth() || from.getHeight() != to.getHeight()) {
+            Xp.log(TAG + "no fade: " + describe(from) + " -> " + describe(to));
+            if (done != null) done.run();
+            reloadTexture();
+            return;
+        }
+        Bitmap buf = sFadeBuf;
+        if (buf == null || buf.isRecycled()
+                || buf.getWidth() != from.getWidth() || buf.getHeight() != from.getHeight()) {
+            buf = Bitmap.createBitmap(from.getWidth(), from.getHeight(), Bitmap.Config.ARGB_8888);
+            sFadeBuf = buf;
+        }
+        final Bitmap dst = buf;
+        final int gen = ++sFadeGen;
+        final long t0 = SystemClock.uptimeMillis();
+        final long[] spent = {0L, 0L, 0L};  // blend ms, frames, frames waited out
+        sFrostSkipping = sSkipFrost;
+        sFadeInFlight = false;
+        final Handler h = new Handler(Looper.getMainLooper());
+        h.post(new Runnable() {
+            @Override
+            public void run() {
+                // A newer fade has taken over - a track changed while this one was in the air.
+                // It owns sFade and the buffer now, so this one simply stops.
+                if (gen != sFadeGen) return;
+                long now = SystemClock.uptimeMillis();
+                // The GL thread has not finished with the buffer yet. Come back rather than
+                // compose over the top of it - see sFadeInFlight.
+                if (sFadeInFlight && now - sFadeSentAt < FADE_ACK_MS) {
+                    spent[2]++;
+                    h.postDelayed(this, 2L);
+                    return;
+                }
+                long el = now - t0;
+                if (el >= sFadeMs) {
+                    sFade = null;
+                    sFadeInFlight = false;
+                    sFrostSkipping = false;
+                    if (done != null) done.run();
+                    // The last upload is a normal one: the real bitmap, and the frosted copy
+                    // regenerated from it.
+                    reloadTexture();
+                    Xp.log(TAG + "fade done in " + el + "ms over " + spent[1] + " frames, blend "
+                            + (spent[1] == 0 ? 0 : spent[0] / spent[1]) + "ms/frame, waited "
+                            + spent[2] + "x for the upload"
+                            + (sSkipFrost ? ", frosting skipped" : ""));
+                    return;
+                }
+                float t = el / (float) sFadeMs;
+                // Ease OUT, not smoothstep. The clock it has to keep company with is a spring,
+                // and a spring is all front-loaded: most of the movement is over in the first
+                // third. A symmetric curve spends that third barely changing, which is exactly
+                // when the eye is looking, and then finishes after the clock has stopped.
+                float e = 1f - (1f - t) * (1f - t) * (1f - t);
+                long b0 = SystemClock.uptimeMillis();
+                blendInto(dst, from, to, e);
+                spent[0] += SystemClock.uptimeMillis() - b0;
+                spent[1]++;
+                sFade = dst;
+                sFadeInFlight = true;
+                sFadeSentAt = SystemClock.uptimeMillis();
+                reloadTexture();
+                h.postDelayed(this, FADE_STEP_MS);
+            }
+        });
+    }
+
+    /** One frame of the crossfade. Both sources are already exactly dst's size. */
+    private static void blendInto(Bitmap dst, Bitmap from, Bitmap to, float t) {
+        Canvas cv = new Canvas(dst);
+        cv.drawBitmap(from, 0f, 0f, null);
+        sFadePaint.setAlpha(Math.round(255f * (t < 0f ? 0f : t > 1f ? 1f : t)));
+        cv.drawBitmap(to, 0f, 0f, sFadePaint);
+    }
+
+    /**
+     * Keeps a copy of the real lock wallpaper, which is the only thing the cover can fade back
+     * to. The bitmap handed to the upload hook belongs to the OEM and is recycled behind us, so
+     * this has to be a copy - and the fingerprint is what stops it being copied again on every
+     * reload that happens while cover mode is off.
+     */
+    private static void rememberOriginal(Bitmap b) {
+        if (b == null || b.isRecycled()) return;
+        try {
+            int print = print8(b);
+            Bitmap have = sOrig;
+            if (have != null && !have.isRecycled() && print == sOrigPrint
+                    && have.getWidth() == b.getWidth() && have.getHeight() == b.getHeight()) {
+                return;
+            }
+            Bitmap copy = b.copy(Bitmap.Config.ARGB_8888, false);
+            if (copy == null) return;
+            sOrig = copy;
+            sOrigPrint = print;
+            Xp.log(TAG + "lock wallpaper remembered " + describe(copy));
+        } catch (Throwable t) {
+            Xp.log(TAG + "could not remember the lock wallpaper: " + t);
+        }
+    }
+
+    /** Coarse identity. Same idea as the module's artPrint, and for the same reason. */
+    private static int print8(Bitmap b) {
+        int w = b.getWidth(), h = b.getHeight();
+        if (w < 8 || h < 8) return 0;
+        int v = w * 31 + h;
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                v = v * 31 + b.getPixel(x * (w - 1) / 7, y * (h - 1) / 7);
+            }
+        }
+        return v;
+    }
+
     /** Fills w x h from the source without distorting it, the way CENTER_CROP would. */
     private static Bitmap centerCrop(Bitmap src, int w, int h) {
         Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -283,7 +516,27 @@ public class WallpaperProbe {
                     } else if ("bmp".equals(op)) {
                         traceBitmaps(i.getStringExtra("name"));
                     } else if ("art".equals(op)) {
+                        final Context cc = c;
+                        boolean reload = i.getBooleanExtra("reload", false);
+                        // A fade needs both ends of it in this process. Missing either one is
+                        // not a failure, it is the old behaviour: swap the texture in one frame.
+                        boolean fade = reload && i.getBooleanExtra("fade", false);
                         if (i.getBooleanExtra("off", false)) {
+                            Bitmap from = fittedArt();
+                            Bitmap to = sOrig;
+                            if (fade && from != null && to != null) {
+                                startFade(from, to, new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        sArt = null;
+                                        sFitted = null;
+                                        sFittedOf = null;
+                                        new File(cc.getFilesDir(), ART_FILE).delete();
+                                        Xp.log(TAG + "art cleared");
+                                    }
+                                });
+                                return;
+                            }
                             sArt = null;
                             new File(c.getFilesDir(), ART_FILE).delete();
                             Xp.log(TAG + "art cleared");
@@ -298,24 +551,42 @@ public class WallpaperProbe {
                                         + (jpg == null ? "null" : jpg.length + "B")
                                         + " file=" + file + ")");
                             } else {
+                                // Read before sArt moves: on the way into cover mode this is
+                                // the lock wallpaper, and on a track change it is the album
+                                // that is on screen right now.
+                                Bitmap from = fittedArt();
+                                if (from == null) from = sOrig;
                                 sArt = b;
                                 sFitted = null;
                                 sFittedOf = null;
-                                fittedArt();   // scale here, not on the GL thread
+                                Bitmap to = fittedArt();   // scale here, not on the GL thread
                                 Xp.log(TAG + "art set " + describe(b));
                                 // Show it first, write it to disk afterwards: the file only
                                 // matters for the next cold start of this process, and a 100KB
                                 // write in front of the upload is pure added latency.
-                                if (i.getBooleanExtra("reload", false)) reloadTexture();
+                                if (fade && from != null && to != null) startFade(from, to, null);
+                                else if (reload) reloadTexture();
                                 if (jpg != null) saveArtLater(c, jpg);
                                 return;
                             }
                         }
-                        if (i.getBooleanExtra("reload", false)) reloadTexture();
+                        if (reload) reloadTexture();
                     } else if ("reload".equals(op)) {
                         reloadTexture();
+                    } else if ("fadems".equals(op)) {
+                        long v = i.getIntExtra("v", (int) sFadeMs);
+                        sFadeMs = v < 60L ? 60L : (v > 1200L ? 1200L : v);
+                        Xp.log(TAG + "crossfade is now " + sFadeMs + "ms");
+                    } else if ("nofrost".equals(op)) {
+                        sSkipFrost = i.getBooleanExtra("on", !sSkipFrost);
+                        Xp.log(TAG + "frosting during a fade is "
+                                + (sSkipFrost ? "skipped" : "kept"));
                     } else if ("state".equals(op)) {
                         Xp.log(TAG + "art=" + describe(sArt)
+                                + " orig=" + describe(sOrig)
+                                + " fading=" + (sFade != null)
+                                + " nofrost=" + sSkipFrost
+                                + " fadems=" + sFadeMs
                                 + " engine=" + sKeyguardEngine);
                     } else {
                         Xp.log(TAG + "ops: cls --es name <fqcn> [--es grep x]"

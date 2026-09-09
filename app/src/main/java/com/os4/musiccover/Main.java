@@ -27,6 +27,8 @@ import android.widget.TextView;
 import java.util.List;
 import android.util.Log;
 import android.view.Choreographer;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewTreeObserver;
 import android.view.animation.PathInterpolator;
@@ -235,6 +237,57 @@ public class Main extends XposedModule {
     private static View sCardGuarded, sCardArt, sCardTitle, sCardArtist;
     /** Set only around a capture. See shootCard(). */
     private static volatile boolean sCardForced;
+    /**
+     * How far the card is into the cover look: 0 is the card as the OEM draws it, 1 is the
+     * artwork hidden and the text centred.
+     *
+     * Deliberately NOT an animator of its own. applyCollapse() already derives a 0..1 progress
+     * from the notifY of the frame it is on, and both the clock's collapse scale and the glass
+     * morph are read off it; hanging the card off the same number means the OEM's spring drives
+     * the thumbnail, the clock and the glass together, and there is nothing left to keep in sync.
+     */
+    private static volatile float sCardP;
+    /** How small the thumbnail gets at the far end of the fade. Apple's shrinks as it goes. */
+    private static final float CARD_ART_MIN_SCALE = 0.82f;
+    /**
+     * The artwork's scale as the OEM leaves it, captured the moment a card view is resolved and
+     * before anything is written to it.
+     *
+     * Not 1. Measured on this device: `album_art` sits at scaleX=-1, scaleY=1 - the OEM keeps
+     * the thumbnail mirrored. Animating an absolute scale would therefore un-mirror it for the
+     * length of the fade and leave it that way afterwards, so the fade multiplies these rather
+     * than replacing them.
+     */
+    private static float sArtScaleX = 1f, sArtScaleY = 1f;
+
+    /**
+     * A single tap on the cover puts the wallpaper back, the way tapping Apple's full-bleed
+     * artwork does. Tapping again brings the cover back.
+     */
+    private static volatile boolean sTapToggle = true;
+    /**
+     * Whether the wallpaper crossfades between the album cover and the lock wallpaper instead of
+     * swapping in one frame. The fade itself runs in the wallpaper process, which is the only
+     * place that holds both pictures; all this decides is whether to ask for it.
+     */
+    private static volatile boolean sFadeWp = true;
+    /**
+     * Set when the user tapped their way OUT of cover mode while the card was still up.
+     *
+     * Without it the very next metadata event puts the cover straight back: the card is the
+     * switch, and the card has not gone anywhere. Cleared when the card actually goes away, so
+     * the next thing the user plays starts from the cover again rather than inheriting a
+     * decision that was made about a different song.
+     */
+    private static volatile boolean sTapSuppressed;
+    private static GestureDetector sTapDetector;
+    /** Set for the length of one gesture that started on the card's artwork and is ours. */
+    private static boolean sArtSwallow;
+    private static long sArtDownAt;
+    /** Longer than a tap is a press, a drag or a scroll, and none of those mean expand. */
+    private static final long ART_TAP_MS = 500L;
+    /** Px of forgiveness around the thumbnail. The card slides; fingers are not pixels. */
+    private static final int ART_TAP_SLOP = 24;
 
     // Indices into TimeView.glassData, read off the class's own constants.
     private static final int GLASS_COLOR_R = 11, GLASS_COLOR_G = 12, GLASS_COLOR_B = 13;
@@ -302,8 +355,9 @@ public class Main extends XposedModule {
             // View.setVisibility process-wide cost every visibility change in SystemUI and
             // fired zero times. What actually lost the state was SystemUI restarting.
             if (sDepthHidden) setDepthHidden(true);
-            // Same story for the card: the guard lives on the view, so a rebuild takes it.
-            if (sCoverMode) applyMediaCard();
+            // Same story for the card: the guard and the artwork's tap listener both live on
+            // the view, so a rebuild takes them.
+            if (sCoverMode || wantsArtTap()) applyMediaCard();
             // A rebuilt keyguard can be a different clock style, so the nudge measured
             // against the old one means nothing - and neither does the clock view we resolved.
             sNudgeSample = Float.NaN;
@@ -369,6 +423,42 @@ public class Main extends XposedModule {
             Xp.log(TAG + "media card hooked");
         } catch (Throwable t) {
             Xp.log(TAG + "media card hook failed: " + t);
+        }
+
+        // A tap on the cover puts the wallpaper back.
+        //
+        // Hooked on the shade window's dispatch rather than given a view of our own: anything
+        // clickable added over the keyguard swallows the ACTION_DOWN in its region, and
+        // swipe-to-unlock is a drag that begins with exactly that ACTION_DOWN. Here the events
+        // are only observed - the detector's answer is thrown away and proceed() runs
+        // unconditionally - so every gesture still reaches the OEM as it did before.
+        try {
+            Class<?> shade = Xp.findClass(
+                    "com.android.systemui.shade.NotificationShadeWindowView", cl);
+            Xp.hookAll(shade, "dispatchTouchEvent", chain -> {
+                MotionEvent ev = null;
+                try {
+                    java.util.List<Object> a = chain.getArgs();
+                    if (!a.isEmpty() && a.get(0) instanceof MotionEvent) {
+                        ev = (MotionEvent) a.get(0);
+                    }
+                } catch (Throwable ignored) {
+                }
+                if (ev != null) {
+                    // The one case this hook does more than watch. Returning true without
+                    // proceeding takes the gesture out of the dispatch entirely, which is the
+                    // only way the artwork can mean something other than "open the player".
+                    try {
+                        if (swallowArtTap(ev)) return Boolean.TRUE;
+                    } catch (Throwable ignored) {
+                    }
+                    feedTap(ev);
+                }
+                return chain.proceed();
+            });
+            Xp.log(TAG + "lock screen tap hooked");
+        } catch (Throwable t) {
+            Xp.log(TAG + "lock screen tap hook failed: " + t);
         }
 
         // Track the live container. Ownership is NOT enforced here: the system's own
@@ -467,6 +557,8 @@ public class Main extends XposedModule {
                     + "\nglass=" + sGlassEnd
                     + "\nmcart=" + (sMcHideArt ? 1 : 0)
                     + "\nmctext=" + (sMcCenterText ? 1 : 0)
+                    + "\ntap=" + (sTapToggle ? 1 : 0)
+                    + "\nfadewp=" + (sFadeWp ? 1 : 0)
                     // Not a setting - a measurement. Kept so the app's preview is to scale from
                     // the first frame after a SystemUI restart, instead of only once the phone
                     // has been locked again.
@@ -520,6 +612,8 @@ public class Main extends XposedModule {
                     else if ("glass".equals(k)) sGlassEnd = Float.parseFloat(v);
                     else if ("mcart".equals(k)) sMcHideArt = "1".equals(v);
                     else if ("mctext".equals(k)) sMcCenterText = "1".equals(v);
+                    else if ("tap".equals(k)) sTapToggle = "1".equals(v);
+                    else if ("fadewp".equals(k)) sFadeWp = "1".equals(v);
                     else if ("cardrect".equals(k)) {
                         String[] r = v.split(",");
                         // Same sanity check the sampler applies, because a file written before
@@ -619,6 +713,14 @@ public class Main extends XposedModule {
                         Xp.log(TAG + "media card hideArt=" + sMcHideArt
                                 + " centerText=" + sMcCenterText);
                         applyMediaCard();
+                    } else if ("fadewp".equals(op)) {
+                        sFadeWp = i.getBooleanExtra("on", !sFadeWp);
+                        saveState();
+                        Xp.log(TAG + "wallpaper crossfade " + (sFadeWp ? "on" : "off"));
+                    } else if ("tap".equals(op)) {
+                        sTapToggle = i.getBooleanExtra("on", !sTapToggle);
+                        saveState();
+                        Xp.log(TAG + "tap-to-toggle " + (sTapToggle ? "on" : "off"));
                     } else if ("clockshot".equals(op)) {
                         // For telling the two candidate causes apart by hand: with this off the
                         // module never draws the live clock, and the preview falls back to its
@@ -723,6 +825,8 @@ public class Main extends XposedModule {
                         out.putString("player", mc == null ? "" : mc.getPackageName());
                         out.putBoolean("mcart", sMcHideArt);
                         out.putBoolean("mctext", sMcCenterText);
+                        out.putBoolean("tap", sTapToggle);
+                        out.putBoolean("fadewp", sFadeWp);
                         // Everything the app's preview needs to be to scale. It draws a lock
                         // screen it cannot see, and every one of these is device-specific, so
                         // they are measured here rather than written down twice.
@@ -755,7 +859,10 @@ public class Main extends XposedModule {
                                 + " track=" + sTrackKey);
                         Xp.log(TAG + "card rect: " + sCardL + "," + sCardT + " "
                                 + sCardW + "x" + sCardH + " hideArt=" + sMcHideArt
-                                + " centerText=" + sMcCenterText);
+                                + " centerText=" + sMcCenterText + " cardP=" + sCardP);
+                        Xp.log(TAG + "tap: toggle=" + sTapToggle
+                                + " suppressed=" + sTapSuppressed
+                                + " wallpaperFade=" + sFadeWp);
                     } else if ("verbose".equals(op)) {
                         sVerbose = i.getBooleanExtra("on", !sVerbose);
                         Xp.log(TAG + "verbose=" + sVerbose);
@@ -877,6 +984,15 @@ public class Main extends XposedModule {
             sGlassV0 = sGlassV1 = Float.NaN;
             sAppliedGlassV = Float.NaN;
             callOnClockViews("updateGlassValue", "f", back, 0, false);
+        }
+        // The card is part of the same state as the clock: cover mode takes the thumbnail
+        // and the text along with the squeeze, and gives all three back together. Releasing it
+        // here rather than in exitCoverMode() is what lets the animated exit keep the guard
+        // installed for the whole flight - the spring walks sCardP down to 0, and this is the
+        // frame after it lands.
+        if (!sCoverMode && sCardP != 0f) {
+            sCardP = 0f;
+            applyMediaCard();
         }
         if (!held) return;
         Xp.log(TAG + "hold abandoned: " + why);
@@ -1342,6 +1458,9 @@ public class Main extends XposedModule {
         float p = (natural - y) / (natural - SQUEEZE_FLOOR);
         if (p < 0f) p = 0f;
         if (p > 1f) p = 1f;
+        // Same progress, three consumers: the collapse scale below, the glass morph, and
+        // the card. One OEM spring drives all of them and none of them owns a clock of its own.
+        setCardProgress(p);
         if (Float.isNaN(min)) { applyGlassMorph(p); return; }
         applyGlassMorph(p);
         float k = 1f - p * (1f - min);
@@ -2476,6 +2595,11 @@ public class Main extends XposedModule {
     private static void pushArtToWallpaper(Context ctx, boolean on, Bitmap art) {
         long t0 = android.os.SystemClock.uptimeMillis();
         Intent out = wallpaperIntent("art");
+        // Only a request. The wallpaper process falls back to the one-frame swap whenever it
+        // does not hold both ends of the fade - after its own restart, most of all. Never with
+        // the display off: the frames would be composed and uploaded into a screen nobody is
+        // looking at, and the clock is not springing either.
+        out.putExtra("fade", sFadeWp && screenOn());
         if (!on) {
             out.putExtra("off", true);
             ctx.sendBroadcast(out);
@@ -2822,7 +2946,13 @@ public class Main extends XposedModule {
      */
     private static void enterCoverMode(boolean animate) {
         sCoverMode = true;
+        // Whatever the user decided about the last song does not carry into this one.
+        sTapSuppressed = false;
         setDepthHidden(true);
+        // Start the card where the OEM has it when animating, so the thumbnail fades out across
+        // the spring's frames instead of blinking away before the clock has begun to move.
+        // Without an animation there is nothing to fade, and the settled look goes on directly.
+        sCardP = animate ? 0f : 1f;
         applyMediaCard();
         sCollapseMin = sClockScale;
         sGlassV0 = 0f;
@@ -2830,8 +2960,11 @@ public class Main extends XposedModule {
         sAppliedK = Float.NaN;
         sAppliedGlassV = Float.NaN;
         if (animate) {
-            springTo(SQUEEZE_FLOOR, EASE_STATE_CHANGED[0], EASE_STATE_CHANGED[1],
-                    "STATE_CHANGED", false);
+            // RUNNING here as well as on the way out. The OEM's STATE_CHANGED curve settles in
+            // ~600ms over this travel, measured, against ~371ms for RUNNING - so with only the
+            // exit changed the toggle was lopsided, and the wallpaper crossfade could not be in
+            // step with both. Apple's is symmetric and so is this now.
+            springTo(SQUEEZE_FLOOR, EASE_RUNNING[0], EASE_RUNNING[1], "STATE_CHANGED", false);
         } else {
             sHoldY = SQUEEZE_FLOOR;
             drive(SQUEEZE_FLOOR, false, "STATE_CHANGED");
@@ -2839,11 +2972,47 @@ public class Main extends XposedModule {
         saveState();
     }
 
-    private static void exitCoverMode() {
+    /**
+     * Leaves cover mode, optionally on the way out rather than all at once.
+     *
+     * Animated, this is one spring and nothing else: it drives notifY back to where the system
+     * last asked for it, and the collapse scale, the glass morph and the card's thumbnail are
+     * all derived from that same y in applyCollapse(), so they move together for free. That is
+     * what Apple's is - everything at once, over about 300ms - and it is also why there is no
+     * duration constant here: the OEM's own STATE_CHANGED curve settles in about 445ms.
+     *
+     * The unanimated path is the old behaviour and still the right one when the display is off
+     * (Choreographer frames stop, so a spring started there never settles) or when the clock was
+     * never taken over in the first place.
+     */
+    private static void exitCoverMode(boolean animate) {
         sCoverMode = false;
+        float natural = sLastSystemY;
+        boolean canSpring = animate && screenOn() && sContainer != null
+                && !Float.isNaN(sCollapseMin)
+                && !Float.isNaN(natural) && natural > SQUEEZE_FLOOR;
+        if (canSpring) {
+            // The cut-out belongs to the wallpaper, and the wallpaper is already on its way
+            // back by the time this runs, so it is restored now rather than at the settle.
+            setDepthHidden(false);
+            // No applyMediaCard() here on purpose: it would drop the guard, and the guard is
+            // what draws every frame of the thumbnail coming back. abandonHold() releases it
+            // when the spring lands.
+            //
+            // RUNNING, not the STATE_CHANGED curve the entry uses. Measured on device: the
+            // OEM's STATE_CHANGED spring takes 610-636ms to settle over this 681px travel,
+            // and because the card fade and the glass morph are both linear in y, the last
+            // tenth of that is a thumbnail still fading in 300ms after the wallpaper has
+            // landed. RUNNING is critically damped at response 0.18s, which settles in about
+            // 300ms - Apple's number, and the wallpaper crossfade's 320ms.
+            springTo(natural, EASE_RUNNING[0], EASE_RUNNING[1], "STATE_CHANGED", true);
+            saveState();
+            return;
+        }
         abandonHold("cover mode off", true);
         setDepthHidden(false);
         // Hands the card back before the guard goes, or the last frame it drew stays.
+        sCardP = 0f;
         applyMediaCard();
         saveState();
     }
@@ -3032,8 +3201,10 @@ public class Main extends XposedModule {
             public void run() {
                 View card = findSysuiView("mi_media_controls");
                 if (card == null) {
-                    // Only worth waiting for while something still wants the card restyled.
-                    if (attempt < CARD_RETRIES && sCoverMode && (sMcHideArt || sMcCenterText)) {
+                    // Only worth waiting for while something still wants something from the
+                    // card: the restyle on the way in, or the artwork tap that is the way back.
+                    if (attempt < CARD_RETRIES
+                            && ((sCoverMode && (sMcHideArt || sMcCenterText)) || wantsArtTap())) {
                         main().postDelayed(new Runnable() {
                             @Override
                             public void run() { applyMediaCard(attempt + 1); }
@@ -3041,8 +3212,23 @@ public class Main extends XposedModule {
                     }
                     return;
                 }
-                sCardArt = card.findViewById(card.getResources()
+                View art = card.findViewById(card.getResources()
                         .getIdentifier("album_art", "id", "com.android.systemui"));
+                if (art != null && art != sCardArt) {
+                    // A card view we have not written to yet, so whatever scale it carries is
+                    // the OEM's. Read it here, not from assertMediaCard: the card is rebuilt on
+                    // every track change, and by the time the first frame is asserted the
+                    // resting value would already be gone.
+                    //
+                    // Only a resting value though. A scale of -1 has been seen on this view and
+                    // 1 at other times, so something over there animates it; catching that
+                    // mid-flight and treating the frame as the baseline would multiply every
+                    // later fade by it and leave the thumbnail permanently the wrong size.
+                    // Magnitude one is the test, which keeps the mirror and rejects the rest.
+                    sArtScaleX = restingScale(art.getScaleX());
+                    sArtScaleY = restingScale(art.getScaleY());
+                }
+                sCardArt = art;
                 sCardTitle = card.findViewById(card.getResources()
                         .getIdentifier("header_title", "id", "com.android.systemui"));
                 sCardArtist = card.findViewById(card.getResources()
@@ -3068,19 +3254,43 @@ public class Main extends XposedModule {
         // it - and because this runs every frame, the card restores itself on unlock by itself.
         View c = sContainer;
         boolean onKeyguard = sCardForced || (keyguardShowing() && c != null && c.isShown());
-        boolean hide = sCoverMode && sMcHideArt && onKeyguard;
-        boolean center = sCoverMode && sMcCenterText && onKeyguard;
+        // A capture for the app's preview wants the settled look, not whichever frame an
+        // animation happens to be on. Everywhere else the fade IS the state.
+        float p = !onKeyguard ? 0f
+                : sCardForced ? (sCoverMode ? 1f : 0f)
+                : sCardP;
+        float hideP = sMcHideArt ? p : 0f;
+        float centreP = sMcCenterText ? p : 0f;
         View art = sCardArt;
         if (art != null) {
-            // INVISIBLE, not GONE: the constraints around it are the card's whole layout, and
-            // collapsing the artwork would drag the text sideways on its own terms rather than
-            // ours. It also leaves the thumbnail's bitmap in place, which is still the module's
-            // last-resort source for the cover itself.
-            int want = hide ? View.INVISIBLE : View.VISIBLE;
-            if (art.getVisibility() != want) art.setVisibility(want);
+            // INVISIBLE at the far end, not GONE: the constraints around it are the card's
+            // whole layout, and collapsing the artwork would drag the text sideways on its own
+            // terms rather than ours. It also leaves the thumbnail's bitmap in place, which is
+            // still the module's last-resort source for the cover itself.
+            //
+            // Anywhere short of the end it is VISIBLE with an alpha and a scale, and that is
+            // the fade. Both only invalidate, so writing them from a pre-draw listener carries
+            // the same guarantee the translationX below does, and the two resting states are
+            // bit-for-bit the two the card had before there was an animation at all.
+            if (hideP >= 1f) {
+                if (art.getVisibility() != View.INVISIBLE) art.setVisibility(View.INVISIBLE);
+                // Out of sight, but put back exactly as the OEM had it: the shade shows this
+                // same view, and a thumbnail left at 0.82 of its size there would be ours.
+                if (art.getScaleX() != sArtScaleX) art.setScaleX(sArtScaleX);
+                if (art.getScaleY() != sArtScaleY) art.setScaleY(sArtScaleY);
+                if (art.getAlpha() != 1f) art.setAlpha(1f);
+            } else {
+                if (art.getVisibility() != View.VISIBLE) art.setVisibility(View.VISIBLE);
+                float a = 1f - hideP;
+                float sc = 1f - hideP * (1f - CARD_ART_MIN_SCALE);
+                float sx = sArtScaleX * sc, sy = sArtScaleY * sc;
+                if (art.getAlpha() != a) art.setAlpha(a);
+                if (art.getScaleX() != sx) art.setScaleX(sx);
+                if (art.getScaleY() != sy) art.setScaleY(sy);
+            }
         }
-        centreCardText(card, (TextView) sCardTitle, center);
-        centreCardText(card, (TextView) sCardArtist, center);
+        centreCardText(card, (TextView) sCardTitle, centreP);
+        centreCardText(card, (TextView) sCardArtist, centreP);
         if (onKeyguard && !sCardForced) sampleCardRect(card);
     }
 
@@ -3098,9 +3308,9 @@ public class Main extends XposedModule {
      * both - it already accounts for whatever gravity, padding and ellipsis are in force, so
      * the sum below is "where the ink starts now" against "where it should start".
      */
-    private static void centreCardText(View card, TextView t, boolean centre) {
+    private static void centreCardText(View card, TextView t, float p) {
         if (t == null) return;
-        if (!centre) {
+        if (p <= 0f) {
             if (t.getTranslationX() != 0f) t.setTranslationX(0f);
             return;
         }
@@ -3109,7 +3319,9 @@ public class Main extends XposedModule {
         float ink = lay.getLineWidth(0);
         if (ink <= 0f) return;
         float have = t.getLeft() + t.getPaddingLeft() + lay.getLineLeft(0);
-        float dx = (card.getWidth() - ink) / 2f - have;
+        // Scaled by the progress, so the line slides between where the OEM put it and the
+        // centre instead of jumping between the two.
+        float dx = ((card.getWidth() - ink) / 2f - have) * p;
         if (t.getTranslationX() != dx) t.setTranslationX(dx);
     }
 
@@ -3160,6 +3372,145 @@ public class Main extends XposedModule {
         sCardH = h;
         Xp.log(TAG + "media card at " + sCardL + "," + sCardT + " " + sCardW + "x" + sCardH);
         saveStateSoon();
+    }
+
+    /**
+     * One frame of the card fade, written by whatever computed the progress.
+     *
+     * Storing the number would not be enough. The guard is a pre-draw listener, and a card that
+     * nothing has invalidated does not draw - a progress that only lived in a field would sit
+     * there until the OEM next happened to touch the card. Writing through here invalidates it,
+     * and the guard goes on doing what it always did: catching the frames the OEM starts.
+     */
+    private static void setCardProgress(float p) {
+        if (p < 0f) p = 0f;
+        if (p > 1f) p = 1f;
+        if (sCardP == p) return;
+        sCardP = p;
+        View card = sCardGuarded;
+        if (card != null) assertMediaCard(card);
+    }
+
+    /**
+     * Whether the card's artwork should currently be a way back into cover mode.
+     *
+     * Only with the cover off, which in practice means the user tapped it away and the card is
+     * still up. With the cover on the thumbnail is hidden anyway, and off the lock screen the
+     * card belongs to the shade, where the OEM's own click is the right one.
+     */
+    private static boolean wantsArtTap() {
+        return sTapToggle && !sCoverMode && sCardShowing;
+    }
+
+    /**
+     * Makes the card's artwork expand into cover mode instead of opening the player.
+     *
+     * This has to happen at the window's dispatch, not on album_art itself. A touch listener on
+     * the child was the obvious answer and does not work: on device it never fired once, so
+     * something above the card claims the gesture before album_art is ever offered it. The
+     * shade window's dispatchTouchEvent is upstream of all of that - it is where our own lock
+     * screen taps already arrive - so consuming there is the one place that is certain to win.
+     *
+     * Consuming means returning true WITHOUT proceeding, for the whole gesture: taking only the
+     * DOWN would leave the OEM tracking a stream whose beginning it never saw. Which is also
+     * why the rect is re-read from the live view on every DOWN rather than from the sampled
+     * card rectangle - the card sits somewhere else with the clock collapsed than without it,
+     * and swallowing touches over empty wallpaper would be a bug the user could not explain.
+     *
+     * The cost is that the thumbnail's 158x158 stops being draggable while the cover is off.
+     * That is the trade, and it is why the UP has to have stayed inside and been brief: a drag
+     * that began on the artwork does nothing rather than expanding on release.
+     */
+    private static boolean swallowArtTap(MotionEvent ev) {
+        int action = ev.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            boolean onCard = wantsArtTap() && screenOn() && keyguardShowing() && onKeyguardNow();
+            sArtSwallow = onCard && artRectContains(ev.getRawX(), ev.getRawY());
+            if (sArtSwallow) {
+                sArtDownAt = android.os.SystemClock.uptimeMillis();
+            } else if (onCard && sVerbose) {
+                // For telling "the rectangle is wrong" from "the state is wrong" without
+                // guessing, which is how the mirror above was found.
+                Xp.log(TAG + "artwork tap missed at " + ev.getRawX() + "," + ev.getRawY()
+                        + " (art " + artRectDesc() + ")");
+            }
+            return sArtSwallow;
+        }
+        if (!sArtSwallow) return false;
+        if (action == MotionEvent.ACTION_UP) {
+            sArtSwallow = false;
+            long held = android.os.SystemClock.uptimeMillis() - sArtDownAt;
+            if (held < ART_TAP_MS && artRectContains(ev.getRawX(), ev.getRawY())) {
+                enterFromTap("artwork tapped");
+            }
+        } else if (action == MotionEvent.ACTION_CANCEL) {
+            sArtSwallow = false;
+        }
+        return true;
+    }
+
+    /** The artwork's rectangle as this code sees it, for the log line above. */
+    private static String artRectDesc() {
+        View a = sCardArt;
+        if (a == null) return "null";
+        android.view.ViewParent p = a.getParent();
+        if (!(p instanceof View)) return "unparented";
+        int[] loc = new int[2];
+        ((View) p).getLocationOnScreen(loc);
+        return (loc[0] + a.getLeft()) + "," + (loc[1] + a.getTop())
+                + " " + a.getWidth() + "x" + a.getHeight() + " shown=" + a.isShown();
+    }
+
+    /** A scale worth remembering as the OEM's own, or 1 if it looks like an animation frame. */
+    private static float restingScale(float v) {
+        return Math.abs(Math.abs(v) - 1f) < 0.02f ? v : 1f;
+    }
+
+    /**
+     * Where the card's thumbnail is on screen right now.
+     *
+     * NOT getLocationOnScreen() on the artwork. That maps (0,0) through the view's own matrix
+     * before adding mLeft, and this view has a matrix: measured, album_art reports an origin
+     * exactly its own width (158px) to the right of its layout slot, with translationX 0 and
+     * scaleX 1 - a horizontal mirror, the OEM's own. The reported rectangle therefore lands on
+     * the title, which is what "tapping the title expands it, not the thumbnail" was.
+     *
+     * A mirror does not move what the user sees, so the layout slot IS the visible rectangle.
+     * Taking it from the card - which carries no transform of its own - plus the child's
+     * getLeft()/getTop() sidesteps the artwork's matrix while still picking up every ancestor's.
+     */
+    private static boolean artRectContains(float x, float y) {
+        View a = sCardArt;
+        if (a == null || !a.isShown() || a.getWidth() <= 0 || a.getHeight() <= 0) return false;
+        android.view.ViewParent p = a.getParent();
+        if (!(p instanceof View)) return false;
+        int[] loc = new int[2];
+        ((View) p).getLocationOnScreen(loc);
+        float left = loc[0] + a.getLeft(), top = loc[1] + a.getTop();
+        // A little slop, because the card is often still sliding when the finger lands. Small
+        // enough to stay clear of the title, which starts just to the right of it.
+        return x >= left - ART_TAP_SLOP && x < left + a.getWidth() + ART_TAP_SLOP
+                && y >= top - ART_TAP_SLOP && y < top + a.getHeight() + ART_TAP_SLOP;
+    }
+
+    /**
+     * The keyguard is actually in front. The clock container is the test - only the keyguard
+     * shows it - and it is what keeps the shade's copy of this same card view out of all this.
+     */
+    private static boolean onKeyguardNow() {
+        View c = sContainer;
+        return c != null && c.isShown();
+    }
+
+    /**
+     * Back into cover mode, through the normal path rather than by re-pushing whatever was last
+     * composed: the track may well have moved on while the cover was off.
+     */
+    private static void enterFromTap(String why) {
+        sTapSuppressed = false;
+        sTrackKey = "";
+        Xp.log(TAG + why + ": expanding into cover mode");
+        onMediaUpdate();
     }
 
     private static void guardCard(final View card) {
@@ -3457,14 +3808,18 @@ public class Main extends XposedModule {
         if (!sAuto || !sCardKnown) return;
         if (!sCardShowing) {
             sTrackKey = "";
+            // The card going away is what clears a tap-dismissed cover: that decision was about
+            // this session, and the next thing the user plays starts from the cover again.
+            sTapSuppressed = false;
             if (sCoverMode) {
                 Xp.log(TAG + "media card dismissed, leaving cover mode");
                 setCoverEnabled(false, true);
             }
             return;
         }
-        // The card is rebuilt around a track change, so this is where a fresh one is found.
-        if (sCoverMode) applyMediaCard();
+        // The card is rebuilt around a track change, so this is where a fresh one is found -
+        // and with the cover tapped away it is still where the tap listener is put back.
+        if (sCoverMode || wantsArtTap()) applyMediaCard();
         rebindSession();
     }
 
@@ -3582,6 +3937,9 @@ public class Main extends XposedModule {
      */
     private static void onMediaUpdate() {
         if (!sAuto || !sCardShowing) return;
+        // The user tapped the cover away and the card is still up. The one case where "there is
+        // a card" must not mean "put the cover back".
+        if (sTapSuppressed) return;
         String key = sCardKey.isEmpty() ? trackKey(sWatched) : sCardKey;
         if (sCoverMode && key.equals(sTrackKey)) return;
         sTrackKey = key;
@@ -3610,7 +3968,7 @@ public class Main extends XposedModule {
             @Override
             public void run() {
                 if (on) enterCoverMode(animate && screenOn());
-                else exitCoverMode();
+                else exitCoverMode(animate && screenOn());
             }
         };
         if (Looper.myLooper() == Looper.getMainLooper()) r.run();
@@ -3637,6 +3995,78 @@ public class Main extends XposedModule {
             return km != null && km.isKeyguardLocked();
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    /**
+     * Feeds the lock screen's touch stream to a detector without taking part in it.
+     *
+     * GestureDetector needs the whole DOWN..UP sequence, which is why this hangs off the shade
+     * window's dispatchTouchEvent rather than any one child: it is the single point every event
+     * passes through before the OEM decides what to do with it. The detector's answer is
+     * discarded - consuming a DOWN here would take swipe-to-unlock with it.
+     */
+    private static void feedTap(MotionEvent ev) {
+        if (!sTapToggle || ev == null) return;
+        if (sTapDetector == null) {
+            Context c = sAppCtx;
+            if (c == null) return;
+            // Constructed from inside the dispatch, so the looper it picks up is the one the
+            // lock screen draws on, which is where the callback has to land.
+            sTapDetector = new GestureDetector(c, new GestureDetector.SimpleOnGestureListener() {
+                @Override
+                public boolean onSingleTapUp(MotionEvent e) {
+                    onLockTap(e.getRawY());
+                    return false;
+                }
+            });
+        }
+        try {
+            sTapDetector.onTouchEvent(ev);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * A tap on the cover toggles cover mode.
+     *
+     * "On the cover" is everything between the status bar and the top of the media card. The
+     * card and everything below it belongs to the OEM - the transport buttons, the notification
+     * list, the two shortcuts in the corners - and a tap down there still means what it always
+     * meant. The card rectangle is the one sampled for the app's preview, and the fallback is a
+     * fraction of the screen rather than a pixel count because it stands in for a measurement
+     * this device has simply not taken yet.
+     */
+    private static void onLockTap(float y) {
+        if (!sTapToggle) return;
+        if (!screenOn() || !keyguardShowing()) return;
+        // Only the keyguard shows the clock container, so this is also what rules out the shade
+        // being pulled down over an unlocked phone - the same test the card restyle uses.
+        View c = sContainer;
+        if (c == null || !c.isShown()) return;
+        // Nothing to toggle without music: the card is the switch, and this only chooses
+        // whether the cover follows it.
+        if (!sCardKnown || !sCardShowing) return;
+        float top = sScreenH * 0.08f;
+        // Measured live where possible. The sampled rectangle is a settled reading taken for
+        // the app's preview and it lags: seen at 1360 while the card was actually at 1700,
+        // which as a boundary would be 340px of cover that answers no tap at all.
+        float bottom;
+        View card = sCardGuarded;
+        if (card != null && card.isShown() && card.getHeight() > 0) {
+            int[] loc = new int[2];
+            card.getLocationOnScreen(loc);
+            bottom = loc[1];
+        } else {
+            bottom = sCardT > sScreenH / 3 ? sCardT : sScreenH * 0.62f;
+        }
+        if (y < top || y > bottom) return;
+        if (sCoverMode) {
+            sTapSuppressed = true;
+            Xp.log(TAG + "tap at y=" + y + ": leaving cover mode");
+            setCoverEnabled(false, true);
+        } else if (sTapSuppressed) {
+            enterFromTap("tap at y=" + y);
         }
     }
 
@@ -3854,7 +4284,19 @@ public class Main extends XposedModule {
         if (v.getScaleX() != 1f || v.getScaleY() != 1f) {
             sb.append(" scale=").append(v.getScaleX()).append('/').append(v.getScaleY());
         }
+        // translationX was missing here and cost an afternoon: album_art reported an x that
+        // overlapped header_title, which is impossible from layout alone. getLocationInWindow
+        // maps (0,0) through the view's OWN matrix before adding mLeft, so a translation or a
+        // mirror moves the reported origin without moving the view's slot.
+        // The layout slot, which is what the user actually touches. It differs from the
+        // reported origin above whenever the view carries a transform of its own.
+        sb.append(" L=").append(v.getLeft()).append(',').append(v.getTop());
+        if (v.getRotationX() != 0f) sb.append(" rotX=").append(v.getRotationX());
+        if (v.getRotationY() != 0f) sb.append(" rotY=").append(v.getRotationY());
+        if (v.getRotation() != 0f) sb.append(" rot=").append(v.getRotation());
+        if (v.getTranslationX() != 0f) sb.append(" tx=").append(v.getTranslationX());
         if (v.getTranslationY() != 0f) sb.append(" ty=").append(v.getTranslationY());
+        if (v.getPivotX() != v.getWidth() / 2f) sb.append(" pivotX=").append(v.getPivotX());
         if (v instanceof android.widget.TextView) {
             android.widget.TextView t = (android.widget.TextView) v;
             sb.append(" textSize=").append(t.getTextSize())
