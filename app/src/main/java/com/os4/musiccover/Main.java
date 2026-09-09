@@ -272,15 +272,19 @@ public class Main extends XposedModule {
     /** How small the thumbnail gets at the far end of the fade. Apple's shrinks as it goes. */
     private static final float CARD_ART_MIN_SCALE = 0.82f;
     /**
-     * The artwork's scale as the OEM leaves it, captured the moment a card view is resolved and
-     * before anything is written to it.
+     * The artwork's scale as the OEM has it, and the last one we wrote over it.
      *
-     * Not 1. Measured on this device: `album_art` sits at scaleX=-1, scaleY=1 - the OEM keeps
-     * the thumbnail mirrored. Animating an absolute scale would therefore un-mirror it for the
-     * length of the fade and leave it that way afterwards, so the fade multiplies these rather
-     * than replacing them.
+     * Sampling one frame of this and writing it back mirrored people's thumbnails. `album_art`
+     * carries a scaleX the OEM owns and animates - -1 has been read off it and so has 1 - so
+     * no single frame tells you which is its resting value, and the frame we happened to catch
+     * when the card was resolved became the value handed back on the way out. When that frame
+     * was not the resting one the thumbnail stayed flipped left-for-right: reported as "expand
+     * to full screen, tap back to the card, and the thumbnail is reversed".
+     *
+     * Keeping both numbers is what removes the guess. See scaleArt().
      */
-    private static float sArtScaleX = 1f, sArtScaleY = 1f;
+    private static float sArtBaseX = 1f, sArtBaseY = 1f;
+    private static float sArtWroteX = Float.NaN, sArtWroteY = Float.NaN;
 
     /**
      * A single tap on the cover puts the wallpaper back, the way tapping Apple's full-bleed
@@ -3528,18 +3532,11 @@ public class Main extends XposedModule {
                 View art = card.findViewById(card.getResources()
                         .getIdentifier("album_art", "id", "com.android.systemui"));
                 if (art != null && art != sCardArt) {
-                    // A card view we have not written to yet, so whatever scale it carries is
-                    // the OEM's. Read it here, not from assertMediaCard: the card is rebuilt on
-                    // every track change, and by the time the first frame is asserted the
-                    // resting value would already be gone.
-                    //
-                    // Only a resting value though. A scale of -1 has been seen on this view and
-                    // 1 at other times, so something over there animates it; catching that
-                    // mid-flight and treating the frame as the baseline would multiply every
-                    // later fade by it and leave the thumbnail permanently the wrong size.
-                    // Magnitude one is the test, which keeps the mirror and rejects the rest.
-                    sArtScaleX = restingScale(art.getScaleX());
-                    sArtScaleY = restingScale(art.getScaleY());
+                    // A card view we have not written to. Forgetting what we wrote to the last
+                    // one makes scaleArt() read this one's scale as the OEM's, which it is -
+                    // otherwise a new thumbnail that happened to arrive carrying the number we
+                    // left on the old view would be scaled against the wrong baseline.
+                    sArtWroteX = sArtWroteY = Float.NaN;
                 }
                 sCardArt = art;
                 sCardTitle = card.findViewById(card.getResources()
@@ -3589,17 +3586,13 @@ public class Main extends XposedModule {
                 if (art.getVisibility() != View.INVISIBLE) art.setVisibility(View.INVISIBLE);
                 // Out of sight, but put back exactly as the OEM had it: the shade shows this
                 // same view, and a thumbnail left at 0.82 of its size there would be ours.
-                if (art.getScaleX() != sArtScaleX) art.setScaleX(sArtScaleX);
-                if (art.getScaleY() != sArtScaleY) art.setScaleY(sArtScaleY);
+                scaleArt(art, 1f);
                 if (art.getAlpha() != 1f) art.setAlpha(1f);
             } else {
                 if (art.getVisibility() != View.VISIBLE) art.setVisibility(View.VISIBLE);
                 float a = 1f - hideP;
-                float sc = 1f - hideP * (1f - CARD_ART_MIN_SCALE);
-                float sx = sArtScaleX * sc, sy = sArtScaleY * sc;
                 if (art.getAlpha() != a) art.setAlpha(a);
-                if (art.getScaleX() != sx) art.setScaleX(sx);
-                if (art.getScaleY() != sy) art.setScaleY(sy);
+                scaleArt(art, 1f - hideP * (1f - CARD_ART_MIN_SCALE));
             }
         }
         centreCardText(card, (TextView) sCardTitle, centreP);
@@ -3774,9 +3767,37 @@ public class Main extends XposedModule {
                 + " " + a.getWidth() + "x" + a.getHeight() + " shown=" + a.isShown();
     }
 
-    /** A scale worth remembering as the OEM's own, or 1 if it looks like an animation frame. */
-    private static float restingScale(float v) {
-        return Math.abs(Math.abs(v) - 1f) < 0.02f ? v : 1f;
+    /**
+     * Shrinks the card's artwork to `factor` of whatever scale the OEM is giving it.
+     *
+     * Anything on the view that we did not put there is the OEM's, and remembering what we
+     * last wrote is what tells the two apart. So the baseline is re-read on the first frame,
+     * on a new card view, and on any frame the OEM's own animation has written over ours -
+     * it follows the OEM live rather than latching one frame of it - and factor 1 writes that
+     * baseline straight back. Sign included: see sArtBaseX for what a sampled scaleX cost.
+     */
+    private static void scaleArt(View art, float factor) {
+        float x = art.getScaleX(), y = art.getScaleY();
+        // Only adopt a reading that could be a RESTING value. The OEM animates this view, and
+        // a frame caught mid-animation is not a baseline: catching a 0 made the thumbnail
+        // vanish for good, because from then on every frame wrote 0 * factor and the value it
+        // read back was its own 0. Magnitude has to be ~1 - and only the magnitude, because
+        // the sign is the OEM's mirror and taking that as "not resting" is what flipped the
+        // thumbnail before. Anything else leaves the last good baseline in place.
+        if ((x != sArtWroteX || y != sArtWroteY) && resting(x) && resting(y)) {
+            sArtBaseX = x;
+            sArtBaseY = y;
+        }
+        float nx = sArtBaseX * factor, ny = sArtBaseY * factor;
+        if (x != nx) art.setScaleX(nx);
+        if (y != ny) art.setScaleY(ny);
+        sArtWroteX = nx;
+        sArtWroteY = ny;
+    }
+
+    /** A scale that could be the OEM's resting one: unit magnitude, either sign. */
+    private static boolean resting(float v) {
+        return Math.abs(Math.abs(v) - 1f) < 0.02f;
     }
 
     /**
