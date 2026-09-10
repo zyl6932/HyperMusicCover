@@ -51,8 +51,9 @@ jobs:
             --json name,body,url,isPrerelease > release.json
 
           # Notes and title reach the next step through files, never through the shell. Release
-          # bodies are attacker-shaped text once anyone can open a PR, and `${{ }}` in a run
-          # block would paste them straight into bash.
+          # bodies are attacker-shaped text once anyone can open a PR, and an expression
+          # interpolated into a run block would paste them straight into bash. (Do not write
+          # that interpolation syntax even in a comment here - Actions evaluates it anyway.)
           jq -r '.body // ""' release.json > body.md
           jq -r '.name // env.TAG'  release.json > title.txt
           jq -r '.url'              release.json > url.txt
