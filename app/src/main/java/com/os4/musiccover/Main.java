@@ -1101,7 +1101,9 @@ public class Main extends XposedModule {
         // here rather than in exitCoverMode() is what lets the animated exit keep the guard
         // installed for the whole flight - the spring walks sCardP down to 0, and this is the
         // frame after it lands.
-        if (!sCoverMode && sCardP != 0f) {
+        // Not while our own animator owns the progress: it is walking the card back frame by
+        // frame and will hand it over itself when it lands.
+        if (!sCoverMode && sCardP != 0f && sCardAnim == null) {
             sCardP = 0f;
             applyMediaCard();
         }
@@ -1302,6 +1304,15 @@ public class Main extends XposedModule {
                 sSelfDriving = false;
             }
             sCurrentY = y;
+            // The card rides our own frames as well as the OEM's chokepoint, because on some
+            // clock styles there IS no chokepoint: notifStateChange never reaches
+            // KeyguardClockNotifInteractor.setNotifY on the classic style, so applyCollapse()
+            // is never called and the card would sit at whatever progress it started the
+            // animation with. Measured on device with the classic style selected: setNotifY
+            // fired zero times across a full enter and exit, and the two card settings simply
+            // stopped working. Writing it here costs a comparison when the hook got there first.
+            float p = coverProgress(y);
+            if (!Float.isNaN(p)) setCardProgress(p);
         } catch (Throwable t) {
             Xp.log(TAG + "applyY failed: " + Log.getStackTraceString(t));
         }
@@ -1595,11 +1606,8 @@ public class Main extends XposedModule {
     private static void applyCollapse(float y) {
         float min = sCollapseMin;
         if (Float.isNaN(min) && Float.isNaN(sGlassV0)) return;
-        float natural = sLastSystemY;
-        if (Float.isNaN(natural) || natural <= SQUEEZE_FLOOR) return;
-        float p = (natural - y) / (natural - SQUEEZE_FLOOR);
-        if (p < 0f) p = 0f;
-        if (p > 1f) p = 1f;
+        float p = coverProgress(y);
+        if (Float.isNaN(p)) return;
         // Same progress, three consumers: the collapse scale below, the glass morph, and
         // the card. One OEM spring drives all of them and none of them owns a clock of its own.
         setCardProgress(p);
@@ -1608,6 +1616,17 @@ public class Main extends XposedModule {
         float k = 1f - p * (1f - min);
         sAppliedK = k;
         placeCollapsedClock(k, y, p);
+    }
+
+    /**
+     * How far into the cover-mode look a given notifY is, 0..1, or NaN while there is no
+     * natural Y to measure it against.
+     */
+    private static float coverProgress(float y) {
+        float natural = sLastSystemY;
+        if (Float.isNaN(natural) || natural <= SQUEEZE_FLOOR) return Float.NaN;
+        float p = (natural - y) / (natural - SQUEEZE_FLOOR);
+        return p < 0f ? 0f : (p > 1f ? 1f : p);
     }
 
     /**
@@ -3754,6 +3773,9 @@ public class Main extends XposedModule {
             // exit changed the toggle was lopsided, and the wallpaper crossfade could not be in
             // step with both. Apple's is symmetric and so is this now.
             springTo(SQUEEZE_FLOOR, EASE_RUNNING[0], EASE_RUNNING[1], "STATE_CHANGED", false);
+            // The spring above cannot carry the card on a style that emits no notifY, and the
+            // card is not the clock's business anyway. See oemDrivesCard().
+            if (!oemDrivesCard()) animateCardTo(1f, null);
         } else {
             sHoldY = SQUEEZE_FLOOR;
             drive(SQUEEZE_FLOOR, false, "STATE_CHANGED");
@@ -3798,11 +3820,26 @@ public class Main extends XposedModule {
             saveState();
             return;
         }
+        // Same stand-in on the way out, and it has to start BEFORE abandonHold(): that is
+        // what hands the card back, and handing it back is the thing being animated. It leaves
+        // the card alone while this animator owns it, and the animator finishes the job.
+        boolean fadeCard = animate && screenOn() && sCardP > 0f && sCardGuarded != null;
+        if (fadeCard) {
+            animateCardTo(0f, new Runnable() {
+                @Override
+                public void run() {
+                    sCardP = 0f;
+                    applyMediaCard();
+                }
+            });
+        }
         abandonHold("cover mode off", true);
         setDepthHidden(false);
-        // Hands the card back before the guard goes, or the last frame it drew stays.
-        sCardP = 0f;
-        applyMediaCard();
+        if (!fadeCard) {
+            // Hands the card back before the guard goes, or the last frame it drew stays.
+            sCardP = 0f;
+            applyMediaCard();
+        }
         saveState();
     }
 
@@ -3827,6 +3864,11 @@ public class Main extends XposedModule {
      */
     private static void reassertCoverClock(boolean force) {
         if (!sCoverMode) return;
+        // Cover mode is being restored, not animated into - a wake, or a keyguard rebuilt under
+        // us - so the card's progress is its settled value rather than a frame of something.
+        // Without this it keeps whatever it was left with, which after a SystemUI restart is the
+        // 0 that comes back from the state file: cover mode on, thumbnail still showing.
+        setCardProgress(1f);
         sCollapseMin = sClockScale;
         sGlassV0 = 0f;
         sGlassV1 = sGlassEnd;
@@ -4188,6 +4230,68 @@ public class Main extends XposedModule {
      * there until the OEM next happened to touch the card. Writing through here invalidates it,
      * and the guard goes on doing what it always did: catching the frames the OEM starts.
      */
+    /**
+     * Whether the OEM's own squeeze will carry the card's progress on this clock style.
+     *
+     * The card fade was deliberately given no animator of its own: it rides the same 0..1 that
+     * applyCollapse() derives from the clock's notifY, so one OEM spring moves the collapse, the
+     * glass and the card together. That holds only where there IS a notifY to ride.
+     *
+     * On the classic clock style there is not. notifStateChange never reaches
+     * KeyguardClockNotifInteractor.setNotifY there, so sLastSystemY is never learned and stays
+     * NaN from process start - measured with verbose on: zero setNotifY calls across a full
+     * enter and exit. No natural Y means no progress, which took the two card settings down
+     * with the clock's collapse even though they have nothing to do with the clock.
+     */
+    private static boolean oemDrivesCard() {
+        float natural = sLastSystemY;
+        return !Float.isNaN(natural) && natural > SQUEEZE_FLOOR;
+    }
+
+    /** Matches the exit spring's settle and the wallpaper crossfade, so they land together. */
+    private static final long CARD_FADE_MS = 320L;
+    private static ValueAnimator sCardAnim;
+
+    /**
+     * Walks the card's progress on our own frames, for the styles where the OEM has none.
+     *
+     * Only ever a stand-in: where oemDrivesCard() is true this is not started at all and the
+     * behaviour is exactly what it was. Writing through setCardProgress() means the guard and
+     * the invalidation work the same way for both drivers.
+     */
+    private static void animateCardTo(final float target, final Runnable onEnd) {
+        stopCardAnim();
+        final float from = sCardP;
+        if (from == target) {
+            if (onEnd != null) onEnd.run();
+            return;
+        }
+        ValueAnimator a = ValueAnimator.ofFloat(from, target);
+        a.setDuration(CARD_FADE_MS);
+        a.setInterpolator(new PathInterpolator(0.2f, 0f, 0f, 1f));
+        a.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator v) {
+                setCardProgress((Float) v.getAnimatedValue());
+            }
+        });
+        a.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator v) {
+                if (sCardAnim == v) sCardAnim = null;
+                if (onEnd != null) onEnd.run();
+            }
+        });
+        sCardAnim = a;
+        a.start();
+    }
+
+    private static void stopCardAnim() {
+        ValueAnimator a = sCardAnim;
+        sCardAnim = null;
+        if (a != null) a.cancel();
+    }
+
     private static void setCardProgress(float p) {
         if (p < 0f) p = 0f;
         if (p > 1f) p = 1f;
