@@ -2989,6 +2989,10 @@ public class Main extends XposedModule {
         out.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
         out.putExtra("op", op);
         out.putExtra("reload", true);
+        // Which kind of lock wallpaper this push is for. The wallpaper process cannot work it
+        // out for itself - it only knows which engines it has BUILT, and those are built once
+        // per process - and this side re-reads it before every push anyway. See videoPath().
+        out.putExtra("video", sVideoWallpaper);
         return out;
     }
 

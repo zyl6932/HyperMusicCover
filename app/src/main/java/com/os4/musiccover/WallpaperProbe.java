@@ -539,6 +539,7 @@ public class WallpaperProbe {
                 Xp.log(TAG + "recv op=" + op
                         + (carried == null ? " " + i.getExtras() : " jpg=" + carried.length + "B"));
                 try {
+                    if (i.hasExtra("video")) noteLockWallpaper(i.getBooleanExtra("video", false));
                     if ("cls".equals(op)) {
                         dumpClass(i.getStringExtra("name"), i.getStringExtra("grep"));
                     } else if ("bmp".equals(op)) {
@@ -714,9 +715,38 @@ public class WallpaperProbe {
     /** Whether the video's surface is currently ours rather than its player's. */
     private static volatile boolean sVideoTakenOver;
 
-    /** Whether this lock wallpaper is a live one, i.e. drawn by a video engine. */
+    /**
+     * What the lock wallpaper is now, as SystemUI reads it before every push. null until a push
+     * has said.
+     */
+    private static volatile Boolean sLockIsVideo;
+
+    /**
+     * Whether this push is for a live lock wallpaper.
+     *
+     * Having a video engine is not the same question, and answering with it alone was a bug:
+     * the engine is captured in a constructor, the constructor runs once, and this process
+     * outlives any number of wallpaper changes. Set a video lock wallpaper and then set a still
+     * one back, and sVideoEngine is still there - so every push took the video path, which on
+     * the depth shape does nothing at all (see takeoverDepth), and the still wallpaper's texture
+     * was never replaced. Measured on the device: cover mode on, "art set" logged here, and
+     * nothing on the lock screen. Both have to be true, and the engine alone never decides.
+     */
     private static boolean videoPath() {
-        return sVideoEngine != null;
+        Boolean live = sLockIsVideo;
+        return sVideoEngine != null && (live == null || live);
+    }
+
+    /** Told, not guessed: SystemUI carries the answer on every broadcast. */
+    private static void noteLockWallpaper(boolean video) {
+        Boolean was = sLockIsVideo;
+        sLockIsVideo = video;
+        if (was != null && was == video) return;
+        Xp.log(TAG + "the lock wallpaper is " + (video ? "a live one" : "a still picture")
+                + (was == null ? "" : ", it was not"));
+        // Release is paired with the take, always: a wallpaper that is no longer a video must
+        // not be left with our canvas where its player's surface should be.
+        if (!video && sVideoTakenOver) videoWindowTakeover(true);
     }
 
     private static boolean videoWindowTakeover(boolean on) {
