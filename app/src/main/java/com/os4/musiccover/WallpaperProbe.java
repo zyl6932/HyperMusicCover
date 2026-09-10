@@ -818,11 +818,33 @@ public class WallpaperProbe {
     }
 
     /**
-     * Re-uploads the wallpaper texture in place. The engine's field b is the "surface needs
-     * creating" flag its preRender step reads; u() is what the OEM calls to set it, and T(false)
-     * posts a render onto the GL thread. Setting the field as well as calling u() is deliberate:
-     * u() is obfuscated, and this is the one bit that decides whether the frame re-reads the
-     * texture or just redraws the old one.
+     * The ways to ask the engine to run its preRender step, and the arguments it takes there.
+     *
+     * Ordered newest-name-first. The names are R8-obfuscated (OS4.0.0.35: u, b, T) and a build
+     * that renamed one used to take the whole reload down with it - the log below is what that
+     * looked like, and what it cost is in Handoff 27.
+     */
+    private static final Object[][] FRAME_REQUESTS = {
+            {"T", Boolean.FALSE},
+            // The OEM's own showKeyguardWallpaper(ZI)/hideKeyguardWallpaper(ZI) take a boolean
+            // and an int, so a build that widened T the same way is worth one more try. 0 is
+            // the no-animation value everywhere these appear.
+            {"T", Boolean.FALSE, Integer.valueOf(0)},
+    };
+
+    /**
+     * Re-uploads the wallpaper texture in place.
+     *
+     * The engine's field b is the "surface needs creating" flag its preRender step reads, u()
+     * is what the OEM calls to arm it, and T(false) posts that preRender onto the GL thread -
+     * which is the path that ends in the texture being re-read. Setting the field as well as
+     * calling u() is deliberate: u() is obfuscated, and this is the one bit that decides whether
+     * the frame re-reads the texture or just redraws the old one.
+     *
+     * Every step stands on its own now. On a 1080x2400 HyperOS build T does not exist at all:
+     * the flag was still armed, the request threw, one "reload failed" went to the log, and the
+     * texture kept the album art. Leaving cover mode then put the depth layer back but not the
+     * wallpaper, so the lock screen read as the cover stuck behind the subject. See Handoff 27.
      */
     private static void reloadTexture() {
         Object eng = sKeyguardEngine;
@@ -832,17 +854,51 @@ public class WallpaperProbe {
             return;
         }
         try {
-            try {
-                Xp.callMethod(eng, "u");
-            } catch (Throwable t) {
-                Xp.log(TAG + "reload: u() failed: " + t);
-            }
-            Xp.setBooleanField(eng, "b", true);
-            Xp.callMethod(eng, "T", false);
-            Xp.log(TAG + "reload requested on " + eng.getClass().getSimpleName());
+            Xp.callMethod(eng, "u");
         } catch (Throwable t) {
-            Xp.log(TAG + "reload failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "reload: u() failed: " + t);
         }
+        try {
+            Xp.setBooleanField(eng, "b", true);
+        } catch (Throwable t) {
+            Xp.log(TAG + "reload: the pending-surface field failed: " + t);
+        }
+        for (Object[] req : FRAME_REQUESTS) {
+            String name = (String) req[0];
+            Object[] args = new Object[req.length - 1];
+            System.arraycopy(req, 1, args, 0, args.length);
+            try {
+                Xp.callMethod(eng, name, args);
+                Xp.log(TAG + "reload requested on " + eng.getClass().getSimpleName()
+                        + " via " + name + "()");
+                return;
+            } catch (Throwable ignored) {
+            }
+        }
+        // Nothing to call, so say what this build DOES have: the methods taking one boolean are
+        // the only candidates, and naming them is the whole of what re-deriving the name needs.
+        Xp.log(TAG + "reload: no frame request on " + eng.getClass().getSimpleName()
+                + " - the texture keeps what it holds until the OEM rebuilds the surface."
+                + " Methods here that take one boolean: " + oneBooleanMethods(eng));
+    }
+
+    /** One-boolean methods declared on the engine and its supers, for re-deriving a name. */
+    private static String oneBooleanMethods(Object eng) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            for (Class<?> c = eng.getClass(); c != null && c != Object.class;
+                 c = c.getSuperclass()) {
+                for (Method m : c.getDeclaredMethods()) {
+                    Class<?>[] p = m.getParameterTypes();
+                    if (p.length != 1 || p[0] != boolean.class) continue;
+                    if (sb.length() > 0) sb.append(", ");
+                    sb.append(c.getSimpleName()).append('.').append(m.getName()).append("(Z)");
+                }
+            }
+        } catch (Throwable t) {
+            return "could not be listed: " + t;
+        }
+        return sb.length() == 0 ? "none" : sb.toString();
     }
 
     /**
