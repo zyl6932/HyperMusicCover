@@ -431,16 +431,6 @@ public class WallpaperProbe {
             Xp.log(TAG + "frosting hook failed: " + t);
         }
 
-        // getBitmap() turned out never to be called - the texture does not travel that way - so
-        // trace every Bitmap-carrying method and constructor on the renderers from load time.
-        // The GL surface is created during process startup, so a hook added later misses it.
-        for (String cn : new String[]{
-                "com.miui.miwallpaper.opengl.ImageWallpaperRenderer",
-                "com.miui.miwallpaper.opengl.AnimImageWallpaperRenderer",
-                "com.miui.miwallpaper.container.openGL.KeyguardAnimImageWallpaperRenderer"}) {
-            traceBitmaps(cn);
-        }
-
         Xp.hook(Xp.findMethodExact(Application.class, "onCreate"), chain -> {
             Object result = chain.proceed();
             try {
@@ -1300,6 +1290,18 @@ public class WallpaperProbe {
     /**
      * Hooks every method of a class that carries a Bitmap in or out and logs it, which is how
      * we find where the wallpaper texture actually enters the renderer.
+     */
+    /**
+     * Hooks every Bitmap-carrying method and constructor on a renderer, and logs each call with
+     * its arguments and result. Reached only through the `bmp` probe op.
+     *
+     * It used to run at load time, for the whole list of renderers, to find out how the wallpaper
+     * bitmap travels into the GL texture. That question is answered (the answer is
+     * onSurfaceCreated -> mTexture.use -> the lambda we replace the bitmap in, which is where the
+     * module has worked since), and the cost of leaving it on was a hook on every one of those
+     * methods in every wallpaper process, plus a log line per call, whether or not anyone was
+     * looking. It stays as a probe because the first step in porting this module to a build whose
+     * R8 names have moved is reading them back off the phone, and this is the tool that does it.
      */
     private static void traceBitmaps(String name) {
         if (name == null) { Xp.log(TAG + "need --es name"); return; }
