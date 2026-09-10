@@ -3735,6 +3735,10 @@ public class Main extends XposedModule {
                         lock.close();
                     } catch (Throwable ignored) {
                     }
+                    // The slot being populated is all the COVER needs. What the transition out
+                    // of it needs as well is for the picture in there to be the size of the
+                    // screen - see fitLockWallpaperToScreen().
+                    fitLockWallpaperToScreen(wm);
                     return true;
                 }
             } catch (Throwable t) {
@@ -3767,6 +3771,178 @@ public class Main extends XposedModule {
             Xp.log(TAG + "could not set a lock wallpaper: " + Log.getStackTraceString(t));
             return false;
         }
+    }
+
+    /**
+     * The size of the last lock wallpaper this tried to re-fit, packed w<<32|h.
+     *
+     * Not a plain "done" flag: the user can change the wallpaper at any point and the next one
+     * deserves its own attempt. What this stops is fighting the same picture over and over -
+     * ensureLockWallpaper() runs before every art push, so a slot that cannot be rewritten would
+     * otherwise be rewritten once per track change, forever.
+     */
+    private static volatile long sLockWpTried;
+
+    /**
+     * Puts an over-sized lock wallpaper back to the size of the screen, so leaving cover mode
+     * can crossfade instead of cutting.
+     *
+     * Every frame of that crossfade re-uploads the WHOLE keyguard texture, and the texture is
+     * the lock wallpaper at ITS OWN pixel size, not the screen's. Measured in the wallpaper
+     * process, same phone, same 240ms fade, the only difference being the wallpaper's own
+     * dimensions:
+     *
+     *   1200x2608 (= the screen)  12.5MB/frame  fine
+     *   1579x3432 (1.7x)          21MB/frame    the GL thread falls behind far enough that the
+     *                                           compositor picks up a half-built frame - the
+     *                                           cover drawn small on black, in a corner
+     *
+     * So WallpaperProbe.fadeTooExpensive() refuses to fade above 1.5x the screen and swaps in
+     * one frame instead. That is the right call at that point, but from the outside it reads as
+     * "the transition only works if your wallpaper happens to be the right resolution", which is
+     * not something anyone should have to know. The extra pixels buy nothing either way: the
+     * picture is only ever drawn on this screen, and every draw throws them away. Re-fitting is
+     * the same centre-crop ensureLockWallpaper() already applies to the copy it writes itself,
+     * so both paths leave the slot in the same shape.
+     *
+     * Two things it will not do:
+     *
+     * - Touch a wallpaper whose aspect ratio is not the screen's. A picture that much wider is
+     *   being used for something - the parallax a scrolling wallpaper pans through - and
+     *   cropping it would change what the user SEES rather than only its resolution. A hard cut
+     *   is the smaller harm.
+     * - Take a second run at the same picture. See sLockWpTried.
+     *
+     * Runs on the art worker, off the main thread, and only from the branch where the lock slot
+     * already holds a still of its own - live wallpapers returned above, long before this.
+     */
+    // Runs inside com.android.systemui, which holds SET_WALLPAPER and
+    // READ_WALLPAPER_INTERNAL. This APK neither has nor needs them.
+    @SuppressLint("MissingPermission")
+    private static void fitLockWallpaperToScreen(android.app.WallpaperManager wm) {
+        int sw = sScreenW, sh = sScreenH;
+        if (sw <= 0 || sh <= 0) return;
+        int w = 0, h = 0;
+        try {
+            android.os.ParcelFileDescriptor fd =
+                    wm.getWallpaperFile(android.app.WallpaperManager.FLAG_LOCK);
+            if (fd == null) return;
+            java.io.InputStream in = new android.os.ParcelFileDescriptor.AutoCloseInputStream(fd);
+            try {
+                android.graphics.BitmapFactory.Options b =
+                        new android.graphics.BitmapFactory.Options();
+                b.inJustDecodeBounds = true;
+                android.graphics.BitmapFactory.decodeStream(in, null, b);
+                w = b.outWidth;
+                h = b.outHeight;
+            } finally {
+                try {
+                    in.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable t) {
+            Xp.log(TAG + "cannot measure the lock wallpaper: " + t);
+            return;
+        }
+        if (w <= 0 || h <= 0) return;
+        // The same gate the fade uses, and deliberately the same number: anything this leaves
+        // alone is something WallpaperProbe will still agree to fade.
+        if ((long) w * h * 2 <= (long) sw * sh * 3) return;
+        float times = (float) (w * (double) h / (sw * (double) sh));
+        // Aspect, to 1%. 1579x3432 and 1200x2608 are one picture at two resolutions; a panorama
+        // is not, and centre-cropping one is a change nobody asked for.
+        if (Math.abs((long) w * sh - (long) h * sw) * 100L > (long) h * sw) {
+            Xp.log(TAG + "lock wallpaper is " + w + "x" + h + ", " + r2(times)
+                    + "x the screen but not its shape - leaving it alone;"
+                    + " the cover will swap in one frame rather than fade");
+            return;
+        }
+        long size = ((long) w << 32) | (h & 0xffffffffL);
+        if (sLockWpTried == size) return;
+        sLockWpTried = size;
+        Bitmap src = null, fitted = null;
+        try {
+            android.os.ParcelFileDescriptor fd =
+                    wm.getWallpaperFile(android.app.WallpaperManager.FLAG_LOCK);
+            if (fd == null) return;
+            java.io.InputStream in = new android.os.ParcelFileDescriptor.AutoCloseInputStream(fd);
+            try {
+                android.graphics.BitmapFactory.Options o =
+                        new android.graphics.BitmapFactory.Options();
+                // Decoded straight down where a power of two allows it: the full 21MB only ever
+                // existed to be thrown away, and this is a phone.
+                o.inSampleSize = sampleSizeFor(w, h, sw, sh);
+                o.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                src = android.graphics.BitmapFactory.decodeStream(in, null, o);
+            } finally {
+                try {
+                    in.close();
+                } catch (Throwable ignored) {
+                }
+            }
+            if (src == null) {
+                Xp.log(TAG + "lock wallpaper could not be decoded for re-fitting");
+                return;
+            }
+            fitted = src.getWidth() == sw && src.getHeight() == sh ? src : fitKeepingColour(src, sw, sh);
+            wm.setBitmap(fitted, null, true, android.app.WallpaperManager.FLAG_LOCK);
+            Xp.log(TAG + "lock wallpaper was " + w + "x" + h + " (" + r2(times)
+                    + "x the screen) - re-fitted to " + sw + "x" + sh
+                    + " so leaving cover mode can crossfade instead of cutting");
+        } catch (Throwable t) {
+            Xp.log(TAG + "could not re-fit the lock wallpaper: " + Log.getStackTraceString(t));
+        } finally {
+            if (fitted != null && fitted != src) fitted.recycle();
+            if (src != null) src.recycle();
+        }
+    }
+
+    /**
+     * centerCrop() with the source's colour space carried through.
+     *
+     * The shared one draws into `Bitmap.createBitmap(w, h, ARGB_8888)`, and that bitmap is
+     * sRGB. Everywhere else in this module that is exactly right - what goes in is album art
+     * that was composed here. Here it is the user's own wallpaper, which on this phone can be
+     * a Display P3 photo, and drawing P3 into an sRGB bitmap gamut-clips it: saturated reds and
+     * greens come back duller, permanently, in a file the user did not ask to have rewritten.
+     * The OEM cares too - its upload path calls BitmapUtils.checkColorSpace() on every bitmap.
+     *
+     * Everything else about the crop is deliberately identical to centerCrop(), because
+     * identical is the point: read off the dex, the OEM maps this texture to the screen with
+     * AnimImageGLProgram.changeMvpMatrixCrop(), which is setIdentityM() plus a single scale on
+     * whichever axis overflows - a centred scale-to-cover with no translation and no crop hint.
+     * So the pixels this bakes into the file are the pixels that were already on screen.
+     */
+    private static Bitmap fitKeepingColour(Bitmap src, int w, int h) {
+        Bitmap out = null;
+        try {
+            android.graphics.ColorSpace cs = src.getColorSpace();
+            if (cs != null && !cs.equals(android.graphics.ColorSpace.get(
+                    android.graphics.ColorSpace.Named.SRGB))) {
+                out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888, src.hasAlpha(), cs);
+                Xp.log(TAG + "keeping the wallpaper's colour space: " + cs.getName());
+            }
+        } catch (Throwable t) {
+            // A colour space the framework will not hand back to createBitmap. sRGB it is -
+            // the same thing that happened before this method existed.
+            Xp.log(TAG + "cannot carry the wallpaper's colour space over: " + t);
+        }
+        if (out == null) return centerCrop(src, w, h);
+        android.graphics.Canvas cv = new android.graphics.Canvas(out);
+        float scale = Math.max((float) w / src.getWidth(), (float) h / src.getHeight());
+        float dw = src.getWidth() * scale, dh = src.getHeight() * scale;
+        cv.drawBitmap(src, null, new android.graphics.RectF(
+                        (w - dw) / 2f, (h - dh) / 2f, (w + dw) / 2f, (h + dh) / 2f),
+                new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG));
+        return out;
+    }
+
+    /** The largest power of two that still leaves the picture covering the screen. */
+    private static int sampleSizeFor(int w, int h, int sw, int sh) {
+        int s = 1;
+        while (w / (s * 2) >= sw && h / (s * 2) >= sh) s *= 2;
+        return s;
     }
 
     /** The one kind of wallpaper this module can work with: a still picture. */
