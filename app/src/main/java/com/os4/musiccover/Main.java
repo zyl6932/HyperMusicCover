@@ -4909,18 +4909,20 @@ public class Main extends XposedModule {
     }
 
     /**
-     * Whether the card's artwork should currently be a way back into cover mode.
+     * Whether the card's artwork is currently a toggle for cover mode.
      *
-     * Only with the cover off, which in practice means the user tapped it away and the card is
-     * still up. With the cover on the thumbnail is hidden anyway, and off the lock screen the
-     * card belongs to the shade, where the OEM's own click is the right one.
+     * Both directions: the thumbnail is what put the cover up, so it is also the natural thing
+     * to tap to put the wallpaper back. With the restyle's hide-artwork option on, the way back
+     * falls out on its own - the thumbnail is INVISIBLE in cover mode by the time anyone could
+     * tap it, and the rectangle test asks isShown(). Off the lock screen the card belongs to the
+     * shade, where the OEM's own click is the right one.
      */
     private static boolean wantsArtTap() {
-        return sTapToggle && !sCoverMode && sCardShowing;
+        return sTapToggle && sCardShowing;
     }
 
     /**
-     * Makes the card's artwork expand into cover mode instead of opening the player.
+     * Makes the card's artwork toggle cover mode instead of opening the player.
      *
      * This has to happen at the window's dispatch, not on album_art itself. A touch listener on
      * the child was the obvious answer and does not work: on device it never fired once, so
@@ -4934,9 +4936,10 @@ public class Main extends XposedModule {
      * card rectangle - the card sits somewhere else with the clock collapsed than without it,
      * and swallowing touches over empty wallpaper would be a bug the user could not explain.
      *
-     * The cost is that the thumbnail's 158x158 stops being draggable while the cover is off.
-     * That is the trade, and it is why the UP has to have stayed inside and been brief: a drag
-     * that began on the artwork does nothing rather than expanding on release.
+     * The cost is that the thumbnail's 158x158 stops being draggable for as long as it is the
+     * thing the tap would act on. That is the trade, and it is why the UP has to have stayed
+     * inside and been brief: a drag that began on the artwork does nothing rather than toggling
+     * on release.
      */
     private static boolean swallowArtTap(MotionEvent ev) {
         int action = ev.getActionMasked();
@@ -4958,7 +4961,12 @@ public class Main extends XposedModule {
             sArtSwallow = false;
             long held = android.os.SystemClock.uptimeMillis() - sArtDownAt;
             if (held < ART_TAP_MS && artRectContains(ev.getRawX(), ev.getRawY())) {
-                enterFromTap("artwork tapped");
+                // The same rectangle is both the way in and the way out, and which one it is
+                // is read at UP rather than at DOWN: a cover that came up under the finger
+                // during the gesture (the OEM can re-lay the card out at any point) would
+                // otherwise send the tap the wrong way.
+                if (sCoverMode) exitFromTap("artwork tapped");
+                else enterFromTap("artwork tapped");
             }
         } else if (action == MotionEvent.ACTION_CANCEL) {
             sArtSwallow = false;
@@ -5045,6 +5053,20 @@ public class Main extends XposedModule {
     private static boolean onKeyguardNow() {
         View c = sContainer;
         return c != null && c.isShown();
+    }
+
+    /**
+     * Back to the plain wallpaper, with the card left standing where it is.
+     *
+     * sTapSuppressed is what holds it that way. A card being up is exactly what the module reads
+     * as "the cover belongs here", so without it the next metadata event would put the cover
+     * straight back. It is the card actually going away that clears it - not a track change -
+     * so the next song starts in cover mode as it always did.
+     */
+    private static void exitFromTap(String why) {
+        sTapSuppressed = true;
+        Xp.log(TAG + why + ": leaving cover mode");
+        setCoverEnabled(false, true);
     }
 
     /**
@@ -5607,9 +5629,7 @@ public class Main extends XposedModule {
         }
         if (y < top || y > bottom) return;
         if (sCoverMode) {
-            sTapSuppressed = true;
-            Xp.log(TAG + "tap at y=" + y + ": leaving cover mode");
-            setCoverEnabled(false, true);
+            exitFromTap("tap at y=" + y);
         } else if (sTapSuppressed) {
             enterFromTap("tap at y=" + y);
         }
