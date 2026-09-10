@@ -5160,20 +5160,46 @@ public class Main extends XposedModule {
         Bitmap blurred = blur(bg, 48, 4, 3);
         cv.drawBitmap(blurred, null, new android.graphics.RectF(0, 0, w, h), p);
         cv.drawColor(0x14000000);
-        float feather = Math.min(240f, coverH / 4f);
-        int layer = cv.saveLayer(0, top, w, top + coverH, null);
-        cv.drawBitmap(src, null, new android.graphics.RectF(0, top, w, top + coverH), p);
-        android.graphics.Paint mask = new android.graphics.Paint();
-        mask.setXfermode(new android.graphics.PorterDuffXfermode(
-                android.graphics.PorterDuff.Mode.DST_IN));
-        mask.setShader(new android.graphics.LinearGradient(0, top, 0, top + feather,
-                0x00000000, 0xFF000000, android.graphics.Shader.TileMode.CLAMP));
-        cv.drawRect(0, top, w, top + feather, mask);
-        mask.setShader(new android.graphics.LinearGradient(0, top + coverH - feather, 0,
-                top + coverH, 0xFF000000, 0x00000000, android.graphics.Shader.TileMode.CLAMP));
-        cv.drawRect(0, top + coverH - feather, w, top + coverH, mask);
-        cv.restoreToCount(layer);
+        // The sharp band, feathered in its own pixels and then drawn in one go. See feathered().
+        Bitmap band = feathered(src, w, Math.round(coverH),
+                Math.min(240, Math.round(coverH / 4f)));
+        cv.drawBitmap(band, null, new android.graphics.RectF(0, top, w, top + coverH), p);
+        band.recycle();
         return out;
+    }
+
+    /**
+     * The artwork at full width and its own aspect, with the top and bottom `feather` rows faded
+     * to transparent - in the pixels, not by masking a layer.
+     *
+     * Masking is what this replaces, and it put a one-pixel line along the band's top edge. The
+     * band was drawn into a saveLayer whose bounds begin at a fractional `top`, and the mask
+     * rect over it was snapped to whole pixels by a different rule than the layer was, so the
+     * band's first row could fall outside the mask and land on the blurred background at full
+     * strength - a line that follows the artwork's own brightness, bright where the row below is
+     * bright and dark where it is dark, which is exactly what it looked like on the phone.
+     *
+     * Here the ramp is part of the picture, so that first row has nothing to show whatever the
+     * rounding does. The mask rects are on a bitmap whose edges are 0 and bandH - both whole
+     * pixels - so there is no fractional bound left for anything to disagree about.
+     */
+    private static Bitmap feathered(Bitmap src, int w, int bandH, int feather) {
+        Bitmap band = Bitmap.createBitmap(w, bandH, Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas bc = new android.graphics.Canvas(band);
+        bc.drawBitmap(src, null, new android.graphics.RectF(0, 0, w, bandH),
+                new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG));
+        if (feather > 0 && feather * 2 <= bandH) {
+            android.graphics.Paint mask = new android.graphics.Paint();
+            mask.setXfermode(new android.graphics.PorterDuffXfermode(
+                    android.graphics.PorterDuff.Mode.DST_IN));
+            mask.setShader(new android.graphics.LinearGradient(0, 0, 0, feather,
+                    0x00000000, 0xFF000000, android.graphics.Shader.TileMode.CLAMP));
+            bc.drawRect(0, 0, w, feather, mask);
+            mask.setShader(new android.graphics.LinearGradient(0, bandH - feather, 0, bandH,
+                    0xFF000000, 0x00000000, android.graphics.Shader.TileMode.CLAMP));
+            bc.drawRect(0, bandH - feather, w, bandH, mask);
+        }
+        return band;
     }
 
     /**
