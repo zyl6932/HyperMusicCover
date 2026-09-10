@@ -2,8 +2,10 @@
 <resources>
     <string name="app_name">HyperMusicCover</string>
     <string name="about_source_code_summary">https://github.com/zyl6932/HyperMusicCover</string>
-    <string name="about_telegram">反馈与建议</string>
-    <string name="about_telegram_summary">https://github.com/zyl6932/HyperMusicCover/issues</string>
+    <string name="about_telegram">Telegram群组</string>
+    <string name="about_telegram_summary">https://t.me/HyperMusicCover</string>
+    <string name="about_feedback">反馈与建议</string>
+    <string name="about_feedback_summary">https://github.com/zyl6932/HyperMusicCover/issues</string>
     <string name="home_now_playing">当前曲目</string>
     <string name="home_no_track">没有正在播放的媒体卡片</string>
     <string name="home_cover_on">封面锁屏已开启</string>

@@ -2,8 +2,10 @@
 <resources>
     <string name="app_name">HyperMusicCover</string>
     <string name="about_source_code_summary">https://github.com/zyl6932/HyperMusicCover</string>
-    <string name="about_telegram">Feedback</string>
-    <string name="about_telegram_summary">https://github.com/zyl6932/HyperMusicCover/issues</string>
+    <string name="about_telegram">Telegram Group</string>
+    <string name="about_telegram_summary">https://t.me/HyperMusicCover</string>
+    <string name="about_feedback">Feedback</string>
+    <string name="about_feedback_summary">https://github.com/zyl6932/HyperMusicCover/issues</string>
     <string name="home_now_playing">Now playing</string>
     <string name="home_no_track">No media card on the lock screen</string>
     <string name="home_cover_on">Cover lock screen is on</string>

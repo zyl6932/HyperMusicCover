@@ -352,6 +352,11 @@ private fun AboutContent(
                         ArrowPreference(
                             title = stringResource(R.string.about_telegram),
                             summary = stringResource(R.string.about_telegram_summary),
+                            onClick = { uriHandler.openUri("https://t.me/HyperMusicCover") },
+                        )
+                        ArrowPreference(
+                            title = stringResource(R.string.about_feedback),
+                            summary = stringResource(R.string.about_feedback_summary),
                             onClick = { uriHandler.openUri("https://github.com/zyl6932/HyperMusicCover/issues") },
                         )
                     }
