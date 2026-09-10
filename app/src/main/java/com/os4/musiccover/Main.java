@@ -1205,6 +1205,7 @@ public class Main extends XposedModule {
                                 + " title=" + (sCardTitleTapped != null) + " cardP=" + sCardP);
                         Xp.log(TAG + "tap: toggle=" + sTapToggle
                                 + " suppressed=" + sTapSuppressed
+                                + " bouncer=" + bouncerUp()
                                 + " wallpaperFade=" + sFadeWp);
                     } else if ("verbose".equals(op)) {
                         sVerbose = i.getBooleanExtra("on", !sVerbose);
@@ -5123,7 +5124,8 @@ public class Main extends XposedModule {
     private static boolean swallowArtTap(MotionEvent ev) {
         int action = ev.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
-            boolean onCard = wantsArtTap() && screenOn() && keyguardShowing() && onKeyguardNow();
+            boolean onCard = wantsArtTap() && screenOn() && keyguardShowing() && onKeyguardNow()
+                    && !bouncerUp();
             sArtSwallow = onCard && artRectContains(ev.getRawX(), ev.getRawY());
             if (sArtSwallow) {
                 sArtDownAt = android.os.SystemClock.uptimeMillis();
@@ -5232,6 +5234,24 @@ public class Main extends XposedModule {
     private static boolean onKeyguardNow() {
         View c = sContainer;
         return c != null && c.isShown();
+    }
+
+    /**
+     * Whether the bouncer - the PIN or pattern pad - is over the lock screen.
+     *
+     * The clock container is NOT this test, however well it works for the shade: measured with
+     * the pad up, the clock stays shown, the card stays up and the keyguard stays locked, so
+     * every guard the cover tap had was still true and a tap aimed at a digit toggled the cover
+     * instead. The keyguard being locked does not mean the lock screen is what is on top.
+     *
+     * The pad hangs off its own child of the shade window, and MIUI keeps that child INVISIBLE
+     * - not GONE - until the bouncer is summoned, so isShown() is exactly "the pad is up".
+     * Falling back to false when the view cannot be found keeps the tap working on a build that
+     * renamed it, rather than silently switching the whole feature off.
+     */
+    private static boolean bouncerUp() {
+        View b = findSysuiView("keyguard_bouncer_container");
+        return b != null && b.isShown();
     }
 
     /**
@@ -5820,6 +5840,8 @@ public class Main extends XposedModule {
         // being pulled down over an unlocked phone - the same test the card restyle uses.
         View c = sContainer;
         if (c == null || !c.isShown()) return;
+        // The pad is up, so the taps on it are its own.
+        if (bouncerUp()) return;
         // Nothing to toggle without music: the card is the switch, and this only chooses
         // whether the cover follows it.
         if (!sCardKnown || !sCardShowing) return;
