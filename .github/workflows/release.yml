@@ -114,3 +114,13 @@ jobs:
           gh release create "${{ steps.v.outputs.tag }}" dist/*.apk \
             --title "${{ steps.v.outputs.tag }}" \
             --generate-notes
+
+  # Publishing above uses github.token, and GitHub will not let one workflow's release event
+  # start another workflow. Calling telegram.yml is therefore the only way a tag-driven
+  # release ever reaches the group.
+  telegram:
+    needs: release
+    uses: ./.github/workflows/telegram.yml
+    with:
+      tag: ${{ inputs.tag || github.ref_name }}
+    secrets: inherit

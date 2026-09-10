@@ -1,0 +1,135 @@
+name: Telegram
+
+# Pushes a published release - the APK plus its notes - into the Telegram group.
+#
+# It never reads the triggering event's payload. The tag is the only input; everything else
+# comes back from `gh release view`, so the same job serves all three entry points:
+#
+#   workflow_call     release.yml calls this after it publishes. Releases created with
+#                     github.token do not raise a `release` event (GitHub refuses to let a
+#                     workflow trigger a workflow), so this call is the only thing that
+#                     covers a tag-driven release.
+#   release           a release published by hand in the web UI, which release.yml never sees.
+#   workflow_dispatch re-sending one that failed, without cutting a new release.
+#
+# Nightlies are deliberately not wired up - one message a night would bury the group.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag of the release to push'
+        required: true
+        type: string
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag of the release to push'
+        required: true
+
+concurrency:
+  group: telegram-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  push:
+    if: github.repository == 'zyl6932/HyperMusicCover'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Fetch the release
+        id: rel
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json name,body,url,isPrerelease > release.json
+
+          # Notes and title reach the next step through files, never through the shell. Release
+          # bodies are attacker-shaped text once anyone can open a PR, and `${{ }}` in a run
+          # block would paste them straight into bash.
+          jq -r '.body // ""' release.json > body.md
+          jq -r '.name // env.TAG'  release.json > title.txt
+          jq -r '.url'              release.json > url.txt
+          echo "prerelease=$(jq -r '.isPrerelease' release.json)" >> "$GITHUB_OUTPUT"
+
+          mkdir -p assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets --clobber
+          ls -lh assets
+
+      - name: Send
+        env:
+          TG_TOKEN:  ${{ secrets.TG_BOT_TOKEN }}
+          CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
+          THREAD_ID: ${{ secrets.TG_THREAD_ID }}
+          PRERELEASE: ${{ steps.rel.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TG_TOKEN:-}" ] || [ -z "${CHAT_ID:-}" ]; then
+            echo "::error::TG_BOT_TOKEN / TG_CHAT_ID are not set"
+            exit 1
+          fi
+          API="https://api.telegram.org/bot$TG_TOKEN"
+
+          # Telegram caps a message at 4096 characters and rejects the whole thing if a stray
+          # < or & looks like a tag, so the notes are escaped and trimmed rather than trusted.
+          # HTML is the parse mode that survives GitHub's Markdown; MarkdownV2 would 400 on the
+          # first unescaped '-' in a bullet list.
+          #
+          # The result goes to a file rather than a shell variable: notes are UTF-8 and a
+          # variable would put them at the mercy of whatever locale the runner booted with.
+          python3 - <<'PY'
+          import html, os
+
+          def read(path):
+              with open(path, encoding='utf-8') as f:
+                  return f.read().strip()
+
+          body = read('body.md')
+          if len(body) > 3400:
+              body = body[:3400].rsplit('\n', 1)[0] + '\n…'
+
+          head = '🌙' if os.environ.get('PRERELEASE') == 'true' else '🎉'
+          text = (f"{head} <b>{html.escape(read('title.txt'))}</b>  "
+                  f"<code>{html.escape(os.environ['TAG'])}</code>\n\n"
+                  f"{html.escape(body)}\n\n"
+                  f"🔗 {read('url.txt')}")
+          with open('message.txt', 'w', encoding='utf-8') as f:
+              f.write(text)
+          PY
+
+          send() {
+            local method="$1"; shift
+            local out
+            out=$(curl -sS -X POST "$API/$method" \
+              -F chat_id="$CHAT_ID" \
+              ${THREAD_ID:+-F message_thread_id="$THREAD_ID"} \
+              "$@")
+            if [ "$(printf '%s' "$out" | jq -r '.ok')" != "true" ]; then
+              echo "::error::$method failed: $(printf '%s' "$out" | jq -r '.description // .')"
+              exit 1
+            fi
+          }
+
+          send sendMessage \
+            -F parse_mode=HTML \
+            -F disable_web_page_preview=true \
+            -F "text=<message.txt"
+
+          # One sendDocument per asset instead of a media group: the group form needs the whole
+          # batch to succeed at once, and a single oversized APK would take the notes with it.
+          shopt -s nullglob
+          for f in assets/*; do
+            # 50 MB is the Bot API's own ceiling for an upload; past it the link has to do.
+            if [ "$(stat -c%s "$f")" -gt 49000000 ]; then
+              echo "::warning::$(basename "$f") is over 50MB - skipped, the release link covers it"
+              continue
+            fi
+            echo "uploading $(basename "$f")"
+            send sendDocument -F document="@$f" -F caption="$(basename "$f")"
+          done
