@@ -119,13 +119,22 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ steps.v.outputs.tag }}"
-
-          # GitHub's own generated notes are a compare link and nothing else - this repo has no
-          # pull requests for it to list - which is no use to someone deciding whether to update,
-          # and none to the Telegram push either. The subjects here are written to be read, so
-          # they are the changelog. Nightlies carry a different prefix and never match.
           prev=$(git tag --list 'v*' --sort=-v:refname | grep -vx "$tag" | head -1)
-          git log --no-merges --pretty='- %s' "${prev:+$prev..}$tag" > notes.md
+
+          # An annotated tag carries its own message, and when it has one that message IS the
+          # changelog: it is the one place a person can say what a release means, in the words
+          # the people reading it actually use. Everything below is the fallback.
+          #
+          # GitHub's own generated notes are not in the running - they come back as a compare
+          # link and nothing else, this repo having no pull requests for it to list, which helps
+          # nobody deciding whether to update and reads as an empty message in the Telegram push.
+          # Commit subjects here are written to be read, so they stand in when the tag says
+          # nothing. Nightlies carry a different prefix and never match.
+          git tag -l --format='%(contents)' "$tag" > notes.md
+          if [ -z "$(tr -d '[:space:]' < notes.md)" ]; then
+            echo "no tag message, falling back to the commit subjects"
+            git log --no-merges --pretty='- %s' "${prev:+$prev..}$tag" > notes.md
+          fi
           if [ -n "$prev" ]; then
             echo "" >> notes.md
             echo "**Full Changelog**: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$prev...$tag" >> notes.md
