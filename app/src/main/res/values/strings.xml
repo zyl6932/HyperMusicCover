@@ -49,6 +49,10 @@
     <string name="import_settings_summary">从 JSON 文件导入设置</string>
     <string name="import_success">导入成功，即将重启应用</string>
     <string name="import_failed">导入失败，文件格式不正确</string>
+    <string name="copy_report">复制诊断信息</string>
+    <string name="copy_report_summary">时钟位置不对时，先复现一次再点这里，把内容发给开发者</string>
+    <string name="copy_report_done">已复制，粘贴发给开发者即可</string>
+    <string name="copy_report_failed">模块没有回应，确认已在 LSPosed 里启用并重启过系统界面</string>
     <string name="export_success">导出成功</string>
     <string name="export_failed">导出失败</string>
     <string name="about">关于</string>

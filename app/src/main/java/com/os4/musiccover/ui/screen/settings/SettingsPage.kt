@@ -1,6 +1,9 @@
 package com.os4.musiccover.ui.screen.settings
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -32,6 +35,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.os4.musiccover.LocaleHelper
+import com.os4.musiccover.ModuleBridge
 import com.os4.musiccover.R
 import com.os4.musiccover.SettingsBackup
 import kotlinx.coroutines.launch
@@ -93,6 +97,23 @@ fun SettingsPageView(
                 }
             }
         }
+    }
+
+    // The clock lands somewhere different on some devices and styles, and only the module can
+    // say why - it measures the date, the glyph box and the view it scales inside SystemUI. This
+    // puts that account on the clipboard so a reporter can send it without adb.
+    val copyReport = {
+        scope.launch {
+            val report = ModuleBridge.report(context)
+            if (report.isNullOrBlank()) {
+                Toast.makeText(context, R.string.copy_report_failed, Toast.LENGTH_LONG).show()
+            } else {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("HyperMusicCover", report))
+                Toast.makeText(context, R.string.copy_report_done, Toast.LENGTH_SHORT).show()
+            }
+        }
+        Unit
     }
 
     val importLauncher = rememberLauncherForActivityResult(
@@ -253,6 +274,11 @@ fun SettingsPageView(
                                     title = stringResource(R.string.import_settings),
                                     summary = stringResource(R.string.import_settings_summary),
                                     onClick = { importLauncher.launch("application/json") }
+                                )
+                                ArrowPreference(
+                                    title = stringResource(R.string.copy_report),
+                                    summary = stringResource(R.string.copy_report_summary),
+                                    onClick = { copyReport() }
                                 )
                             }
                         }

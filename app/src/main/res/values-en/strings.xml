@@ -49,6 +49,10 @@
     <string name="import_settings_summary">Import settings from JSON file</string>
     <string name="import_success">Import successful, restarting app</string>
     <string name="import_failed">Import failed, invalid file format</string>
+    <string name="copy_report">Copy diagnostics</string>
+    <string name="copy_report_summary">Reproduce the misplaced clock first, then tap here and send the text to the developer</string>
+    <string name="copy_report_done">Copied. Paste it to the developer.</string>
+    <string name="copy_report_failed">The module did not answer. Check it is enabled in LSPosed and that SystemUI has been restarted.</string>
     <string name="export_success">Export successful</string>
     <string name="export_failed">Export failed</string>
     <string name="about">More</string>

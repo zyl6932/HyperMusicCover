@@ -931,6 +931,14 @@ public class Main extends XposedModule {
                             out.putFloat("clockpivotx", cg[4]);
                         }
                         setResultExtras(out);
+                    } else if ("diag".equals(op)) {
+                        String report = clockReport();
+                        android.os.Bundle rb = new android.os.Bundle();
+                        rb.putString("report", report);
+                        setResultExtras(rb);
+                        // Logged as well as answered: an adb run of this op should not have to
+                        // go through the app to see it.
+                        for (String line : report.split("\n")) Xp.log(TAG + line);
                     } else if ("bounds".equals(op)) {
                         dumpClockBounds();
                     } else if ("state".equals(op)) {
@@ -2040,9 +2048,222 @@ public class Main extends XposedModule {
             g.setScaleY(k);
             g.setTranslationY(dateBottom + gap - (g.getTop() + glyph));
         }
+        recordCollapse(y, p, k, glyph, dateBottom, nudge, date);
         if (sVerbose) {
             Xp.log(TAG + "collapse y=" + y + " p=" + p + " k=" + k
                     + " glyphTop=" + glyph + " dateBottom=" + dateBottom + " nudge=" + nudge);
+        }
+    }
+
+    // ------------------------------------------------------------------ diagnostics
+
+    /**
+     * A rolling record of what the collapse actually did, for a phone that is not here.
+     *
+     * The clock lands in the wrong place on some devices and clock styles and not on the one
+     * this was written on, and a screenshot cannot say why: every number that decides the
+     * placement - the date's settled position, the pooled glyph box, which view was picked as
+     * the thing to scale - is measured on the device at the moment it happens. So the module
+     * keeps the last few frames' worth and the app can ask for them (op=diag), which turns a
+     * report into numbers without the reporter needing adb.
+     *
+     * Deduplicated on everything but the timestamp: at rest the OEM emits the same y over and
+     * over, and a ring full of one identical frame says nothing. What is worth seeing is the
+     * ramp into the collapse and the settled value it ended on.
+     */
+    private static final int DIAG_FRAMES = 20;
+    private static final String[] sDiagRing = new String[DIAG_FRAMES];
+    private static int sDiagAt;
+    private static String sDiagLast = "";
+    /** The most recent fully collapsed frame, which the entry ring is too old to hold. */
+    private static volatile String sDiagSettled;
+
+    private static void recordCollapse(float y, float p, float k, float glyph, float dateBottom,
+                                       float nudge, View date) {
+        int[] loc = new int[2];
+        date.getLocationOnScreen(loc);
+        StringBuilder sb = new StringBuilder();
+        // p to three places on purpose: updateDateOffset() only measures at p >= 0.999, so a
+        // report where the nudge never moved has to show whether that threshold was reached.
+        sb.append("y=").append(r1(y)).append(" p=").append(r3(p)).append(" k=").append(r2(k))
+          .append(" glyphTop=").append(r1(glyph)).append(" dateBottom=").append(r1(dateBottom))
+          .append(" nudge=").append(r1(nudge)).append(" sNudge=").append(r1(sNudge))
+          .append(" sample=").append(r1(sNudgeSample))
+          .append(" dateOnScreen=").append(loc[1])
+          .append(" dateTop=").append(date.getTop()).append(" dateH=").append(date.getHeight())
+          .append(" dateTy=").append(r1(date.getTranslationY()));
+        for (View root : clockRoots()) {
+            View g = clockTarget(root);
+            if (g == null) continue;
+            int[] gl = new int[2];
+            g.getLocationOnScreen(gl);
+            sb.append(" | ").append(idOf(g)).append(" top=").append(g.getTop())
+              .append(" ty=").append(r1(g.getTranslationY()))
+              .append(" onScreen=").append(gl[1]);
+        }
+        String line = sb.toString();
+        if (p >= 0.999f) sDiagSettled = line;
+        if (line.equals(sDiagLast)) return;
+        sDiagLast = line;
+        // The ring is the ENTRY into the collapse and is not overwritten afterwards. Leaving it
+        // rolling looked right until you follow what a reporter actually does: see the clock in
+        // the wrong place, unlock, then open the app - and unlocking runs the exit animation,
+        // whose twenty-odd frames would evict every frame that decided the placement. The entry
+        // is where it is decided; the settled line above carries the current answer.
+        if (sDiagAt >= DIAG_FRAMES) return;
+        sDiagRing[sDiagAt] = line;
+        sDiagAt++;
+    }
+
+    private static void resetCollapseRecord() {
+        sDiagAt = 0;
+        sDiagLast = "";
+        java.util.Arrays.fill(sDiagRing, null);
+    }
+
+    private static String r1(float v) {
+        return Float.isNaN(v) ? "NaN" : String.valueOf(Math.round(v * 10f) / 10f);
+    }
+
+    private static String r2(float v) {
+        return Float.isNaN(v) ? "NaN" : String.valueOf(Math.round(v * 100f) / 100f);
+    }
+
+    private static String r3(float v) {
+        return Float.isNaN(v) ? "NaN" : String.valueOf(Math.round(v * 1000f) / 1000f);
+    }
+
+    /**
+     * Everything needed to explain where this phone put the clock, as one block of text.
+     *
+     * Written to be pasted into a bug report by someone who cannot run adb, so it says what it
+     * measured AND what it intended: a report where `target` and `dateOnScreen` agree is a
+     * report about something other than the placement.
+     */
+    private static String clockReport() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("HyperMusicCover clock report\n");
+        sb.append("device: ").append(android.os.Build.MANUFACTURER).append(' ')
+          .append(android.os.Build.MODEL).append(" (").append(android.os.Build.DEVICE)
+          .append(")\nbuild: ").append(android.os.Build.DISPLAY)
+          .append(" / Android ").append(android.os.Build.VERSION.RELEASE)
+          .append(" / SDK ").append(android.os.Build.VERSION.SDK_INT)
+          .append("\nos: ").append(sysProp("ro.mi.os.version.name"))
+          .append(' ').append(sysProp("ro.mi.os.version.incremental"))
+          .append("\n");
+        View v = sContainer;
+        if (v == null) {
+            sb.append("no clock container - the module is loaded but the keyguard has not been "
+                    + "built yet, or the hook did not take.\n");
+            return sb.toString();
+        }
+        android.util.DisplayMetrics dm = v.getResources().getDisplayMetrics();
+        sb.append("screen: ").append(dm.widthPixels).append('x').append(dm.heightPixels)
+          .append(" density=").append(dm.density).append(" dpi=").append(dm.densityDpi)
+          .append(" moduleScreen=").append(sScreenW).append('x').append(sScreenH)
+          .append(" statusBar=").append(sysDimen(v, "status_bar_height"))
+          .append("\n");
+        sb.append("state: cover=").append(sCoverMode).append(" auto=").append(sAuto)
+          .append(" card=").append(sCardKnown ? (sCardShowing ? "showing" : "gone") : "unknown")
+          .append(" keyguard=").append(onKeyguardNow())
+          .append(" videoWallpaper=").append(sVideoWallpaper)
+          .append("\nhold: y=").append(sHoldY).append(" current=").append(r1(sCurrentY))
+          .append(" lastSystem=").append(r1(sLastSystemY))
+          .append(" floor=").append(SQUEEZE_FLOOR)
+          .append(" collapseMin=").append(r2(sCollapseMin))
+          .append(" clockScale=").append(sClockScale)
+          .append("\nnudge: inForce=").append(r1(sNudge))
+          .append(" lastSample=").append(r1(sNudgeSample))
+          .append(" dateTopTarget=").append(r1(DATE_TOP_DP * dm.density))
+          .append("dp*").append(dm.density).append(" gap=").append(CLOCK_GAP_DP).append("dp\n");
+
+        View date = visibleDate();
+        if (date == null) {
+            sb.append("date: NOT FOUND - nothing to anchor the clock to\n");
+        } else {
+            int[] loc = new int[2];
+            date.getLocationOnScreen(loc);
+            sb.append("date: #").append(idOf(date)).append(' ')
+              .append(date.getClass().getSimpleName())
+              .append(" onScreen=").append(loc[0]).append(',').append(loc[1])
+              .append(" top=").append(date.getTop()).append(" h=").append(date.getHeight())
+              .append(" ty=").append(r1(date.getTranslationY()))
+              .append(" text=\"").append(date instanceof TextView
+                    ? ((TextView) date).getText() : "?").append("\"\n");
+        }
+        RectF pooled = glyphBox();
+        sb.append("glyphs: ").append(pooled == null ? "NOT MEASURABLE" : pooled.toString())
+          .append("\n");
+        float[] cg = clockGeometry();
+        sb.append("geometry: ").append(cg == null ? "null"
+                : "w=" + r1(cg[0]) + " h=" + r1(cg[1]) + " y=" + r1(cg[2])
+                  + " x=" + r1(cg[3]) + " pivotX=" + r1(cg[4])).append("\n");
+
+        for (View root : clockRoots()) {
+            sb.append("tree ").append(idOf(root)).append(":\n");
+            View g = clockTarget(root);
+            if (g == null) {
+                sb.append("  target: NONE (this tree draws no clock)\n");
+            } else {
+                int[] gl = new int[2];
+                g.getLocationOnScreen(gl);
+                boolean byId = g == findClockView(root, "time_group");
+                sb.append("  target: #").append(idOf(g)).append(' ')
+                  .append(g.getClass().getSimpleName())
+                  .append(byId ? " (time_group)" : " (RESOLVED by search)")
+                  .append(" left=").append(g.getLeft()).append(" top=").append(g.getTop())
+                  .append(' ').append(g.getWidth()).append('x').append(g.getHeight())
+                  .append(" onScreen=").append(gl[0]).append(',').append(gl[1])
+                  .append(" scale=").append(r2(g.getScaleX())).append('/').append(r2(g.getScaleY()))
+                  .append(" pivot=").append(r1(g.getPivotX())).append(',').append(r1(g.getPivotY()))
+                  .append(" ty=").append(r1(g.getTranslationY()))
+                  .append("\n  ink: ").append(inkBox(root, g)).append('\n');
+                // The one thing a screenshot cannot show and the placement depends on entirely:
+                // whether the view being scaled also contains the date, which would drag the
+                // date along with the clock and make the anchor chase itself.
+                if (date != null) {
+                    sb.append("  target holds the date: ").append(isAncestor(g, date)).append('\n');
+                }
+            }
+            describeClockTree(root, sb, 1);
+            sb.append('\n');
+        }
+
+        sb.append("settled: ").append(sDiagSettled == null ? "never" : sDiagSettled)
+          .append('\n');
+        sb.append("first ").append(sDiagAt).append(" frames of the collapse")
+          .append(sDiagAt == 0 ? " (none - cover mode has not run)" : "").append(":\n");
+        for (int n = 0; n < sDiagAt; n++) {
+            sb.append("  ").append(sDiagRing[n]).append('\n');
+        }
+        return sb.toString();
+    }
+
+    private static boolean isAncestor(View ancestor, View child) {
+        for (android.view.ViewParent p = child.getParent(); p instanceof View;
+             p = ((View) p).getParent()) {
+            if (p == ancestor) return true;
+        }
+        return false;
+    }
+
+    private static String sysProp(String key) {
+        try {
+            Class<?> sp = Class.forName("android.os.SystemProperties");
+            Object s = sp.getMethod("get", String.class).invoke(null, key);
+            String out = s == null ? "" : s.toString();
+            return out.isEmpty() ? "?" : out;
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    private static String sysDimen(View v, String name) {
+        try {
+            int id = v.getResources().getIdentifier(name, "dimen", "android");
+            return id == 0 ? "?" : String.valueOf(v.getResources().getDimensionPixelSize(id));
+        } catch (Throwable t) {
+            return "?";
         }
     }
 
@@ -3513,6 +3734,7 @@ public class Main extends XposedModule {
      */
     private static void enterCoverMode(boolean animate) {
         sCoverMode = true;
+        resetCollapseRecord();
         // Whatever the user decided about the last song does not carry into this one.
         sTapSuppressed = false;
         setDepthHidden(true);

@@ -125,6 +125,16 @@ object ModuleBridge {
     suspend fun query(context: Context): State = fromBundle(ask(context, "query"))
 
     /**
+     * The module's account of where it put the clock, as text.
+     *
+     * For a lock screen that is wrong on someone else's phone and right on ours: every number
+     * that decides the placement is measured inside SystemUI at the moment it happens, so a
+     * screenshot cannot settle it and neither can anything this side can see. Null means the
+     * module did not answer - the same "not loaded" signal every other query gives.
+     */
+    suspend fun report(context: Context): String? = ask(context, "diag")?.getString("report")
+
+    /**
      * A picture of one of SystemUI's own views, with the screen rectangle it occupies.
      *
      * The preview paints these where they belong instead of drawing its own idea of them: the
