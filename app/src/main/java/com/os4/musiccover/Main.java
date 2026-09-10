@@ -322,6 +322,15 @@ public class Main extends XposedModule {
      */
     private static volatile boolean sHideFp;
     /**
+     * Whether the wallpaper process is sizing the keyguard texture to the SCREEN rather than to
+     * the wallpaper file, which is its default and is the same switch as WallpaperProbe.sTexFit
+     * on the other side. Kept here for one reason: while that is on, the re-fit below - which
+     * rewrites the user's lockscreen wallpaper to the screen's size - must not run. Rewriting it
+     * is what costs the user their depth cut-out, and it is no longer needed to make the
+     * crossfade affordable, because a screen-sized texture is what made it affordable.
+     */
+    private static volatile boolean sTexFit = true;
+    /**
      * Whether the notification stack keeps clear of the fingerprint icon: 0 leaves it to the
      * system, 1 never avoids it, 2 always does. Not a boolean, because "off" here would mean two
      * different things - stop reserving the space, or reserve it even with no print enrolled.
@@ -1030,6 +1039,18 @@ public class Main extends XposedModule {
                                 + " centerText=" + sMcCenterText
                                 + " titleTap=" + sMcTitleTap);
                         applyMediaCard();
+                    } else if ("texfit".equals(op)) {
+                        // The screen-sized keyguard texture, on by default (WallpaperProbe's half
+                        // is the one that does the work). Flipping it here flips that half too,
+                        // because the two have to agree: with it on, the re-fit that rewrites the
+                        // user's lockscreen wallpaper is skipped; with it off, that re-fit is the
+                        // only thing keeping the crossfade affordable.
+                        sTexFit = i.getBooleanExtra("on", !sTexFit);
+                        Intent wp = wallpaperIntent("texfit");
+                        wp.putExtra("on", sTexFit);
+                        c.sendBroadcast(wp);
+                        Xp.log(TAG + "texture fit to screen " + (sTexFit ? "ON" : "off")
+                                + " (wallpaper re-fit " + (sTexFit ? "skipped" : "enabled") + ")");
                     } else if ("hidefp".equals(op)) {
                         sHideFp = i.getBooleanExtra("on", !sHideFp);
                         saveState();
@@ -3938,6 +3959,12 @@ public class Main extends XposedModule {
     // READ_WALLPAPER_INTERNAL. This APK neither has nor needs them.
     @SuppressLint("MissingPermission")
     private static void fitLockWallpaperToScreen(android.app.WallpaperManager wm) {
+        // Not while the wallpaper process sizes its texture to the screen (sTexFit, on by
+        // default): that solves the same problem - a 2121x4712 wallpaper making every swap upload
+        // 38MB and putting the crossfade over its own threshold - without writing anything. The
+        // two must not both run, and if this one does, the user's depth cut-out goes with it:
+        // MIUI segments the wallpaper the picker set, and nothing re-analyses a file we wrote.
+        if (sTexFit) return;
         int sw = sScreenW, sh = sScreenH;
         if (sw <= 0 || sh <= 0) return;
         int w = 0, h = 0;
