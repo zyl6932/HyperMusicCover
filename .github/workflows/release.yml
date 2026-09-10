@@ -42,6 +42,13 @@ jobs:
           set -euo pipefail
           tag="${{ inputs.tag || github.ref_name }}"
           name="${tag#v}"
+          # Three parts, checked before splitting. "0.03" would otherwise split to minor 03 and
+          # patch 03, pass the numeric test below, and publish versionCode 303 - a number that no
+          # later v0.0.x could ever climb over.
+          case "$name" in
+            *.*.*) ;;
+            *) echo "::error::tag '$tag' is not vMAJOR.MINOR.PATCH"; exit 1 ;;
+          esac
           major="${name%%.*}"
           rest="${name#*.}"
           minor="${rest%%.*}"
@@ -111,9 +118,21 @@ jobs:
       - name: Publish
         run: |
           set -euo pipefail
-          gh release create "${{ steps.v.outputs.tag }}" dist/*.apk \
-            --title "${{ steps.v.outputs.tag }}" \
-            --generate-notes
+          tag="${{ steps.v.outputs.tag }}"
+
+          # GitHub's own generated notes are a compare link and nothing else - this repo has no
+          # pull requests for it to list - which is no use to someone deciding whether to update,
+          # and none to the Telegram push either. The subjects here are written to be read, so
+          # they are the changelog. Nightlies carry a different prefix and never match.
+          prev=$(git tag --list 'v*' --sort=-v:refname | grep -vx "$tag" | head -1)
+          git log --no-merges --pretty='- %s' "${prev:+$prev..}$tag" > notes.md
+          if [ -n "$prev" ]; then
+            echo "" >> notes.md
+            echo "**Full Changelog**: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$prev...$tag" >> notes.md
+          fi
+          cat notes.md
+
+          gh release create "$tag" dist/*.apk --title "$tag" --notes-file notes.md
 
   # Publishing above uses github.token, and GitHub will not let one workflow's release event
   # start another workflow. Calling telegram.yml is therefore the only way a tag-driven
