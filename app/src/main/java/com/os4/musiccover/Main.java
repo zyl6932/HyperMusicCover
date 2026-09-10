@@ -406,6 +406,7 @@ public class Main extends XposedModule {
                 // View.setVisibility process-wide cost every visibility change in SystemUI and
                 // fired zero times. What actually lost the state was SystemUI restarting.
                 if (sDepthHidden) setDepthHidden(true);
+                else if (sVideoWpOwed) setDepthHidden(false);
                 // Same story for the card: the guard and the artwork's tap listener both live on
                 // the view, so a rebuild takes them.
                 if (sCoverMode || wantsArtTap()) applyMediaCard();
@@ -1007,6 +1008,8 @@ public class Main extends XposedModule {
                     // Waking re-runs the OEM's depth pipeline, and if the keyguard was rebuilt
                     // while the screen was off the guard went away with the old view.
                     if (sDepthHidden) setDepthHidden(true);
+                    // A hand-back of the live wallpaper that had to wait for a lock screen.
+                    else if (sVideoWpOwed) setDepthHidden(false);
                     if (sCoverMode) applyMediaCard();
                     return;
                 }
@@ -2839,6 +2842,7 @@ public class Main extends XposedModule {
                     // layer, i.e. in front of the clock. Left alone it floats over the cover
                     // exactly the way deducted_image_view did on the image path.
                     setDepthHidden(true);
+                    guardVideoCover(iv);
                     Xp.log(TAG + "video cover shown " + sScreenW + "x" + sScreenH
                             + " bias=" + sBias + ", draw " + draw + "ms");
                 } catch (Throwable t) {
@@ -2847,6 +2851,104 @@ public class Main extends XposedModule {
             }
         });
     }
+
+    /**
+     * Keeps the live-wallpaper cover to the lock screen, and only the lock screen.
+     *
+     * keyguard_background_layer is not the keyguard's alone: MIUI draws it as the backdrop of
+     * the Control Center too, the same way the media card view is shared between the lock
+     * screen and the shade. So a full-screen ImageView parked in it turns up behind the
+     * Control Center - reported from the device as the cover appearing there while music
+     * played, and sharp rather than blurred, which is what says it is a VIEW being drawn and
+     * not something sampling the wallpaper.
+     *
+     * The wallpaper's own TextureViews go the other way: they are hidden because our cover is
+     * over them, and that is only true on the lock screen, so off it they are left exactly as
+     * MIUI has them - see setVideoSurfacesHidden().
+     *
+     * A pre-draw listener rather than a one-off, for the reason the depth guard has one: this
+     * has to be true on every frame something else draws that layer, and nothing tells us when
+     * that is. Every write is conditional and visibility-only, so a frame that needs no change
+     * costs a comparison.
+     */
+    private static void guardVideoCover(final View cover) {
+        if (sCoverGuarded == cover && sCoverGuard != null) return;
+        releaseCoverGuard();
+        sCoverGuard = new ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                boolean onKeyguard = sCoverMode && onKeyguardNow();
+                int want = onKeyguard ? View.VISIBLE : View.INVISIBLE;
+                if (cover.getVisibility() != want) cover.setVisibility(want);
+                // Our own view is the only thing to write off the lock screen. The wallpaper's
+                // TextureViews belong to MIUI there, and handing them back inside a layer the
+                // shade is drawing is what put a stray frame of the wallpaper into the first
+                // pull-down - setVideoSurfacesHidden() has the measurement.
+                if (!onKeyguard) return true;
+                View bg = sVideoBg, fg = sVideoFg;
+                if (bg != null && bg.getVisibility() != View.INVISIBLE) {
+                    bg.setVisibility(View.INVISIBLE);
+                }
+                if (fg != null && fg.getVisibility() != View.INVISIBLE) {
+                    fg.setVisibility(View.INVISIBLE);
+                }
+                return true;
+            }
+        };
+        cover.getViewTreeObserver().addOnPreDrawListener(sCoverGuard);
+        sCoverGuarded = cover;
+        Xp.log(TAG + "video cover guard installed");
+    }
+
+    /**
+     * The live wallpaper's own TextureViews: hidden while the cover is over them, given back
+     * when it goes.
+     *
+     * Giving them back only counts while the lock screen is actually in front.
+     * keyguard_background_layer is not the keyguard's alone - the shade draws it as its own
+     * backdrop over the desktop, which is how the cover could turn up behind the Control
+     * Centre - so writing VISIBLE there off the lock screen leaves a surface on screen that
+     * nobody is feeding. Measured on the device: exactly one bad frame, because MIUI sets it
+     * straight back the moment that layer is drawn, which is why only the FIRST pull-down
+     * after unlocking showed a stray wallpaper frame and the second was clean.
+     *
+     * So a hand-back we cannot make now is remembered instead, and paid the next time the
+     * keyguard is in front (screen on, or a keyguard rebuild). That debt is the safety net the
+     * old unconditional restore was: what must never happen is the wallpaper hidden with no
+     * cover over it, which is a black lock screen.
+     */
+    private static void setVideoSurfacesHidden(boolean hide, View bg, View fg) {
+        if (!hide && !onKeyguardNow()) {
+            if (sVideoWallpaper && !sVideoWpOwed) {
+                sVideoWpOwed = true;
+                Xp.log(TAG + "off the lock screen: leaving the live wallpaper as MIUI left it,"
+                        + " hand-back deferred");
+            }
+            return;
+        }
+        int vis = hide ? View.INVISIBLE : View.VISIBLE;
+        if (bg != null) bg.setVisibility(vis);
+        if (fg != null) fg.setVisibility(vis);
+        sVideoWpOwed = false;
+    }
+
+    /** A hand-back of the live wallpaper's surfaces that is waiting for a lock screen. */
+    private static volatile boolean sVideoWpOwed;
+
+    private static void releaseCoverGuard() {
+        View c = sCoverGuarded;
+        ViewTreeObserver.OnPreDrawListener g = sCoverGuard;
+        sCoverGuarded = null;
+        sCoverGuard = null;
+        if (c == null || g == null) return;
+        try {
+            c.getViewTreeObserver().removeOnPreDrawListener(g);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static View sCoverGuarded;
+    private static ViewTreeObserver.OnPreDrawListener sCoverGuard;
 
     /** keyguard_background_layer, which sits behind the whole clock stack. */
     private static ViewGroup coverLayer() {
@@ -3544,14 +3646,13 @@ public class Main extends XposedModule {
                 // the wallpaper type changes.
                 View fg = videoSurfaceView("keyguard_foreground_layer");
                 sVideoFg = fg;
-                if (fg != null) fg.setVisibility(hide ? View.INVISIBLE : View.VISIBLE);
                 // And the video itself, in the background layer. The cover is drawn over it
                 // either way, but leaving it playing under an opaque view decodes a video
                 // nobody can see - and if anything of it is still reaching the screen, this
                 // is what says so.
                 View bg = sVideoWallpaper ? videoSurfaceView("keyguard_background_layer") : null;
                 sVideoBg = bg;
-                if (bg != null) bg.setVisibility(hide ? View.INVISIBLE : View.VISIBLE);
+                setVideoSurfacesHidden(hide, bg, fg);
                 if (hide) guardDepth(d); else releaseDepthGuard();
                 Xp.log(TAG + "deducted_image_view " + (hide ? "hidden" : "shown")
                         + (fg == null ? "" : " (+ the live wallpaper's cut-out)"));
@@ -3608,16 +3709,10 @@ public class Main extends XposedModule {
                                 + sDepthTakebacks + ")");
                     }
                 }
-                // The live wallpaper's cut-out needs the same standing assertion, and for the
-                // same reason: MIUI drives its own animators on it.
-                View fg = sVideoFg;
-                if (sDepthHidden && fg != null && fg.getVisibility() == View.VISIBLE) {
-                    fg.setVisibility(View.INVISIBLE);
-                }
-                View bg = sVideoBg;
-                if (sDepthHidden && bg != null && bg.getVisibility() == View.VISIBLE) {
-                    bg.setVisibility(View.INVISIBLE);
-                }
+                // The live wallpaper's own TextureViews are NOT asserted here. guardVideoCover()
+                // owns them, because whether they should be hidden depends on the cover being
+                // on screen, which is a lock-screen question this guard cannot answer - and two
+                // guards writing one property just take turns undoing each other.
                 return true;
             }
         };
@@ -4610,6 +4705,7 @@ public class Main extends XposedModule {
             @Override
             public void run() {
                 try {
+                    releaseCoverGuard();
                     ViewGroup p = (ViewGroup) iv.getParent();
                     if (p != null) p.removeView(iv);
                     iv.setImageDrawable(null);
@@ -4621,15 +4717,16 @@ public class Main extends XposedModule {
                     // The live wallpaper was only hidden because this view was covering it.
                     // Whatever removed the view - an exit, a keyguard rebuild, a failure part
                     // way through - the wallpaper has to come back with it, or the lock screen
-                    // is left blank. Unconditional on purpose: this is the safety net, and the
-                    // ordinary exit path having already done it is not something to rely on.
+                    // is left blank. Off the lock screen that hand-back is deferred rather than
+                    // dropped; setVideoSurfacesHidden() says why.
                     View bg = sVideoBg, fg = sVideoFg;
                     sVideoBg = null;
                     sVideoFg = null;
-                    if (bg != null) bg.setVisibility(View.VISIBLE);
-                    if (fg != null) fg.setVisibility(View.VISIBLE);
+                    setVideoSurfacesHidden(false, bg, fg);
                     Xp.log(TAG + "cover detached"
-                            + (bg == null && fg == null ? "" : ", live wallpaper restored"));
+                            + (bg == null && fg == null ? ""
+                               : sVideoWpOwed ? ", live wallpaper owed back"
+                               : ", live wallpaper restored"));
                 } catch (Throwable t) {
                     Xp.log(TAG + "detachCover failed: " + t);
                 }
