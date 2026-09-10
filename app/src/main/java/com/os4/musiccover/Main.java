@@ -2228,7 +2228,15 @@ public class Main extends XposedModule {
             g.setPivotY(glyph);
             g.setScaleX(k);
             g.setScaleY(k);
-            g.setTranslationY(dateBottom + gap - (g.getTop() + glyph));
+            // Faded in with p, exactly like the date's nudge above, and for the same reason:
+            // at p=0 the group has to be back at ITS OWN layout position, because that is what
+            // abandonHold() hands back to (translationY 0, scale 1) the moment the exit spring
+            // lands. The absolute anchor this used to be does not converge there - measured on
+            // this screen it left the clock 12px high at p=0 - so the last frame of the exit
+            // and the first frame after it differed by those 12px, and the big clock dropped
+            // in one step a quarter of a second after it had visibly stopped moving. The same
+            // step ran the other way on the first frame of the entry.
+            g.setTranslationY((dateBottom + gap - (g.getTop() + glyph)) * p);
         }
         recordCollapse(y, p, k, glyph, dateBottom, nudge, date);
         if (sVerbose) {
