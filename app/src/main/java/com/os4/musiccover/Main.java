@@ -2074,6 +2074,135 @@ public class Main extends XposedModule {
         }
     }
 
+    // ------------------------------------------------------- transition trace
+
+    /**
+     * Records what every moving part of the lock screen is doing, frame by frame, for the
+     * length of one transition.
+     *
+     * For an artifact that lasts a few frames and is not in the wallpaper: the wallpaper
+     * process proved its own geometry never moves during a swap, so whatever flashes on screen
+     * is a VIEW in this process, and no log written after the fact can say which one. This
+     * samples the candidates on the pre-draw of every frame and prints only what CHANGED, so a
+     * part that sits still costs one string compare and says nothing, and the part that jumps
+     * to the corner of the screen for three frames is the only thing in the output.
+     *
+     * Armed for a fixed window rather than left running: this is per-frame reflection over a
+     * handful of views, which is fine for the 900ms of a transition and not fine forever.
+     */
+    private static final String[] TRACE_VIEWS = {
+            "media_player", "album_art", "album_art_image", "deducted_image_view",
+            "keyguard_background_layer", "keyguard_foreground_layer",
+            "notification_container_parent", "mi_media_controls",
+    };
+    private static final long TRACE_MS = 900L;
+
+    private static ViewTreeObserver.OnPreDrawListener sTrace;
+    private static View sTraceOn;
+    private static long sTraceT0;
+    private static final java.util.HashMap<String, String> sTraceLast = new java.util.HashMap<>();
+    private static final StringBuilder sTraceOut = new StringBuilder();
+
+    private static void armTransitionTrace(final String why) {
+        // Off unless someone is watching: this is per-frame reflection over a handful of views
+        // plus a walk of the whole window, which is the right price for 900ms of a bug hunt and
+        // the wrong one for every transition forever. `--es op verbose --ez on true` arms it.
+        if (!sVerbose) return;
+        final View root = sContainer;
+        if (root == null || sTrace != null) return;
+        sTraceT0 = android.os.SystemClock.uptimeMillis();
+        sTraceLast.clear();
+        sTraceOut.setLength(0);
+        sTraceOut.append("transition trace (").append(why).append("):");
+        sTraceOn = root;
+        sTrace = new ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                long dt = android.os.SystemClock.uptimeMillis() - sTraceT0;
+                for (String name : TRACE_VIEWS) {
+                    View v = findSysuiView(name);
+                    String now = v == null ? "gone" : traceLine(v);
+                    String was = sTraceLast.put(name, now);
+                    if (now.equals(was)) continue;
+                    sTraceOut.append("\n  +").append(dt).append("ms ").append(name)
+                             .append(' ').append(now);
+                }
+                sweepForStrays(dt);
+                if (dt >= TRACE_MS) {
+                    releaseTransitionTrace();
+                    Xp.log(TAG + sTraceOut);
+                }
+                return true;
+            }
+        };
+        root.getViewTreeObserver().addOnPreDrawListener(sTrace);
+    }
+
+    /**
+     * Anything small being drawn high on the screen that is NOT one of the views above.
+     *
+     * The named list is a set of guesses, and a guess cannot find an artifact nobody has
+     * identified yet - the report is "a small copy of the cover, up in the corner", and the
+     * whole point of this pass is to name the view that is. So every frame also walks the
+     * keyguard window for a visible view that is under half the screen wide and sitting in the
+     * top third, which is what "small, up there" means in numbers. Bounded by the same 900ms
+     * window as the rest of the trace.
+     */
+    private static void sweepForStrays(long dt) {
+        View root = sContainer;
+        if (root == null || sScreenW <= 0) return;
+        sweep(root.getRootView(), dt, 0);
+    }
+
+    private static void sweep(View v, long dt, int depth) {
+        if (depth > 14 || v == null || v.getVisibility() != View.VISIBLE) return;
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) sweep(g.getChildAt(i), dt, depth + 1);
+        }
+        int w = v.getWidth(), h = v.getHeight();
+        // Small, but cover-sized: below an eighth of the screen is the status bar's icons,
+        // which jitter by a pixel every frame and would bury the one line that matters.
+        if (w < sScreenW / 8 || h < sScreenW / 8 || w > sScreenW / 2) return;
+        if (!(v instanceof ImageView) && !(v instanceof android.view.TextureView)) return;
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        if (loc[1] > sScreenH / 3) return;
+        String name = idOf(v);
+        String key = "stray:" + name + '@' + System.identityHashCode(v);
+        String now = v.getClass().getSimpleName() + ' ' + traceLine(v);
+        String was = sTraceLast.put(key, now);
+        if (now.equals(was)) return;
+        sTraceOut.append("\n  +").append(dt).append("ms STRAY #").append(name)
+                 .append(' ').append(now);
+    }
+
+    private static String traceLine(View v) {
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        StringBuilder sb = new StringBuilder();
+        sb.append(loc[0]).append(',').append(loc[1])
+          .append(' ').append(v.getWidth()).append('x').append(v.getHeight())
+          .append(" vis=").append(v.getVisibility())
+          .append(" a=").append(r2(v.getAlpha()))
+          .append(" s=").append(r2(v.getScaleX())).append('/').append(r2(v.getScaleY()))
+          .append(" t=").append(r1(v.getTranslationX())).append(',')
+          .append(r1(v.getTranslationY()))
+          .append(" shown=").append(v.isShown());
+        return sb.toString();
+    }
+
+    private static void releaseTransitionTrace() {
+        View on = sTraceOn;
+        ViewTreeObserver.OnPreDrawListener t = sTrace;
+        sTraceOn = null;
+        sTrace = null;
+        if (on == null || t == null) return;
+        try {
+            on.getViewTreeObserver().removeOnPreDrawListener(t);
+        } catch (Throwable ignored) {
+        }
+    }
     // ------------------------------------------------------------------ diagnostics
 
     /**
@@ -3754,6 +3883,7 @@ public class Main extends XposedModule {
     private static void enterCoverMode(boolean animate) {
         sCoverMode = true;
         resetCollapseRecord();
+        armTransitionTrace("entering cover mode");
         // Whatever the user decided about the last song does not carry into this one.
         sTapSuppressed = false;
         setDepthHidden(true);
@@ -3798,6 +3928,7 @@ public class Main extends XposedModule {
      */
     private static void exitCoverMode(boolean animate) {
         sCoverMode = false;
+        armTransitionTrace("leaving cover mode");
         float natural = sLastSystemY;
         boolean canSpring = animate && screenOn() && sContainer != null
                 && !Float.isNaN(sCollapseMin)
