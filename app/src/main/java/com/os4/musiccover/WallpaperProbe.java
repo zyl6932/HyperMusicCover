@@ -69,10 +69,24 @@ public class WallpaperProbe {
     /** Asked for the cover again, at most this often. */
     private static final long ASK_MIN_MS = 2000L;
     /**
-     * When askForArt() last sent a request. Written from the GL thread as well as the main one, so
-     * this is only ever a coarse rate limit - which is all it needs to be.
+     * How many times one dry spell may ask.
+     *
+     * The gap between this process starting and SystemUI's receiver being up is about two
+     * seconds wide, and both of the asks below fire inside it: measured on device, process start
+     * at 18:53:04.169 and the engine at 18:53:05.064, SystemUI not loaded until 18:53:06.065,
+     * and neither request arrived. So the ask is retried from the renderer for a few seconds.
+     *
+     * Nothing is retried once art has arrived, which is what keeps a cover that is simply
+     * switched off - where this process is empty by design and always will be - from asking
+     * forever.
+     */
+    private static final int ASK_TRIES = 5;
+    /**
+     * When askForArt() last sent a request, and how many it has sent since art last arrived.
+     * Written from the GL thread as well as the main one, so these are only ever coarse.
      */
     private static volatile long sAskedAt;
+    private static volatile int sAsks;
 
     /**
      * Tells SystemUI that this process has no cover to draw, so it should send one again.
@@ -89,17 +103,19 @@ public class WallpaperProbe {
      */
     private static void askForArt(String why) {
         Context c = sCtx;
-        if (c == null) return;
+        if (c == null || sAsks >= ASK_TRIES) return;
         long now = SystemClock.uptimeMillis();
         if (now - sAskedAt < ASK_MIN_MS) return;
         sAskedAt = now;
+        sAsks++;
         try {
             Intent out = new Intent("com.os4.musiccover.PROBE");
             out.setPackage("com.android.systemui");
             out.putExtra("op", "needart");
             out.putExtra("why", why);
             c.sendBroadcast(out);
-            Xp.log(TAG + "no art here, asked SystemUI for it (" + why + ")");
+            Xp.log(TAG + "no art here, asked SystemUI for it (" + why + " "
+                    + sAsks + "/" + ASK_TRIES + ")");
         } catch (Throwable t) {
             Xp.log(TAG + "askForArt failed: " + t);
         }
@@ -224,7 +240,13 @@ public class WallpaperProbe {
                     // The one moment the real lock wallpaper passes through here. Once the art
                     // is set the getBitmap short-circuit below means the OEM never decodes it
                     // again, so this is the only chance to learn what to fade back to.
-                    if (art == null) rememberOriginal(orig);
+                    if (art == null) {
+                        rememberOriginal(orig);
+                        // Drawing the keyguard with no cover to draw: the one moment worth
+                        // asking, and the retry for the two asks above that fire before
+                        // SystemUI's receiver exists. Rate-limited and capped in askForArt().
+                        askForArt("renderer");
+                    }
                     if (art != null) {
                         // Match the original exactly: updateDimensions/updateMatrix derive
                         // the GL matrix from these, so another size lands the wallpaper askew.
@@ -485,6 +507,7 @@ public class WallpaperProbe {
         Bitmap b = BitmapFactory.decodeFile(f.getAbsolutePath());
         if (b != null) {
             sArt = b;
+            sAsks = 0;
             Xp.log(TAG + "art restored from disk " + describe(b));
         }
     }
@@ -768,6 +791,7 @@ public class WallpaperProbe {
                                 Bitmap from = fittedArt();
                                 if (from == null) from = sOrig;
                                 sArt = b;
+                                sAsks = 0;
                                 sFitted = null;
                                 sFittedOf = null;
                                 Bitmap to = fittedArt();   // scale here, not on the GL thread
@@ -826,9 +850,16 @@ public class WallpaperProbe {
      */
     private static final Object[][] FRAME_REQUESTS = {
             {"T", Boolean.FALSE},
+            // OS4.0.0.17's name for the same method, read off its bytecode rather than inferred
+            // from the log: there ImageEngineImpl.M(Z) and U(Z) stand where 0.35 has L(Z) and
+            // T(Z). M and L are instruction-for-instruction identical, and U and T both open on
+            // `iget-boolean h:Z; if-eqz; iget-object t:HashMap; s()` - the post-a-frame path.
+            // What settles the pairing is the rest of that set: changeScrollWithScreen and g
+            // kept their names across both builds, and those are what align the two lists.
+            {"U", Boolean.FALSE},
             // The OEM's own showKeyguardWallpaper(ZI)/hideKeyguardWallpaper(ZI) take a boolean
-            // and an int, so a build that widened T the same way is worth one more try. 0 is
-            // the no-animation value everywhere these appear.
+            // and an int, so a build that widened the frame request the same way is worth one
+            // more try. 0 is the no-animation value everywhere these appear.
             {"T", Boolean.FALSE, Integer.valueOf(0)},
     };
 
