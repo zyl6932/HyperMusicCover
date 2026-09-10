@@ -934,6 +934,19 @@ public class Main extends XposedModule {
                         if (i.hasExtra("bias")) sBias = clamp01(i.getFloatExtra("bias", sBias));
                         sTrackKey = on ? trackKey(pickController(c)) : "";
                         setCoverEnabled(on, anim, false);
+                    } else if ("needart".equals(op)) {
+                        // The wallpaper process came up with nothing to draw - see
+                        // WallpaperProbe.askForArt(). It only sends this while its own art is
+                        // null, and stops the moment one arrives, so this cannot loop.
+                        String why = i.getStringExtra("why");
+                        if (!sCoverMode) {
+                            Xp.log(TAG + "needart (" + why + "), ignored: cover is off");
+                        } else {
+                            Xp.log(TAG + "needart (" + why + "), resending the art");
+                            // Not a track change: take whatever the session has now, without the
+                            // same-artwork check that is what swallowed the later pushes.
+                            pushArtAsync(true, false);
+                        }
                     } else if ("mediacard".equals(op)) {
                         if (i.hasExtra("hideart")) sMcHideArt = i.getBooleanExtra("hideart", false);
                         if (i.hasExtra("centertext")) {
@@ -3668,7 +3681,10 @@ public class Main extends XposedModule {
                     Xp.log(TAG + "same artwork as the last track, wallpaper left alone");
                     return;
                 }
-                sArtPrint = print;
+                // Only when something is really going out. A push with no art leaves the
+                // wallpaper showing what it already showed, and recording 0 here would claim it
+                // was empty and disarm the stale-art check on the next track change.
+                if (art != null) sArtPrint = print;
                 pushArtToWallpaper(ctx, true, art);
             }
         }, attempt == 0 ? 0L : ART_RETRY_MS);

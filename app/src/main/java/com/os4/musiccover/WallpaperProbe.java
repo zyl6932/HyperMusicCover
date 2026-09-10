@@ -66,6 +66,45 @@ public class WallpaperProbe {
     private static final String CLS_KEYGUARD_ENGINE =
             "com.miui.miwallpaper.wallpaperservice.impl.keyguard.KeyguardImageEngineImpl";
 
+    /** Asked for the cover again, at most this often. */
+    private static final long ASK_MIN_MS = 2000L;
+    /**
+     * When askForArt() last sent a request. Written from the GL thread as well as the main one, so
+     * this is only ever a coarse rate limit - which is all it needs to be.
+     */
+    private static volatile long sAskedAt;
+
+    /**
+     * Tells SystemUI that this process has no cover to draw, so it should send one again.
+     *
+     * The push is one-shot and SystemUI only pushes on a track change - and once it has pushed,
+     * the same-artwork rule suppresses every later push for that song. So art composed while the
+     * wallpaper process was not up is lost for the whole track: measured on device, nine pushes
+     * between 16:23 and 16:24 with the receiver here only registering at 16:25:17, and not one of
+     * them arrived - the lock screen stayed without a cover until the next track. Nothing on the
+     * SystemUI side can notice, because it recorded the print as sent the moment it sent it.
+     *
+     * So the side that knows it is empty does the asking. Only ever called when there is nothing
+     * here, which is also what stops it once the art arrives.
+     */
+    private static void askForArt(String why) {
+        Context c = sCtx;
+        if (c == null) return;
+        long now = SystemClock.uptimeMillis();
+        if (now - sAskedAt < ASK_MIN_MS) return;
+        sAskedAt = now;
+        try {
+            Intent out = new Intent("com.os4.musiccover.PROBE");
+            out.setPackage("com.android.systemui");
+            out.putExtra("op", "needart");
+            out.putExtra("why", why);
+            c.sendBroadcast(out);
+            Xp.log(TAG + "no art here, asked SystemUI for it (" + why + ")");
+        } catch (Throwable t) {
+            Xp.log(TAG + "askForArt failed: " + t);
+        }
+    }
+
     // ------------------------------------------------------------------ the crossfade
 
     /**
@@ -253,6 +292,10 @@ public class WallpaperProbe {
                 Object result = chain.proceed();
                 sKeyguardEngine = chain.getThisObject();
                 Xp.log(TAG + "keyguard engine captured: " + sKeyguardEngine);
+                // From here the lock screen has an image engine, so this is the first moment a
+                // cover has somewhere to go - and by now the receiver above is up, which is what
+                // the pushes that went missing did not have.
+                if (sArt == null) askForArt("keyguard engine");
                 return result;
             });
             Xp.log(TAG + "keyguard engine hooked");
@@ -657,6 +700,9 @@ public class WallpaperProbe {
         sRegistered = true;
         sCtx = ctx.getApplicationContext();
         loadArt(ctx);
+        // Restored from disk or not: either way the cover that belongs on screen is the one
+        // SystemUI holds, and SystemUI has no way to learn ours is missing.
+        if (sArt == null) askForArt("process start");
         BroadcastReceiver r = new BroadcastReceiver() {
             @Override
             public void onReceive(Context c, Intent i) {
