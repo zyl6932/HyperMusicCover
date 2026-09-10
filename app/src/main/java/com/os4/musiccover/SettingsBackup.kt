@@ -23,6 +23,8 @@ object SettingsBackup {
     private const val KEY_GLASS_END = "glassEnd"
     private const val KEY_CARD_HIDE_ART = "cardHideArt"
     private const val KEY_CARD_CENTER_TEXT = "cardCenterText"
+    private const val KEY_HIDE_FINGERPRINT = "hideFingerprint"
+    private const val KEY_FP_AVOID = "fingerprintAvoid"
 
     suspend fun export(context: Context): String {
         val json = JSONObject(AppSettings.load(context).toJson())
@@ -35,6 +37,8 @@ object SettingsBackup {
             json.put(KEY_GLASS_END, module.glassEnd.toDouble())
             json.put(KEY_CARD_HIDE_ART, module.mcHideArt)
             json.put(KEY_CARD_CENTER_TEXT, module.mcCenterText)
+            json.put(KEY_HIDE_FINGERPRINT, module.hideFingerprint)
+            json.put(KEY_FP_AVOID, module.fpAvoid)
         }
         return json.toString(2)
     }
@@ -56,6 +60,12 @@ object SettingsBackup {
             }
             if (obj.has(KEY_CARD_CENTER_TEXT)) {
                 ModuleBridge.setCardCenterText(context, obj.getBoolean(KEY_CARD_CENTER_TEXT))
+            }
+            if (obj.has(KEY_HIDE_FINGERPRINT)) {
+                ModuleBridge.setHideFingerprint(context, obj.getBoolean(KEY_HIDE_FINGERPRINT))
+            }
+            if (obj.has(KEY_FP_AVOID)) {
+                ModuleBridge.setFingerprintAvoid(context, obj.getInt(KEY_FP_AVOID))
             }
         } catch (_: Exception) {
             // The app half is already applied; a malformed module half is not worth losing it over.

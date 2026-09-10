@@ -30,9 +30,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import com.os4.musiccover.ModuleBridge
@@ -49,6 +49,7 @@ import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.preference.SwitchPreference
+import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -338,6 +339,39 @@ private fun CardGroup(
                 onChange(module.copy(mcCenterText = it))
                 ModuleBridge.setCardCenterText(context, it)
                 onCardRestyled()
+            },
+        )
+        // Sits here because that is where it was asked for, but it is not a card setting and
+        // does not follow cover mode - which the summary says, since the two switches above it
+        // do. No onCardRestyled(): the preview above draws no fingerprint.
+        SwitchPreference(
+            title = stringResource(R.string.hide_fingerprint),
+            checked = module.hideFingerprint,
+            enabled = enabled,
+            onCheckedChange = {
+                onChange(module.copy(hideFingerprint = it))
+                ModuleBridge.setHideFingerprint(context, it)
+            },
+        )
+        // Three states rather than a switch: "off" would have to mean both "stop reserving the
+        // space" and "reserve it even with no print enrolled", which are opposite requests.
+        val avoidModes = listOf(
+            stringResource(R.string.fp_avoid_system),
+            stringResource(R.string.fp_avoid_never),
+            stringResource(R.string.fp_avoid_always),
+        )
+        val avoidIndex = module.fpAvoid.coerceIn(0, avoidModes.lastIndex)
+        WindowDropdownPreference(
+            title = stringResource(R.string.fp_avoid),
+            // The delay is real and would otherwise read as the setting not working, so it is
+            // stated where the setting is, not in a release note.
+            summary = stringResource(R.string.fp_avoid_summary),
+            items = avoidModes,
+            selectedIndex = avoidIndex,
+            enabled = enabled,
+            onSelectedIndexChange = {
+                onChange(module.copy(fpAvoid = it))
+                ModuleBridge.setFingerprintAvoid(context, it)
             },
         )
     }

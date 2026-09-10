@@ -72,6 +72,32 @@ public class Main extends XposedModule {
             + ".mediacontrol.MiuiMediaNotificationControllerImpl";
     private static final String CLS_KG_WALLPAPER_MANAGER =
             "com.android.keyguard.wallpaper.MiuiKeyguardWallPaperManager";
+    /**
+     * The fingerprint ring is drawn twice over, so hiding one of these leaves the other on
+     * screen: the frame animation plays the pulsing circle from a list of drawables, and the
+     * icon view holds the static print underneath it.
+     */
+    private static final String CLS_FOD_ANIM =
+            "com.miui.keyguard.biometrics.fod.MiuiGxzwFrameAnimation";
+    private static final String CLS_FOD_ICON =
+            "com.miui.keyguard.biometrics.fod.MiuiGxzwIconView";
+    /**
+     * Where the lock screen's notification stack is allowed to end.
+     *
+     * SystemUI computes that bound in KeyguardPanelViewController.nsslLockYPosition, a StateFlow
+     * combined out of seven other flows. When the sensor is under the display AND the user has
+     * fingerprint unlock on AND a print is enrolled, the stack stops just above the fingerprint
+     * icon; otherwise it runs down to the indication area. Two of those seven values are that
+     * setting and that enrolment, and forcing the pair is how the branch gets chosen.
+     *
+     * The class doing the combining is a Kotlin lambda that R8 names with a per-build ordinal,
+     * so what follows is a shape to search for, never a name to look up. See findAvoidCombine.
+     */
+    private static final String CLS_KG_PANEL =
+            "com.android.keyguard.panel.KeyguardPanelViewController";
+    private static final String AVOID_PREFIX = CLS_KG_PANEL
+            + "$nsslLockYPosition_delegate$lambda";
+    private static final String AVOID_SUFFIX = "$$inlined$combine$1$3";
 
     /** SystemUI's own keyguard wallpaper manager, for the wallpaper type. See wallpaperKind(). */
     private static volatile Object sKgWallpaperMgr;
@@ -252,6 +278,28 @@ public class Main extends XposedModule {
      */
     private static volatile boolean sMcHideArt;
     private static volatile boolean sMcCenterText;
+    /**
+     * Hide the lock screen fingerprint ring. Unlike the two card switches above, this one is not
+     * tied to cover mode: an icon that appeared and vanished as the music started and stopped
+     * would read as a glitch rather than as a setting.
+     */
+    private static volatile boolean sHideFp;
+    /**
+     * Whether the notification stack keeps clear of the fingerprint icon: 0 leaves it to the
+     * system, 1 never avoids it, 2 always does. Not a boolean, because "off" here would mean two
+     * different things - stop reserving the space, or reserve it even with no print enrolled.
+     */
+    private static volatile int sFpAvoid;
+    /**
+     * Every fingerprint icon view built since SystemUI started, weakly held. The alpha is set at
+     * construction, but the switch can move afterwards, and a hidden icon has to be able to come
+     * back without the user restarting SystemUI.
+     */
+    private static final java.util.Map<View, Boolean> sFodIcons =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, Boolean>());
+    /** resId -> is this one of the ring's frames, so the name lookup happens once per drawable. */
+    private static final java.util.concurrent.ConcurrentHashMap<Integer, Boolean> sFodRing =
+            new java.util.concurrent.ConcurrentHashMap<>();
     /**
      * Where the card lands on the lock screen, in screen pixels. The app draws a preview of the
      * lock screen and cannot measure this itself - the card belongs to SystemUI - so it is
@@ -471,6 +519,99 @@ public class Main extends XposedModule {
             Xp.log(TAG + "depth ownership hook failed: " + t);
         }
 
+        // The fingerprint ring, when the user has asked for it to go. Two hooks, because the
+        // ring is two things: MiuiGxzwFrameAnimation plays the pulsing circle out of a list of
+        // drawables, and MiuiGxzwIconView holds the static print underneath. Hiding either one
+        // alone leaves the other on screen.
+        //
+        // Both install whatever the setting says and read the flag per call, so the switch takes
+        // effect on the next draw rather than on the next SystemUI restart. And both are on
+        // their own terms: a build that renamed one still gets the other.
+        try {
+            Class<?> anim = Xp.findClass(CLS_FOD_ANIM, cl);
+            Xp.hookAll(anim, "draw", chain -> {
+                Object[] args = chain.getArgs().toArray();
+                // draw(int resId) is the frame. Any other overload is not ours to touch, which
+                // the argument check below says without having to name the signature.
+                if (sHideFp && args.length == 1 && args[0] instanceof Integer
+                        && isFodRing((Integer) args[0])) {
+                    // Substituting the drawable rather than skipping the draw: the animation
+                    // keeps its own timing and its own lifecycle, it just paints nothing. A
+                    // skipped draw would leave whatever the OEM expects to be on that surface.
+                    args[0] = android.R.color.transparent;
+                }
+                return chain.proceed(args);
+            });
+            Xp.log(TAG + "fingerprint animation hooked");
+        } catch (Throwable t) {
+            Xp.log(TAG + "fingerprint animation hook failed, the ring will still pulse: " + t);
+        }
+
+        try {
+            Class<?> iconCls = Xp.findClass(CLS_FOD_ICON, cl);
+            Xp.hookAllConstructors(iconCls, chain -> {
+                Object result = chain.proceed();
+                try {
+                    View v = (View) chain.getThisObject();
+                    sFodIcons.put(v, Boolean.TRUE);
+                    v.setAlpha(sHideFp ? 0f : 1f);
+                } catch (Throwable ignored) {
+                    // A view we cannot dim is a visible print, not a broken keyguard.
+                }
+                return result;
+            });
+            Xp.log(TAG + "fingerprint icon hooked");
+        } catch (Throwable t) {
+            Xp.log(TAG + "fingerprint icon hook failed, the static print will stay: " + t);
+        }
+
+        // Whether the notifications keep clear of that icon. Installed whatever the setting is,
+        // and the mode is read per call, but unlike everything else here a change does not show
+        // up immediately: this value is not one of the seven flows, so the bound is only
+        // recomputed when one of those moves.
+        try {
+            // Fail on the panel rather than on the lambda: "no KeyguardPanelViewController" is a
+            // different build, "no combine lambda" is a different R8 run, and the log should say
+            // which one happened.
+            Xp.findClass(CLS_KG_PANEL, cl);
+            long t0 = android.os.SystemClock.uptimeMillis();
+            Class<?> combine = findAvoidCombine(cl);
+            java.lang.reflect.Method invoke = combine == null ? null : invoke3(combine);
+            if (invoke == null) {
+                Xp.log(TAG + "no nsslLockYPosition combine lambda on this build"
+                        + " - fingerprint avoidance cannot be overridden");
+            } else {
+                Xp.hook(invoke, chain -> {
+                    if (sFpAvoid != 0) {
+                        try {
+                            java.util.List<Object> a = chain.getArgs();
+                            Object second = a.size() > 1 ? a.get(1) : null;
+                            if (second instanceof Object[]) {
+                                Object[] vals = (Object[]) second;
+                                // Exactly seven, or the indices below mean something else. A
+                                // build that combines a different number of flows gets left
+                                // alone rather than having two unknown values overwritten.
+                                if (vals.length == 7) {
+                                    Boolean forced = sFpAvoid == 2;
+                                    // 5 is "fingerprint unlock is on", 6 is "a print is
+                                    // enrolled". Written in place: the array is the one the
+                                    // original will read, so proceed() needs no new arguments.
+                                    vals[5] = forced;
+                                    vals[6] = forced;
+                                }
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                    return chain.proceed();
+                });
+                Xp.log(TAG + "fingerprint avoidance hooked on " + combine.getName()
+                        + " in " + (android.os.SystemClock.uptimeMillis() - t0) + "ms");
+            }
+        } catch (Throwable t) {
+            Xp.log(TAG + "fingerprint avoidance hook failed: " + t);
+        }
+
         // MIUI's own answer to "what kind of wallpaper is this", which beats every heuristic
         // below it: SystemUI keeps this class unobfuscated and it holds a live
         // MiuiWallpaperManager, whose getMiuiWallpaperType(which) is the API MIUI itself asks.
@@ -644,6 +785,8 @@ public class Main extends XposedModule {
                     + "\nmctext=" + (sMcCenterText ? 1 : 0)
                     + "\ntap=" + (sTapToggle ? 1 : 0)
                     + "\nfadewp=" + (sFadeWp ? 1 : 0)
+                    + "\nhidefp=" + (sHideFp ? 1 : 0)
+                    + "\nfpavoid=" + sFpAvoid
                     // Not a setting - a measurement. Kept so the app's preview is to scale from
                     // the first frame after a SystemUI restart, instead of only once the phone
                     // has been locked again.
@@ -699,6 +842,8 @@ public class Main extends XposedModule {
                     else if ("mctext".equals(k)) sMcCenterText = "1".equals(v);
                     else if ("tap".equals(k)) sTapToggle = "1".equals(v);
                     else if ("fadewp".equals(k)) sFadeWp = "1".equals(v);
+                    else if ("hidefp".equals(k)) sHideFp = "1".equals(v);
+                    else if ("fpavoid".equals(k)) sFpAvoid = Integer.parseInt(v);
                     else if ("cardrect".equals(k)) {
                         String[] r = v.split(",");
                         // Same sanity check the sampler applies, because a file written before
@@ -798,6 +943,19 @@ public class Main extends XposedModule {
                         Xp.log(TAG + "media card hideArt=" + sMcHideArt
                                 + " centerText=" + sMcCenterText);
                         applyMediaCard();
+                    } else if ("hidefp".equals(op)) {
+                        sHideFp = i.getBooleanExtra("on", !sHideFp);
+                        saveState();
+                        Xp.log(TAG + "hide fingerprint " + (sHideFp ? "on" : "off"));
+                        applyHideFp();
+                    } else if ("fpavoid".equals(op)) {
+                        sFpAvoid = i.getIntExtra("mode", 0);
+                        saveState();
+                        // Nothing to re-apply: the bound is recomputed when one of the seven
+                        // flows changes and this flag is not one of them, so it lands on the
+                        // next recompute - in practice the next time the screen goes off.
+                        Xp.log(TAG + "fingerprint avoid mode=" + sFpAvoid
+                                + " (applies on the next recompute)");
                     } else if ("fadewp".equals(op)) {
                         sFadeWp = i.getBooleanExtra("on", !sFadeWp);
                         saveState();
@@ -912,6 +1070,8 @@ public class Main extends XposedModule {
                         out.putBoolean("mctext", sMcCenterText);
                         out.putBoolean("tap", sTapToggle);
                         out.putBoolean("fadewp", sFadeWp);
+                        out.putBoolean("hidefp", sHideFp);
+                        out.putInt("fpavoid", sFpAvoid);
                         // Everything the app's preview needs to be to scale. It draws a lock
                         // screen it cannot see, and every one of these is device-specific, so
                         // they are measured here rather than written down twice.
@@ -986,6 +1146,9 @@ public class Main extends XposedModule {
         ctx.registerReceiver(r, new IntentFilter(ACTION), Context.RECEIVER_EXPORTED);
         Xp.log(TAG + "receiver registered for " + ACTION);
         loadState();
+        // The icon views can already exist by now - the file is read when the keyguard attaches,
+        // which is not necessarily before the fingerprint view is built.
+        applyHideFp();
 
         // Which kind of wallpaper is on the lock screen decides where the cover is drawn, and
         // cover mode can be restored from disk before any push has had a chance to work it
@@ -4010,6 +4173,119 @@ public class Main extends XposedModule {
         sHoldY = SQUEEZE_FLOOR;
         drive(SQUEEZE_FLOOR, false, "STATE_CHANGED");
         Xp.log(TAG + "cover clock re-collapsed after wake");
+    }
+
+    /**
+     * The combine behind nsslLockYPosition, whatever R8 called it this time.
+     *
+     * The name carries an ordinal that is assigned per build, so it cannot be written down: a
+     * number measured on one HyperOS is simply a wrong guess on the next. The class loader's own
+     * dex tables are asked instead, and the ordinal probe below only exists for the case where
+     * those private fields have moved.
+     */
+    private static Class<?> findAvoidCombine(ClassLoader cl) {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        try {
+            java.lang.reflect.Field pf = Class.forName("dalvik.system.BaseDexClassLoader")
+                    .getDeclaredField("pathList");
+            pf.setAccessible(true);
+            Object pathList = pf.get(cl);
+            java.lang.reflect.Field ef = pathList.getClass().getDeclaredField("dexElements");
+            ef.setAccessible(true);
+            for (Object el : (Object[]) ef.get(pathList)) {
+                try {
+                    java.lang.reflect.Field df = el.getClass().getDeclaredField("dexFile");
+                    df.setAccessible(true);
+                    Object dex = df.get(el);
+                    if (dex == null) continue;
+                    java.util.Enumeration<?> en = (java.util.Enumeration<?>)
+                            dex.getClass().getMethod("entries").invoke(dex);
+                    while (en.hasMoreElements()) {
+                        Object o = en.nextElement();
+                        if (!(o instanceof String)) continue;
+                        // Normalised first: entries() has been seen returning both the internal
+                        // form and the binary one, and matching only one of them would fail
+                        // silently on the other.
+                        String n = ((String) o).replace('/', '.');
+                        if (n.startsWith(AVOID_PREFIX) && n.endsWith(AVOID_SUFFIX)) names.add(n);
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable t) {
+            Xp.log(TAG + "dex walk for the avoid combine failed: " + t);
+        }
+        for (String n : names) {
+            try {
+                Class<?> c = Class.forName(n, false, cl);
+                if (invoke3(c) != null) return c;
+            } catch (Throwable ignored) {
+            }
+        }
+        for (int i = 1; i <= 400; i++) {
+            try {
+                Class<?> c = Class.forName(AVOID_PREFIX + "$" + i + AVOID_SUFFIX, false, cl);
+                if (invoke3(c) != null) return c;
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
+    }
+
+    /** Kotlin's Function3 bridge: invoke(FlowCollector, Object[], Continuation). */
+    private static java.lang.reflect.Method invoke3(Class<?> c) {
+        for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
+            if ("invoke".equals(m.getName()) && m.getParameterTypes().length == 3) {
+                m.setAccessible(true);
+                return m;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Is this drawable one of the fingerprint ring's frames?
+     *
+     * Asked by resource name rather than against a list of ids: ids are assigned per build, so a
+     * list would have to be re-measured on every phone, while the names the OEM gives these
+     * frames have been stable. The answer is cached because the question is asked inside a draw.
+     */
+    private static boolean isFodRing(int resId) {
+        Boolean known = sFodRing.get(resId);
+        if (known != null) return known;
+        Context c = sAppCtx;
+        // No context yet is not an answer worth remembering: it means the keyguard has not
+        // attached, and the next draw will resolve properly.
+        if (c == null) return false;
+        boolean ring = false;
+        try {
+            String name = c.getResources().getResourceEntryName(resId);
+            ring = name != null
+                    && (name.startsWith("finger_circle") || name.contains("fingerprint_circle"));
+        } catch (Throwable ignored) {
+            // Not a resource in SystemUI's table, so not one of the OEM's ring frames. Cached
+            // as such - the same id will come back on the next frame.
+        }
+        sFodRing.put(resId, ring);
+        return ring;
+    }
+
+    /**
+     * Applies the current setting to every icon view still alive. Runs on the main thread: the
+     * receiver has no handler of its own, so it is already there.
+     */
+    private static void applyHideFp() {
+        float alpha = sHideFp ? 0f : 1f;
+        java.util.List<View> views;
+        synchronized (sFodIcons) {
+            views = new java.util.ArrayList<>(sFodIcons.keySet());
+        }
+        for (View v : views) {
+            try {
+                v.setAlpha(alpha);
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
     private static void setDepthHidden(final boolean hide) {
