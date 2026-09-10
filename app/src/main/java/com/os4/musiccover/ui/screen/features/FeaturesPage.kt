@@ -32,7 +32,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import com.os4.musiccover.ModuleBridge
@@ -197,18 +196,6 @@ fun FeaturesPageView(
                     date = shots.date,
                     leftShortcut = shots.left,
                     rightShortcut = shots.right,
-                )
-                MiuixText(
-                    // Say so when the picture is standing in, rather than letting a sample cover
-                    // read as the user's own music.
-                    text = stringResource(
-                        if (art == null && shots.card == null) R.string.preview_note_sample
-                        else R.string.preview_note
-                    ),
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 Spacer(Modifier.height(12.dp))
                 TabRow(

@@ -92,8 +92,6 @@
     <string name="card_section">Media card</string>
     <string name="card_hide_art">Hide the thumbnail</string>
     <string name="card_center_text">Centre the title</string>
-    <string name="preview_note">Clock and card come from the phone; frosting and rim are approximations</string>
-    <string name="preview_note_sample">Nothing playing: the cover and card are a sample</string>
     <string name="hide_fingerprint">Hide lock screen fingerprint icon</string>
     <string name="fp_avoid">Notifications avoid fingerprint</string>
     <string name="fp_avoid_summary">Applies after restarting System UI</string>
