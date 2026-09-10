@@ -344,10 +344,54 @@ public class WallpaperProbe {
                     }
                     return result;
                 });
+                hookVideoPathGetter(vd);
+                hookSurfaceChanged(vd);
                 Xp.log(TAG + "video engine hooked on " + cn.substring(cn.lastIndexOf('.') + 1));
             } catch (Throwable t) {
                 Xp.log(TAG + "video engine hook failed on " + cn + ": " + t);
             }
+        }
+
+        // Intercept WallpaperServiceController.m1159s(2, false) to return cover video when active
+        try {
+            Class<?> wsc = Xp.findClass("com.miui.miwallpaper.manager.WallpaperServiceController", sCl);
+            for (Method m : wsc.getDeclaredMethods()) {
+                if (m.getReturnType() == String.class && m.getParameterCount() == 2) {
+                    Class<?>[] p = m.getParameterTypes();
+                    if (p[0] == int.class && p[1] == boolean.class) {
+                        Xp.hook(m, chain -> {
+                            Object[] args = chain.getArgs().toArray();
+                            int which = (Integer) args[0];
+                            boolean isPreview = (Boolean) args[1];
+                            if (which == 2 && !isPreview && sCoverVideoActive && sCoverVideoPath != null) {
+                                Xp.log(TAG + "intercepted WallpaperServiceController." + m.getName()
+                                        + "(2, false) -> " + sCoverVideoPath);
+                                return sCoverVideoPath;
+                            }
+                            return chain.proceed();
+                        });
+                        Xp.log(TAG + "hooked WallpaperServiceController." + m.getName() + "(int, boolean)");
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Xp.log(TAG + "hook WallpaperServiceController failed: " + t);
+        }
+
+        // Prevent FastPlayer from high-frequency decoding the 1-frame cover video in an infinite loop
+        try {
+            Class<?> fp = Xp.findClass("com.miui.fastplayer.FastPlayer", sCl);
+            Xp.hookAll(fp, "setLoop", chain -> {
+                if (sCoverVideoActive) {
+                    Object[] args = chain.getArgs().toArray();
+                    args[0] = Boolean.FALSE;
+                    return chain.proceed(args);
+                }
+                return chain.proceed();
+            });
+            Xp.log(TAG + "hooked FastPlayer.setLoop");
+        } catch (Throwable t) {
+            Xp.log(TAG + "hook FastPlayer.setLoop failed: " + t);
         }
 
         // The frosted copy the notification and media cards blur against is regenerated on
@@ -956,6 +1000,8 @@ public class WallpaperProbe {
     private static final String[] CLS_VIDEO_ENGINES = {
             "com.miui.miwallpaper.wallpaperservice.impl.VideoDepthEngineImpl",
             "com.miui.miwallpaper.wallpaperservice.impl.VideoEngineImpl",
+            "com.miui.miwallpaper.wallpaperservice.impl.keyguard.KeyguardVideoDepthEngineImpl",
+            "com.miui.miwallpaper.wallpaperservice.impl.keyguard.KeyguardVideoEngineImpl",
     };
 
     /**
@@ -971,8 +1017,12 @@ public class WallpaperProbe {
      * The video keeps playing into the other two the whole time, so nothing has to be resumed,
      * re-seeked or re-decoded on the way back - the surface is simply handed over again.
      */
-    /** Whether the video's surface is currently ours rather than its player's. */
-    private static volatile boolean sVideoTakenOver;
+    /** Whether the video wallpaper is currently playing our 1-frame cover video. */
+    private static volatile boolean sCoverVideoActive;
+    private static volatile String sCoverVideoPath;
+    private static final String COVER_VIDEO_FILE = "mc_cover.mp4";
+    private static final java.util.concurrent.ExecutorService sVideoWorker =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
 
     /**
      * What the lock wallpaper is now, as SystemUI reads it before every push. null until a push
@@ -982,14 +1032,6 @@ public class WallpaperProbe {
 
     /**
      * Whether this push is for a live lock wallpaper.
-     *
-     * Having a video engine is not the same question, and answering with it alone was a bug:
-     * the engine is captured in a constructor, the constructor runs once, and this process
-     * outlives any number of wallpaper changes. Set a video lock wallpaper and then set a still
-     * one back, and sVideoEngine is still there - so every push took the video path, which on
-     * the depth shape does nothing at all (see takeoverDepth), and the still wallpaper's texture
-     * was never replaced. Measured on the device: cover mode on, "art set" logged here, and
-     * nothing on the lock screen. Both have to be true, and the engine alone never decides.
      */
     private static boolean videoPath() {
         Boolean live = sLockIsVideo;
@@ -1003,187 +1045,117 @@ public class WallpaperProbe {
         if (was != null && was == video) return;
         Xp.log(TAG + "the lock wallpaper is " + (video ? "a live one" : "a still picture")
                 + (was == null ? "" : ", it was not"));
-        // Release is paired with the take, always: a wallpaper that is no longer a video must
-        // not be left with our canvas where its player's surface should be.
-        if (!video && sVideoTakenOver) videoWindowTakeover(true);
+        if (!video && sCoverVideoActive) videoWindowTakeover(true);
     }
 
+    /**
+     * Controls dynamic video wallpaper cover mode.
+     * @param on true to restore the original video wallpaper, false to activate the album cover video
+     */
     private static boolean videoWindowTakeover(boolean on) {
         Object eng = sVideoEngine;
         if (eng == null) {
-            Xp.log(TAG + "vgl: no video engine - is the lock wallpaper a video?");
+            Xp.log(TAG + "videoWindowTakeover: no video engine captured yet");
             return false;
         }
-        Object mgr = videoDepthManager();
-        try {
-            return mgr != null ? takeoverDepth(mgr, on) : takeoverPlain(eng, on);
-        } catch (Throwable t) {
-            Xp.log(TAG + "vgl failed: " + Log.getStackTraceString(t));
-            return false;
-        }
-    }
 
-    /**
-     * The depth shape: FastPlayer renders into three surfaces held by a VideoDepthManager, and
-     * changeOpenGLSurface(alpha, on, normal, on, local, on) is the OEM's own way of switching
-     * an individual output off. Asking the player to let go beats fighting it for the buffer -
-     * a Surface connected to GL cannot also be locked for a software canvas.
-     */
-    private static boolean takeoverDepth(Object mgr, boolean on) throws Exception {
-        // Deliberately does nothing. The depth shape cannot be taken over, and TRYING breaks
-        // the video.
-        //
-        // Switching the local output off with changeOpenGLSurface(local=false) does not release
-        // the buffer - FastPlayer's native GL context still holds the EGLSurface - so
-        // lockCanvas throws IllegalArgumentException. Handing it a null local surface with
-        // setSurface(alpha, normal, null, 12, null), the depth equivalent of d(null)/h(null) on
-        // the plain shape, does not release it either. Both measured.
-        //
-        // The reverting version of this was worse than useless: setSurface is not a cheap
-        // toggle, it re-initialises the player's outputs, and calling it to null and straight
-        // back left the video frozen with no way home short of restarting the wallpaper
-        // process. Reported from the device as "the video sticks and never becomes playable
-        // again" - which is a broken lock screen, and strictly worse than this shape simply
-        // not having the cover on its card and clock glass.
-        //
-        // So on this shape the cover is the keyguard-layer view alone: the background is right
-        // and the media card blur and the clock glass keep showing the video. If this is ever
-        // revisited, the thing to try is the Bitmap parameter setSurface already takes and MIUI
-        // always passes null for - letting FastPlayer draw the picture would sidestep
-        // lockCanvas entirely. Do not go back to disabling the output.
-        if (!on && !sDepthWarned) {
-            sDepthWarned = true;
-            Xp.log(TAG + "vgl: this is the depth engine - the wallpaper window cannot be taken "
-                    + "over on it, so the card blur and the clock glass keep the video. The "
-                    + "cover is still drawn in the keyguard layer.");
-        }
-        return false;
-    }
-
-    /** So the explanation above is logged once per process, not once per track. */
-    private static volatile boolean sDepthWarned;
-
-    /**
-     * The plain shape: a VideoPlayer on the engine's field `e` drawing into the engine's own
-     * SurfaceHolder on `o` - which IS the wallpaper window. Stopping the player is what frees
-     * the surface; start() puts the video back.
-     */
-    private static boolean takeoverPlain(Object eng, boolean on) throws Exception {
-        Object player = Xp.getObjectField(eng, "e");
-        Object holder = Xp.getObjectField(eng, "o");
-        if (player == null || !(holder instanceof android.view.SurfaceHolder)) {
-            Xp.log(TAG + "vgl: player=" + player + " holder=" + holder);
-            return false;
-        }
-        android.view.SurfaceHolder h = (android.view.SurfaceHolder) holder;
         if (on) {
-            if (!sVideoTakenOver) return true;
-            sVideoTakenOver = false;
-            // Give the surface BACK before starting. Taking it away was d(null)/h(null), and
-            // start() on its own just plays into nowhere - the window keeps showing the last
-            // frame we painted, i.e. the cover, for good. That is what "the video never comes
-            // back" was.
-            setPlayerHolder(player, h);
-            Xp.callMethod(player, "start");
-            Xp.log(TAG + "vgl(plain): surface handed back, player restarted");
-        } else if (sVideoTakenOver) {
-            // Already ours - a track change, not an entry. The player is stopped and the
-            // surface is already detached, so this is one repaint and nothing else.
-            paintCoverOnto(h.getSurface());
+            if (!sCoverVideoActive) return true;
+            sCoverVideoActive = false;
+            sCoverVideoPath = null;
+            Xp.log(TAG + "videoWindowTakeover: restoring original video wallpaper");
+            triggerVideoReload(eng);
+            return true;
         } else {
-            sVideoTakenOver = true;
-            Xp.callMethod(player, "stop");
-            // stop() ends the decode loop but leaves the surface connected to the decoder, and
-            // a connected Surface cannot be locked for a software canvas - lockCanvas throws
-            // IllegalArgumentException. Hand the player a null holder to make it let go.
-            setPlayerHolder(player, null);
-            Xp.log(TAG + "vgl(plain): player stopped and surface released");
-            paintCoverOnto(h.getSurface());
-        }
-        return true;
-    }
-
-    /**
-     * The VideoDepthManager, reached through the engine that owns it.
-     *
-     * Not from its own constructor - that runs before the module is loaded - and not from its
-     * static instance field either, which is left null on this build. The engine is
-     * constructible after we are in, and holds the manager on field `p`.
-     */
-    private static Object videoDepthManager() {
-        Object mgr = sVideoDepth;
-        if (mgr != null) return mgr;
-        Object eng = sVideoEngine;
-        if (eng == null) return null;
-        try {
-            mgr = Xp.getObjectField(eng, "p");
-            // `p` is only the manager on the depth engine - on the plain one it is an unrelated
-            // obfuscated field of the same name, and reading it as a manager was good for one
-            // confusing "no field k1.f.j". The type is the thing that decides which shape this
-            // engine is, so check it rather than trusting the field name.
-            if (mgr != null && !mgr.getClass().getName().contains("VideoDepthManager")) {
-                mgr = null;
+            final Bitmap art = sArt;
+            if (art == null) {
+                Xp.log(TAG + "videoWindowTakeover: sArt is null, cannot make cover video");
+                return false;
             }
-            if (mgr != null) {
-                sVideoDepth = mgr;
-                Xp.log(TAG + "video depth manager: " + mgr);
+            final Context ctx = sCtx;
+            if (ctx == null) {
+                Xp.log(TAG + "videoWindowTakeover: sCtx is null");
+                return false;
             }
-            return mgr;
-        } catch (Throwable t) {
-            Xp.log(TAG + "vgl: cannot reach the VideoDepthManager: " + t);
-            return null;
-        }
-    }
 
-    /**
-     * Sets - or clears, with null - the holder the VideoPlayer draws into.
-     *
-     * Both `d` and `h` take a SurfaceHolder and which one actually binds is an R8 name away
-     * from being knowable, so both are called and whichever exists wins. Symmetric on purpose:
-     * the release and the hand-back have to be the same pair, or the video never comes back.
-     */
-    private static void setPlayerHolder(Object player, android.view.SurfaceHolder holder) {
-        for (String name : new String[]{"d", "h"}) {
-            try {
-                Method m = Xp.findMethodExact(player.getClass(), name,
-                        android.view.SurfaceHolder.class);
-                m.invoke(player, holder);
-            } catch (Throwable t) {
-                Xp.log(TAG + "vgl(plain): " + name + "(" + (holder == null ? "null" : "holder")
-                        + ") -> " + t);
-            }
-        }
-    }
-
-    /** Draws the current art over a surface FastPlayer has just let go of. */
-    private static boolean paintCoverOnto(android.view.Surface s) {
-        Bitmap art = sArt;
-        if (art == null || !s.isValid()) {
-            Xp.log(TAG + "vgl: nothing to paint (art=" + describe(art)
-                    + " valid=" + s.isValid() + ")");
-            return false;
-        }
-        Canvas cv = null;
-        boolean painted = false;
-        try {
-            cv = s.lockCanvas(null);
-            RectF dst = new RectF(0, 0, cv.getWidth(), cv.getHeight());
-            cv.drawBitmap(art, null, dst, new Paint(Paint.FILTER_BITMAP_FLAG));
-            Xp.log(TAG + "vgl: painted " + describe(art) + " onto the wallpaper window "
-                    + cv.getWidth() + "x" + cv.getHeight());
-            painted = true;
-        } catch (Throwable t) {
-            Xp.log(TAG + "vgl: lockCanvas failed: " + t);
-        } finally {
-            if (cv != null) {
+            sVideoWorker.submit(() -> {
                 try {
-                    s.unlockCanvasAndPost(cv);
+                    File videoFile = new File(ctx.getFilesDir(), COVER_VIDEO_FILE);
+                    int w = sReportedW > 0 ? sReportedW : ctx.getResources().getDisplayMetrics().widthPixels;
+                    int h = sReportedH > 0 ? sReportedH : ctx.getResources().getDisplayMetrics().heightPixels;
+                    Bitmap fitted = centerCrop(art, (w / 2) * 2, (h / 2) * 2);
+
+                    boolean ok = CoverVideoEncoder.encodeBitmapToMp4(fitted, videoFile);
+                    if (ok && videoFile.exists() && videoFile.length() > 0) {
+                        sCoverVideoPath = videoFile.getAbsolutePath();
+                        sCoverVideoActive = true;
+                        Xp.log(TAG + "videoWindowTakeover: cover video ready (" + videoFile.length()
+                                + "B), triggering reload on " + eng.getClass().getSimpleName());
+                        triggerVideoReload(eng);
+                    } else {
+                        Xp.log(TAG + "videoWindowTakeover: cover video encoding failed");
+                    }
                 } catch (Throwable t) {
-                    Xp.log(TAG + "vgl: unlockCanvasAndPost failed: " + t);
+                    Xp.log(TAG + "videoWindowTakeover: worker error: " + t);
                 }
+            });
+            return true;
+        }
+    }
+
+    private static void triggerVideoReload(Object eng) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                Xp.callMethod(eng, "onWallpaperUpdate", "video", 2);
+                Xp.log(TAG + "triggerVideoReload: onWallpaperUpdate('video', 2) called on "
+                        + eng.getClass().getSimpleName());
+            } catch (Throwable t) {
+                Xp.log(TAG + "triggerVideoReload failed: " + t);
+            }
+        });
+    }
+
+    private static void hookVideoPathGetter(Class<?> cls) {
+        for (Method m : cls.getDeclaredMethods()) {
+            if (m.getParameterCount() == 0 && m.getReturnType() == String.class
+                    && !Modifier.isStatic(m.getModifiers())
+                    && !m.getName().equals("toString")
+                    && !m.getName().equals("getClass")) {
+                Xp.hook(m, chain -> {
+                    Object self = chain.getThisObject();
+                    if (self != null && self.getClass().getName().contains("Keyguard")) {
+                        if (sCoverVideoActive && sCoverVideoPath != null) {
+                            Xp.log(TAG + "video path intercepted (" + cls.getSimpleName()
+                                    + "." + m.getName() + "()) -> " + sCoverVideoPath);
+                            return sCoverVideoPath;
+                        }
+                    }
+                    return chain.proceed();
+                });
+                Xp.log(TAG + "hooked video path candidate: " + cls.getSimpleName() + "." + m.getName());
             }
         }
-        return painted;
+    }
+
+    private static void hookSurfaceChanged(Class<?> cls) {
+        for (Method m : cls.getDeclaredMethods()) {
+            Class<?>[] p = m.getParameterTypes();
+            if (p.length >= 3 && p[1] == int.class && p[2] == int.class) {
+                Xp.hook(m, chain -> {
+                    Object[] args = chain.getArgs().toArray();
+                    if (args.length >= 3 && args[1] instanceof Integer && args[2] instanceof Integer) {
+                        int w = (Integer) args[1];
+                        int h = (Integer) args[2];
+                        if (w > 0 && h > 0) {
+                            sReportedW = Math.min(w, h);
+                            sReportedH = Math.max(w, h);
+                            Xp.log(TAG + "video surface size reported: " + sReportedW + "x" + sReportedH);
+                        }
+                    }
+                    return chain.proceed();
+                });
+            }
+        }
     }
 
     private static void dumpClass(String name, String grep) {
