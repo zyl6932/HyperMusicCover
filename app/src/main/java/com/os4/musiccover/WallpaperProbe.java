@@ -154,10 +154,24 @@ public class WallpaperProbe {
                         sReportedH = h;
                         Xp.log(TAG + "keyguard texture is " + w + "x" + h);
                     }
+                    noteRenderState(chain.getThisObject(), w, h);
                     // A fade owns the texture outright while it runs: every frame of it is
                     // a blend this process composed, and neither the art nor the original is
                     // what should be uploaded until it lands.
                     Bitmap fade = sFade;
+                    // Size-checked like the art below, and for the same reason: the GL matrix
+                    // comes from the bitmap's dimensions, so a bitmap that is not exactly this
+                    // texture lands the wallpaper askew - a corner of the picture in a corner
+                    // of the screen. A fade composed for a texture that has since changed size
+                    // (a new wallpaper, a surface rebuilt at another size) is not something to
+                    // fit and show, it is stale: drop it and let the frame below draw the real
+                    // art at the real size.
+                    if (fade != null && (fade.getWidth() != w || fade.getHeight() != h)) {
+                        Xp.log(TAG + "fade dropped: composed for " + describe(fade)
+                                + " but the texture is " + w + "x" + h);
+                        cancelFade();
+                        fade = null;
+                    }
                     if (fade != null) {
                         args[0] = fade;
                         // proceed() is the upload: once it returns, the buffer has been read
@@ -213,6 +227,8 @@ public class WallpaperProbe {
                     "com.miui.miwallpaper.container.openGL.KeyguardAnimImageWallpaperRenderer",
                     sCl);
             Xp.hookAll(kg, "getBitmap", chain -> {
+                // Not size-checked here on purpose: getBitmap is the SOURCE, and what the
+                // texture ends up being is decided by the lambda above, which does check.
                 Bitmap fading = sFade;
                 if (fading != null) return fading;
                 Bitmap fitted = fittedArt();
@@ -332,6 +348,53 @@ public class WallpaperProbe {
         return BitmapFactory.decodeByteArray(jpg, 0, jpg.length, o);
     }
 
+    private static String sRenderState = "";
+    private static boolean sRenderStateFailed;
+    /** The screen, as MIUI's own renderer has it (mSurfaceSize). 0 until an upload has run. */
+    private static volatile int sSurfaceW, sSurfaceH;
+
+    /**
+     * The three numbers that decide where the wallpaper lands on screen, read off MIUI's own
+     * renderer at the moment of the upload:
+     *
+     * - mSurfaceSize, which is the glViewport onSurfaceChanged last set;
+     * - the texture's dimensions, which is what AnimImageWallpaperRenderer.updateMVPMatrix()
+     *   builds the MVP matrix from (updateMVPMatrix(surfaceW, surfaceH, textureDimensions));
+     * - the bitmap actually being uploaded.
+     *
+     * A picture drawn small and cornered is one of these three disagreeing with the other two,
+     * and none of them is visible from the SystemUI side or from a screenshot. Logged only when
+     * the triple CHANGES, so a steady state costs one string compare per upload and says
+     * nothing, and the frame that moves the picture is the one that prints.
+     */
+    private static void noteRenderState(Object renderer, int w, int h) {
+        if (sRenderStateFailed) return;
+        try {
+            Object surface = Xp.getObjectField(renderer, "mSurfaceSize");
+            Object texture = Xp.getObjectField(renderer, "mTexture");
+            Object dims = texture == null ? null
+                    : Xp.callMethod(texture, "getTextureDimensions");
+            // Read before the early return below: this is the only place the SCREEN's own size
+            // is knowable in this process, and startFade() needs it on every fade, not only on
+            // the frames where something changed.
+            if (surface instanceof android.graphics.Rect) {
+                android.graphics.Rect r = (android.graphics.Rect) surface;
+                if (r.width() > 0 && r.height() > 0) {
+                    sSurfaceW = r.width();
+                    sSurfaceH = r.height();
+                }
+            }
+            String now = "viewport=" + surface + " mvpFrom=" + dims
+                    + " upload=" + w + "x" + h;
+            if (now.equals(sRenderState)) return;
+            sRenderState = now;
+            Xp.log(TAG + "render state " + now);
+        } catch (Throwable t) {
+            sRenderStateFailed = true;
+            Xp.log(TAG + "cannot read the renderer's geometry: " + t);
+        }
+    }
+
     /**
      * sArt scaled to the texture the keyguard actually uploads, or null while that size is still
      * unknown. Cached, so a track change scales once rather than on every GL callback.
@@ -408,6 +471,19 @@ public class WallpaperProbe {
             reloadTexture();
             return;
         }
+        if (fadeTooExpensive(from)) {
+            if (done != null) done.run();
+            reloadTexture();
+            return;
+        }
+        // Both ends agree with each other by the check above; whether they agree with the
+        // TEXTURE is the thing that decides how this looks on screen, and it is the one number
+        // that is not in either of them. Logged once per fade so a report of a bad transition
+        // can be read off the log instead of guessed at.
+        if (from.getWidth() != sReportedW || from.getHeight() != sReportedH) {
+            Xp.log(TAG + "fade " + describe(from) + " -> " + describe(to)
+                    + " does NOT match the texture " + sReportedW + "x" + sReportedH);
+        }
         Bitmap buf = sFadeBuf;
         if (buf == null || buf.isRecycled()
                 || buf.getWidth() != from.getWidth() || buf.getHeight() != from.getHeight()) {
@@ -467,6 +543,56 @@ public class WallpaperProbe {
                 h.postDelayed(this, FADE_STEP_MS);
             }
         });
+    }
+
+    /**
+     * Ends a fade in flight without running its completion. For a fade that has become invalid
+     * rather than one that has finished - the buffer it was composing into no longer matches
+     * the texture, so nothing it produces from here is worth uploading.
+     */
+    private static void cancelFade() {
+        sFadeGen++;
+        sFade = null;
+        sFadeInFlight = false;
+        sFrostSkipping = false;
+    }
+
+    /**
+     * Whether a crossfade at this texture size is affordable, measured rather than assumed.
+     *
+     * Every frame of the fade goes through reloadTexture(), and that is not a cheap poke: it
+     * re-runs the OEM's onSurfaceCreated(), which clears the surface, rebuilds the GL program
+     * and re-uploads the WHOLE texture. So the cost of a fade is the texture size times the
+     * frame count, and it is paid on the GL thread while the clock is springing next to it.
+     *
+     * Measured on the device, same phone, same 240ms fade, the only difference being the lock
+     * wallpaper's own dimensions:
+     *
+     *   1200x2608 (= the screen)  12.5MB/frame  8 frames  waited 16x for the upload   fine
+     *   1579x3432                 21MB/frame    7 frames  waited 51x                  breaks
+     *
+     * Breaks how: the GL thread falls far enough behind that the compositor picks up a frame
+     * from the middle of onSurfaceCreated() - after glClearColor, before updateMVPMatrix - and
+     * that frame is the cover drawn small on black, in a corner. Reported from the device as
+     * "a small album cover in the top right, then it switches over", in both directions.
+     *
+     * So the gate is the ratio to the screen, which is the number the frame budget actually
+     * scales with. A lock wallpaper the size of the screen is what ensureLockWallpaper() writes
+     * and what this was built for; 1.7x the screen is not, and a hard cut is better than a
+     * transition that flashes. Unknown surface size fades, as before - never make the OEM's own
+     * behaviour worse over a number we have not read yet.
+     */
+    private static boolean fadeTooExpensive(Bitmap from) {
+        long screen = (long) sSurfaceW * sSurfaceH;
+        if (screen <= 0) return false;
+        long texture = (long) from.getWidth() * from.getHeight();
+        if (texture * 2 <= screen * 3) return false;           // <= 1.5x the screen
+        Xp.log(TAG + "no fade: " + describe(from) + " is "
+                + (Math.round(texture * 10.0 / screen) / 10.0) + "x the screen ("
+                + sSurfaceW + "x" + sSurfaceH + ") - one upload of it is "
+                + (texture * 4 / (1024 * 1024)) + "MB and the fade needs one per frame."
+                + " Swapping in one frame instead.");
+        return true;
     }
 
     /** One frame of the crossfade. Both sources are already exactly dst's size. */
