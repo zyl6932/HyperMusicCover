@@ -2149,7 +2149,16 @@ public class Main extends XposedModule {
     private static RectF glyphBox() {
         RectF box = null;
         for (View root : clockRoots()) {
-            RectF r = inkBox(root, clockTarget(root));
+            View target = clockTarget(root);
+            RectF r = inkBox(root, target);
+            // A tree that HAS a clock in it but shows no ink yet is a clock that has not been
+            // through a layout pass, not a tree without a clock - that one has no usable target
+            // at all. Reported as "no box" rather than unioned away, because half a box is what
+            // makes clockPivotX() take the left-aligned branch: all_in_one draws the hour in one
+            // tree and the minute in the other, so the half that happens to be measured first
+            // has a centre nowhere near the screen's, and the clock collapses towards its own
+            // left edge. That is the crooked small clock a SystemUI restart used to leave behind.
+            if (r == null && usable(target)) return null;
             if (r == null) continue;
             if (box == null) box = r; else box.union(r);
         }
@@ -2258,10 +2267,13 @@ public class Main extends XposedModule {
         float uncorrected = loc[1] - date.getTranslationY();
         float target = DATE_TOP_DP * date.getResources().getDisplayMetrics().density;
         float measured = target - uncorrected;
-        if (!Float.isNaN(sNudgeSample) && Math.abs(measured - sNudgeSample) < 1f) {
-            sNudge = measured;
-        }
+        boolean adopt = !Float.isNaN(sNudgeSample) && Math.abs(measured - sNudgeSample) < 1f;
+        if (adopt) sNudge = measured;
         sNudgeSample = measured;
+        if (sVerbose) {
+            Xp.log(TAG + "nudge: onScreen=" + loc[1] + " ty=" + r1(date.getTranslationY())
+                    + " measured=" + r1(measured) + (adopt ? " ADOPTED" : " held"));
+        }
     }
 
     /**
@@ -2279,7 +2291,7 @@ public class Main extends XposedModule {
      * result on screen and corrected it over the following frames, which is exactly what the jump
      * to the top and the slide back down was.
      */
-    private static void placeCollapsedClock(float k, float y, float p) {
+    private static boolean placeCollapsedClock(float k, float y, float p) {
         View date = visibleDate();
         // A different date view means the clock views were re-inflated - a style change - and
         // anything remembered about the old ones describes a clock that is no longer there.
@@ -2299,7 +2311,7 @@ public class Main extends XposedModule {
         // already applied alone is right: resetting would itself be a visible jump.
         if (date == null || pooled == null) {
             reportUnknownClock(date, pooled);
-            return;
+            return false;
         }
         sClockComplained = false;
         float glyph = pooled.top;
@@ -2338,6 +2350,7 @@ public class Main extends XposedModule {
             Xp.log(TAG + "collapse y=" + y + " p=" + p + " k=" + k
                     + " glyphTop=" + glyph + " dateBottom=" + dateBottom + " nudge=" + nudge);
         }
+        return true;
     }
 
     // ------------------------------------------------------- transition trace
@@ -4473,7 +4486,91 @@ public class Main extends XposedModule {
         sAppliedGlassV = Float.NaN;
         sHoldY = SQUEEZE_FLOOR;
         drive(SQUEEZE_FLOOR, false, "STATE_CHANGED");
+        settleCollapsedClock(0);
         Xp.log(TAG + "cover clock re-collapsed after wake");
+    }
+
+    /**
+     * Frames the re-assert gets: six once the nudge has been adopted, and up to forty while
+     * either the clock is unmeasurable or the offset is still moving, at 80ms apart.
+     *
+     * Forty is not a guess. Measured on the restart path: the clock is unmeasurable for the first
+     * ten passes, and the date's own layout then slides from 230 to 266 over the next seven -
+     * the OEM is still animating its squeeze towards the y we are holding it at, and the date
+     * moves with it. Two readings 80ms apart differ by ten pixels the whole way down, so the
+     * loop adopts nothing until that stops, which takes about three seconds. A shorter tail is
+     * what left the first lock screen at the un-nudged 270: the readings were all real, and the
+     * last of them just needed a partner.
+     */
+    private static final int CLOCK_SETTLE_TRIES = 6;
+    private static final int CLOCK_SETTLE_MAX = 40;
+    private static final long CLOCK_SETTLE_MS = 80L;
+
+    /**
+     * Places the collapsed clock again over the next few frames, then stops.
+     *
+     * The placement normally rides the OEM's own frames - an entry animates for 600ms and every
+     * one of those frames runs it - but the re-assert after a SystemUI restart has no animation
+     * to ride. The clock container attaches, we drive notifY once, and the OEM stops emitting
+     * frames the moment it has nothing left to move. If that single frame lands before the
+     * keyguard's clock has been measured (and it does: the container attaches at 0,0-0,0, and
+     * `clock style not understood: date=MISSING glyphs=MISSING` is what that one frame says),
+     * then placeCollapsedClock() bails and NOTHING runs it again - the clock sat uncollapsed, or
+     * at a pivot taken from half a glyph box, until the user locked the screen and got a real
+     * collapse to converge on. That is the "first time after a restart is always crooked" bug.
+     *
+     * Six frames rather than a condition: the interesting question is not whether this pass
+     * worked but whether the LAYOUT has settled, and a pass that succeeded on a half-measured
+     * clock is exactly the crooked case. By the last one the keyguard has been through measure,
+     * layout and the OEM's own squeeze, and every pass writes the same numbers a normal frame
+     * of the collapse would, so the extra ones cost nothing but are idempotent.
+     */
+    private static void settleCollapsedClock(final int attempt) {
+        if (!sCoverMode || Float.isNaN(sCollapseMin)) return;
+        Float y = sHoldY;
+        if (y == null) return;
+        // Overlapping chains are harmless - every pass writes the values the last one did - and
+        // the alternative is bookkeeping for a method that runs a handful of times per restart.
+        if (attempt > CLOCK_SETTLE_MAX) return;
+        float p = coverProgress(y);
+        if (Float.isNaN(p)) {
+            // No natural y to measure against yet, and on a fresh SystemUI there may never be
+            // one: coverProgress() needs a frame the OEM emitted on its own, and after a restart
+            // the only frames going are ours. Held at the squeeze floor the collapse is complete
+            // by definition - p is 1 whatever the natural y turns out to be - so this is not a
+            // guess, it is the definition the hold was taken under. (This was the second reason
+            // the first lock screen stayed wrong: the retry loop ran, and every pass through it
+            // returned here.)
+            if (y > SQUEEZE_FLOOR) return;
+            p = 1f;
+        }
+        boolean placed = placeCollapsedClock(1f - p * (1f - sCollapseMin), y, p);
+        // Two reasons to keep going, and both are the bug rather than a nicety.
+        //
+        // The clock may not be measurable yet - the keyguard is still laying out - and a pass
+        // that never ran is the whole complaint; one that runs late costs a view write that
+        // writes what is already there.
+        //
+        // And the date's offset is a feedback loop that refuses to adopt a reading until two
+        // passes agree (its gain is 0.9, so it needs two or three readings to converge). With
+        // the OEM's own squeeze still animating behind us the first readings are -3, -39, -42:
+        // every one of them a real measurement, none of them agreeing with the last, and the
+        // loop left holding 0. sNudge == sNudgeSample is what "it has adopted something" looks
+        // like from outside - updateDateOffset assigns both from the same reading when it
+        // commits - so that is the condition the tail is for.
+        boolean adopted = !Float.isNaN(sNudgeSample) && sNudge == sNudgeSample;
+        if (sVerbose) {
+            Xp.log(TAG + "settle " + attempt + ": placed=" + placed + " adopted=" + adopted
+                    + " nudge=" + r1(sNudge) + " sample=" + r1(sNudgeSample));
+        }
+        if (placed && adopted && attempt >= CLOCK_SETTLE_TRIES) return;
+        if (attempt >= CLOCK_SETTLE_MAX) return;
+        main().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                settleCollapsedClock(attempt + 1);
+            }
+        }, CLOCK_SETTLE_MS);
     }
 
     /**
