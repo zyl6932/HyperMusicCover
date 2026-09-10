@@ -18,3 +18,8 @@ local.properties
 
 # The README on GitHub is written by hand; this local copy is not the source of truth.
 /README.md
+
+# The handoff notes are for whoever picks this up next, not for the repo's readers. Kept
+# locally and deliberately untracked - it names the phone, the test device's build, and a
+# running list of what is broken.
+/HANDOFF.md
