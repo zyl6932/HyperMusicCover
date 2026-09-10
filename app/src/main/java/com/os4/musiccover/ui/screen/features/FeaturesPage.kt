@@ -333,7 +333,6 @@ private fun CardGroup(
         // is the one part of the card that is both big and far from the sensor.
         SwitchPreference(
             title = stringResource(R.string.card_title_tap),
-            summary = stringResource(R.string.card_title_tap_summary),
             checked = module.mcTitleTap,
             enabled = enabled,
             onCheckedChange = {

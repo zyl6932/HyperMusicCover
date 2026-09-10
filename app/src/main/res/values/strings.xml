@@ -93,7 +93,6 @@
     <string name="card_hide_art">隐藏封面缩略图</string>
     <string name="card_center_text">标题居中</string>
     <string name="card_title_tap">点击歌名暂停播放</string>
-    <string name="card_title_tap_summary">锁屏上点歌名就能暂停或播放，不用去够那颗压在指纹上的按钮</string>
     <string name="hide_fingerprint">隐藏锁屏指纹图标</string>
     <string name="fp_avoid">通知指纹避让</string>
     <string name="fp_avoid_summary">重启系统界面后生效</string>
