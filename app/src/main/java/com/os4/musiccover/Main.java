@@ -31,6 +31,7 @@ import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewTreeObserver;
+import android.view.animation.Interpolator;
 import android.view.animation.PathInterpolator;
 
 import java.lang.reflect.Method;
@@ -511,6 +512,7 @@ public class Main extends XposedModule {
                 // A rebuilt keyguard can be a different clock style, so the nudge measured
                 // against the old one means nothing - and neither does the clock view we resolved.
                 sClockTargets.clear();
+                forgetGlyphBox();
                 if (sCoverMode) reassertCoverClock(true);
                 return result;
             });
@@ -1586,6 +1588,12 @@ public class Main extends XposedModule {
      */
     private static void rampTo(final float target, final long ms, final String typeName,
                                final boolean releaseAtEnd) {
+        rampTo(target, ms, typeName, releaseAtEnd, null);
+    }
+
+    /** ease != null overrides the OEM-ish decelerate above. */
+    private static void rampTo(final float target, final long ms, final String typeName,
+                               final boolean releaseAtEnd, final Interpolator ease) {
         final View v = sContainer;
         if (v == null) {
             Xp.log(TAG + "no clock container captured yet");
@@ -1605,7 +1613,7 @@ public class Main extends XposedModule {
                 ValueAnimator a = ValueAnimator.ofFloat(from, target);
                 a.setDuration(ms);
                 // HyperOS-ish emphasised decelerate; swap for a spring later.
-                a.setInterpolator(new PathInterpolator(0.2f, 0f, 0f, 1f));
+                a.setInterpolator(ease != null ? ease : new PathInterpolator(0.2f, 0f, 0f, 1f));
                 a.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
                     @Override
                     public void onAnimationUpdate(ValueAnimator an) {
@@ -2630,7 +2638,34 @@ public class Main extends XposedModule {
      * The top anchors the placement, the middle decides the pivot, and the size is what the
      * preview draws at - all three off this one pooled measurement.
      */
+    /**
+     * How long a measured glyph box is trusted for.
+     *
+     * placeCollapsedClock() needs the box on every frame of a transition - its top is the pivot
+     * the collapse scales about and the anchor the clock hangs from - and measuring it walks both
+     * clock trees, collects the digits and asks each one for its text bounds. That is fine once
+     * per placement and is not fine sixty times a second with the OEM recomputing a variable font
+     * on the same frames.
+     *
+     * The box is left alone by the squeeze: measured across whole transitions, `glyphTop` is the
+     * same number on every frame of one (1099.0269 throughout, 1103.9614 on another run - it is a
+     * property of the style and the layout, not of y). So a short trust window costs nothing and
+     * a layout change - which is the one thing that does move it - clears it outright.
+     */
+    private static RectF sGlyphCache;
+    private static long sGlyphAt;
+    private static final long GLYPH_TTL_MS = 120L;
+
+    /** Drops the remembered box. Called from every place the layout is known to have changed. */
+    private static void forgetGlyphBox() {
+        sGlyphCache = null;
+        sGlyphAt = 0L;
+    }
+
     private static RectF glyphBox() {
+        long now = android.os.SystemClock.uptimeMillis();
+        RectF cached = sGlyphCache;
+        if (cached != null && now - sGlyphAt < GLYPH_TTL_MS) return new RectF(cached);
         RectF box = null;
         boolean treeDrewNothing = false;
         for (View root : clockRoots()) {
@@ -2643,7 +2678,7 @@ public class Main extends XposedModule {
             if (box == null) box = r; else box.union(r);
         }
         if (box == null) return null;
-        if (!treeDrewNothing) return box;
+        if (!treeDrewNothing) { sGlyphCache = box; sGlyphAt = now; return new RectF(box); }
         // A tree that HAS a clock in it but shows no ink is either a clock that has not been
         // through a layout pass, or a tree that is simply not drawing - and those two want
         // opposite answers. Half a box is what makes clockPivotX() take the left-aligned
@@ -2668,9 +2703,12 @@ public class Main extends XposedModule {
         for (View root : clockRoots()) {
             if (clockTarget(root) != null) { any = root; break; }
         }
-        if (any == null) return box;
+        if (any == null) { sGlyphCache = box; sGlyphAt = now; return new RectF(box); }
         float screenW = any.getResources().getDisplayMetrics().widthPixels;
-        return Math.abs(box.centerX() - screenW / 2f) < screenW * 0.05f ? box : null;
+        if (Math.abs(box.centerX() - screenW / 2f) >= screenW * 0.05f) return null;
+        sGlyphCache = box;
+        sGlyphAt = now;
+        return new RectF(box);
     }
 
     /**
@@ -2717,8 +2755,28 @@ public class Main extends XposedModule {
     }
 
     private static View findClockView(View root, String id) {
-        int i = root.getResources().getIdentifier(id, "id", "com.android.systemui");
+        int i = resId(root.getResources(), id);
         return i == 0 ? null : root.findViewById(i);
+    }
+
+    /**
+     * getIdentifier() walks the package's resource table by name on every call, and the collapse
+     * asks for the same handful of ids several times a frame - both clock roots, the clock target
+     * inside each, the date, `time_group` for the anchored test. That is measurable against the
+     * OEM doing its own animation at the same time and coming out smooth: driving y makes the
+     * OEM recompute the variable font every frame, and this used to be added on top of it.
+     *
+     * The answer cannot change while the process lives - a build either has the id or it does
+     * not - so it is remembered, including the 0 a build without it answers.
+     */
+    private static final java.util.HashMap<String, Integer> sResIds = new java.util.HashMap<>();
+
+    private static int resId(android.content.res.Resources r, String name) {
+        Integer hit = sResIds.get(name);
+        if (hit != null) return hit;
+        int id = r.getIdentifier(name, "id", "com.android.systemui");
+        sResIds.put(name, id);
+        return id;
     }
 
     /** The ids the OEM gives a date line, the plain one first. */
@@ -2837,6 +2895,9 @@ public class Main extends XposedModule {
         public void onLayoutChange(View v, int l, int t, int r, int b,
                                    int ol, int ot, int or, int ob) {
             if (l == ol && t == ot && r == or && b == ob) return;
+            // Before any of the reasons to skip below: a layout change is exactly what makes the
+            // remembered glyph box wrong, whether or not this pass goes on to re-place.
+            forgetGlyphBox();
             if (!sCoverMode || Float.isNaN(sCollapseMin)) return;
             if (sFrameCb != null || sRamp != null) return;
             long now = android.os.SystemClock.uptimeMillis();
@@ -2881,6 +2942,7 @@ public class Main extends XposedModule {
         if (date != sDateView) {
             sDateView = date;
             sClockTargets.clear();
+            forgetGlyphBox();
             sDateNatural = Float.NaN;
             sAppliedK = Float.NaN;
             sAppliedGlassV = Float.NaN;
@@ -5207,7 +5269,19 @@ public class Main extends XposedModule {
      * the reading is the position the date is actually at; a remembered one belongs to a
      * different layout and the path would begin with a jump of its own.
      */
-    private static final long WAKE_RAMP_MS = 380L;
+    /**
+     * Long enough to land with the OEM's own transition rather than before it.
+     *
+     * Measured: with 380ms the ramp is finished while the container the OEM is moving under
+     * it still has about 150ms left - read frame by frame, the date's own position (our
+     * translation divided out) walks 298 -> 252 after the ramp has already stopped. The clock
+     * arrives, holds, and the rest of the wake completes around it, which is the "先顿一下
+     * 之后再完成过渡".
+     */
+    private static final long WAKE_RAMP_MS = 530L;
+    /** Material's standard curve. The OEM-ish decelerate above puts half the move into the
+     *  first fifth of the time, which is a lurch on a 752px travel; this spreads it. */
+    private static final Interpolator WAKE_EASE = new PathInterpolator(0.4f, 0f, 0.2f, 1f);
 
     private static void wakeIntoCover() {
         sCollapseMin = sClockScale;
@@ -5218,7 +5292,7 @@ public class Main extends XposedModule {
         sDateNatural = Float.NaN;
         sCardP = 1f;
         applyMediaCard();
-        rampTo(SQUEEZE_FLOOR, WAKE_RAMP_MS, "STATE_CHANGED");
+        rampTo(SQUEEZE_FLOOR, WAKE_RAMP_MS, "STATE_CHANGED", false, WAKE_EASE);
         // The ramp above cannot carry the card on a style that emits no notifY; see
         // oemDrivesCard().
         if (!oemDrivesCard()) animateCardTo(1f, null);
@@ -7274,8 +7348,8 @@ public class Main extends XposedModule {
         java.util.List<View> out = new java.util.ArrayList<>();
         for (String id : new String[]{"miui_keyguard_clock_container",
                 "miui_keyguard_foreground_clock_container"}) {
-            int rid = root.getResources().getIdentifier(id, "id", "com.android.systemui");
-            View c = rid == 0 ? null : root.findViewById(rid);
+            int resId = resId(root.getResources(), id);
+            View c = resId == 0 ? null : root.findViewById(resId);
             if (c != null) out.add(c);
         }
         return out.toArray(new View[0]);
