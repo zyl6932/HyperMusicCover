@@ -8081,9 +8081,15 @@ public class Main extends XposedModule {
 
     /** Cover mode is on exactly when the card is up. Idempotent, so it is safe to re-run. */
     private static void applyCardState() {
-        // Nothing observed yet: a SystemUI restart must not tear down a cover that is on the
-        // phone just because the card hook has not fired for the first time.
-        if (!sAuto || !sCardKnown) return;
+        // Nothing observed yet is not the same as nothing there: a SystemUI restart must not
+        // tear down a cover that is on the phone just because the card hook has not fired for
+        // the first time. That wait has to end somewhere though, and it did not - which left
+        // the wallpaper on the last album for good. See releaseUnobservedCover().
+        if (!sAuto) return;
+        if (!sCardKnown) {
+            releaseUnobservedCover(activeSessions());
+            return;
+        }
         if (!sCardShowing) {
             sTrackKey = "";
             // The card going away is what clears a tap-dismissed cover: that decision was about
@@ -8099,6 +8105,42 @@ public class Main extends XposedModule {
         // and with the cover tapped away it is still where the tap listener is put back.
         if (sCoverMode || wantsArtTap()) applyMediaCard();
         rebindSession();
+    }
+
+    /**
+     * Ends the wait a cover restored from disk is parked in when no card is ever observed.
+     *
+     * The saved cover comes back before any card can, and the guard above refuses to act while
+     * `sCardKnown` is false. That is right for as long as a card is on its way - a restart
+     * rebuilds the card and the hook fires then - but it is not a wait that could ever end if
+     * nothing plays again in this process: the hook never fires, the guard has no second chance,
+     * and the wallpaper keeps the last album until the user happens to start some music. Which
+     * is what a SystemUI restart during playback, followed by the music stopping, left behind.
+     *
+     * A card cannot exist without a media session behind it, so an EMPTY list is proof the card
+     * is gone. Neither of the other two answers is proof of anything and both leave the cover
+     * alone: a list that could not be read, and a non-empty one - the ordinary wait.
+     */
+    private static void releaseUnobservedCover(List<MediaController> sessions) {
+        if (sCardKnown || !sCoverMode || sessions == null || !sessions.isEmpty()) return;
+        Xp.log(TAG + "cover restored with no media session at all - leaving cover mode");
+        sTrackKey = "";
+        sTapSuppressed = false;
+        setCoverEnabled(false, true);
+    }
+
+    /** The sessions the system holds right now, or null when the question could not be asked. */
+    private static List<MediaController> activeSessions() {
+        Context ctx = sAppCtx;
+        if (ctx == null) return null;
+        try {
+            MediaSessionManager msm = sMsm != null ? sMsm
+                    : (MediaSessionManager) ctx.getSystemService(Context.MEDIA_SESSION_SERVICE);
+            return msm == null ? null : msm.getActiveSessions(null);
+        } catch (Throwable t) {
+            Xp.log(TAG + "active session read failed: " + t);
+            return null;
+        }
     }
 
     /** Track identity as the card itself sees it. */
@@ -8126,6 +8168,10 @@ public class Main extends XposedModule {
                 sSessionsCb = new MediaSessionManager.OnActiveSessionsChangedListener() {
                     @Override
                     public void onActiveSessionsChanged(List<MediaController> controllers) {
+                        // The one moment the list is handed over for free, and the only evidence
+                        // there is while the card hook has still not fired in this process. The
+                        // last session ending is what the card going away looks like from here.
+                        releaseUnobservedCover(controllers);
                         rebindSession();
                     }
                 };
