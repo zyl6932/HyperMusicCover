@@ -128,6 +128,10 @@ public class CoverVideoEncoder {
             encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             encoder.start();
 
+            File rawFile = new File(destFile.getAbsolutePath() + ".raw.mp4");
+            if (rawFile.exists()) {
+                rawFile.delete();
+            }
             if (destFile.exists()) {
                 destFile.delete();
             }
@@ -136,7 +140,7 @@ public class CoverVideoEncoder {
                 parent.mkdirs();
             }
 
-            muxer = new MediaMuxer(destFile.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+            muxer = new MediaMuxer(rawFile.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
 
             int trackIndex = -1;
             boolean muxerStarted = false;
@@ -155,7 +159,10 @@ public class CoverVideoEncoder {
 
             // Feed 2 identical frames (0ms and 100ms) with EOS on frame 1
             for (int frame = 0; frame < 2; frame++) {
-                int inputIndex = encoder.dequeueInputBuffer(TIMEOUT_US);
+                int inputIndex = -1;
+                while (inputIndex < 0 && (SystemClock.uptimeMillis() - startTime) < 2000L) {
+                    inputIndex = encoder.dequeueInputBuffer(TIMEOUT_US);
+                }
                 if (inputIndex >= 0) {
                     ByteBuffer inputBuffer = encoder.getInputBuffer(inputIndex);
                     if (inputBuffer != null) {
@@ -165,6 +172,10 @@ public class CoverVideoEncoder {
                         int flags = (frame == 1) ? MediaCodec.BUFFER_FLAG_END_OF_STREAM : 0;
                         encoder.queueInputBuffer(inputIndex, 0, yuv.length, pts, flags);
                     }
+                } else {
+                    Xp.log(TAG + "Failed to dequeue input buffer for frame " + frame);
+                    rawFile.delete();
+                    return false;
                 }
             }
 
@@ -209,6 +220,28 @@ public class CoverVideoEncoder {
 
             if (!eosReached) {
                 Xp.log(TAG + "encodeBitmapToMp4: timed out or ended before EOS");
+                rawFile.delete();
+                if (destFile.exists()) {
+                    destFile.delete();
+                }
+                return false;
+            }
+
+            // Close muxer before injecting dual track
+            try {
+                muxer.stop();
+            } catch (Throwable ignored) {}
+            try {
+                muxer.release();
+            } catch (Throwable ignored) {}
+            muxer = null;
+
+            // Inject GoPro MET (gpmd) null-depth mask as Track 0
+            boolean injected = FastMp4Muxer.injectGpmdTrack(rawFile, destFile);
+            rawFile.delete();
+
+            if (!injected || !destFile.exists() || destFile.length() == 0) {
+                Xp.log(TAG + "encodeBitmapToMp4: FastMp4Muxer dual track injection failed");
                 if (destFile.exists()) {
                     destFile.delete();
                 }
@@ -218,7 +251,7 @@ public class CoverVideoEncoder {
             sLastContentKey = contentKey;
             sCachedVideoPath = destFile.getAbsolutePath();
             long cost = SystemClock.uptimeMillis() - startTime;
-            Xp.log(TAG + "1-frame MP4 generated successfully at " + destFile.getAbsolutePath()
+            Xp.log(TAG + "Dual-track cover MP4 generated successfully at " + destFile.getAbsolutePath()
                     + " (" + width + "x" + height + ", " + destFile.length() + "B, " + cost + "ms)");
             return true;
 
@@ -226,6 +259,10 @@ public class CoverVideoEncoder {
             Xp.log(TAG + "Failed to encode bitmap to mp4: " + t);
             return false;
         } finally {
+            File rawFile = new File(destFile.getAbsolutePath() + ".raw.mp4");
+            if (rawFile.exists()) {
+                rawFile.delete();
+            }
             if (scaledBitmap != null && scaledBitmap != bitmap) {
                 try {
                     scaledBitmap.recycle();

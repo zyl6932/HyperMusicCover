@@ -1142,9 +1142,133 @@ public class WallpaperProbe {
         if (!video && sCoverVideoActive) videoWindowTakeover(true);
     }
 
+    private static volatile long sSavedVideoPositionUs = 0;
+
     private static boolean isDepthEngine(Object eng) {
         if (eng == null) return false;
         return eng.getClass().getName().contains("Depth");
+    }
+
+    private static long getDepthVideoPositionUs(Object eng) {
+        Object mgr = videoDepthManager(eng);
+        if (mgr == null) return 0;
+        try {
+            Object fp = Xp.getObjectField(mgr, "j");
+            if (fp != null) {
+                long us = (Long) Xp.callMethod(fp, "getCurrentPositionUs");
+                if (us > 0) return us;
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            long us = (Long) Xp.getObjectField(mgr, "w");
+            if (us > 0) return us;
+        } catch (Throwable ignored) {
+        }
+        return 0;
+    }
+
+    private static void restoreDepthVideoPosition(Object eng, long posUs) {
+        if (posUs <= 0) return;
+        long posMs = posUs / 1000;
+        if (posMs >= 1500 || posMs <= 100) {
+            Xp.log(TAG + "restoreDepthVideoPosition: posMs=" + posMs + " near end/start, replaying naturally");
+            return;
+        }
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                Object mgr = videoDepthManager(eng);
+                if (mgr != null) {
+                    Xp.callMethod(mgr, "m1078h", posMs);
+                    Xp.log(TAG + "restoreDepthVideoPosition: seeked to " + posMs + "ms via depth manager");
+                    return;
+                }
+            } catch (Throwable ignored) {
+            }
+            try {
+                Object mgr = videoDepthManager(eng);
+                if (mgr != null) {
+                    Object fp = Xp.getObjectField(mgr, "j");
+                    if (fp != null) {
+                        Xp.callMethod(fp, "seekto", 0.0f, posMs, 0);
+                        Xp.log(TAG + "restoreDepthVideoPosition: FastPlayer seekto " + posMs + "ms");
+                    }
+                }
+            } catch (Throwable t) {
+                Xp.log(TAG + "restoreDepthVideoPosition failed: " + t);
+            }
+        }, 350L);
+    }
+
+    private static long getVideoPositionUs(Object eng) {
+        if (eng == null) return 0;
+        if (isDepthEngine(eng)) {
+            return getDepthVideoPositionUs(eng);
+        }
+        // Plain engine: KeyguardVideoEngineImpl -> f3121e (field "e", FastPlayerImpl) -> f2256t (field "t", FastPlayer)
+        try {
+            Object player = Xp.getObjectField(eng, "e");
+            if (player != null) {
+                Object fp = Xp.getObjectField(player, "t");
+                if (fp != null) {
+                    try {
+                        long us = (Long) Xp.callMethod(fp, "getCurrentPositionUs");
+                        if (us > 0) return us;
+                    } catch (Throwable ignored) {
+                    }
+                    try {
+                        long ms = (Long) Xp.callMethod(fp, "getCurrentPosition");
+                        if (ms > 0) return ms * 1000L;
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return 0;
+    }
+
+    private static void restoreVideoPosition(Object eng, long posUs) {
+        if (posUs <= 0 || eng == null) return;
+        if (isDepthEngine(eng)) {
+            restoreDepthVideoPosition(eng, posUs);
+            return;
+        }
+        long posMs = posUs / 1000L;
+        // If playback was already near the end (>=1500ms for a ~2000ms lock video) or just starting (<=100ms),
+        // do not seek, let it naturally replay from 0 without jumping.
+        if (posMs >= 1500 || posMs <= 100) {
+            Xp.log(TAG + "restorePlainVideoPosition: posMs=" + posMs
+                    + " is near end/start, replaying naturally from 0 without jump");
+            return;
+        }
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                Object player = Xp.getObjectField(eng, "e");
+                if (player != null) {
+                    try {
+                        Xp.callMethod(player, "mo1345i", posMs);
+                        Xp.log(TAG + "restorePlainVideoPosition: seeked to " + posMs + "ms via player.mo1345i");
+                        return;
+                    } catch (Throwable ignored) {
+                    }
+                    try {
+                        Xp.callMethod(player, "mo1047i", posMs);
+                        Xp.log(TAG + "restorePlainVideoPosition: seeked to " + posMs + "ms via player.mo1047i");
+                        return;
+                    } catch (Throwable ignored) {
+                    }
+                    Object fp = Xp.getObjectField(player, "t");
+                    if (fp != null) {
+                        Xp.callMethod(fp, "seekto", 0.0f, posMs, 0);
+                        Xp.log(TAG + "restorePlainVideoPosition: seeked to " + posMs + "ms via FastPlayer.seekto");
+                        return;
+                    }
+                }
+            } catch (Throwable t) {
+                Xp.log(TAG + "restorePlainVideoPosition failed: " + t);
+            }
+        });
     }
 
     /**
@@ -1158,19 +1282,6 @@ public class WallpaperProbe {
             return false;
         }
 
-        // The depth shape (KeyguardVideoDepthEngineImpl) relies on dual-stream alpha/depth video
-        // shaders in FastPlayer; feeding it a single-stream RGB MP4 results in a frozen green frame,
-        // and triggering onWallpaperUpdate resets the video playback to 0 ("stutter on entry/exit").
-        // On that shape, SystemUI's keyguard view layer already displays the cover cleanly without
-        // interrupting the live wallpaper. We only take over the wallpaper window on the plain shape
-        // (KeyguardVideoEngineImpl), where the wallpaper window is the sole rendering surface and
-        // the 1-frame MP4 eliminates blur bleed-through with zero side effects.
-        if (isDepthEngine(eng)) {
-            Xp.log(TAG + "videoWindowTakeover: depth engine (" + eng.getClass().getSimpleName()
-                    + ") detected - keeping SystemUI overlay mode to avoid alpha shader green frame and reload stutter");
-            return false;
-        }
-
         if (on) {
             if (!sCoverVideoActive) return true;
             sCoverVideoActive = false;
@@ -1178,6 +1289,10 @@ public class WallpaperProbe {
             Xp.log(TAG + "videoWindowTakeover: restoring original video wallpaper");
             restoreVideoPath(eng);
             triggerVideoReload(eng);
+            if (sSavedVideoPositionUs > 0) {
+                restoreVideoPosition(eng, sSavedVideoPositionUs);
+                sSavedVideoPositionUs = 0;
+            }
             return true;
         } else {
             final Bitmap art = sArt;
@@ -1189,6 +1304,12 @@ public class WallpaperProbe {
             if (ctx == null) {
                 Xp.log(TAG + "videoWindowTakeover: sCtx is null");
                 return false;
+            }
+            if (!sCoverVideoActive) {
+                long posUs = getVideoPositionUs(eng);
+                if (posUs > 0) sSavedVideoPositionUs = posUs;
+                Xp.log(TAG + "videoWindowTakeover: saved playback position: "
+                        + (sSavedVideoPositionUs / 1000) + "ms");
             }
             final long checksum = sCurrentArtChecksum;
 
