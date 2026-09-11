@@ -2565,7 +2565,7 @@ public class Main extends XposedModule {
             if (!usableDate(date)) return true;
             int[] loc = new int[2];
             date.getLocationOnScreen(loc);
-            float target = DATE_TOP_DP * date.getResources().getDisplayMetrics().density;
+            float target = dateTargetY();
             if (Math.abs(loc[1] - target) > 1.5f) return true;
         }
         for (View root : clockRoots()) {
@@ -3656,7 +3656,7 @@ public class Main extends XposedModule {
         if (g == null) return null;
         float d = g.getResources().getDisplayMetrics().density;
         return new float[]{box.width(), box.height(),
-                DATE_TOP_DP * d + (date == null ? 0 : date.getHeight()) + CLOCK_GAP_DP * d,
+                dateTargetY() + (date == null ? 0 : date.getHeight()) + CLOCK_GAP_DP * d,
                 g.getLeft() + box.left, g.getLeft() + clockPivotX(g, glyphBox())};
     }
 
@@ -3766,8 +3766,70 @@ public class Main extends XposedModule {
      *
      * Deliberately not derived from status_bar_height: that resource reads 182px here, which is
      * the whole cutout band rather than anything the eye lines up against.
+     *
+     * A dp is only ever as portable as the thing it is measured FROM, and this one is measured
+     * from the top of the screen. The OEM's own top margin is not a density-scaled quantity - it
+     * is the cut-out band plus a fixed inset - so a phone with a taller camera band has the
+     * keyguard's content starting lower in dp than this one does, and a pinned 76dp can put the
+     * date under the camera. See dateTargetY().
      */
     private static final float DATE_TOP_DP = 76f;
+    /** Air between the cut-out and the date, when the cut-out is what decides the line. */
+    private static final float DATE_SAFE_GAP_DP = 8f;
+
+    /** Gone off once, so a phone that keeps tripping the guard does not log every frame. */
+    private static volatile boolean sDateSafeNoted;
+
+    /**
+     * Where cover mode pins the date, in screen pixels.
+     *
+     * The tuned line, unless the top of the safe area is below it - in which case the date is
+     * pushed clear, because being unreadable under the camera is not a matter of taste. On the
+     * phone this was matched to the guard never fires: 76dp is 228px against a 144px status bar,
+     * so the answer is the tuned value and nothing about the look changes.
+     */
+    private static float dateTargetY() {
+        float tuned = DATE_TOP_DP * density();
+        float safe = safeAreaTopPx();
+        if (safe <= 0f) return tuned;
+        float guarded = safe + DATE_SAFE_GAP_DP * density();
+        if (guarded <= tuned + 0.5f) return tuned;
+        if (!sDateSafeNoted) {
+            sDateSafeNoted = true;
+            Xp.log(TAG + "date line: tuned " + r1(tuned) + "px sits under the top inset "
+                    + r1(safe) + "px, pinning to " + r1(guarded));
+        }
+        return guarded;
+    }
+
+    /**
+     * How deep the top of the screen is unusable, in pixels, or 0 for "no answer".
+     *
+     * The cut-out first - it is the thing that actually hides content - and the status bar's own
+     * inset as well, since a build with no cut-out still has a bar over the top of the keyguard.
+     * Both are read off the live window rather than out of a resource: the resource is a
+     * per-build number, and the question is about the display in hand.
+     *
+     * Read through the container, which is the view the keyguard hangs the clock off and so the
+     * one that knows which window this is. 0 is a real answer and the caller keeps the tuned
+     * line, rather than an exception moving the date to the top of the screen.
+     */
+    private static float safeAreaTopPx() {
+        View v = sContainer;
+        if (v == null) return 0f;
+        try {
+            android.view.WindowInsets insets = v.getRootWindowInsets();
+            if (insets == null) return 0f;
+            android.view.DisplayCutout cut = insets.getDisplayCutout();
+            if (cut != null && cut.getSafeInsetTop() > 0) return cut.getSafeInsetTop();
+            int bar = insets.getInsets(android.view.WindowInsets.Type.statusBars()).top;
+            return bar > 0 ? bar : 0f;
+        } catch (Throwable t) {
+            // An insets call that throws on some build is not a reason to move the date.
+            Xp.log(TAG + "date line: insets unavailable (" + t + "), keeping the tuned line");
+            return 0f;
+        }
+    }
 
     /**
      * Where the date sits with the squeeze wound all the way off, i.e. at the start of an entry.
@@ -3941,7 +4003,7 @@ public class Main extends XposedModule {
             date.getLocationOnScreen(loc);
             dateRead = loc[1];
             float here = loc[1] - date.getTranslationY();
-            target = DATE_TOP_DP * date.getResources().getDisplayMetrics().density;
+            target = dateTargetY();
             // PROBE: what the OEM's own function says this y means, next to what the screen
             // says. Equal means the computed one can be trusted and the measurement - and its one
             // frame of lag - can go.
@@ -4409,7 +4471,7 @@ public class Main extends XposedModule {
           // are. The first thing to look at when the slider appears to do nothing.
           .append(" anchored=").append(anchoredStyle())
           .append(" glassStyle=").append(clockHasGlass())
-          .append("\ndate: target=").append(r1(DATE_TOP_DP * dm.density))
+          .append("\ndate: target=").append(r1(dateTargetY()))
           .append("px from the top; the offset to it is computed per frame from where the date"
                   + " actually sits, so there is nothing remembered to report here")
           .append("\ngap=").append(CLOCK_GAP_DP).append("dp\n");
@@ -4899,9 +4961,8 @@ public class Main extends XposedModule {
         if (png == null) return;
         int[] loc = new int[2];
         date.getLocationOnScreen(loc);
-        float density = date.getResources().getDisplayMetrics().density;
         out.putByteArray("date", png);
-        out.putIntArray("daterect", new int[]{loc[0], Math.round(DATE_TOP_DP * density),
+        out.putIntArray("daterect", new int[]{loc[0], Math.round(dateTargetY()),
                 date.getWidth(), date.getHeight()});
     }
 
