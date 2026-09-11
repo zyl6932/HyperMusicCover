@@ -420,6 +420,9 @@ public class WallpaperProbe {
         try {
             Class<?> wsc = Xp.findClass("com.miui.miwallpaper.manager.WallpaperServiceController", sCl);
             for (Method m : wsc.getDeclaredMethods()) {
+                if (Modifier.isAbstract(m.getModifiers()) || Modifier.isNative(m.getModifiers())) {
+                    continue;
+                }
                 if (m.getReturnType() == String.class && m.getParameterCount() == 2) {
                     Class<?>[] p = m.getParameterTypes();
                     if (p[0] == int.class && p[1] == boolean.class) {
@@ -858,6 +861,7 @@ public class WallpaperProbe {
                             // A live wallpaper has no texture to fade back to - the way back
                             // is handing the surface to its player again.
                             if (videoPath()) {
+                                sCurrentArtChecksum = 0;
                                 sArt = null;
                                 sFitted = null;
                                 sFittedOf = null;
@@ -871,6 +875,7 @@ public class WallpaperProbe {
                                 startFade(from, to, new Runnable() {
                                     @Override
                                     public void run() {
+                                        sCurrentArtChecksum = 0;
                                         sArt = null;
                                         sFitted = null;
                                         sFittedOf = null;
@@ -880,6 +885,7 @@ public class WallpaperProbe {
                                 });
                                 return;
                             }
+                            sCurrentArtChecksum = 0;
                             sArt = null;
                             new File(c.getFilesDir(), ART_FILE).delete();
                             Xp.log(TAG + "art cleared");
@@ -887,8 +893,15 @@ public class WallpaperProbe {
                             byte[] jpg = i.getByteArrayExtra("jpg");
                             String file = i.getStringExtra("file");
                             Bitmap b = null;
-                            if (jpg != null) b = decodeToTextureSize(jpg);
-                            else if (file != null) b = BitmapFactory.decodeFile(file);
+                            if (jpg != null) {
+                                b = decodeToTextureSize(jpg);
+                                java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+                                crc.update(jpg);
+                                sCurrentArtChecksum = crc.getValue();
+                            } else if (file != null) {
+                                b = BitmapFactory.decodeFile(file);
+                                sCurrentArtChecksum = 0;
+                            }
                             if (b == null) {
                                 Xp.log(TAG + "art decode failed (jpg="
                                         + (jpg == null ? "null" : jpg.length + "B")
@@ -1090,6 +1103,7 @@ public class WallpaperProbe {
     /** Whether the video wallpaper is currently playing our 1-frame cover video. */
     private static volatile boolean sCoverVideoActive;
     private static volatile String sCoverVideoPath;
+    private static volatile long sCurrentArtChecksum;
     /**
      * The wallpaper's own playback path, held while cover mode has the manager's field.
      *
@@ -1128,6 +1142,11 @@ public class WallpaperProbe {
         if (!video && sCoverVideoActive) videoWindowTakeover(true);
     }
 
+    private static boolean isDepthEngine(Object eng) {
+        if (eng == null) return false;
+        return eng.getClass().getName().contains("Depth");
+    }
+
     /**
      * Controls dynamic video wallpaper cover mode.
      * @param on true to restore the original video wallpaper, false to activate the album cover video
@@ -1136,6 +1155,19 @@ public class WallpaperProbe {
         Object eng = sVideoEngine;
         if (eng == null) {
             Xp.log(TAG + "videoWindowTakeover: no video engine captured yet");
+            return false;
+        }
+
+        // The depth shape (KeyguardVideoDepthEngineImpl) relies on dual-stream alpha/depth video
+        // shaders in FastPlayer; feeding it a single-stream RGB MP4 results in a frozen green frame,
+        // and triggering onWallpaperUpdate resets the video playback to 0 ("stutter on entry/exit").
+        // On that shape, SystemUI's keyguard view layer already displays the cover cleanly without
+        // interrupting the live wallpaper. We only take over the wallpaper window on the plain shape
+        // (KeyguardVideoEngineImpl), where the wallpaper window is the sole rendering surface and
+        // the 1-frame MP4 eliminates blur bleed-through with zero side effects.
+        if (isDepthEngine(eng)) {
+            Xp.log(TAG + "videoWindowTakeover: depth engine (" + eng.getClass().getSimpleName()
+                    + ") detected - keeping SystemUI overlay mode to avoid alpha shader green frame and reload stutter");
             return false;
         }
 
@@ -1158,6 +1190,7 @@ public class WallpaperProbe {
                 Xp.log(TAG + "videoWindowTakeover: sCtx is null");
                 return false;
             }
+            final long checksum = sCurrentArtChecksum;
 
             sVideoWorker.submit(() -> {
                 try {
@@ -1166,7 +1199,7 @@ public class WallpaperProbe {
                     int h = sReportedH > 0 ? sReportedH : ctx.getResources().getDisplayMetrics().heightPixels;
                     Bitmap fitted = centerCrop(art, (w / 2) * 2, (h / 2) * 2);
 
-                    boolean ok = CoverVideoEncoder.encodeBitmapToMp4(fitted, videoFile);
+                    boolean ok = CoverVideoEncoder.encodeBitmapToMp4(fitted, videoFile, checksum);
                     if (ok && videoFile.exists() && videoFile.length() > 0) {
                         sCoverVideoPath = videoFile.getAbsolutePath();
                         sCoverVideoActive = true;
