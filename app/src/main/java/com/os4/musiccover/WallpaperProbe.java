@@ -410,7 +410,6 @@ public class WallpaperProbe {
                     return result;
                 });
                 hookVideoPathGetter(vd);
-                hookSurfaceChanged(vd);
                 Xp.log(TAG + "video engine hooked on " + cn.substring(cn.lastIndexOf('.') + 1));
             } catch (Throwable t) {
                 Xp.log(TAG + "video engine hook failed on " + cn + ": " + t);
@@ -1086,6 +1085,16 @@ public class WallpaperProbe {
     /** Whether the video wallpaper is currently playing our 1-frame cover video. */
     private static volatile boolean sCoverVideoActive;
     private static volatile String sCoverVideoPath;
+    /**
+     * The wallpaper's own playback path, held while cover mode has the manager's field.
+     *
+     * Read out of the field before we overwrite it rather than asked of the engine, because the
+     * engine's path getter is the thing we are shadowing - calling it while cover mode is on
+     * would hand back our own file.
+     */
+    private static volatile String sOriginalVideoPath;
+    /** Whether the manager's path field is currently ours rather than the wallpaper's. */
+    private static volatile boolean sPathPinned;
     private static final String COVER_VIDEO_FILE = "mc_cover.mp4";
     private static final java.util.concurrent.ExecutorService sVideoWorker =
             java.util.concurrent.Executors.newSingleThreadExecutor();
@@ -1130,6 +1139,7 @@ public class WallpaperProbe {
             sCoverVideoActive = false;
             sCoverVideoPath = null;
             Xp.log(TAG + "videoWindowTakeover: restoring original video wallpaper");
+            restoreVideoPath(eng);
             triggerVideoReload(eng);
             return true;
         } else {
@@ -1157,6 +1167,9 @@ public class WallpaperProbe {
                         sCoverVideoActive = true;
                         Xp.log(TAG + "videoWindowTakeover: cover video ready (" + videoFile.length()
                                 + "B), triggering reload on " + eng.getClass().getSimpleName());
+                        // Pin BEFORE the reload: the reload is what rebuilds the player, and it
+                        // reads the manager's cached path rather than our hooked getter.
+                        pinVideoPath(eng);
                         triggerVideoReload(eng);
                     } else {
                         Xp.log(TAG + "videoWindowTakeover: cover video encoding failed");
@@ -1167,6 +1180,126 @@ public class WallpaperProbe {
             });
             return true;
         }
+    }
+
+    /**
+     * The VideoDepthManager, reached through the engine that owns it.
+     *
+     * Not from its own constructor - that runs before the module is loaded - and not from its
+     * static instance field either, which is left null on this build. The engine is
+     * constructible after we are in, and holds the manager on field `p`: read straight off the
+     * disassembly of VideoDepthEngineImpl.T(), which does
+     * `iget-object v1, v4, VideoDepthEngineImpl;.p:L.../videodepth/VideoDepthManager;`.
+     *
+     * `p` is only the manager on the depth engine - on the plain one it is an unrelated
+     * obfuscated field of the same name, and reading it as a manager was good for one confusing
+     * "no field k1.f.j". The type is the thing that decides which shape this engine is, so
+     * check it rather than trusting the field name.
+     */
+    private static Object videoDepthManager(Object eng) {
+        try {
+            Object mgr = Xp.getObjectField(eng, "p");
+            if (mgr != null && mgr.getClass().getName().contains("VideoDepthManager")) {
+                sVideoDepth = mgr;
+                return mgr;
+            }
+            Xp.log(TAG + "vgl: engine field p is " + describe(mgr) + ", not a VideoDepthManager");
+        } catch (Throwable t) {
+            Xp.log(TAG + "vgl: cannot reach the VideoDepthManager: " + t);
+        }
+        return null;
+    }
+
+    /**
+     * The one String field on the VideoDepthManager: the path its player is opened with.
+     *
+     * Found by TYPE, not by name. The name is R8's (`q` on OS4.0.0.35) and this module has been
+     * broken by a rename before, but there is exactly one String field on the class - the
+     * disassembly of VideoDepthEngineImpl.T() shows it written from the engine's own path
+     * getter and read by the method that opens the player - so the type is the stronger
+     * identity. Refuses rather than guesses if a build ever has two.
+     */
+    private static java.lang.reflect.Field videoPathField(Object mgr) {
+        java.lang.reflect.Field found = null;
+        for (java.lang.reflect.Field f : mgr.getClass().getDeclaredFields()) {
+            if (f.getType() != String.class || Modifier.isStatic(f.getModifiers())) continue;
+            if (found != null) {
+                Xp.log(TAG + "vgl: " + mgr.getClass().getSimpleName() + " carries more than one "
+                        + "String field (" + found.getName() + ", " + f.getName()
+                        + ") - not guessing which is the path");
+                return null;
+            }
+            found = f;
+        }
+        if (found != null) found.setAccessible(true);
+        return found;
+    }
+
+    /** What the manager would open its player with right now. */
+    private static String videoPathFieldValue(Object mgr) {
+        java.lang.reflect.Field f = videoPathField(mgr);
+        if (f == null) return null;
+        try {
+            return (String) f.get(mgr);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Points the depth manager's cached playback path at `path`. Returns false if it could not.
+     *
+     * This is the fix for why the cover never appeared on this shape. The engine's own T() is
+     * the only writer of that field and the only caller of the path getter this module hooks,
+     * and onWallpaperUpdate - the reload we trigger - rebuilds the surfaces and the player
+     * WITHOUT re-running T(). Measured on the device: `releaseAndInitFastPlayer` ->
+     * `init fastplayer` -> `setDataSource path = /data/system/theme_magic/.../lock_wallpaper_video.mp4`,
+     * i.e. the intercepted path was loaded once and then thrown away on the next re-init, and
+     * the player kept the wallpaper's own video. Writing the field is what survives the reload.
+     */
+    private static boolean setVideoPath(Object mgr, String path) {
+        java.lang.reflect.Field f = videoPathField(mgr);
+        if (f == null) return false;
+        try {
+            f.set(mgr, path);
+            Xp.log(TAG + "vgl: playback path field " + f.getName() + " := " + path);
+            return true;
+        } catch (Throwable t) {
+            Xp.log(TAG + "vgl: cannot write the playback path field: " + t);
+            return false;
+        }
+    }
+
+    /** Writes our cover file into the manager's cached path, remembering the wallpaper's own. */
+    private static void pinVideoPath(Object eng) {
+        Object mgr = videoDepthManager(eng);
+        if (mgr == null) {
+            // Not a failure on the plain shape, where the author's device works without this:
+            // there the reload does re-read the hooked getter.
+            Xp.log(TAG + "vgl: no VideoDepthManager - the path stays unpinned, so the cover "
+                    + "survives only if the engine re-reads its getter on the reload");
+            return;
+        }
+        if (!sPathPinned) {
+            sOriginalVideoPath = videoPathFieldValue(mgr);
+            Xp.log(TAG + "vgl: the wallpaper's own playback path is " + sOriginalVideoPath);
+        }
+        sPathPinned = setVideoPath(mgr, sCoverVideoPath);
+    }
+
+    /** Puts the wallpaper's own path back. The reload that follows re-opens the player on it. */
+    private static void restoreVideoPath(Object eng) {
+        Object mgr = videoDepthManager(eng);
+        if (mgr == null) return;
+        String original = sOriginalVideoPath;
+        if (original != null) {
+            setVideoPath(mgr, original);
+        } else {
+            Xp.log(TAG + "vgl: never learned the wallpaper's own path - the field still holds "
+                    + describe(videoPathFieldValue(mgr)) + ", leaving it alone");
+        }
+        sPathPinned = false;
+        sOriginalVideoPath = null;
     }
 
     private static void triggerVideoReload(Object eng) {
@@ -1183,6 +1316,16 @@ public class WallpaperProbe {
 
     private static void hookVideoPathGetter(Class<?> cls) {
         for (Method m : cls.getDeclaredMethods()) {
+            // The path getter is ABSTRACT on the base class and implemented on the Keyguard
+            // subclass, and libxposed refuses to hook an abstract method by throwing - which
+            // aborted the rest of this loop's try block and logged the whole engine as a
+            // failure. Measured on the device, OS4.0.0.35:
+            //   "Cannot hook abstract methods: public abstract java.lang.String
+            //    com.miui.miwallpaper.wallpaperservice.impl.VideoDepthEngineImpl.M()"
+            // Skipping them is what the two concrete names in CLS_VIDEO_ENGINES are for.
+            if (Modifier.isAbstract(m.getModifiers()) || Modifier.isNative(m.getModifiers())) {
+                continue;
+            }
             if (m.getParameterCount() == 0 && m.getReturnType() == String.class
                     && !Modifier.isStatic(m.getModifiers())
                     && !m.getName().equals("toString")
@@ -1203,26 +1346,21 @@ public class WallpaperProbe {
         }
     }
 
-    private static void hookSurfaceChanged(Class<?> cls) {
-        for (Method m : cls.getDeclaredMethods()) {
-            Class<?>[] p = m.getParameterTypes();
-            if (p.length >= 3 && p[1] == int.class && p[2] == int.class) {
-                Xp.hook(m, chain -> {
-                    Object[] args = chain.getArgs().toArray();
-                    if (args.length >= 3 && args[1] instanceof Integer && args[2] instanceof Integer) {
-                        int w = (Integer) args[1];
-                        int h = (Integer) args[2];
-                        if (w > 0 && h > 0) {
-                            sReportedW = Math.min(w, h);
-                            sReportedH = Math.max(w, h);
-                            Xp.log(TAG + "video surface size reported: " + sReportedW + "x" + sReportedH);
-                        }
-                    }
-                    return chain.proceed();
-                });
-            }
-        }
-    }
+    // hookSurfaceChanged() used to live here: a sweep over "any 3-arg method whose 2nd and
+    // 3rd parameters are ints", writing the result into sReportedW/sReportedH. Two reasons it
+    // is gone rather than fixed.
+    //
+    // It never ran. onSurfaceChanged is declared on the base class and overridden by nobody, so
+    // the sweep over getDeclaredMethods() on the two Keyguard subclasses matched nothing, and
+    // on the base classes it sat behind the abstract-method throw above. Measured on the device
+    // across a full session: "video surface size reported" - 0 hits.
+    //
+    // And sReportedW/sReportedH are not its to write. They are the texture size the STILL
+    // wallpaper path scales its art by (fittedArt(), the fade agreement check), re-derived by
+    // the keyguard upload hook on every upload. A video surface size written into them is at
+    // best a transient lie and at worst a wrong crop. If the video surface size is ever needed,
+    // it goes in fields of its own.
+
 
     private static void dumpClass(String name, String grep) {
         if (name == null) { Xp.log(TAG + "need --es name"); return; }
