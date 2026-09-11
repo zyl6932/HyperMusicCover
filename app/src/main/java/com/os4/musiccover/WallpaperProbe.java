@@ -868,7 +868,12 @@ public class WallpaperProbe {
                                 + " nofrost=" + sSkipFrost
                                 + " fadems=" + sFadeMs
                                 + " engine=" + sKeyguardEngine
-                                + " videoEngine=" + sVideoEngine);
+                                + " videoEngine=" + sVideoEngine
+                                + " coverVideo=" + sCoverVideoActive
+                                + " pinned=" + sPathPinned);
+                        dumpVideoManager();
+                    } else if ("vpath".equals(op)) {
+                        dumpVideoManager();
                     } else if ("vgl".equals(op)) {
                         videoWindowTakeover(i.getBooleanExtra("on", true));
                     } else {
@@ -1202,6 +1207,49 @@ public class WallpaperProbe {
             Xp.log(TAG + "vgl: cannot write the playback path field: " + t);
             return false;
         }
+    }
+
+    /**
+     * The depth manager as it actually stands, read off the live object.
+     *
+     * Exists because the paper trail on this shape is not enough to debug it with: the OEM's
+     * own `VideoDepthManager##setDataSource` line says which path the ENGINE handed over, and
+     * the question after that is always whether the manager's cached field still holds it. This
+     * is the one place both are visible at the same moment.
+     */
+    private static void dumpVideoManager() {
+        Object eng = sVideoEngine;
+        if (eng == null) {
+            Xp.log(TAG + "vmanager: no video engine captured");
+            return;
+        }
+        Object mgr = videoDepthManager(eng);
+        if (mgr == null) {
+            Xp.log(TAG + "vmanager: engine is " + eng.getClass().getSimpleName()
+                    + " with no VideoDepthManager (plain shape)");
+            return;
+        }
+        int surfaces = 0;
+        StringBuilder sb = new StringBuilder();
+        try {
+            for (java.lang.reflect.Field f : mgr.getClass().getDeclaredFields()) {
+                if (f.getType() != android.view.Surface.class || Modifier.isStatic(f.getModifiers())) {
+                    continue;
+                }
+                f.setAccessible(true);
+                Object v = f.get(mgr);
+                if (v != null) surfaces++;
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(f.getName()).append(v == null ? "=null" : "=set");
+            }
+        } catch (Throwable t) {
+            sb.append("unreadable: ").append(t);
+        }
+        Xp.log(TAG + "vmanager: " + mgr.getClass().getSimpleName()
+                + " surfaces=" + surfaces + "/6 [" + sb + "]"
+                + " cachedPath=" + describe(videoPathFieldValue(mgr))
+                + " originalPath=" + describe(sOriginalVideoPath)
+                + " pinned=" + sPathPinned);
     }
 
     /** Writes our cover file into the manager's cached path, remembering the wallpaper's own. */
