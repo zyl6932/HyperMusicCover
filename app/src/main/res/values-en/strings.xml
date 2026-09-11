@@ -119,5 +119,5 @@
     <string name="update_status_title">Update</string>
     <string name="update_no_installer">No app on this device can install an APK - install it from a file manager</string>
     <string name="update_confirm">Update</string>
-    <string name="home_mode_fullscreen">Full-screen cover</string>
+    <string name="restart_scope">Restart all scoped apps</string>
 </resources>

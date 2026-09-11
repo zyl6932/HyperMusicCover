@@ -374,6 +374,20 @@ object ModuleBridge {
      */
     fun restartWallpaper(): Boolean = kill("com.miui.miwallpaper")
 
+    /**
+     * Every process the module is scoped to, in one go.
+     *
+     * Read from the scope list the module ships rather than hard-coded, so this keeps meaning
+     * "everything the module touches" if that list ever grows. For both entries today the process
+     * to restart has the same name as the package.
+     */
+    fun restartScope(context: Context): Boolean {
+        val scoped = context.resources.getStringArray(R.array.xposedscope)
+        var all = true
+        for (pkg in scoped) if (!kill(pkg)) all = false
+        return all
+    }
+
     private fun kill(process: String): Boolean = try {
         val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "kill \$(pidof $process)"))
         p.waitFor() == 0
