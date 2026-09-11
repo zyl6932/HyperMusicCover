@@ -1,6 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        The About page opens QQ and Telegram on their own deep links, and both are probed with
+        resolveActivity first, which package visibility would otherwise answer with null. The
+        tg scheme entry covers every Telegram client; the three packages cover QQ, TIM and QQ
+        International, which is all openQqGroup ever aims at.
+    -->
+    <queries>
+        <package android:name="com.tencent.mobileqq" />
+        <package android:name="com.tencent.tim" />
+        <package android:name="com.tencent.mobileqqi" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="tg" />
+        </intent>
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
