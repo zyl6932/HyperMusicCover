@@ -169,25 +169,22 @@ public class Main extends XposedModule {
     private static final float SQUEEZE_FLOOR = 740f;
     private static volatile float sAppliedK = Float.NaN;
     /**
-     * How light the strip of the cover that the collapsed clock and its date are drawn on is,
-     * 0..1. NaN = nothing measured, and every colour the OEM sets is left exactly as it is.
+     * The colour of the strip of the cover that the collapsed clock and its date are drawn on, as
+     * ARGB. 0 = nothing measured, and every colour the OEM sets is left exactly as it is.
      *
      * Read off the COMPOSED cover - mirrored, blurred, bias-placed - rather than off the album
      * art, because that is the picture the glyphs are actually over: at the default bias the
-     * sharp band starts below the clock, so what is behind it is the blur, and on a light cover
-     * that blur is light.
+     * sharp band starts below the clock, so what is behind it is the blur.
+     *
+     * Only HUE and SATURATION are taken from it; the lightness stays the OEM's. That split is the
+     * whole design. Hue and saturation are what make a clock look like it belongs on the picture;
+     * lightness is the half that decides whether it can be read at all, and the system has
+     * already worked that out from a palette. Overriding the lightness as well is what used to
+     * make the glyphs flip dark over a light cover.
      */
-    private static volatile float sCoverLuma = Float.NaN;
-    /** From a debug op, so both halves of the range can be tried without swapping tracks. */
-    private static volatile float sCoverLumaOverride = Float.NaN;
-    /** Below this the cover counts as dark, i.e. the glyphs have to go light. */
-    private static final float COVER_DARK_BELOW = 0.5f;
-    /**
-     * Where the glyph's lightness is put once the cover has decided the direction. Hue and
-     * saturation are what make the clock look like it belongs; these are the ends that make it
-     * readable, chosen far enough apart that a mid-grey cover still resolves to a real contrast.
-     */
-    private static final float GLYPH_DARK_V = 0.16f, GLYPH_LIGHT_V = 0.95f;
+    private static volatile int sCoverTint;
+    /** From a debug op, so a colour can be tried without hunting for the artwork that gives it. */
+    private static volatile int sCoverTintOverride;
     /**
      * The strip of the cover that gets sampled for that reading, in dp from the top of the
      * screen. Generous on purpose: the date is pinned to DATE_TOP_DP and the collapsed clock
@@ -918,6 +915,9 @@ public class Main extends XposedModule {
             // arrived at a colour - the wallpaper palette, a colour animation, or our own
             // updateGlassValue frame - it reaches a glyph through one of these setters, and
             // none of them has to know anything about the palette.
+            //
+            // The lightness is not touched here, and setBrightness - which carries the material's
+            // own dark/light flag and used to be hooked alongside these - deliberately is not.
             Xp.hookAll(timeView, "setGlassColor", chain -> {
                 View self = (View) chain.getThisObject();
                 if (!glassStyleFor(self)) return chain.proceed();
@@ -930,23 +930,6 @@ public class Main extends XposedModule {
                 if (!glassStyleFor(self)) return chain.proceed();
                 Object[] args = chain.getArgs().toArray();
                 args[0] = legible(self, (Integer) args[0]);
-                return chain.proceed(args);
-            });
-            // The material's own brightness, which the OEM takes from the same palette and which
-            // has to agree with the glyphs: the pale frosted kind goes with dark text, the dark
-            // kind with light text, and passing one against the other is a washed-out clock.
-            //
-            // The argument is the OEM's own flag, and the one it is given here is the value the
-            // palette would have handed it for a background as light as the cover - read off
-            // AllInOneBase.setClockPalette, which forwards its textDark to this call. Inferred
-            // rather than seen: it is the only part of this that a device test has to confirm,
-            // and if the small clock comes out washed rather than crisp, this is the line.
-            Xp.hookAll(timeView, "setBrightness", chain -> {
-                if (!glassStyleFor((View) chain.getThisObject())) return chain.proceed();
-                float luma = coverLuma();
-                if (Float.isNaN(luma)) return chain.proceed();
-                Object[] args = chain.getArgs().toArray();
-                args[0] = luma >= COVER_DARK_BELOW;
                 return chain.proceed(args);
             });
         } catch (Throwable t) {
@@ -1163,16 +1146,27 @@ public class Main extends XposedModule {
                         String name = i.getStringExtra("name");
                         if (name == null) dumpClockStyleInfo();
                         else dumpClass(name, i.getStringExtra("grep"));
-                    } else if ("cluma".equals(op)) {
-                        // The cover reading, by hand. Both halves of its range on one track,
-                        // instead of waiting for the right artwork to come round.
+                    } else if ("ctint".equals(op)) {
+                        // The cover's colour, by hand, so a tint can be tried without hunting for
+                        // the artwork that would produce it.
                         if (i.getBooleanExtra("off", false)) {
-                            sCoverLumaOverride = Float.NaN;
-                            Xp.log(TAG + "cover luma back to measured " + sCoverLuma);
+                            sCoverTintOverride = 0;
+                            Xp.log(TAG + "cover tint back to measured #"
+                                    + Integer.toHexString(sCoverTint));
                         } else {
-                            sCoverLumaOverride = i.getFloatExtra("v", 0.8f);
-                            Xp.log(TAG + "cover luma forced to " + sCoverLumaOverride
-                                    + " (measured " + sCoverLuma + ")");
+                            // A hex string rather than an int extra: `am --ei` parses with
+                            // Integer.valueOf, which does not take `0x`, and "#86a6b1" is how a
+                            // colour is written everywhere else in this file.
+                            String v = i.getStringExtra("v");
+                            try {
+                                sCoverTintOverride = v == null ? 0xff8888ff
+                                        : (int) Long.parseLong(v.replace("#", ""), 16);
+                            } catch (Throwable t) {
+                                Xp.log(TAG + "ctint: cannot read " + v);
+                                return;
+                            }
+                            Xp.log(TAG + "cover tint forced to #"
+                                    + Integer.toHexString(sCoverTintOverride));
                         }
                         recolorClock();
                     } else if ("gdata".equals(op)) {
@@ -1629,7 +1623,7 @@ public class Main extends XposedModule {
 
     private static void abandonHold(String why, boolean restore) {
         boolean held = sHoldY != null || sFrameCb != null || sRamp != null
-                || !Float.isNaN(sCollapseMin) || !Float.isNaN(sCoverLuma);
+                || !Float.isNaN(sCollapseMin) || sCoverTint != 0;
         stopMotion();
         sHoldY = null;
         sCurrentY = Float.NaN;
@@ -1672,10 +1666,11 @@ public class Main extends XposedModule {
         }
         // The cover's colouring goes back with the rest of cover mode, through the same call
         // that put it there: with nothing measured, the setter hooks hand the OEM's own colours
-        // straight through. Without this the date would stay dark over the wallpaper the cover
-        // was hiding - the one way this could leave the lock screen worse than it found it.
-        if (!Float.isNaN(sCoverLuma)) {
-            sCoverLuma = Float.NaN;
+        // straight through. Without this the clock would keep the cover's hue over the wallpaper
+        // the cover was hiding - the one way this could leave the lock screen worse than it found
+        // it.
+        if (sCoverTint != 0) {
+            sCoverTint = 0;
             recolorClock();
         }
         if (!Float.isNaN(sGlassV0)) {
@@ -5311,9 +5306,9 @@ public class Main extends XposedModule {
             out.putExtra("off", true);
             ctx.sendBroadcast(out);
             sTrackKey = "";
-            // Nothing behind the clock any more, so nothing to judge the colour against. The
-            // repaint that hands the OEM's own colours back happens with the rest of cover mode.
-            sCoverLuma = Float.NaN;
+            // Nothing behind the clock any more, so nothing to take a colour from. The repaint
+            // that hands the OEM's own colours back happens with the rest of cover mode.
+            sCoverTint = 0;
             Xp.log(TAG + "pushart off");
             return;
         }
@@ -5324,7 +5319,7 @@ public class Main extends XposedModule {
         if (sCoverMode) recolorClock();
         long tc = android.os.SystemClock.uptimeMillis();
         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-        int q = 85;
+        int q = 95;
         byte[] jpg;
         do {
             bos.reset();
@@ -6341,8 +6336,8 @@ public class Main extends XposedModule {
         // than at the settle: the clock is at its smallest now, so the colour going back to the
         // OEM's is at its least visible, and the animated exit keeps the cover's colour off the
         // frames in between.
-        if (!Float.isNaN(sCoverLuma)) {
-            sCoverLuma = Float.NaN;
+        if (sCoverTint != 0) {
+            sCoverTint = 0;
             recolorClock();
         }
         armTransitionTrace("leaving cover mode");
@@ -7469,20 +7464,25 @@ public class Main extends XposedModule {
         // construction, and the blur keeps local colour instead of averaging the whole image.
         int bw = Math.max(1, w / 4), bh = Math.max(1, h / 4);
         float k = bw / (float) w;
-        float cH = coverH * k, tp = top * k;
+        // Floored at a pixel: a panorama's band is a fraction of a row, and the loop below counts
+        // copies of it.
+        float cH = Math.max(1f, coverH * k), tp = top * k;
         Bitmap bg = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
         android.graphics.Canvas bc = new android.graphics.Canvas(bg);
         bc.drawBitmap(src, null, new android.graphics.RectF(0, tp, bw, tp + cH), p);
-        bc.save();
-        bc.translate(0, tp);
-        bc.scale(1f, -1f);
-        bc.drawBitmap(src, null, new android.graphics.RectF(0, 0, bw, cH), p);
-        bc.restore();
-        bc.save();
-        bc.translate(0, tp + cH);
-        bc.scale(1f, -1f);
-        bc.drawBitmap(src, null, new android.graphics.RectF(0, -cH, bw, 0), p);
-        bc.restore();
+        // One mirrored copy each way is what this was, and it covers the background only while
+        // the band is a large part of the screen: a square cover puts it at 1200 of 2608 and the
+        // copy reaches both edges. A LANDSCAPE cover does not. Measured on a 960x539 artwork at
+        // the default bias: the band is 674px, the single copy below it ends at 2057, and the
+        // last 551 rows were never painted at all - the blur came out with a black bottom fifth.
+        // The mirror is periodic with 2*coverH either way, so this draws the same picture,
+        // continued until the background runs out.
+        int tiles = Math.min(64, (int) Math.ceil(bh / cH) + 1);
+        for (int i = 1; i <= tiles; i++) {
+            boolean flip = (i % 2) == 1;
+            drawTile(bc, src, bw, cH, tp + i * cH, flip, p);
+            drawTile(bc, src, bw, cH, tp - i * cH, flip, p);
+        }
 
         Bitmap blurred = blur(bg, 48, 4, 3);
         cv.drawBitmap(blurred, null, new android.graphics.RectF(0, 0, w, h), p);
@@ -7493,6 +7493,30 @@ public class Main extends XposedModule {
         cv.drawBitmap(band, null, new android.graphics.RectF(0, top, w, top + coverH), p);
         band.recycle();
         return out;
+    }
+
+    /**
+     * One mirrored copy of the artwork, cH tall with its top edge at y, clipped to the canvas.
+     *
+     * `flip` alternates down the strip, and that is what makes it a mirror rather than a repeat:
+     * every copy is the reflection of the one before it, so the rows either side of a seam are
+     * the same row of the artwork and the join is continuous by construction. Drawing it as a
+     * translate to the tile's own bottom edge plus a vertical scale of -1, into a destination
+     * rect that starts at this canvas's origin, is the same transform the one-copy version used
+     * for both of the copies it drew.
+     */
+    private static void drawTile(android.graphics.Canvas cv, Bitmap src, int bw, float cH,
+                                 float y, boolean flip, android.graphics.Paint p) {
+        if (y > cv.getHeight() || y + cH < 0f) return;
+        if (!flip) {
+            cv.drawBitmap(src, null, new android.graphics.RectF(0, y, bw, y + cH), p);
+            return;
+        }
+        cv.save();
+        cv.translate(0, y + cH);
+        cv.scale(1f, -1f);
+        cv.drawBitmap(src, null, new android.graphics.RectF(0, 0, bw, cH), p);
+        cv.restore();
     }
 
     /**
@@ -8110,49 +8134,41 @@ public class Main extends XposedModule {
         });
     }
 
-    /**
-     * The luminance every colour decision is made against, or NaN when there is nothing to make
-     * one against - no cover measured, cover mode off - and the OEM's colouring is therefore
-     * left exactly as it is.
-     *
-     * The screen check is the AOD one. Cover mode outlives the display going off, and the
-     * glyphs are the same TimeViews in the always-on view: forcing the clock dark for a light
-     * cover on a black AOD face is the one way this could make things worse than it found them.
-     * `isInteractive` is false in AOD, so the OEM's own colouring stands there.
-     */
-    private static float coverLuma() {
-        // The AOD is the system's, colour and all - see applyGlassMorph(), which is the other
-        // half of handing it over. The cover's luma describes a picture the AOD is not drawn on:
-        // there is no wallpaper behind those glyphs, so a cover that asks for dark glyphs is
-        // asking for a clock that cannot be read on a black screen.
-        if (!sCoverMode || !sScreenOn) return Float.NaN;
-        float forced = sCoverLumaOverride;
-        return Float.isNaN(forced) ? sCoverLuma : forced;
+    /** The cover's colour, or 0 when there is nothing to take one from. */
+    private static int coverTint() {
+        // The screen check is the AOD one. Cover mode outlives the display going off, and the
+        // glyphs are the same TimeViews in the always-on view: the cover's colour describes a
+        // picture the AOD is not drawn on, and repainting those glyphs in it is the one way this
+        // could make things worse than it found them. `isInteractive` is false in AOD, so the
+        // OEM's own colouring stands there.
+        if (!sCoverMode || !sScreenOn) return 0;
+        int forced = sCoverTintOverride;
+        return forced != 0 ? forced : sCoverTint;
     }
 
     /**
-     * The OEM's colour with only its lightness moved, or that same colour back when there is no
-     * cover to judge it against.
+     * The OEM's colour with its hue and saturation replaced by the cover's, or that same colour
+     * back when there is no cover to take one from.
      *
-     * This is the whole fix for the light cover. The system's automatic clock colouring is
-     * computed from the wallpaper's palette, and the cover replaces the wallpaper behind
-     * SystemUI's back, so the palette arriving here describes a picture the clock is no longer
-     * drawn on: a dark wallpaper gives the OEM light glyphs, the cover underneath them is light
-     * too, and the small clock all but disappears - Taylor Swift's *Lover* is the case that
-     * started this. Hue and saturation are what make the clock look like it belongs, so they
-     * survive untouched; lightness is what decides whether it can be read at all, so that comes
-     * from the cover.
+     * The system's automatic clock colouring is computed from the wallpaper's palette, and the
+     * cover replaces the wallpaper behind SystemUI's back - so the palette arriving here
+     * describes a picture the clock is no longer drawn on. What is wanted is a clock in the
+     * colour of the picture it is actually over, which is what this puts back. Lightness is
+     * deliberately NOT taken from the cover: that half belongs to the system.
      */
     private static int legible(View v, int argb) {
-        float luma = coverLuma();
-        if (Float.isNaN(luma)) return argb;
-        float[] hsv = new float[3];
+        int tint = coverTint();
+        if (tint == 0) return argb;
+        float[] cover = new float[3], hsv = new float[3];
+        android.graphics.Color.colorToHSV(tint, cover);
         android.graphics.Color.colorToHSV(argb, hsv);
-        hsv[2] = luma < COVER_DARK_BELOW ? GLYPH_LIGHT_V : GLYPH_DARK_V;
+        hsv[0] = cover[0];
+        hsv[1] = cover[1];
         int out = android.graphics.Color.HSVToColor(android.graphics.Color.alpha(argb), hsv);
         if (sVerbose) {
             Xp.log(TAG + "colour " + Integer.toHexString(argb) + " -> "
-                    + Integer.toHexString(out) + " over luma " + r2(luma) + " " + viewIdOf(v));
+                    + Integer.toHexString(out) + " over tint " + Integer.toHexString(tint)
+                    + " " + viewIdOf(v));
         }
         return out;
     }
@@ -8179,25 +8195,31 @@ public class Main extends XposedModule {
             }
             int top = Math.max(0, Math.round(topPx));
             int bottom = Math.min(full.getHeight(), Math.round(botPx));
-            if (bottom - top < 8) { sCoverLuma = Float.NaN; return; }
+            if (bottom - top < 8) { sCoverTint = 0; return; }
             int stride = Math.max(1, (bottom - top) / 24);
             int[] row = new int[full.getWidth()];
-            double sum = 0;
+            long sr = 0, sg = 0, sb = 0;
             int n = 0;
             for (int y = top; y < bottom; y += stride) {
                 full.getPixels(row, 0, row.length, 0, y, row.length, 1);
                 for (int x = 0; x < row.length; x += 8) {
-                    sum += android.graphics.Color.luminance(row[x]);
+                    int c = row[x];
+                    sr += (c >> 16) & 0xff;
+                    sg += (c >> 8) & 0xff;
+                    sb += c & 0xff;
                     n++;
                 }
             }
-            if (n == 0) { sCoverLuma = Float.NaN; return; }
-            sCoverLuma = (float) (sum / n);
-            Xp.log(TAG + "cover luma " + r2(sCoverLuma) + " over " + n
+            if (n == 0) { sCoverTint = 0; return; }
+            // The plain average of the band, which the mirror-blur has already smoothed: one
+            // number describing the picture behind the glyphs rather than any one pixel of it.
+            sCoverTint = 0xff000000 | ((int) (sr / n) << 16) | ((int) (sg / n) << 8)
+                    | (int) (sb / n);
+            Xp.log(TAG + "cover tint #" + Integer.toHexString(sCoverTint) + " over " + n
                     + "px, band " + top + ".." + bottom);
         } catch (Throwable t) {
-            sCoverLuma = Float.NaN;
-            Xp.log(TAG + "cover luma failed: " + t);
+            sCoverTint = 0;
+            Xp.log(TAG + "cover tint failed: " + t);
         }
     }
 
