@@ -1357,7 +1357,26 @@ public class Main extends XposedModule {
             public void onReceive(Context c, Intent i) {
                 String a = i.getAction();
                 if (Intent.ACTION_SCREEN_ON.equals(a)) {
-                    reassertCoverClock();
+                    // The clock was handed back on the way down, so it is where the OEM left
+                    // it - natural position, full size - and taking the hold back here is a real
+                    // move. reassertCoverClock() snaps it, and a snap on this one is a teleport:
+                    // measured on this device the container crosses 728px in the single frame
+                    // the snap lands on, and the placement that compensates for that move has to
+                    // be written before the frame is drawn - so that frame renders the date
+                    // 728px from where it belongs. One frame of that is a jump, and the retries
+                    // after it make a few more: "从aod点亮之后小时钟会跳几次再停止".
+                    //
+                    // A timed ramp instead, so every frame moves one frame's worth of pixels.
+                    // Not the spring entering cover mode uses: that settles in about 300ms and
+                    // spends the first third of it doing most of the travelling - measured,
+                    // 0.26 of the collapse inside its first two frames, which on this 752px
+                    // move is 368px of the date in one step, and one step is what the user sees.
+                    // An entry has no travel to do (the date's ideal path there is a few pixels)
+                    // and the spring is right for it; this is a move, and a move wants a
+                    // duration. Where the hold survived the display going off there is nothing
+                    // to animate at all, and the old re-assert is exactly right.
+                    if (sCoverMode && sHoldY == null) wakeIntoCover();
+                    else reassertCoverClock();
                     // Waking re-runs the OEM's depth pipeline, and if the keyguard was rebuilt
                     // while the screen was off the guard went away with the old view.
                     if (sDepthHidden) setDepthHidden(true);
@@ -1366,16 +1385,27 @@ public class Main extends XposedModule {
                     if (sCoverMode) applyMediaCard();
                     return;
                 }
-                // Cover mode deliberately survives the screen going off. Releasing and then
-                // snapping back on wake is what made the AOD-to-lockscreen transition jump:
-                // the clock rendered at its natural size for the first frames and was then
-                // yanked to the collapsed one. Holding throughout means every emission the OEM
-                // makes during that transition is already coerced, so there is nothing to jump.
-                // (The screen-off release still applies otherwise - that is what stopped a
-                // stale hold from leaking into the next keyguard.)
+                // Cover mode outlives the display going off. Its grip on the clock does not.
+                //
+                // The AOD transition is the OEM's own animation of the clock container, and it
+                // is not driven by notifY at all: measured on the way down, notifStateChange and
+                // setNotifY are never called, and what moves is the container itself - the
+                // date's own position (read with our translation divided out) walks 278 -> 912
+                // -> 978 -> 980, and 981 is its UNSQUEEZED layout top. The OEM is taking the
+                // clock back out of the squeeze for the AOD face, and the AOD clock is drawn
+                // where that lands.
+                //
+                // Holding throughout meant the placement dragged the date back to its cover
+                // position on every frame of that walk. The small clock stayed where the big one
+                // no longer was, and what the user sees is the two never meeting - while the
+                // uncollapsed clock, with nothing of ours writing to it, lands exactly on the
+                // AOD face: "大时间可以".
+                //
+                // So the clock is handed back for the AOD and taken again on the way up.
+                // Releasing only releases: the hold, the scale, the tint and the card all go
+                // together, which is what makes the OEM's own transition the whole story.
                 if (Intent.ACTION_SCREEN_OFF.equals(a) && sCoverMode) {
-                    stopMotion();
-                    Xp.log(TAG + "screen off, cover mode keeps the clock held");
+                    abandonHold("screen off, the clock goes back for the AOD", true);
                     return;
                 }
                 abandonHold(a, true);
@@ -2929,7 +2959,17 @@ public class Main extends XposedModule {
                 oemNote = " oem=" + r1(oemT) + " computedHere=" + r1(computed)
                         + " diff=" + r1(computed - here);
             }
-            if (p < 0.02f) sDateNatural = here;
+            // Sampled ONCE per collapse - at the first placement whose p is anywhere near zero,
+            // which on every path that has one is the entry's first frame.
+            //
+            // It used to be re-sampled on every frame with p < 0.02, and on a wake that is a
+            // jump of its own: the ramp starts at p = 0 with the date still at the AOD position
+            // (measured, 980), the OEM's container then steps 449px towards the squeeze in the
+            // next frame, and a `from` that follows it pins the date to the new reading - so the
+            // date is dragged 980 -> 531 in one frame with nothing asked for it. Frozen, the
+            // OEM's step is cancelled by the nudge instead and the date stays on the path the
+            // ramp puts it on.
+            if (Float.isNaN(sDateNatural)) sDateNatural = here;
             float from = Float.isNaN(sDateNatural) ? here : sDateNatural;
             nudge = from + (target - from) * p - here;
             date.setTranslationY(nudge);
@@ -5152,6 +5192,38 @@ public class Main extends XposedModule {
             applyMediaCard();
         }
         saveState();
+    }
+
+    /**
+     * Takes the hold back on the way up from the AOD, over one spring.
+     *
+     * Not reassertCoverClock(): that writes the hold and drives it in one snap, which is right
+     * when the collapse is already on the views and wrong when it is not. See the wake path in
+     * registerReceiver() for what the snap costs.
+     *
+     * `from` - where the date sits with the squeeze wound off, which is what the placement
+     * blends the path from - is re-sampled here rather than taken from whatever the last cover
+     * mode left. It is only ever sampled while p is near zero, and the spring starts there, so
+     * the reading is the position the date is actually at; a remembered one belongs to a
+     * different layout and the path would begin with a jump of its own.
+     */
+    private static final long WAKE_RAMP_MS = 380L;
+
+    private static void wakeIntoCover() {
+        sCollapseMin = sClockScale;
+        sGlassV0 = 0f;
+        sGlassV1 = sGlassEnd;
+        sAppliedK = Float.NaN;
+        sAppliedGlassV = Float.NaN;
+        sDateNatural = Float.NaN;
+        sCardP = 1f;
+        applyMediaCard();
+        rampTo(SQUEEZE_FLOOR, WAKE_RAMP_MS, "STATE_CHANGED");
+        // The ramp above cannot carry the card on a style that emits no notifY; see
+        // oemDrivesCard().
+        if (!oemDrivesCard()) animateCardTo(1f, null);
+        recolorClock();
+        ensureClockGuard();
     }
 
     /**
