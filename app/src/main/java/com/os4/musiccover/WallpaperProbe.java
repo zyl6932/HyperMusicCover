@@ -47,6 +47,35 @@ public class WallpaperProbe {
     /** The fitted copy of sArt, kept so the GL thread never rescales during a track change. */
     private static volatile Bitmap sFitted;
     private static volatile Bitmap sFittedOf;
+    /**
+     * Give the keyguard a texture the size of the SCREEN instead of the size of the wallpaper
+     * file. On by default; the `texfit` probe turns it off.
+     *
+     * MIUI builds the keyguard texture at whatever `WallpaperManager.peekBitmapDimensions()`
+     * says, and `ImageGLWallpaper.setupTexture()` allocates it from the bitmap it is handed, so
+     * a phone whose lock wallpaper is 2121x4712 uploads 38MB per swap - twice - and our art has
+     * to be scaled UP to that size to keep the GL matrix (built from the same dimensions) honest.
+     * It also puts the fade over its own threshold, so the swap is a cut. Measured on the phone
+     * that reported it: 1.3s to re-fit the wallpaper, then 38MB twice on every swap.
+     *
+     * The fix the module shipped first rewrote the wallpaper FILE (fitLockWallpaperToScreen in
+     * Main), which is what costs the user their depth cut-out: MIUI's subject segmentation is
+     * tied to the wallpaper the picker set, and nothing re-analyses a file we wrote ourselves.
+     *
+     * This does it without touching the file. Both ends of the pair move together:
+     *   - the bitmap the upload gets, fitted to the surface, in screenSized() below;
+     *   - the rectangle updateMVPMatrix() builds the matrix from, in the hook further down.
+     * With those agreeing, the texture is the screen's size and the picture is where it belongs.
+     * On a phone whose lock wallpaper IS the screen's size both halves return early and nothing
+     * happens at all, which is every phone until someone picks a big picture.
+     *
+     * sKeyguardTexture is the wallpaper process's own ImageWallpaperRenderer$WallpaperTexture for
+     * the KEYGUARD renderer - the desktop wallpaper shares this code and is not ours to resize.
+     */
+    private static volatile boolean sTexFit = true;
+    private static volatile Object sKeyguardTexture;
+    private static Bitmap sScreenArt;
+    private static Bitmap sScreenArtOf;
     private static volatile int sReportedW, sReportedH;
 
     /**
@@ -203,6 +232,22 @@ public class WallpaperProbe {
                 boolean keyguard = chain.getThisObject().getClass().getName().contains("Keyguard");
                 if (keyguard && args.length > 0 && args[0] instanceof Bitmap) {
                     Bitmap orig = (Bitmap) args[0];
+                    if (sKeyguardTexture == null) {
+                        // Kept so the dimension hook can tell the keyguard's texture from the
+                        // desktop one's: same class, two instances, and only one of them is ours.
+                        try {
+                            sKeyguardTexture = Xp.getObjectField(chain.getThisObject(), "mTexture");
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                    // The experiment's other half. Everything below - the fade size check, the
+                    // art fit, sReportedW/H that fittedArt() scales by - then sees the screen's
+                    // size rather than the wallpaper file's, which is the whole point.
+                    Bitmap screen = screenSized(orig);
+                    if (screen != null) {
+                        orig = screen;
+                        args[0] = screen;
+                    }
                     int w = orig.getWidth(), h = orig.getHeight();
                     if (w != sReportedW || h != sReportedH) {
                         sReportedW = w;
@@ -275,6 +320,26 @@ public class WallpaperProbe {
             // the short-circuit below in the same breath. This is the one that matters: with
             // it gone the texture is never replaced, so the cover does nothing at all.
             Xp.log(TAG + "upload path hook FAILED - the cover cannot be drawn: " + t);
+        }
+
+        // The experiment's other half. updateMVPMatrix(surfaceW, surfaceH, getTextureDimensions())
+        // builds the GL matrix from this rectangle, so a screen-sized upload with a
+        // wallpaper-sized source rect draws the picture whichever way the two disagree - a corner
+        // of it in a corner of the screen, which is the failure our own art-fit comment describes.
+        // Both ends move together or neither does.
+        try {
+            Class<?> tex = Xp.findClass(
+                    "com.miui.miwallpaper.opengl.ImageWallpaperRenderer$WallpaperTexture", sCl);
+            Xp.hookAll(tex, "getTextureDimensions", chain -> {
+                Object self = chain.getThisObject();
+                if (!sTexFit || self == null || self != sKeyguardTexture) return chain.proceed();
+                int w = sSurfaceW, h = sSurfaceH;
+                if (w <= 0 || h <= 0) return chain.proceed();
+                return new android.graphics.Rect(0, 0, w, h);
+            });
+            Xp.log(TAG + "texture dimension hook installed");
+        } catch (Throwable t) {
+            Xp.log(TAG + "texture dimension hook failed: " + t);
         }
 
         // Measured: of the ~380ms a track change took, 210ms was the OEM's own getBitmap()
@@ -408,16 +473,6 @@ public class WallpaperProbe {
             Xp.log(TAG + "frosting hooked");
         } catch (Throwable t) {
             Xp.log(TAG + "frosting hook failed: " + t);
-        }
-
-        // getBitmap() turned out never to be called - the texture does not travel that way - so
-        // trace every Bitmap-carrying method and constructor on the renderers from load time.
-        // The GL surface is created during process startup, so a hook added later misses it.
-        for (String cn : new String[]{
-                "com.miui.miwallpaper.opengl.ImageWallpaperRenderer",
-                "com.miui.miwallpaper.opengl.AnimImageWallpaperRenderer",
-                "com.miui.miwallpaper.container.openGL.KeyguardAnimImageWallpaperRenderer"}) {
-            traceBitmaps(cn);
         }
 
         Xp.hook(Xp.findMethodExact(Application.class, "onCreate"), chain -> {
@@ -783,6 +838,17 @@ public class WallpaperProbe {
                         dumpClass(i.getStringExtra("name"), i.getStringExtra("grep"));
                     } else if ("bmp".equals(op)) {
                         traceBitmaps(i.getStringExtra("name"));
+                    } else if ("texfit".equals(op)) {
+                        // The one switch for the screen-sized keyguard texture, which is on unless
+                        // this turns it off: if a phone ever draws the wallpaper into a corner,
+                        // this is what to reach for. A reload is what makes the next upload
+                        // re-read every one of these numbers, and reloadTexture() is also how the
+                        // surface size gets known here (the first upload of a process runs before
+                        // onSurfaceChanged has set it).
+                        sTexFit = i.getBooleanExtra("on", !sTexFit);
+                        Xp.log(TAG + "texture fit to screen " + (sTexFit ? "ON" : "off")
+                                + " (surface " + sSurfaceW + "x" + sSurfaceH + ")");
+                        reloadTexture();
                     } else if ("art".equals(op)) {
                         final Context cc = c;
                         boolean reload = i.getBooleanExtra("reload", false);
@@ -1197,6 +1263,18 @@ public class WallpaperProbe {
      * Hooks every method of a class that carries a Bitmap in or out and logs it, which is how
      * we find where the wallpaper texture actually enters the renderer.
      */
+    /**
+     * Hooks every Bitmap-carrying method and constructor on a renderer, and logs each call with
+     * its arguments and result. Reached only through the `bmp` probe op.
+     *
+     * It used to run at load time, for the whole list of renderers, to find out how the wallpaper
+     * bitmap travels into the GL texture. That question is answered (the answer is
+     * onSurfaceCreated -> mTexture.use -> the lambda we replace the bitmap in, which is where the
+     * module has worked since), and the cost of leaving it on was a hook on every one of those
+     * methods in every wallpaper process, plus a log line per call, whether or not anyone was
+     * looking. It stays as a probe because the first step in porting this module to a build whose
+     * R8 names have moved is reading them back off the phone, and this is the tool that does it.
+     */
     private static void traceBitmaps(String name) {
         if (name == null) { Xp.log(TAG + "need --es name"); return; }
         Class<?> c;
@@ -1253,6 +1331,39 @@ public class WallpaperProbe {
             Xp.log(sb.toString());
             return result;
         };
+    }
+
+    /**
+     * The bitmap the GL upload should get, at the size the texture should be - or null when
+     * there is nothing to change.
+     *
+     * Null for the three cases that must not be touched: the experiment is off, the surface size
+     * is not known yet (the first upload of a process runs before onSurfaceChanged has set it),
+     * or the bitmap is already that size. Cached per source, because the source is either the
+     * module's own art or the OEM's one wallpaper and both repeat.
+     */
+    private static Bitmap screenSized(Bitmap src) {
+        int w = sSurfaceW, h = sSurfaceH;
+        if (!sTexFit || src == null || w <= 0 || h <= 0) return null;
+        if (src.getWidth() == w && src.getHeight() == h) return null;
+        if (sScreenArt != null && sScreenArtOf == src
+                && sScreenArt.getWidth() == w && sScreenArt.getHeight() == h) {
+            return sScreenArt;
+        }
+        Bitmap fitted;
+        try {
+            fitted = centerCrop(src, w, h);
+        } catch (Throwable t) {
+            Xp.log(TAG + "screen-size fit failed: " + t);
+            return null;
+        }
+        Bitmap old = sScreenArt;
+        if (old != null && old != src && old != sArt) old.recycle();
+        sScreenArt = fitted;
+        sScreenArtOf = src;
+        Xp.log(TAG + "texture fitted to the screen: " + describe(src)
+                + " -> " + describe(fitted));
+        return fitted;
     }
 
     private static String describe(Object o) {

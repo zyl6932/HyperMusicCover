@@ -41,6 +41,7 @@ object ModuleBridge {
         val player: String = "",
         val mcHideArt: Boolean = false,
         val mcCenterText: Boolean = false,
+        val mcTitleTap: Boolean = false,
         val hideFingerprint: Boolean = false,
         /** 0 system default, 1 never avoid the fingerprint icon, 2 always avoid it. */
         val fpAvoid: Int = 0,
@@ -120,6 +121,9 @@ object ModuleBridge {
 
     fun setCardCenterText(context: Context, on: Boolean) =
         send(context, "mediacard") { putExtra("centertext", on) }
+
+    fun setCardTitleTap(context: Context, on: Boolean) =
+        send(context, "mediacard") { putExtra("titletap", on) }
 
     // Its own op rather than a third extra on "mediacard": the switch sits under the card
     // options on screen, but it has nothing to do with the card, and grouping it there on the
@@ -316,6 +320,7 @@ object ModuleBridge {
             player = b.getString("player") ?: "",
             mcHideArt = b.getBoolean("mcart", false),
             mcCenterText = b.getBoolean("mctext", false),
+            mcTitleTap = b.getBoolean("mctap", false),
             hideFingerprint = b.getBoolean("hidefp", false),
             fpAvoid = b.getInt("fpavoid", 0),
             geometry = Geometry(

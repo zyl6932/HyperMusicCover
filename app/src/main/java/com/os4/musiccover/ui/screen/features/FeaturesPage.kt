@@ -328,6 +328,18 @@ private fun CardGroup(
                 onCardRestyled()
             },
         )
+        // Requested for a reason of its own: on this card the real play/pause button sits over
+        // the fingerprint sensor, so a thumb aiming for it unlocks the phone instead. The title
+        // is the one part of the card that is both big and far from the sensor.
+        SwitchPreference(
+            title = stringResource(R.string.card_title_tap),
+            checked = module.mcTitleTap,
+            enabled = enabled,
+            onCheckedChange = {
+                onChange(module.copy(mcTitleTap = it))
+                ModuleBridge.setCardTitleTap(context, it)
+            },
+        )
         // Sits here because that is where it was asked for, but it is not a card setting and
         // does not follow cover mode - which the summary says, since the two switches above it
         // do. No onCardRestyled(): the preview above draws no fingerprint.

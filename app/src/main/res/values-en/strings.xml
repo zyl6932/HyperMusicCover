@@ -92,6 +92,7 @@
     <string name="card_section">Media card</string>
     <string name="card_hide_art">Hide the thumbnail</string>
     <string name="card_center_text">Centre the title</string>
+    <string name="card_title_tap">Tap the title to pause</string>
     <string name="hide_fingerprint">Hide lock screen fingerprint icon</string>
     <string name="fp_avoid">Notifications avoid fingerprint</string>
     <string name="fp_avoid_summary">Applies after restarting System UI</string>

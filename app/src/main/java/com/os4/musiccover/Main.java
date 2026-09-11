@@ -68,6 +68,8 @@ public class Main extends XposedModule {
     private static final String CLS_INTERACTOR =
             "com.android.keyguard.interactor.KeyguardClockNotifInteractor";
     private static final String CLS_TIME_VIEW = "com.miui.clock.allInOne.TimeView";
+    /** The date line above the clock - the only thing on the lock screen that draws it. */
+    private static final String CLS_TEXT_AREA = "com.miui.clock.classic.ClassicTextAreaView";
     private static final String CLS_MEDIA_CARD = "com.android.systemui.statusbar.notification"
             + ".mediacontrol.MiuiMediaNotificationControllerImpl";
     private static final String CLS_KG_WALLPAPER_MANAGER =
@@ -164,11 +166,33 @@ public class Main extends XposedModule {
     private static final float SQUEEZE_FLOOR = 740f;
     private static volatile float sAppliedK = Float.NaN;
     /**
-     * Cover-mode clock tint as {r, g, b, a, mix} for the MiGlass shader. null = leave the
-     * OEM's own colour alone. The OEM rewrites glassData whenever it re-renders, so this is
-     * re-asserted per draw rather than set once - same ownership model as the notifY hold.
+     * How light the strip of the cover that the collapsed clock and its date are drawn on is,
+     * 0..1. NaN = nothing measured, and every colour the OEM sets is left exactly as it is.
+     *
+     * Read off the COMPOSED cover - mirrored, blurred, bias-placed - rather than off the album
+     * art, because that is the picture the glyphs are actually over: at the default bias the
+     * sharp band starts below the clock, so what is behind it is the blur, and on a light cover
+     * that blur is light.
      */
-    private static volatile float[] sTint;
+    private static volatile float sCoverLuma = Float.NaN;
+    /** From a debug op, so both halves of the range can be tried without swapping tracks. */
+    private static volatile float sCoverLumaOverride = Float.NaN;
+    /** Below this the cover counts as dark, i.e. the glyphs have to go light. */
+    private static final float COVER_DARK_BELOW = 0.5f;
+    /**
+     * Where the glyph's lightness is put once the cover has decided the direction. Hue and
+     * saturation are what make the clock look like it belongs; these are the ends that make it
+     * readable, chosen far enough apart that a mid-grey cover still resolves to a real contrast.
+     */
+    private static final float GLYPH_DARK_V = 0.16f, GLYPH_LIGHT_V = 0.95f;
+    /**
+     * The strip of the cover that gets sampled for that reading, in dp from the top of the
+     * screen. Generous on purpose: the date is pinned to DATE_TOP_DP and the collapsed clock
+     * hangs under it, and how tall that whole block is depends on the clock style - 56dp clears
+     * the status bar and 172dp is past the glyphs on every style measured so far, the point
+     * being that a band that overshoots by a few rows still describes what the eye sees there.
+     */
+    private static final float BAND_TOP_DP = 56f, BAND_BOT_DP = 172f;
     /**
      * Liquid-glass -> filled morph across the collapse. AllInOneBase.updateGlassValue(float)
      * writes glassData[36] and fades the glyph interior from fully transparent (the liquid
@@ -279,11 +303,33 @@ public class Main extends XposedModule {
     private static volatile boolean sMcHideArt;
     private static volatile boolean sMcCenterText;
     /**
+     * Whether tapping the card's title line toggles playback.
+     *
+     * It exists because of where the real button is: on this card it sits over the fingerprint
+     * sensor, so a thumb aiming at pause is as likely to unlock the phone instead. The title is
+     * the one part of the card that is both large and nowhere near the sensor.
+     *
+     * Applied on the lock screen only, like the two switches above it, and for a sharper reason
+     * than consistency: the shade shows the SAME card view, and in the shade the real button
+     * works and the title is the OEM's. Held the same way too - asserted from the card guard
+     * rather than set once, because the guard is already what tells us the card is still ours.
+     */
+    private static volatile boolean sMcTitleTap;
+    /**
      * Hide the lock screen fingerprint ring. Unlike the two card switches above, this one is not
      * tied to cover mode: an icon that appeared and vanished as the music started and stopped
      * would read as a glitch rather than as a setting.
      */
     private static volatile boolean sHideFp;
+    /**
+     * Whether the wallpaper process is sizing the keyguard texture to the SCREEN rather than to
+     * the wallpaper file, which is its default and is the same switch as WallpaperProbe.sTexFit
+     * on the other side. Kept here for one reason: while that is on, the re-fit below - which
+     * rewrites the user's lockscreen wallpaper to the screen's size - must not run. Rewriting it
+     * is what costs the user their depth cut-out, and it is no longer needed to make the
+     * crossfade affordable, because a screen-sized texture is what made it affordable.
+     */
+    private static volatile boolean sTexFit = true;
     /**
      * Whether the notification stack keeps clear of the fingerprint icon: 0 leaves it to the
      * system, 1 never avoids it, 2 always does. Not a boolean, because "off" here would mean two
@@ -311,6 +357,9 @@ public class Main extends XposedModule {
     private static long sCardSampleAt;
     private static ViewTreeObserver.OnPreDrawListener sCardGuard;
     private static View sCardGuarded, sCardArt, sCardTitle, sCardArtist;
+    /** The title carrying our play/pause listener, and what it was clickable-wise before. */
+    private static View sCardTitleTapped;
+    private static boolean sCardTitleClickable;
     /** Set only around a capture. See shootCard(). */
     private static volatile boolean sCardForced;
     /**
@@ -368,10 +417,6 @@ public class Main extends XposedModule {
     private static final long ART_TAP_MS = 500L;
     /** Px of forgiveness around the thumbnail. The card slides; fingers are not pixels. */
     private static final int ART_TAP_SLOP = 24;
-
-    // Indices into TimeView.glassData, read off the class's own constants.
-    private static final int GLASS_COLOR_R = 11, GLASS_COLOR_G = 12, GLASS_COLOR_B = 13;
-    private static final int GLASS_COLOR_A = 14, GLASS_COLOR_MIX = 16;
 
     /**
      * The OEM's own miuix curves, read off AllInOneClockAnimation at runtime as
@@ -721,28 +766,62 @@ public class Main extends XposedModule {
                 Xp.hookAll(timeView, m, axisLog);
             }
 
-            // Own the colour the same way we own notifY. Setting glassData once does not
-            // survive - the OEM rewrites it on every re-render (verified: the clock reverted
-            // to the glass look right after a spring animation) - so re-assert per draw.
-            Xp.hookAll(timeView, "onDraw", chain -> {
-                float[] t = sTint;
-                if (t != null) {
-                    try {
-                        float[] g = (float[]) Xp.getObjectField(chain.getThisObject(), "glassData");
-                        if (g != null && g.length > GLASS_COLOR_MIX) {
-                            g[GLASS_COLOR_R] = t[0];
-                            g[GLASS_COLOR_G] = t[1];
-                            g[GLASS_COLOR_B] = t[2];
-                            g[GLASS_COLOR_A] = t[3];
-                            g[GLASS_COLOR_MIX] = t[4];
-                        }
-                    } catch (Throwable ignored) {
-                    }
-                }
-                return chain.proceed();
+            // Own the colour the way we own the y, but at the far end of the pipeline.
+            //
+            // Writing glassData and stopping there does nothing: the shader's parameters are
+            // pushed by MiuiBlurUtils.setMiGlass/setGlassEffectMethod when a colour is SET, not
+            // read out of the array when the view draws. The per-draw write that used to be here
+            // was dead for exactly that reason - the OEM's own write of the same array is what
+            // ever made a tint show up.
+            //
+            // So the substitution goes where the OEM's value enters: whichever way SystemUI
+            // arrived at a colour - the wallpaper palette, a colour animation, or our own
+            // updateGlassValue frame - it reaches a glyph through one of these setters, and
+            // none of them has to know anything about the palette.
+            Xp.hookAll(timeView, "setGlassColor", chain -> {
+                Object[] args = chain.getArgs().toArray();
+                args[0] = legible((View) chain.getThisObject(), (Integer) args[0]);
+                return chain.proceed(args);
+            });
+            Xp.hookAll(timeView, "setTextColor", chain -> {
+                Object[] args = chain.getArgs().toArray();
+                args[0] = legible((View) chain.getThisObject(), (Integer) args[0]);
+                return chain.proceed(args);
+            });
+            // The material's own brightness, which the OEM takes from the same palette and which
+            // has to agree with the glyphs: the pale frosted kind goes with dark text, the dark
+            // kind with light text, and passing one against the other is a washed-out clock.
+            //
+            // The argument is the OEM's own flag, and the one it is given here is the value the
+            // palette would have handed it for a background as light as the cover - read off
+            // AllInOneBase.setClockPalette, which forwards its textDark to this call. Inferred
+            // rather than seen: it is the only part of this that a device test has to confirm,
+            // and if the small clock comes out washed rather than crisp, this is the line.
+            Xp.hookAll(timeView, "setBrightness", chain -> {
+                float luma = coverLuma();
+                if (Float.isNaN(luma)) return chain.proceed();
+                Object[] args = chain.getArgs().toArray();
+                args[0] = luma >= COVER_DARK_BELOW;
+                return chain.proceed(args);
             });
         } catch (Throwable t) {
             Xp.log(TAG + "TimeView hook failed: " + t);
+        }
+
+        // The date line above the clock. Same palette, same cover behind it, and its own class:
+        // the glass never touches it and it takes a plain colour, so it needs a hook of its own
+        // rather than riding the TimeView one. Its setter is the only way in - setTextColor
+        // forwards to setDateTextColor, which is where the AOD and blur-blend variants are
+        // chosen, so hooking the outer one covers every path.
+        try {
+            Class<?> textArea = Xp.findClass(CLS_TEXT_AREA, cl);
+            Xp.hookAll(textArea, "setTextColor", chain -> {
+                Object[] args = chain.getArgs().toArray();
+                args[0] = legible((View) chain.getThisObject(), (Integer) args[0]);
+                return chain.proceed(args);
+            });
+        } catch (Throwable t) {
+            Xp.log(TAG + "date colour hook failed: " + t);
         }
 
         // The real chokepoint. Everything that squeezes the clock - the OEM's own
@@ -783,6 +862,7 @@ public class Main extends XposedModule {
                     + "\nglass=" + sGlassEnd
                     + "\nmcart=" + (sMcHideArt ? 1 : 0)
                     + "\nmctext=" + (sMcCenterText ? 1 : 0)
+                    + "\nmctap=" + (sMcTitleTap ? 1 : 0)
                     + "\ntap=" + (sTapToggle ? 1 : 0)
                     + "\nfadewp=" + (sFadeWp ? 1 : 0)
                     + "\nhidefp=" + (sHideFp ? 1 : 0)
@@ -840,6 +920,7 @@ public class Main extends XposedModule {
                     else if ("glass".equals(k)) sGlassEnd = Float.parseFloat(v);
                     else if ("mcart".equals(k)) sMcHideArt = "1".equals(v);
                     else if ("mctext".equals(k)) sMcCenterText = "1".equals(v);
+                    else if ("mctap".equals(k)) sMcTitleTap = "1".equals(v);
                     else if ("tap".equals(k)) sTapToggle = "1".equals(v);
                     else if ("fadewp".equals(k)) sFadeWp = "1".equals(v);
                     else if ("hidefp".equals(k)) sHideFp = "1".equals(v);
@@ -911,20 +992,18 @@ public class Main extends XposedModule {
                         String name = i.getStringExtra("name");
                         if (name == null) dumpClockStyleInfo();
                         else dumpClass(name, i.getStringExtra("grep"));
-                    } else if ("tint".equals(op)) {
+                    } else if ("cluma".equals(op)) {
+                        // The cover reading, by hand. Both halves of its range on one track,
+                        // instead of waiting for the right artwork to come round.
                         if (i.getBooleanExtra("off", false)) {
-                            sTint = null;
-                            Xp.log(TAG + "tint released");
+                            sCoverLumaOverride = Float.NaN;
+                            Xp.log(TAG + "cover luma back to measured " + sCoverLuma);
                         } else {
-                            int argb = i.getIntExtra("color", 0xFFFFFFFF);
-                            sTint = new float[]{
-                                    ((argb >> 16) & 0xFF) / 255f, ((argb >> 8) & 0xFF) / 255f,
-                                    (argb & 0xFF) / 255f, i.getFloatExtra("a", 1f),
-                                    i.getFloatExtra("mix", 1f)};
-                            Xp.log(TAG + "tint rgb=" + sTint[0] + "," + sTint[1] + ","
-                                    + sTint[2] + " a=" + sTint[3] + " mix=" + sTint[4]);
+                            sCoverLumaOverride = i.getFloatExtra("v", 0.8f);
+                            Xp.log(TAG + "cover luma forced to " + sCoverLumaOverride
+                                    + " (measured " + sCoverLuma + ")");
                         }
-                        invalidateClocks();
+                        recolorClock();
                     } else if ("gdata".equals(op)) {
                         pokeGlassData(i.getIntExtra("idx", -1), i.getFloatExtra("v", 0f));
                     } else if ("depth".equals(op)) {
@@ -952,10 +1031,26 @@ public class Main extends XposedModule {
                         if (i.hasExtra("centertext")) {
                             sMcCenterText = i.getBooleanExtra("centertext", false);
                         }
+                        if (i.hasExtra("titletap")) {
+                            sMcTitleTap = i.getBooleanExtra("titletap", false);
+                        }
                         saveState();
                         Xp.log(TAG + "media card hideArt=" + sMcHideArt
-                                + " centerText=" + sMcCenterText);
+                                + " centerText=" + sMcCenterText
+                                + " titleTap=" + sMcTitleTap);
                         applyMediaCard();
+                    } else if ("texfit".equals(op)) {
+                        // The screen-sized keyguard texture, on by default (WallpaperProbe's half
+                        // is the one that does the work). Flipping it here flips that half too,
+                        // because the two have to agree: with it on, the re-fit that rewrites the
+                        // user's lockscreen wallpaper is skipped; with it off, that re-fit is the
+                        // only thing keeping the crossfade affordable.
+                        sTexFit = i.getBooleanExtra("on", !sTexFit);
+                        Intent wp = wallpaperIntent("texfit");
+                        wp.putExtra("on", sTexFit);
+                        c.sendBroadcast(wp);
+                        Xp.log(TAG + "texture fit to screen " + (sTexFit ? "ON" : "off")
+                                + " (wallpaper re-fit " + (sTexFit ? "skipped" : "enabled") + ")");
                     } else if ("hidefp".equals(op)) {
                         sHideFp = i.getBooleanExtra("on", !sHideFp);
                         saveState();
@@ -1081,6 +1176,7 @@ public class Main extends XposedModule {
                         out.putString("player", mc == null ? "" : mc.getPackageName());
                         out.putBoolean("mcart", sMcHideArt);
                         out.putBoolean("mctext", sMcCenterText);
+                        out.putBoolean("mctap", sMcTitleTap);
                         out.putBoolean("tap", sTapToggle);
                         out.putBoolean("fadewp", sFadeWp);
                         out.putBoolean("hidefp", sHideFp);
@@ -1125,9 +1221,12 @@ public class Main extends XposedModule {
                                 + " track=" + sTrackKey);
                         Xp.log(TAG + "card rect: " + sCardL + "," + sCardT + " "
                                 + sCardW + "x" + sCardH + " hideArt=" + sMcHideArt
-                                + " centerText=" + sMcCenterText + " cardP=" + sCardP);
+                                + " centerText=" + sMcCenterText
+                                + " titleTap=" + sMcTitleTap
+                                + " title=" + (sCardTitleTapped != null) + " cardP=" + sCardP);
                         Xp.log(TAG + "tap: toggle=" + sTapToggle
                                 + " suppressed=" + sTapSuppressed
+                                + " bouncer=" + bouncerUp()
                                 + " wallpaperFade=" + sFadeWp);
                     } else if ("verbose".equals(op)) {
                         sVerbose = i.getBooleanExtra("on", !sVerbose);
@@ -1244,7 +1343,7 @@ public class Main extends XposedModule {
 
     private static void abandonHold(String why, boolean restore) {
         boolean held = sHoldY != null || sFrameCb != null || sRamp != null
-                || !Float.isNaN(sCollapseMin) || sTint != null;
+                || !Float.isNaN(sCollapseMin) || !Float.isNaN(sCoverLuma);
         stopMotion();
         sHoldY = null;
         sCurrentY = Float.NaN;
@@ -1262,9 +1361,13 @@ public class Main extends XposedModule {
             sNudge = 0f;
             sNudgeSample = Float.NaN;
         }
-        if (sTint != null) {
-            sTint = null;
-            invalidateClocks();
+        // The cover's colouring goes back with the rest of cover mode, through the same call
+        // that put it there: with nothing measured, the setter hooks hand the OEM's own colours
+        // straight through. Without this the date would stay dark over the wallpaper the cover
+        // was hiding - the one way this could leave the lock screen worse than it found it.
+        if (!Float.isNaN(sCoverLuma)) {
+            sCoverLuma = Float.NaN;
+            recolorClock();
         }
         if (!Float.isNaN(sGlassV0)) {
             float back = sGlassV0;
@@ -2067,7 +2170,16 @@ public class Main extends XposedModule {
     private static RectF glyphBox() {
         RectF box = null;
         for (View root : clockRoots()) {
-            RectF r = inkBox(root, clockTarget(root));
+            View target = clockTarget(root);
+            RectF r = inkBox(root, target);
+            // A tree that HAS a clock in it but shows no ink yet is a clock that has not been
+            // through a layout pass, not a tree without a clock - that one has no usable target
+            // at all. Reported as "no box" rather than unioned away, because half a box is what
+            // makes clockPivotX() take the left-aligned branch: all_in_one draws the hour in one
+            // tree and the minute in the other, so the half that happens to be measured first
+            // has a centre nowhere near the screen's, and the clock collapses towards its own
+            // left edge. That is the crooked small clock a SystemUI restart used to leave behind.
+            if (r == null && usable(target)) return null;
             if (r == null) continue;
             if (box == null) box = r; else box.union(r);
         }
@@ -2176,10 +2288,13 @@ public class Main extends XposedModule {
         float uncorrected = loc[1] - date.getTranslationY();
         float target = DATE_TOP_DP * date.getResources().getDisplayMetrics().density;
         float measured = target - uncorrected;
-        if (!Float.isNaN(sNudgeSample) && Math.abs(measured - sNudgeSample) < 1f) {
-            sNudge = measured;
-        }
+        boolean adopt = !Float.isNaN(sNudgeSample) && Math.abs(measured - sNudgeSample) < 1f;
+        if (adopt) sNudge = measured;
         sNudgeSample = measured;
+        if (sVerbose) {
+            Xp.log(TAG + "nudge: onScreen=" + loc[1] + " ty=" + r1(date.getTranslationY())
+                    + " measured=" + r1(measured) + (adopt ? " ADOPTED" : " held"));
+        }
     }
 
     /**
@@ -2197,7 +2312,7 @@ public class Main extends XposedModule {
      * result on screen and corrected it over the following frames, which is exactly what the jump
      * to the top and the slide back down was.
      */
-    private static void placeCollapsedClock(float k, float y, float p) {
+    private static boolean placeCollapsedClock(float k, float y, float p) {
         View date = visibleDate();
         // A different date view means the clock views were re-inflated - a style change - and
         // anything remembered about the old ones describes a clock that is no longer there.
@@ -2217,7 +2332,7 @@ public class Main extends XposedModule {
         // already applied alone is right: resetting would itself be a visible jump.
         if (date == null || pooled == null) {
             reportUnknownClock(date, pooled);
-            return;
+            return false;
         }
         sClockComplained = false;
         float glyph = pooled.top;
@@ -2256,6 +2371,7 @@ public class Main extends XposedModule {
             Xp.log(TAG + "collapse y=" + y + " p=" + p + " k=" + k
                     + " glyphTop=" + glyph + " dateBottom=" + dateBottom + " nudge=" + nudge);
         }
+        return true;
     }
 
     // ------------------------------------------------------- transition trace
@@ -3303,12 +3419,17 @@ public class Main extends XposedModule {
             out.putExtra("off", true);
             ctx.sendBroadcast(out);
             sTrackKey = "";
+            // Nothing behind the clock any more, so nothing to judge the colour against. The
+            // repaint that hands the OEM's own colours back happens with the rest of cover mode.
+            sCoverLuma = Float.NaN;
             Xp.log(TAG + "pushart off");
             return;
         }
         if (art == null) { Xp.log(TAG + "pushart: no album art"); return; }
         int w = sScreenW, h = sScreenH;
         Bitmap full = composeWallpaper(art, w, h, sBias);
+        measureCover(full);
+        if (sCoverMode) recolorClock();
         long tc = android.os.SystemClock.uptimeMillis();
         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
         int q = 85;
@@ -3362,6 +3483,8 @@ public class Main extends XposedModule {
         // Composed here, on the worker, exactly as for the image path - same mirror-extend,
         // blur and bias, so the two paths produce the same picture.
         final Bitmap full = composeWallpaper(art, sScreenW, sScreenH, sBias);
+        measureCover(full);
+        if (sCoverMode) recolorClock();
         final long draw = android.os.SystemClock.uptimeMillis() - t0;
         main().post(new Runnable() {
             @Override
@@ -3836,6 +3959,12 @@ public class Main extends XposedModule {
     // READ_WALLPAPER_INTERNAL. This APK neither has nor needs them.
     @SuppressLint("MissingPermission")
     private static void fitLockWallpaperToScreen(android.app.WallpaperManager wm) {
+        // Not while the wallpaper process sizes its texture to the screen (sTexFit, on by
+        // default): that solves the same problem - a 2121x4712 wallpaper making every swap upload
+        // 38MB and putting the crossfade over its own threshold - without writing anything. The
+        // two must not both run, and if this one does, the user's depth cut-out goes with it:
+        // MIUI segments the wallpaper the picker set, and nothing re-analyses a file we wrote.
+        if (sTexFit) return;
         int sw = sScreenW, sh = sScreenH;
         if (sw <= 0 || sh <= 0) return;
         int w = 0, h = 0;
@@ -4273,6 +4402,9 @@ public class Main extends XposedModule {
             sHoldY = SQUEEZE_FLOOR;
             drive(SQUEEZE_FLOOR, false, "STATE_CHANGED");
         }
+        // The reading may predate this cover - the card can come up on art that was pushed
+        // before the user ever locked the phone - and the OEM will not re-colour on its own.
+        recolorClock();
         saveState();
     }
 
@@ -4291,6 +4423,15 @@ public class Main extends XposedModule {
      */
     private static void exitCoverMode(boolean animate) {
         sCoverMode = false;
+        // The cover is on its way out, so the reading that coloured the clock describes the
+        // wallpaper coming back even less than it described the old one. Dropped here rather
+        // than at the settle: the clock is at its smallest now, so the colour going back to the
+        // OEM's is at its least visible, and the animated exit keeps the cover's colour off the
+        // frames in between.
+        if (!Float.isNaN(sCoverLuma)) {
+            sCoverLuma = Float.NaN;
+            recolorClock();
+        }
         armTransitionTrace("leaving cover mode");
         float natural = sLastSystemY;
         boolean canSpring = animate && screenOn() && sContainer != null
@@ -4372,7 +4513,91 @@ public class Main extends XposedModule {
         sAppliedGlassV = Float.NaN;
         sHoldY = SQUEEZE_FLOOR;
         drive(SQUEEZE_FLOOR, false, "STATE_CHANGED");
+        settleCollapsedClock(0);
         Xp.log(TAG + "cover clock re-collapsed after wake");
+    }
+
+    /**
+     * Frames the re-assert gets: six once the nudge has been adopted, and up to forty while
+     * either the clock is unmeasurable or the offset is still moving, at 80ms apart.
+     *
+     * Forty is not a guess. Measured on the restart path: the clock is unmeasurable for the first
+     * ten passes, and the date's own layout then slides from 230 to 266 over the next seven -
+     * the OEM is still animating its squeeze towards the y we are holding it at, and the date
+     * moves with it. Two readings 80ms apart differ by ten pixels the whole way down, so the
+     * loop adopts nothing until that stops, which takes about three seconds. A shorter tail is
+     * what left the first lock screen at the un-nudged 270: the readings were all real, and the
+     * last of them just needed a partner.
+     */
+    private static final int CLOCK_SETTLE_TRIES = 6;
+    private static final int CLOCK_SETTLE_MAX = 40;
+    private static final long CLOCK_SETTLE_MS = 80L;
+
+    /**
+     * Places the collapsed clock again over the next few frames, then stops.
+     *
+     * The placement normally rides the OEM's own frames - an entry animates for 600ms and every
+     * one of those frames runs it - but the re-assert after a SystemUI restart has no animation
+     * to ride. The clock container attaches, we drive notifY once, and the OEM stops emitting
+     * frames the moment it has nothing left to move. If that single frame lands before the
+     * keyguard's clock has been measured (and it does: the container attaches at 0,0-0,0, and
+     * `clock style not understood: date=MISSING glyphs=MISSING` is what that one frame says),
+     * then placeCollapsedClock() bails and NOTHING runs it again - the clock sat uncollapsed, or
+     * at a pivot taken from half a glyph box, until the user locked the screen and got a real
+     * collapse to converge on. That is the "first time after a restart is always crooked" bug.
+     *
+     * Six frames rather than a condition: the interesting question is not whether this pass
+     * worked but whether the LAYOUT has settled, and a pass that succeeded on a half-measured
+     * clock is exactly the crooked case. By the last one the keyguard has been through measure,
+     * layout and the OEM's own squeeze, and every pass writes the same numbers a normal frame
+     * of the collapse would, so the extra ones cost nothing but are idempotent.
+     */
+    private static void settleCollapsedClock(final int attempt) {
+        if (!sCoverMode || Float.isNaN(sCollapseMin)) return;
+        Float y = sHoldY;
+        if (y == null) return;
+        // Overlapping chains are harmless - every pass writes the values the last one did - and
+        // the alternative is bookkeeping for a method that runs a handful of times per restart.
+        if (attempt > CLOCK_SETTLE_MAX) return;
+        float p = coverProgress(y);
+        if (Float.isNaN(p)) {
+            // No natural y to measure against yet, and on a fresh SystemUI there may never be
+            // one: coverProgress() needs a frame the OEM emitted on its own, and after a restart
+            // the only frames going are ours. Held at the squeeze floor the collapse is complete
+            // by definition - p is 1 whatever the natural y turns out to be - so this is not a
+            // guess, it is the definition the hold was taken under. (This was the second reason
+            // the first lock screen stayed wrong: the retry loop ran, and every pass through it
+            // returned here.)
+            if (y > SQUEEZE_FLOOR) return;
+            p = 1f;
+        }
+        boolean placed = placeCollapsedClock(1f - p * (1f - sCollapseMin), y, p);
+        // Two reasons to keep going, and both are the bug rather than a nicety.
+        //
+        // The clock may not be measurable yet - the keyguard is still laying out - and a pass
+        // that never ran is the whole complaint; one that runs late costs a view write that
+        // writes what is already there.
+        //
+        // And the date's offset is a feedback loop that refuses to adopt a reading until two
+        // passes agree (its gain is 0.9, so it needs two or three readings to converge). With
+        // the OEM's own squeeze still animating behind us the first readings are -3, -39, -42:
+        // every one of them a real measurement, none of them agreeing with the last, and the
+        // loop left holding 0. sNudge == sNudgeSample is what "it has adopted something" looks
+        // like from outside - updateDateOffset assigns both from the same reading when it
+        // commits - so that is the condition the tail is for.
+        boolean adopted = !Float.isNaN(sNudgeSample) && sNudge == sNudgeSample;
+        if (sVerbose) {
+            Xp.log(TAG + "settle " + attempt + ": placed=" + placed + " adopted=" + adopted
+                    + " nudge=" + r1(sNudge) + " sample=" + r1(sNudgeSample));
+        }
+        if (placed && adopted && attempt >= CLOCK_SETTLE_TRIES) return;
+        if (attempt >= CLOCK_SETTLE_MAX) return;
+        main().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                settleCollapsedClock(attempt + 1);
+            }
+        }, CLOCK_SETTLE_MS);
     }
 
     /**
@@ -4670,7 +4895,8 @@ public class Main extends XposedModule {
                     // Only worth waiting for while something still wants something from the
                     // card: the restyle on the way in, or the artwork tap that is the way back.
                     if (attempt < CARD_RETRIES
-                            && ((sCoverMode && (sMcHideArt || sMcCenterText)) || wantsArtTap())) {
+                            && ((sCoverMode && (sMcHideArt || sMcCenterText || sMcTitleTap))
+                                || wantsArtTap())) {
                         main().postDelayed(new Runnable() {
                             @Override
                             public void run() { applyMediaCard(attempt + 1); }
@@ -4693,7 +4919,7 @@ public class Main extends XposedModule {
                 sCardArtist = card.findViewById(card.getResources()
                         .getIdentifier("header_artist", "id", "com.android.systemui"));
                 assertMediaCard(card);
-                if (sCoverMode && (sMcHideArt || sMcCenterText)) guardCard(card);
+                if (sCoverMode && (sMcHideArt || sMcCenterText || sMcTitleTap)) guardCard(card);
                 else releaseCardGuard();
             }
         });
@@ -4746,7 +4972,85 @@ public class Main extends XposedModule {
         }
         centreCardText(card, (TextView) sCardTitle, centreP);
         centreCardText(card, (TextView) sCardArtist, centreP);
+        applyTitleTap((TextView) sCardTitle, sMcTitleTap && sCoverMode && onKeyguard);
         if (onKeyguard && !sCardForced) sampleCardRect(card);
+    }
+
+    /**
+     * Makes the card's title a play/pause button, or hands the title back.
+     *
+     * Asserted from the guard rather than set once when the card was found, because the same
+     * view is also the shade's: the lock screen's title is ours and the shade's is the OEM's,
+     * and the guard is the only thing here that knows which of the two is on screen. Written
+     * only when the state actually changes - the guard runs every frame and this puts a
+     * listener on, which is not something to redo sixty times a second.
+     *
+     * Java has no way to read a view's existing OnClickListener back off it, so what the title
+     * had is remembered as the two things that CAN be read - whether it was clickable, and
+     * whether it had a listener at all - and the latter is logged, because a title that already
+     * does something of its own would be silently swallowed here.
+     */
+    private static void applyTitleTap(TextView title, boolean on) {
+        View mine = sCardTitleTapped;
+        boolean want = on && title != null;
+        if (mine == title && want) return;
+        if (mine == null && !want) return;
+        if (mine != null) {
+            sCardTitleTapped = null;
+            try {
+                mine.setOnClickListener(null);
+                mine.setClickable(sCardTitleClickable);
+            } catch (Throwable ignored) {
+            }
+        }
+        if (!want) return;
+        sCardTitleClickable = title.isClickable();
+        if (title.hasOnClickListeners()) {
+            Xp.log(TAG + "card title already had a click listener - it will not be restored");
+        }
+        sCardTitleTapped = title;
+        title.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                togglePlayback();
+            }
+        });
+    }
+
+    /**
+     * Play or pause whatever the card is showing.
+     *
+     * Through the session the card is bound to rather than the media-key broadcast the OEM's
+     * own button ends up sending: same result when nothing else is going on, but it cannot
+     * drift onto a different player, which a key event can when two of them are open.
+     * The state is read rather than toggled blind because the transport controls have play()
+     * and pause() and no playPause() of their own.
+     */
+    private static void togglePlayback() {
+        MediaController c = sWatched;
+        if (c == null) {
+            rebindSession();
+            c = sWatched;
+        }
+        if (c == null) {
+            Xp.log(TAG + "title tap: no session to play");
+            return;
+        }
+        try {
+            PlaybackState st = c.getPlaybackState();
+            boolean playing = st != null && st.getState() == PlaybackState.STATE_PLAYING;
+            MediaController.TransportControls t = c.getTransportControls();
+            if (t == null) {
+                Xp.log(TAG + "title tap: no transport controls");
+                return;
+            }
+            if (playing) t.pause();
+            else t.play();
+            Xp.log(TAG + "title tap -> " + (playing ? "pause" : "play")
+                    + " on " + c.getPackageName());
+        } catch (Throwable t) {
+            Xp.log(TAG + "title tap failed: " + t);
+        }
     }
 
     /**
@@ -4944,7 +5248,8 @@ public class Main extends XposedModule {
     private static boolean swallowArtTap(MotionEvent ev) {
         int action = ev.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
-            boolean onCard = wantsArtTap() && screenOn() && keyguardShowing() && onKeyguardNow();
+            boolean onCard = wantsArtTap() && screenOn() && keyguardShowing() && onKeyguardNow()
+                    && !bouncerUp();
             sArtSwallow = onCard && artRectContains(ev.getRawX(), ev.getRawY());
             if (sArtSwallow) {
                 sArtDownAt = android.os.SystemClock.uptimeMillis();
@@ -5056,6 +5361,24 @@ public class Main extends XposedModule {
     }
 
     /**
+     * Whether the bouncer - the PIN or pattern pad - is over the lock screen.
+     *
+     * The clock container is NOT this test, however well it works for the shade: measured with
+     * the pad up, the clock stays shown, the card stays up and the keyguard stays locked, so
+     * every guard the cover tap had was still true and a tap aimed at a digit toggled the cover
+     * instead. The keyguard being locked does not mean the lock screen is what is on top.
+     *
+     * The pad hangs off its own child of the shade window, and MIUI keeps that child INVISIBLE
+     * - not GONE - until the bouncer is summoned, so isShown() is exactly "the pad is up".
+     * Falling back to false when the view cannot be found keeps the tap working on a build that
+     * renamed it, rather than silently switching the whole feature off.
+     */
+    private static boolean bouncerUp() {
+        View b = findSysuiView("keyguard_bouncer_container");
+        return b != null && b.isShown();
+    }
+
+    /**
      * Back to the plain wallpaper, with the card left standing where it is.
      *
      * sTapSuppressed is what holds it that way. A card being up is exactly what the module reads
@@ -5100,6 +5423,10 @@ public class Main extends XposedModule {
         ViewTreeObserver.OnPreDrawListener g = sCardGuard;
         sCardGuarded = null;
         sCardGuard = null;
+        // The guard is what gives the title back, so it has to happen here: with the guard gone
+        // nothing would ever run the assert that would have done it, and the shade would keep a
+        // title that pauses the music.
+        applyTitleTap(null, false);
         if (d == null || g == null) return;
         try {
             d.getViewTreeObserver().removeOnPreDrawListener(g);
@@ -5637,6 +5964,8 @@ public class Main extends XposedModule {
         // being pulled down over an unlocked phone - the same test the card restyle uses.
         View c = sContainer;
         if (c == null || !c.isShown()) return;
+        // The pad is up, so the taps on it are its own.
+        if (bouncerUp()) return;
         // Nothing to toggle without music: the card is the switch, and this only chooses
         // whether the cover follows it.
         if (!sCardKnown || !sCardShowing) return;
@@ -5715,6 +6044,159 @@ public class Main extends XposedModule {
                 }
             }
         });
+    }
+
+    /**
+     * The luminance every colour decision is made against, or NaN when there is nothing to make
+     * one against - no cover measured, cover mode off - and the OEM's colouring is therefore
+     * left exactly as it is.
+     *
+     * The screen check is the AOD one. Cover mode outlives the display going off, and the
+     * glyphs are the same TimeViews in the always-on view: forcing the clock dark for a light
+     * cover on a black AOD face is the one way this could make things worse than it found them.
+     * `isInteractive` is false in AOD, so the OEM's own colouring stands there.
+     */
+    private static float coverLuma() {
+        if (!sCoverMode || !screenOn()) return Float.NaN;
+        float forced = sCoverLumaOverride;
+        return Float.isNaN(forced) ? sCoverLuma : forced;
+    }
+
+    /**
+     * The OEM's colour with only its lightness moved, or that same colour back when there is no
+     * cover to judge it against.
+     *
+     * This is the whole fix for the light cover. The system's automatic clock colouring is
+     * computed from the wallpaper's palette, and the cover replaces the wallpaper behind
+     * SystemUI's back, so the palette arriving here describes a picture the clock is no longer
+     * drawn on: a dark wallpaper gives the OEM light glyphs, the cover underneath them is light
+     * too, and the small clock all but disappears - Taylor Swift's *Lover* is the case that
+     * started this. Hue and saturation are what make the clock look like it belongs, so they
+     * survive untouched; lightness is what decides whether it can be read at all, so that comes
+     * from the cover.
+     */
+    private static int legible(View v, int argb) {
+        float luma = coverLuma();
+        if (Float.isNaN(luma)) return argb;
+        float[] hsv = new float[3];
+        android.graphics.Color.colorToHSV(argb, hsv);
+        hsv[2] = luma < COVER_DARK_BELOW ? GLYPH_LIGHT_V : GLYPH_DARK_V;
+        int out = android.graphics.Color.HSVToColor(android.graphics.Color.alpha(argb), hsv);
+        if (sVerbose) {
+            Xp.log(TAG + "colour " + Integer.toHexString(argb) + " -> "
+                    + Integer.toHexString(out) + " over luma " + r2(luma) + " " + viewIdOf(v));
+        }
+        return out;
+    }
+
+    /**
+     * Averages the strip of the composed cover the clock and its date are drawn on.
+     *
+     * Sampled from the composed bitmap rather than from the album art, because the two are not
+     * the same picture where it matters: the sharp band starts below the clock at the default
+     * bias, so what is actually behind the glyphs is the mirrored blur - and on a light cover
+     * that blur is light. Costs 24 rows of getPixels on the worker that is already encoding the
+     * same bitmap.
+     */
+    private static void measureCover(Bitmap full) {
+        try {
+            float d = sAppCtx.getResources().getDisplayMetrics().density;
+            int top = Math.max(0, Math.round(BAND_TOP_DP * d));
+            int bottom = Math.min(full.getHeight(), Math.round(BAND_BOT_DP * d));
+            if (bottom - top < 8) { sCoverLuma = Float.NaN; return; }
+            int stride = Math.max(1, (bottom - top) / 24);
+            int[] row = new int[full.getWidth()];
+            double sum = 0;
+            int n = 0;
+            for (int y = top; y < bottom; y += stride) {
+                full.getPixels(row, 0, row.length, 0, y, row.length, 1);
+                for (int x = 0; x < row.length; x += 8) {
+                    sum += android.graphics.Color.luminance(row[x]);
+                    n++;
+                }
+            }
+            if (n == 0) { sCoverLuma = Float.NaN; return; }
+            sCoverLuma = (float) (sum / n);
+            Xp.log(TAG + "cover luma " + r2(sCoverLuma) + " over " + n
+                    + "px, band " + top + ".." + bottom);
+        } catch (Throwable t) {
+            sCoverLuma = Float.NaN;
+            Xp.log(TAG + "cover luma failed: " + t);
+        }
+    }
+
+    /**
+     * Asks the OEM for its clock colours again, so a cover that has just changed is judged
+     * against the new one.
+     *
+     * Nothing else will. The colour pass runs when the wallpaper's palette changes, and swapping
+     * the cover is not one - it happens behind the wallpaper's back. Without this a track change
+     * would keep the previous cover's decision, which on the way from a light cover to a dark
+     * one means a dark clock left dark on a dark picture: worse than the problem this exists to
+     * fix. The values handed over are the OEM's own, off the style it is already holding; the
+     * setter hooks are what make them come out legible.
+     */
+    private static void recolorClock() {
+        final View v = sContainer;
+        if (v == null) return;
+        v.post(new Runnable() {
+            @Override
+            public void run() {
+                for (View root : clockRoots()) {
+                    try {
+                        if (!(root instanceof ViewGroup)) continue;
+                        View c = ((ViewGroup) root).getChildAt(0);
+                        if (c == null) continue;
+                        if (glassGlyphs(root)) {
+                            // The glass is driven from our own morph, and re-running one frame of
+                            // it is what makes it re-colour - the same call applyGlassMorph()
+                            // makes on every frame of a collapse, so nothing new is being asked
+                            // of it. updateClockColor, which is the other path, is deliberately
+                            // NOT called here: the OEM only reaches for it on a solid style, and
+                            // it writes the glyphs' paint colour as well as their glass data.
+                            if (!Float.isNaN(sAppliedGlassV)) {
+                                Xp.callMethod(c, "updateGlassValue", sAppliedGlassV);
+                            }
+                        } else {
+                            Object info = Xp.getObjectField(c, "mClockStyleInfo");
+                            Xp.callMethod(c, "updateClockColor",
+                                    Xp.callMethod(info, "getPrimaryColor"),
+                                    Xp.callMethod(info, "getSecondaryColor"));
+                        }
+                    } catch (Throwable t) {
+                        Xp.log(TAG + "recolor failed: " + t);
+                    }
+                }
+                // The date is on neither of those paths - the glass never touches it, and the
+                // palette is the only thing that colours it. Handing it back its own current
+                // colour is enough: the setter hook is what turns that into the legible one.
+                View date = visibleDate();
+                if (date instanceof TextView) {
+                    try {
+                        Xp.callMethod(date, "setTextColor", ((TextView) date).getCurrentTextColor());
+                    } catch (Throwable t) {
+                        Xp.log(TAG + "date recolour failed: " + t);
+                    }
+                }
+            }
+        });
+    }
+
+    /** Whether these glyphs are drawn through the MiGlass shader, read off the views themselves. */
+    private static boolean glassGlyphs(View root) {
+        View v = sContainer;
+        if (v == null) return false;
+        for (String id : new String[]{"hour_view", "minute_view", "colon_view"}) {
+            int rid = v.getContext().getResources().getIdentifier(id, "id", "com.android.systemui");
+            View t = rid == 0 ? null : root.findViewById(rid);
+            if (t == null) continue;
+            try {
+                return Boolean.TRUE.equals(Xp.getObjectField(t, "isMiGlassEffectEnable"));
+            } catch (Throwable ignored) {
+                return false;
+            }
+        }
+        return false;
     }
 
     /** Rides the same progress as the scale, so one OEM spring drives size and look together. */
