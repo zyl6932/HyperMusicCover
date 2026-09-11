@@ -30,6 +30,7 @@
     <string name="settings_interface">Interface</string>
     <string name="settings_language">Language</string>
     <string name="settings_data">Data Management</string>
+    <string name="settings_update">Updates</string>
     <string name="theme_mode">Theme Mode</string>
     <string name="theme_system">Follow System</string>
     <string name="theme_light">Light</string>
@@ -118,4 +119,6 @@
     <string name="update_no_installer">No app on this device can install an APK - install it from a file manager</string>
     <string name="update_confirm">Update</string>
     <string name="restart_scope">Restart all scoped apps</string>
+    <string name="check_update">Check for updates</string>
+    <string name="check_update_summary">Automatically check for a new version after the app starts</string>
 </resources>

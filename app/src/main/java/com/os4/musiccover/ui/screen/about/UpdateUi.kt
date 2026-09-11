@@ -42,12 +42,11 @@ import com.os4.musiccover.ui.util.openQqGroup
 import com.os4.musiccover.ui.util.openTelegramGroup
 import com.os4.musiccover.updater.InstallOutcome
 import com.os4.musiccover.updater.UpdateApi
+import com.os4.musiccover.updater.UpdateCheck
 import com.os4.musiccover.ui.component.markdown.MarkdownContent
 import com.os4.musiccover.updater.UpdateInfo
 import com.os4.musiccover.updater.UpdateInstaller
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -60,47 +59,13 @@ import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 
-private const val TAG = "HyperMusicCover.Update"
-
 private const val POLL_MS = 200L
-private const val INSTALL_TIMEOUT_MS = 3L * 60 * 1000
 
 /** Where the links dialog sends people. The QQ pair is the group's number and its share link. */
 private const val RELEASES_PAGE = "https://github.com/zyl6932/HyperMusicCover/releases"
 private const val TELEGRAM_GROUP = "https://t.me/HyperMusicCover"
 private const val QQ_GROUP_UIN = "392493127"
 private const val QQ_GROUP_LINK = "https://qm.qq.com/q/RcLbYXgBy2"
-
-/**
- * The About page's update surfaces, and the one piece of state that has to outlive a composition.
- *
- * The page keeps the answer for the life of the process, so that leaving the tab and coming back -
- * or the Activity being recreated - does not go to the network again. The floor between checks is
- * not decoration: `api.github.com` allows 60 unauthenticated requests an hour per address, and
- * the About page is one swipe away from two neighbours.
- */
-object UpdateCheck {
-
-    private const val MIN_INTERVAL_MS = 10L * 60 * 1000
-
-    @Volatile
-    var result: UpdateInfo? = null
-        private set
-
-    @Volatile
-    private var checkedAt: Long = 0L
-
-    /** False when nothing has been asked yet, or when the last answer is old enough to re-ask. */
-    fun isFresh(): Boolean {
-        val at = checkedAt
-        return at != 0L && SystemClock.elapsedRealtime() - at in 0 until MIN_INTERVAL_MS
-    }
-
-    fun store(info: UpdateInfo?) {
-        result = info
-        checkedAt = SystemClock.elapsedRealtime()
-    }
-}
 
 /**
  * Every piece of state the updater needs.
@@ -161,12 +126,15 @@ class UpdateController internal constructor(internal val states: UpdateStates) {
  * and the install outlives the composition that started it.
  */
 @Composable
-fun rememberUpdateController(refreshKey: Int): UpdateController {
+fun rememberUpdateController(refreshKey: Int, checkUpdate: Boolean): UpdateController {
     val context = LocalContext.current
     // LocalResources, not context.getString: the latter is not configuration-aware, and lint
     // fails the build on it (LocalContextGetResourceValueCall).
     val resources = LocalResources.current
-    val allowed = remember { UpdateApi.enabled(context) }
+    // Two separate questions, asked together: may this build update itself at all (not a fork,
+    // not a debug build), and does the user want it to. Flipping the setting re-runs every effect
+    // below, which is what makes the switch on the Settings page take effect immediately.
+    val allowed = remember(checkUpdate) { checkUpdate && UpdateApi.enabled(context) }
     val states = remember {
         UpdateStates().apply {
             update = UpdateCheck.result
@@ -174,15 +142,14 @@ fun rememberUpdateController(refreshKey: Int): UpdateController {
         }
     }
 
+    // The app already checked when it started; this picks that answer up, and re-asks only if it
+    // has since gone stale - opening the page is the moment a stale answer is worth refreshing,
+    // and the interval above is what keeps that from being a request per visit.
     LaunchedEffect(refreshKey, allowed) {
+        states.update = UpdateCheck.result
         if (!allowed) return@LaunchedEffect
-        if (UpdateCheck.isFresh()) {
-            states.update = UpdateCheck.result
-            return@LaunchedEffect
-        }
-        val found = withContext(Dispatchers.IO) { UpdateApi.latest() }
-        UpdateCheck.store(found)
-        states.update = found
+        UpdateCheck.refresh(context)
+        states.update = UpdateCheck.result
     }
 
     // The install itself is the installer app's business; all this waits for is the moment the

@@ -82,10 +82,11 @@ fun AboutPageContent(
     openLicensePage: () -> Unit,
     isBlurEnabled: Boolean = true,
     refreshKey: Int = 0,
+    checkUpdate: Boolean = true,
 ) {
     // Owns the check, the install and the four dialogs; see UpdateUi.kt. It has to sit above the
     // Scaffold because the dialogs open their own windows and cannot be nested in the page body.
-    val update = rememberUpdateController(refreshKey)
+    val update = rememberUpdateController(refreshKey, checkUpdate)
     val topAppBarScrollBehavior = MiuixScrollBehavior()
     val lazyListState = rememberLazyListState()
 

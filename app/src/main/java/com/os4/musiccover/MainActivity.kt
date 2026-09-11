@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import com.os4.musiccover.ui.component.PagerNavigationSpringSpec
 import com.os4.musiccover.ui.component.liquid.IosLiquidGlassNavigationBar
 import com.os4.musiccover.ui.screen.about.AboutPageContent
+import com.os4.musiccover.updater.UpdateCheck
 import com.os4.musiccover.ui.screen.features.FeaturesPageView
 import com.os4.musiccover.ui.screen.home.HomePageView
 import com.os4.musiccover.ui.screen.settings.SettingsPageView
@@ -128,6 +129,7 @@ class MainActivity : ComponentActivity() {
             var isFloatingNavbar by remember { mutableStateOf(savedSettings.isFloatingNavbar) }
             var isLiquidGlass by remember { mutableStateOf(savedSettings.isLiquidGlass) }
             var isBlurEnabled by remember { mutableStateOf(savedSettings.isBlurEnabled) }
+            var checkUpdate by remember { mutableStateOf(savedSettings.checkUpdate) }
 
             fun persistState() {
                 AppSettings.save(
@@ -137,6 +139,7 @@ class MainActivity : ComponentActivity() {
                         isFloatingNavbar = isFloatingNavbar,
                         isLiquidGlass = isLiquidGlass,
                         isBlurEnabled = isBlurEnabled,
+                        checkUpdate = checkUpdate,
                         language = LocaleHelper.getSavedLanguage(this@MainActivity).code,
                     )
                 )
@@ -151,15 +154,23 @@ class MainActivity : ComponentActivity() {
                     LaunchBackground.remember(this@MainActivity, themeMode.name, surface.toArgb())
                     uiReady = true
                 }
+                // The update check belongs to the app starting, not to the About page being
+                // opened - the setting says so, and it is the one moment the answer is worth
+                // having before anyone goes looking for it. The About page only reads this.
+                LaunchedEffect(Unit) {
+                    if (checkUpdate) UpdateCheck.refresh(this@MainActivity)
+                }
                 MainScreen(
                     themeMode = themeMode,
                     isFloatingNavbar = isFloatingNavbar,
                     isLiquidGlass = isLiquidGlass,
                     isBlurEnabled = isBlurEnabled,
+                    checkUpdate = checkUpdate,
                     onThemeModeChange = { themeMode = it; persistState() },
                     onFloatingNavbarChange = { isFloatingNavbar = it; persistState() },
                     onLiquidGlassChange = { isLiquidGlass = it; persistState() },
                     onBlurEnabledChange = { isBlurEnabled = it; persistState() },
+                    onCheckUpdateChange = { checkUpdate = it; persistState() },
                 )
             }
         }
@@ -209,10 +220,12 @@ private fun MainScreen(
     isFloatingNavbar: Boolean,
     isLiquidGlass: Boolean,
     isBlurEnabled: Boolean,
+    checkUpdate: Boolean,
     onThemeModeChange: (ColorSchemeMode) -> Unit,
     onFloatingNavbarChange: (Boolean) -> Unit,
     onLiquidGlassChange: (Boolean) -> Unit,
     onBlurEnabledChange: (Boolean) -> Unit,
+    onCheckUpdateChange: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val pagerState = rememberPagerState(pageCount = { 4 })
@@ -335,6 +348,8 @@ private fun MainScreen(
                         onLiquidGlassChange = onLiquidGlassChange,
                         isBlurEnabled = isBlurEnabled,
                         onBlurEnabledChange = onBlurEnabledChange,
+                        checkUpdate = checkUpdate,
+                        onCheckUpdateChange = onCheckUpdateChange,
                         extraBottomPadding = navBarHeight,
                     )
 
@@ -344,6 +359,7 @@ private fun MainScreen(
                         },
                         isBlurEnabled = isBlurEnabled,
                         refreshKey = refreshKey,
+                        checkUpdate = checkUpdate,
                     )
                 }
             }
