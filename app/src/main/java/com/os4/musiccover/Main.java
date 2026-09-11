@@ -1110,6 +1110,20 @@ public class Main extends XposedModule {
                                 else ensureLockWallpaper(cc, force);
                             }
                         });
+                    } else if ("uncover".equals(op)) {
+                        // PROBE: hide OUR ImageView only, leaving MIUI's own layers exactly as
+                        // they are. Whatever shows through is what the WALLPAPER WINDOW really
+                        // holds - the one question a screenshot of the finished lock screen
+                        // cannot answer, because our own cover is drawn over it.
+                        View cv = sCover;
+                        boolean hide = i.getBooleanExtra("on", true);
+                        if (cv != null) {
+                            cv.setVisibility(hide ? View.INVISIBLE : View.VISIBLE);
+                            Xp.log(TAG + "uncover: our cover ImageView is now "
+                                    + (hide ? "INVISIBLE" : "VISIBLE"));
+                        } else {
+                            Xp.log(TAG + "uncover: no cover ImageView");
+                        }
                     } else if ("cover".equals(op)) {
                         if (i.getBooleanExtra("on", true)) {
                             sCoverWanted = true;
