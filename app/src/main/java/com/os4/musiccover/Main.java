@@ -4672,12 +4672,22 @@ public class Main extends XposedModule {
         return albumArt(ctx, true);
     }
 
+    private static Bitmap albumArt(Context ctx, boolean allowCard) {
+        return albumArt(ctx, allowCard, null);
+    }
+
     /**
      * allowCard gates the media card thumbnail. It is the only source when the player publishes
      * nothing but an artwork URI, but it lags a track change by a moment - long enough to hand
      * back the PREVIOUS album - so callers that can afford to wait ask for the session only.
+     *
+     * sessionBits, when passed, is filled in with what the session turned out to be: 1 it
+     * carried a bitmap, 0 it carried none, -1 there was no session to ask. The caller needs the
+     * difference between the last two, because one is a player still filling its bitmap in and
+     * the other is a player that never publishes one - and this is the only place that sees it.
      */
-    private static Bitmap albumArt(Context ctx, boolean allowCard) {
+    private static Bitmap albumArt(Context ctx, boolean allowCard, int[] sessionBits) {
+        if (sessionBits != null) sessionBits[0] = -1;
         MediaController c = pickController(ctx);
         if (c != null) {
             MediaMetadata md = c.getMetadata();
@@ -4688,11 +4698,13 @@ public class Main extends XposedModule {
                     b = md.getDescription().getIconBitmap();
                 }
                 if (b != null) {
+                    if (sessionBits != null) sessionBits[0] = 1;
                     Xp.log(TAG + "album art from " + c.getPackageName()
                             + " " + b.getWidth() + "x" + b.getHeight() + " \""
                             + md.getString(MediaMetadata.METADATA_KEY_TITLE) + "\"");
                     return b;
                 }
+                if (sessionBits != null) sessionBits[0] = 0;
                 Xp.log(TAG + c.getPackageName() + " carries no art bitmap (uri="
                         + md.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI) + ")");
             }
@@ -5625,6 +5637,14 @@ public class Main extends XposedModule {
      * already read the new one). So attempts are spaced out, the session is preferred over the
      * card until the last one, and artwork identical to what is already on the wallpaper is read
      * as "not updated yet" rather than accepted.
+     *
+     * That budget only means anything for a player that HAS a bitmap to fill in. One that
+     * publishes only an artwork URI never will, and for it the session is not a source at all -
+     * Bilibili hands over an i1.hdslb.com URL and no bitmap, on 2309 of the 2690 session reads
+     * in a day's log - so every try spent on the session is spent knowing it comes back empty.
+     * Measured before this was understood: 143 video switches waited an average of 1.6s, and 128
+     * of them burned all fourteen tries, with the wallpaper sitting on the previous video the
+     * whole time, before the card thumbnail was ever consulted once.
      */
     private static final int ART_TRIES = 14;
     /**
@@ -5669,6 +5689,19 @@ public class Main extends XposedModule {
 
     private static void tryPushArt(final Context ctx, final int attempt, final boolean fresh,
                                    final int gen) {
+        tryPushArt(ctx, attempt, fresh, gen, false);
+    }
+
+    /**
+     * allowCard travels with the attempt because the first one is where the session gets judged.
+     * When it answers with no bitmap there is nothing left to wait for on that side, and the
+     * card thumbnail - which until then was read on the very last try only - can answer from the
+     * next one instead. The try budget is untouched, so the worst case is exactly what it was;
+     * what changes is that the common case stops spending it. The session is still asked first
+     * on every attempt, so a player that does fill its bitmap in late is still picked up.
+     */
+    private static void tryPushArt(final Context ctx, final int attempt, final boolean fresh,
+                                   final int gen, final boolean allowCard) {
         worker().postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -5677,13 +5710,22 @@ public class Main extends XposedModule {
                     return;
                 }
                 boolean last = attempt >= ART_TRIES - 1;
-                Bitmap art = albumArt(ctx, last);
+                int[] sessionBits = new int[1];
+                Bitmap art = albumArt(ctx, last || allowCard, sessionBits);
                 int print = art == null ? 0 : artPrint(art);
                 boolean stale = fresh && art != null && sArtPrint != 0 && print == sArtPrint;
                 if ((art == null || stale) && !last) {
+                    // 0 is "a session was there and carried no bitmap", which more tries will not
+                    // change. -1 is "there was nothing to ask", which more tries might. Once the
+                    // card is in it stays in, so this is worth looking at on any attempt - the
+                    // session can turn up late - and declaring it once keeps the line off the log.
+                    boolean bare = sessionBits[0] == 0 && !allowCard;
+                    if (bare) {
+                        Xp.log(TAG + "session carries no bitmap at all, reading the card from here");
+                    }
                     Xp.log(TAG + "art " + (art == null ? "not ready" : "still the old one")
                             + ", retrying (" + (attempt + 2) + "/" + ART_TRIES + ")");
-                    tryPushArt(ctx, attempt + 1, fresh, gen);
+                    tryPushArt(ctx, attempt + 1, fresh, gen, allowCard || bare);
                     return;
                 }
                 if (stale) {
