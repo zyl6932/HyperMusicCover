@@ -1359,24 +1359,17 @@ public class Main extends XposedModule {
             public void onReceive(Context c, Intent i) {
                 String a = i.getAction();
                 if (Intent.ACTION_SCREEN_ON.equals(a)) {
-                    // The clock was handed back on the way down, so it is where the OEM left
-                    // it - natural position, full size - and taking the hold back here is a real
-                    // move. reassertCoverClock() snaps it, and a snap on this one is a teleport:
-                    // measured on this device the container crosses 728px in the single frame
-                    // the snap lands on, and the placement that compensates for that move has to
-                    // be written before the frame is drawn - so that frame renders the date
-                    // 728px from where it belongs. One frame of that is a jump, and the retries
-                    // after it make a few more: "从aod点亮之后小时钟会跳几次再停止".
+                    // Animated, but briefly - and only now that the pre-draw finishes each
+                    // frame off with the geometry it is really drawn with.
                     //
-                    // A timed ramp instead, so every frame moves one frame's worth of pixels.
-                    // Not the spring entering cover mode uses: that settles in about 300ms and
-                    // spends the first third of it doing most of the travelling - measured,
-                    // 0.26 of the collapse inside its first two frames, which on this 752px
-                    // move is 368px of the date in one step, and one step is what the user sees.
-                    // An entry has no travel to do (the date's ideal path there is a few pixels)
-                    // and the spring is right for it; this is a move, and a move wants a
-                    // duration. Where the hold survived the display going off there is nothing
-                    // to animate at all, and the old re-assert is exactly right.
+                    // Scanned frame by frame off screen recordings of this phone: at 530ms the
+                    // clock is still at its AOD size over the cover wallpaper for the first
+                    // eight frames ("先放大再缩小回原来的位置"), and taken back with a snap it
+                    // is small before the wallpaper has begun to appear and the whole wake reads
+                    // as a single flash ("一闪而过"). The clock has to be seen to arrive, just
+                    // not seen to linger - so a ramp short enough that its whole length is the
+                    // arrival. What made the short ones judder before was the placement's one
+                    // frame of lag against the OEM's own move, which the pre-draw removes.
                     if (sCoverMode && sHoldY == null) wakeIntoCover();
                     else reassertCoverClock();
                     // Waking re-runs the OEM's depth pipeline, and if the keyguard was rebuilt
@@ -1407,7 +1400,33 @@ public class Main extends XposedModule {
                 // Releasing only releases: the hold, the scale, the tint and the card all go
                 // together, which is what makes the OEM's own transition the whole story.
                 if (Intent.ACTION_SCREEN_OFF.equals(a) && sCoverMode) {
-                    abandonHold("screen off, the clock goes back for the AOD", true);
+                    // Kept, not handed back. The AOD's clock is this same clock - it is
+                // SystemUI's keyguard in doze, not a face belonging to com.miui.aod - so what
+                // the AOD shows is whatever is on these views when the screen goes out. Handing
+                // it back therefore means the AOD shows a full-size clock, and the whole way
+                // back up is a clock shrinking on a wallpaper that is already there.
+                //
+                // The collapse used to be lost here instead, which is the other half of the
+                // same problem: in doze SystemUI stops drawing, so the pre-draw guard never
+                // runs, and the layout the OEM swaps to for doze is a different one - the
+                // placement that was written against the lock screen's layout does not describe
+                // it. Nothing re-places, and what is left is the unsqueezed font driven to an
+                // intermediate axis state, which reads as a stretched glyph.
+                //
+                // So the hold stays AND the placement is put back onto the doze layout, on a
+                // timer, because there is no draw to hang it off. Three passes: the OEM's own
+                // screen-off animation is still running for the first, the layout usually lands
+                // on the second, and the third is for the builds that are slower about it.
+                stopMotion();
+                Xp.log(TAG + "screen off, cover mode keeps the clock held");
+                for (long d : new long[]{260L, 700L, 1400L}) {
+                    main().postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (sCoverMode) reassertCoverClock(true);
+                        }
+                    }, d);
+                }
                     return;
                 }
                 abandonHold(a, true);
@@ -2018,6 +2037,10 @@ public class Main extends XposedModule {
         @Override
         public boolean onPreDraw() {
             if (!sCoverMode || Float.isNaN(sCollapseMin)) return true;
+            // Before the reasons to skip below, and deliberately: a spring or a ramp places on
+            // every one of its frames and is still one frame late doing it, which is exactly
+            // what this is for.
+            applyPendingTranslation();
             // While a spring is running the placement already runs on every frame of it, and
             // this would only be reading back what the frame callback just wrote.
             if (sFrameCb != null || sRamp != null) return true;
@@ -2147,6 +2170,55 @@ public class Main extends XposedModule {
         // put the date a thousand pixels from the line. The lag this was for is handled by asking
         // the OEM for its translation instead - see oemTranslationY().
         placeCollapsedClock(k, y, p);
+    }
+
+    /**
+     * The frame the placement last described, waiting for a pre-draw to be finished off.
+     *
+     * Only the TRANSLATIONS are deferred, and only their geometry is re-read. Everything that
+     * has to be measured - the glyph box, the pivot, which views are being scaled - was measured
+     * by placeCollapsedClock() and is not re-done here; what moves between the two is where the
+     * OEM has since put the clock, which is a reading and not a measurement.
+     */
+    private static volatile float sPendP = Float.NaN;
+    private static boolean sPendAnchored;
+    private static float sPendFrom, sPendTarget, sPendGlyph, sPendGap;
+
+    /**
+     * Writes this frame's translations from the geometry the frame will actually be drawn with.
+     *
+     * placeCollapsedClock() runs inside the OEM's own animation callback, and Folme applies the
+     * container's translation for that frame AFTER it returns. So the nudge it writes describes
+     * the previous frame's clock and the date is drawn at `target + (O_n - O_n-1)` - displaced
+     * by one frame of the OEM's own motion. Smooth styles move a few pixels a frame and nobody
+     * can see it; the wake from the AOD moves 728px in one frame, and there the placement's
+     * single frame of lag IS the error, drawn as a date 728px from where it belongs.
+     *
+     * The pre-draw is after every transform for the frame has been applied, so a reading there
+     * is the one the frame is drawn with. Both writes are skipped when the value is already
+     * right, so a frame the placement got right costs two comparisons.
+     */
+    private static void applyPendingTranslation() {
+        if (Float.isNaN(sPendP) || Float.isNaN(sCollapseMin) || !sCoverMode) return;
+        View date = sDateView;
+        float dateBottom;
+        if (sPendAnchored) {
+            if (!usableDate(date)) return;
+            int[] loc = new int[2];
+            date.getLocationOnScreen(loc);
+            float here = loc[1] - date.getTranslationY();
+            float nudge = sPendFrom + (sPendTarget - sPendFrom) * sPendP - here;
+            if (Math.abs(nudge - date.getTranslationY()) >= 0.5f) date.setTranslationY(nudge);
+            dateBottom = date.getTop() + date.getHeight() + date.getTranslationY();
+        } else {
+            dateBottom = date == null ? 0f : date.getTop() + date.getHeight();
+        }
+        for (View root : clockRoots()) {
+            View g = clockTarget(root);
+            if (g == null) continue;
+            float want = (dateBottom + sPendGap - (g.getTop() + sPendGlyph)) * sPendP;
+            if (Math.abs(want - g.getTranslationY()) >= 0.5f) g.setTranslationY(want);
+        }
     }
 
     /**
@@ -2976,6 +3048,9 @@ public class Main extends XposedModule {
         // the OEM put it and neither it nor the date is moved.
         float nudge = 0f;
         float dateBottom;
+        // Hoisted out of the two branches below: the pre-draw needs them after the fact, to
+        // re-derive this frame's translations from geometry the OEM has finished writing.
+        float from = 0f, target = 0f, gap = 0f;
         // Where the date ends this frame, and where it was actually FOUND, both for the
         // verbose trace. The second one is the frame before's rendered position - the read
         // happens before the write - so it is the number that shows a jitter.
@@ -3011,7 +3086,7 @@ public class Main extends XposedModule {
             date.getLocationOnScreen(loc);
             dateRead = loc[1];
             float here = loc[1] - date.getTranslationY();
-            float target = DATE_TOP_DP * date.getResources().getDisplayMetrics().density;
+            target = DATE_TOP_DP * date.getResources().getDisplayMetrics().density;
             // PROBE: what the OEM's own function says this y means, next to what the screen
             // says. Equal means the computed one can be trusted and the measurement - and its one
             // frame of lag - can go.
@@ -3032,7 +3107,7 @@ public class Main extends XposedModule {
             // OEM's step is cancelled by the nudge instead and the date stays on the path the
             // ramp puts it on.
             if (Float.isNaN(sDateNatural)) sDateNatural = here;
-            float from = Float.isNaN(sDateNatural) ? here : sDateNatural;
+            from = Float.isNaN(sDateNatural) ? here : sDateNatural;
             nudge = from + (target - from) * p - here;
             date.setTranslationY(nudge);
             dateBottom = date.getTop() + date.getHeight() + nudge;
@@ -3045,7 +3120,7 @@ public class Main extends XposedModule {
         for (View root : clockRoots()) {
             View g = clockTarget(root);
             if (g == null) continue;
-            float gap = CLOCK_GAP_DP * g.getResources().getDisplayMetrics().density;
+            gap = CLOCK_GAP_DP * g.getResources().getDisplayMetrics().density;
             g.setPivotX(clockPivotX(g, pooled));
             // Pivoting on the glyph top means the scaled block still starts at `glyph`, so the
             // translation needed to land it under the date does not depend on k.
@@ -3062,6 +3137,12 @@ public class Main extends XposedModule {
             // step ran the other way on the first frame of the entry.
             g.setTranslationY(anchored ? (dateBottom + gap - (g.getTop() + glyph)) * p : 0f);
         }
+        sPendP = p;
+        sPendAnchored = anchored;
+        sPendFrom = from;
+        sPendTarget = target;
+        sPendGlyph = glyph;
+        sPendGap = gap;
         recordCollapse(y, p, k, glyph, dateBottom, nudge, date);
         if (sVerbose) {
             Xp.log(TAG + "collapse y=" + y + " p=" + p + " k=" + k
@@ -5278,9 +5359,17 @@ public class Main extends XposedModule {
      * arrives, holds, and the rest of the wake completes around it, which is the "先顿一下
      * 之后再完成过渡".
      */
-    private static final long WAKE_RAMP_MS = 530L;
-    /** Material's standard curve. The OEM-ish decelerate above puts half the move into the
-     *  first fifth of the time, which is a lurch on a 752px travel; this spreads it. */
+    /**
+     * Takes the hold back on the way up from the AOD, over one short ramp.
+     *
+     * The clock is at the AOD's position and the AOD's size when this runs, so unlike
+     * reassertCoverClock() this is a real move and it has to be seen. Short, though: the whole
+     * ramp is meant to read as the clock arriving, not as a clock that stays big and then
+     * shrinks. 220ms against the wallpaper's own fade-in.
+     */
+    private static final long WAKE_RAMP_MS = 220L;
+    /** Material's standard curve - a lurch is worse here than elsewhere, since the travel is
+     *  the full height of the clock. */
     private static final Interpolator WAKE_EASE = new PathInterpolator(0.4f, 0f, 0.2f, 1f);
 
     private static void wakeIntoCover() {
@@ -5289,7 +5378,6 @@ public class Main extends XposedModule {
         sGlassV1 = sGlassEnd;
         sAppliedK = Float.NaN;
         sAppliedGlassV = Float.NaN;
-        sDateNatural = Float.NaN;
         sCardP = 1f;
         applyMediaCard();
         rampTo(SQUEEZE_FLOOR, WAKE_RAMP_MS, "STATE_CHANGED", false, WAKE_EASE);
