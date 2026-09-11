@@ -8,7 +8,6 @@
 package com.os4.musiccover.ui.screen.home
 
 import android.annotation.SuppressLint
-import android.widget.Toast
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Box
@@ -399,14 +398,11 @@ private fun RestartMenu() {
                         index = index,
                         onSelectedIndexChange = {
                             showMenu = false
-                            scope.launch {
-                                val ok = withContext(Dispatchers.IO) { entry.second() }
-                                Toast.makeText(
-                                    context,
-                                    if (ok) R.string.restart_done else R.string.restart_failed,
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            }
+                            // No result is reported. A Toast is not a channel this app has - they
+                            // are dropped whenever notifications are off, which is this app's
+                            // default - and the restart is its own feedback: the screen blinks and
+                            // the lock screen comes back.
+                            scope.launch { withContext(Dispatchers.IO) { entry.second() } }
                         },
                     )
                 }

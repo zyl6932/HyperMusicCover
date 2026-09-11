@@ -23,8 +23,6 @@
     <string name="restart_menu">Restart</string>
     <string name="restart_systemui">Restart System UI</string>
     <string name="restart_wallpaper">Restart wallpaper</string>
-    <string name="restart_done">Restart requested</string>
-    <string name="restart_failed">Restart failed, root required</string>
 
     <string name="tab_home">Home</string>
     <string name="tab_settings">Settings</string>

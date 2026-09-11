@@ -23,8 +23,6 @@
     <string name="restart_menu">重启</string>
     <string name="restart_systemui">重启系统界面</string>
     <string name="restart_wallpaper">重启壁纸</string>
-    <string name="restart_done">已请求重启</string>
-    <string name="restart_failed">重启失败，需要 Root 权限</string>
 
     <string name="tab_home">主页</string>
     <string name="tab_settings">设置</string>
