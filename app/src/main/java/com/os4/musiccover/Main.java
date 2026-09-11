@@ -526,7 +526,7 @@ public class Main extends XposedModule {
         // stale. Drop it on detach and always drive the currently attached one.
         try {
             Xp.hookAll(sContainerCls, "onDetachedFromWindow", chain -> {
-                detachPlacePreDraw();
+                releaseClockGuard();
                 Object result = chain.proceed();
                 if (sContainer == chain.getThisObject()) {
                     sContainer = null;
@@ -1945,72 +1945,145 @@ public class Main extends XposedModule {
         });
     }
 
-    // ------------------------------------------------------------------ deferred placement
+    // ------------------------------------------------------------------ collapse guard
 
-    /** The frame's placement parameters, waiting for the pre-draw that will apply them. */
-    private static float sPendingK = Float.NaN;
-    private static float sPendingY;
-    private static float sPendingP;
-    /** Whether sPlacePreDraw is currently attached, so one frame cannot queue it twice. */
-    private static volatile boolean sPendingPlaced;
+    /**
+     * The collapsed clock is asserted once per frame the keyguard draws, the same way the depth
+     * cut-out and the media card are.
+     *
+     * Everything the placement writes is derived from the layout, and it is only ever written
+     * while something is driving frames. In cover mode at rest nothing is: the OEM has stopped
+     * emitting notifY, so applyCollapse() is not called, and the clock keeps whatever the last
+     * driven frame left on it. Anything that changes *then* is invisible to us and stays wrong.
+     *
+     * Measured, on the path that had no other trigger left (SystemUI restarted with the screen
+     * off, then woken): the one placement this process ran happened while the clock container was
+     * still at screen y = 0, the OEM then translated the whole container 728px up, and no further
+     * frame ever came. The date ended up at screen y = -501 - off the top of the screen - with
+     * the transform on the views perfectly self-consistent, so nothing that only checks whether
+     * the placement ran can tell.
+     *
+     * The layout listener below catches a rebuild that changes a *layout*. This catches
+     * everything else, transforms included, which no layout event ever reports. The check is
+     * deliberately cheap - the already-cached date view and clock targets, no lookups of its own
+     * - so measuring the glyphs only happens on the frames where the answer is no.
+     */
+    private static View sClockGuarded;
+    private static long sClockFixAt;
+    /** Long enough for a re-placement to have landed before another can be asked for. */
+    private static final long CLOCK_FIX_MS = 250L;
+    /** The repairs are logged, but a clock that cannot be measured asks every 250ms. */
+    private static int sClockFixes;
 
-    private static final ViewTreeObserver.OnPreDrawListener sPlacePreDraw =
+    private static final ViewTreeObserver.OnPreDrawListener sClockGuard =
             new ViewTreeObserver.OnPreDrawListener() {
         @Override
         public boolean onPreDraw() {
-            detachPlacePreDraw();
-            float k = sPendingK;
-            if (Float.isNaN(k)) return true;
-            try {
-                placeCollapsedClock(k, sPendingY, sPendingP);
-            } catch (Throwable t) {
-                Xp.log(TAG + "pre-draw placement failed: " + t);
+            if (!sCoverMode || Float.isNaN(sCollapseMin)) return true;
+            // While a spring is running the placement already runs on every frame of it, and
+            // this would only be reading back what the frame callback just wrote.
+            if (sFrameCb != null || sRamp != null) return true;
+            Float held = sHoldY;
+            if (held == null) return true;
+            float p = coverProgress(held);
+            // Same reading the settle uses: with no natural y observed yet, held at the floor is
+            // a complete collapse by definition, and that definition is what the hold was taken
+            // under. Anything short of settled has a driver of its own and is left alone.
+            if (Float.isNaN(p)) p = held > SQUEEZE_FLOOR ? 0f : 1f;
+            if (p < 0.999f) return true;
+            if (!collapseStale()) return true;
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - sClockFixAt < CLOCK_FIX_MS) return true;
+            sClockFixAt = now;
+            if (++sClockFixes <= 5 || sClockFixes % 20 == 0) {
+                Xp.log(TAG + "collapsed clock was stale on the views (" + staleWhy()
+                        + "), placing it again (" + sClockFixes + ")");
             }
+            placeCollapsedClock(1f - p * (1f - sCollapseMin), held, p);
             return true;
         }
     };
 
-    private static void detachPlacePreDraw() {
-        sPendingPlaced = false;
+    /**
+     * Whether what is on the views still says where the clock belongs.
+     *
+     * The date is the canary: it is the one thing pinned to an absolute place on the screen, so
+     * anything that moves the clock under it - a rebuilt keyguard, the OEM translating the
+     * container - shows up there first. A style that is only scaled where the OEM put it has no
+     * absolute anchor to compare against, and its scale is all there is to check.
+     *
+     * The scale being checked is sCollapseMin itself, not sAppliedK: at the floor p is 1 and
+     * `1 - p * (1 - min)` is `min` exactly, so the expected value needs nothing remembered, and
+     * a clock that was never placed - the whole of the "restart and nothing collapses" report -
+     * reads as stale at 1.0 against it.
+     */
+    private static boolean collapseStale() {
+        View date = sDateView;
+        if (anchoredStyle()) {
+            if (!usableDate(date)) return true;
+            int[] loc = new int[2];
+            date.getLocationOnScreen(loc);
+            float target = DATE_TOP_DP * date.getResources().getDisplayMetrics().density;
+            if (Math.abs(loc[1] - target) > 1.5f) return true;
+        }
+        for (View root : clockRoots()) {
+            View g = sClockTargets.get(root);
+            // Nothing resolved for this tree yet, so there is nothing to compare - and one
+            // repair is what resolves it.
+            if (g == null) return true;
+            // A tree that answered "no clock here" is not a tree to correct, and asking again
+            // from here would walk the layer every frame for a style that has nothing to scale.
+            // The layout listener is what speaks up if one ever appears.
+            if (g == root) continue;
+            if (!usable(g)) return true;
+            if (Math.abs(g.getScaleX() - sCollapseMin) > 0.005f) return true;
+        }
+        // Every tree is either scaled as it should be or has no clock to scale.
+        return false;
+    }
+
+    /** The same reading, once, for the log line - only ever called once the answer is yes. */
+    private static String staleWhy() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("want k=").append(r2(sCollapseMin));
+        View date = sDateView;
+        if (usableDate(date)) {
+            int[] loc = new int[2];
+            date.getLocationOnScreen(loc);
+            sb.append(" dateOnScreen=").append(loc[1]);
+        } else {
+            sb.append(" date=MISSING");
+        }
+        for (View root : clockRoots()) {
+            View g = sClockTargets.get(root);
+            sb.append(" | ").append(g == null ? "unresolved"
+                    : g == root ? "no clock here" : idOf(g) + " scale=" + r2(g.getScaleX()));
+        }
+        return sb.toString();
+    }
+
+    /** Idempotent, so it can be called from anywhere the container is known to be alive. */
+    private static void ensureClockGuard() {
         View v = sContainer;
-        if (v == null) return;
+        if (v == null || sClockGuarded == v) return;
+        releaseClockGuard();
         try {
-            v.getViewTreeObserver().removeOnPreDrawListener(sPlacePreDraw);
-        } catch (Throwable ignored) {
+            v.getViewTreeObserver().addOnPreDrawListener(sClockGuard);
+            sClockGuarded = v;
+        } catch (Throwable t) {
+            // Adding during the pre-draw dispatch itself throws. Whoever next knows the
+            // container is alive will try again.
+            Xp.log(TAG + "clock guard not installed: " + t);
         }
     }
 
-    /**
-     * Asks for this frame's placement, to be applied just before the frame is drawn.
-     *
-     * Everything the placement reads - where the date is, how tall the clock is - has to be read
-     * after the OEM has moved its own views, and the only moment that is true is the pre-draw.
-     * Reading it earlier costs one frame of lag, which shows up as the date being displaced by
-     * the OEM's per-frame translation - invisible on a smooth style, 68px of shake on the
-     * two-row one.
-     *
-     * The latest parameters win: several drivers can push a y into one frame, and only the last
-     * of them describes where the clock will actually be drawn.
-     */
-    private static void requestPlacement(float k, float y, float p) {
-        sPendingK = k;
-        sPendingY = y;
-        sPendingP = p;
-        View v = sContainer;
-        if (v == null) {
-            // No container to hang a callback on; the read is stale but doing it late is worse.
-            placeCollapsedClock(k, y, p);
-            return;
-        }
-        if (sPendingPlaced) return;
+    private static void releaseClockGuard() {
+        View v = sClockGuarded;
+        sClockGuarded = null;
+        if (v == null) return;
         try {
-            v.getViewTreeObserver().addOnPreDrawListener(sPlacePreDraw);
-            sPendingPlaced = true;
-        } catch (Throwable t) {
-            // Adding during dispatchOnPreDraw throws. Doing it now is wrong by a frame; skipping
-            // it entirely is wrong until the next frame, so take the frame.
-            Xp.log(TAG + "could not defer the placement: " + t);
-            placeCollapsedClock(k, y, p);
+            v.getViewTreeObserver().removeOnPreDrawListener(sClockGuard);
+        } catch (Throwable ignored) {
         }
     }
 
@@ -2064,10 +2137,18 @@ public class Main extends XposedModule {
      * out of play entirely rather than throwing: the date, and the wallpaper, still work.)
      */
     private static View clockTarget(View root) {
-        // Always tried first, and never cached: one resource lookup and a findViewById, and
-        // answering from a cache here is how a style change would go unnoticed.
+        // Always tried first and never answered from the cache: one resource lookup and a
+        // findViewById, and short-circuiting it is how a style change would go unnoticed.
         View g = findClockView(root, "time_group");
-        if (usable(g)) return g;
+        if (usable(g)) {
+            // Recorded, not answered from: the lookup above is what decides, and it is still the
+            // first thing tried on every call. But sClockTargets is the only record of what this
+            // resolved to, and the frame-by-frame guard reads it - leaving the fast path out of
+            // it made every tree look unresolved for as long as the style had a time_group, and
+            // the guard re-placed the clock four times a second for ever.
+            sClockTargets.put(root, g);
+            return g;
+        }
         View cached = sClockTargets.get(root);
         if (cached != null && cached != root && usable(cached) && cached.getParent() != null) {
             return cached;
@@ -4998,6 +5079,7 @@ public class Main extends XposedModule {
         // The reading may predate this cover - the card can come up on art that was pushed
         // before the user ever locked the phone - and the OEM will not re-colour on its own.
         recolorClock();
+        ensureClockGuard();
         saveState();
     }
 
@@ -5016,6 +5098,7 @@ public class Main extends XposedModule {
      */
     private static void exitCoverMode(boolean animate) {
         sCoverMode = false;
+        releaseClockGuard();
         // The cover is on its way out, so the reading that coloured the clock describes the
         // wallpaper coming back even less than it described the old one. Dropped here rather
         // than at the settle: the clock is at its smallest now, so the colour going back to the
@@ -5097,6 +5180,9 @@ public class Main extends XposedModule {
      */
     private static void reassertCoverClock(boolean force) {
         if (!sCoverMode) return;
+        // Before the early exit below, not after: a hold that survived the keyguard being
+        // rebuilt returns from there, and that is the case the guard exists for.
+        ensureClockGuard();
         // Cover mode is being restored, not animated into - a wake, or a keyguard rebuilt under
         // us - so the card's progress is its settled value rather than a frame of something.
         // Without this it keeps whatever it was left with, which after a SystemUI restart is the
