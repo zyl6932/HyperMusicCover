@@ -105,8 +105,14 @@ jobs:
           body = re.sub(r'[*][*](.+?)[*][*]', bold, body)
 
           head = '🌙' if os.environ.get('PRERELEASE') == 'true' else '🎉'
-          text = (f"{head} <b>{html.escape(read('title.txt'))}</b>  "
-                  f"<code>{html.escape(os.environ['TAG'])}</code>\n\n"
+          title = read('title.txt')
+          tag = os.environ['TAG']
+          # release.yml names every tag-driven release after the tag itself, so the bold
+          # name and the code tag below are the same string twice in a row. Both are worth
+          # showing only when a person named the release by hand in the web UI, which is
+          # the one path where the name says something the tag does not.
+          named = '' if title == tag else f"  <code>{html.escape(tag)}</code>"
+          text = (f"{head} <b>{html.escape(title)}</b>{named}\n\n"
                   f"{body}\n\n"
                   f"🔗 {read('url.txt')}")
           with open('message.txt', 'w', encoding='utf-8') as f:
