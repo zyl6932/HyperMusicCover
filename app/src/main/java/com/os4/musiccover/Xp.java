@@ -145,14 +145,30 @@ final class Xp {
 
     // ---------------------------------------------------------------- fields
 
+    /** The declared fields of a class by name, for the same reason the methods are cached. */
+    private static final ClassValue<java.util.concurrent.ConcurrentHashMap<String, Field>>
+            DECLARED_FIELDS =
+            new ClassValue<java.util.concurrent.ConcurrentHashMap<String, Field>>() {
+                @Override
+                protected java.util.concurrent.ConcurrentHashMap<String, Field> computeValue(
+                        Class<?> type) {
+                    java.util.concurrent.ConcurrentHashMap<String, Field> byName =
+                            new java.util.concurrent.ConcurrentHashMap<>();
+                    for (Field f : type.getDeclaredFields()) {
+                        try {
+                            f.setAccessible(true);
+                        } catch (Throwable ignored) {
+                        }
+                        byName.put(f.getName(), f);
+                    }
+                    return byName;
+                }
+            };
+
     private static Field field(Object obj, String name) {
         for (Class<?> c = obj.getClass(); c != null; c = c.getSuperclass()) {
-            try {
-                Field f = c.getDeclaredField(name);
-                f.setAccessible(true);
-                return f;
-            } catch (NoSuchFieldException ignored) {
-            }
+            Field f = DECLARED_FIELDS.get(c).get(name);
+            if (f != null) return f;
         }
         throw new IllegalArgumentException("no field " + obj.getClass().getName() + "." + name);
     }
@@ -198,20 +214,87 @@ final class Xp {
         }
     }
 
+    /**
+     * One declared method, with its parameter types kept alongside it.
+     *
+     * `Method.getParameterTypes()` clones its array on every call, which is the same reason this
+     * cache exists at all: the matching below runs once per frame on the collapse's hot path and
+     * cannot be allocating.
+     */
+    private static final class Overload {
+        final Method method;
+        final Class<?>[] params;
+
+        Overload(Method m) {
+            method = m;
+            // Guarded: this now runs for every method a class declares rather than for the one
+            // that was asked for, and one method a build refuses to open must not cost the rest
+            // of the class its table. A method that cannot be opened is simply not offered, and
+            // the lookup then throws exactly what it threw before there was a cache.
+            try {
+                m.setAccessible(true);
+            } catch (Throwable ignored) {
+            }
+            params = m.getParameterTypes();
+        }
+    }
+
+    /**
+     * The declared methods of a class, grouped by name.
+     *
+     * This is the whole point of the class, and it is a frame-rate fix rather than a tidiness.
+     * `applyGlassMorph()` drives `updateGlassValue` through here on every frame of a cover-mode
+     * transition, and the lookup used to be `getDeclaredMethods()` on every class between the
+     * view and Object. That call ALLOCATES: it builds a fresh Method object for every method the
+     * class declares, every time it is asked. On a View subclass that is hundreds of objects per
+     * call, twice a frame, on top of the OEM recomputing a variable font on the same frames -
+     * which is felt as jank in exactly the transition this module is for.
+     *
+     * ClassValue rather than a Map<Class, ...>: it holds the entry on the Class itself, so an
+     * OEM class that is unloaded takes its table with it instead of being pinned by a static map
+     * for the life of SystemUI.
+     */
+    private static final ClassValue<java.util.concurrent.ConcurrentHashMap<String, Overload[]>>
+            DECLARED_METHODS =
+            new ClassValue<java.util.concurrent.ConcurrentHashMap<String, Overload[]>>() {
+                @Override
+                protected java.util.concurrent.ConcurrentHashMap<String, Overload[]> computeValue(
+                        Class<?> type) {
+                    java.util.concurrent.ConcurrentHashMap<String, Overload[]> byName =
+                            new java.util.concurrent.ConcurrentHashMap<>();
+                    for (Method m : type.getDeclaredMethods()) {
+                        String n = m.getName();
+                        Overload o = new Overload(m);
+                        Overload[] prev = byName.get(n);
+                        if (prev == null) {
+                            byName.put(n, new Overload[]{o});
+                        } else {
+                            Overload[] next = new Overload[prev.length + 1];
+                            System.arraycopy(prev, 0, next, 0, prev.length);
+                            next[prev.length] = o;
+                            byName.put(n, next);
+                        }
+                    }
+                    return byName;
+                }
+            };
+
+    /**
+     * The order is the one the scan had: nearest class first, and within a class the order
+     * getDeclaredMethods() reported, so a name with several overloads still picks the same one.
+     */
     private static Method findMethod(Class<?> cls, String name, Object[] args) {
         for (Class<?> c = cls; c != null; c = c.getSuperclass()) {
-            for (Method m : c.getDeclaredMethods()) {
-                if (!m.getName().equals(name)) continue;
-                Class<?>[] p = m.getParameterTypes();
+            Overload[] cands = DECLARED_METHODS.get(c).get(name);
+            if (cands == null) continue;
+            for (Overload o : cands) {
+                Class<?>[] p = o.params;
                 if (p.length != args.length) continue;
                 boolean fits = true;
                 for (int i = 0; i < p.length && fits; i++) {
                     fits = accepts(p[i], args[i]);
                 }
-                if (fits) {
-                    m.setAccessible(true);
-                    return m;
-                }
+                if (fits) return o.method;
             }
         }
         throw new IllegalArgumentException("no method " + cls.getName() + "." + name

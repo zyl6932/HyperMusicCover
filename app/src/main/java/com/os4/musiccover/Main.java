@@ -227,7 +227,7 @@ public class Main extends XposedModule {
      */
     private static void updateColorBand() {
         if (!sCoverMode && !sReleasing) return;
-        int[] p = new int[2];
+        int[] p = LOC_BAND;
         float top = Float.NaN, bot = Float.NaN;
         View date = sDateView;
         if (usableDate(date)) {
@@ -374,6 +374,21 @@ public class Main extends XposedModule {
 
     /** The screen the wallpaper is composed for. Read off the keyguard, not assumed. */
     private static volatile int sScreenW = 1200, sScreenH = 2608;
+
+    /**
+     * Scratch pairs for getLocationOnScreen, one per call site.
+     *
+     * Every one of these sits on the collapse's per-frame path, where the array was the whole of
+     * what the call allocated and there are several hundred frames in a transition for the
+     * collector to walk afterwards. One array per SITE rather than one shared: they are all read
+     * and consumed within a few lines of being filled, none of them nests inside another, and a
+     * shared one would be a bug waiting for the first caller that does nest.
+     */
+    private static final int[] LOC_PLACE = new int[2];
+    private static final int[] LOC_PEND = new int[2];
+    private static final int[] LOC_BAND = new int[2];
+    private static final int[] LOC_STALE = new int[2];
+    private static final int[] LOC_CARD = new int[2];
 
     /**
      * The media card, restyled. This is the first thing the module changes about the card
@@ -533,6 +548,34 @@ public class Main extends XposedModule {
     private static final float[] EASE_DEFAULT       = {0.82f, 0.42f}; // k=223.8  c=24.5
     private static final float[] EASE_RUNNING       = {1.00f, 0.18f}; // k=1218.5 c=69.8
 
+    /**
+     * The curve the cover-mode transition runs on, and it is the OEM's own - the same numbers as
+     * EASE_STATE_CHANGED above, which is the preset the system itself drives this transition
+     * with. Named separately so the two can diverge if they ever have reason to, not because
+     * they differ today.
+     *
+     * It replaced EASE_RUNNING (0.18) in both directions, and that is the whole of the change:
+     * the same spring family, the same driver, same velocity carry-over across a retarget, one
+     * pair of numbers. 0.18 covers its distance about twice as fast at every point - 50% of the
+     * travel at 48ms against 95ms here, 95% at 136ms against 235 - which on a 120Hz screen puts
+     * the peak of the motion at ~73px in a single frame, at t~29ms. That is also the moment the
+     * OEM is recomputing the clock's variable font at its largest, so any dropped frame there
+     * doubled a step that was already the fastest thing on the screen. Measured with the jerk
+     * probe: 30/49/75px on the old curve, 25-41px on this one.
+     *
+     * A recording of the transition was also measured frame by frame (clock band, pixel change
+     * summed into a speed profile, integrated into progress), and it agrees on the shape but not
+     * on the number: a least-squares fit puts the response at 0.45-0.55s, consistently slower
+     * than the preset. The preset is believed over the fit, because the two are different kinds
+     * of evidence - a 0.38 that was read out of the OEM's own animation object, against a number
+     * inferred from pixels that cannot separate the clock's growth from the cover shrinking and
+     * the wallpaper swapping in the same frames, with a noise floor that clips exactly the slow
+     * first frames a spring is slowest in. Both errors push the estimate long. The preset also
+     * reproduces an independent measurement already in this file: the exit spring "settles in
+     * 610-636ms" was read off the device, and 0.38 lands at 665ms.
+     */
+    private static final float[] EASE_COVER         = {0.88f, 0.38f};
+
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
         Xp.attach(this);
@@ -612,6 +655,7 @@ public class Main extends XposedModule {
                 // A rebuilt keyguard can be a different clock style, so the nudge measured
                 // against the old one means nothing - and neither does the clock view we resolved.
                 sClockTargets.clear();
+                forgetClockRoots();
                 forgetGlyphBox();
                 if (sCoverMode) reassertCoverClock(true);
                 return result;
@@ -1234,6 +1278,12 @@ public class Main extends XposedModule {
                         c.sendBroadcast(wp);
                         Xp.log(TAG + "texture fit to screen " + (sTexFit ? "ON" : "off")
                                 + " (wallpaper re-fit " + (sTexFit ? "skipped" : "enabled") + ")");
+                    } else if ("jerk".equals(op)) {
+                        // Read-only probe: reports how far the clock's drawn position moves in
+                        // one frame. See jerk(). Costs a getLocationOnScreen per clock root per
+                        // frame while it is on, so it is off unless asked for.
+                        sJerkProbe = i.getBooleanExtra("on", true);
+                        Xp.log(TAG + "jerk probe " + (sJerkProbe ? "on" : "off"));
                     } else if ("hidefp".equals(op)) {
                         sHideFp = i.getBooleanExtra("on", !sHideFp);
                         saveState();
@@ -1500,6 +1550,9 @@ public class Main extends XposedModule {
                 // Cached for the per-frame paths, which cannot afford screenOn()'s binder call:
                 // how the clock is inked is a per-frame decision. screenOn() itself stays for the
                 // event-time questions, where it is authoritative.
+                // Every one of these three changes the answer to one of the two cached readings,
+                // so the timer below is not what anyone waits on at the moments that matter.
+                forgetSysReads();
                 if (Intent.ACTION_SCREEN_ON.equals(a)) sScreenOn = true;
                 else if (Intent.ACTION_SCREEN_OFF.equals(a)) {
                     sScreenOn = false;
@@ -1872,17 +1925,41 @@ public class Main extends XposedModule {
         return null;
     }
 
-    /** The named constant of that enum, or its first one if the names have moved too. */
+    /**
+     * The named constant of that enum, or its first one if the names have moved too.
+     *
+     * Remembered per name, because this is called once per frame of every transition that drives
+     * the clock - applyY() asks for it before every notifStateChange - and the answer is the same
+     * constant for the life of the process. Resolving it costs an array: getEnumConstants()
+     * hands back a fresh clone on every call, and the scan then allocates an iterator. Caching it
+     * also stops the "no such constant" line below from being logged sixty times a second on a
+     * build whose names have moved, which is a cross-process write on the frames that can least
+     * afford one; it is now said once, and then the fallback is simply used.
+     */
+    private static final java.util.HashMap<String, Object> sTopTypes = new java.util.HashMap<>();
+    private static Class<?> sTopTypesFor;
+
     private static Object topChangeType(String name) {
         Class<?> c = sTypeCls;
         if (c == null) return null;
+        if (sTopTypesFor == c) {
+            Object hit = sTopTypes.get(name);
+            if (hit != null) return hit;
+        } else {
+            sTopTypes.clear();
+            sTopTypesFor = c;
+        }
         Object[] all = c.getEnumConstants();
         if (all == null || all.length == 0) return null;
         for (Object o : all) {
-            if (((Enum<?>) o).name().equals(name)) return o;
+            if (((Enum<?>) o).name().equals(name)) {
+                sTopTypes.put(name, o);
+                return o;
+            }
         }
         Xp.log(TAG + "no " + name + " on " + c.getName() + ", falling back to "
                 + ((Enum<?>) all[0]).name());
+        sTopTypes.put(name, all[0]);
         return all[0];
     }
 
@@ -2534,11 +2611,13 @@ public class Main extends XposedModule {
             // switched the correction below off for the one transition that needs it most.
             boolean exiting = !sCoverMode && sReleasing;
             if ((!sCoverMode && !exiting) || Float.isNaN(sCollapseMin)) return true;
+            long perf0 = System.nanoTime();
             // Before the reasons to skip below, and deliberately: a spring or a ramp places on
             // every one of its frames and is still one frame late doing it, which is exactly
             // what this is for.
             applyPendingTranslation();
             updateColorBand();
+            perfPre(perf0);
             // Nothing to REPAIR on the way out either, and it would be harmful: the repair below
             // asks whether the clock is at sCollapseMin, and on the way out it deliberately is
             // not, so every frame would look stale and be re-placed every CLOCK_FIX_MS.
@@ -2584,7 +2663,7 @@ public class Main extends XposedModule {
         View date = sDateView;
         if (anchoredStyle()) {
             if (!usableDate(date)) return true;
-            int[] loc = new int[2];
+            int[] loc = LOC_STALE;
             date.getLocationOnScreen(loc);
             float target = dateTargetY();
             if (Math.abs(loc[1] - target) > 1.5f) return true;
@@ -2611,7 +2690,7 @@ public class Main extends XposedModule {
         sb.append("want k=").append(r2(sCollapseMin));
         View date = sDateView;
         if (usableDate(date)) {
-            int[] loc = new int[2];
+            int[] loc = LOC_STALE;
             date.getLocationOnScreen(loc);
             sb.append(" dateOnScreen=").append(loc[1]);
         } else {
@@ -2660,11 +2739,18 @@ public class Main extends XposedModule {
         if (Float.isNaN(min) && Float.isNaN(sGlassV0)) return;
         float p = coverProgress(y);
         if (Float.isNaN(p)) return;
+        // The one place every driven frame of a transition passes through, which is why the cost
+        // accounting is hung here - see perfFrame().
+        perfFrame();
+        long perf0 = System.nanoTime();
         // Same progress, three consumers: the collapse scale below, the glass morph, and
         // the card. One OEM spring drives all of them and none of them owns a clock of its own.
         setCardProgress(p);
-        if (Float.isNaN(min)) { applyGlassMorph(p); return; }
+        perfSeg(PERF_CARD, perf0);
+        long seg = System.nanoTime();
+        if (Float.isNaN(min)) { applyGlassMorph(p); perfSeg(PERF_GLASS, seg); perfPlace(perf0); return; }
         applyGlassMorph(p);
+        perfSeg(PERF_GLASS, seg);
         float k = 1f - p * (1f - min);
         sAppliedK = k;
         // NOT deferred to a pre-draw: that was tried and it both failed to remove the lag
@@ -2672,6 +2758,134 @@ public class Main extends XposedModule {
         // put the date a thousand pixels from the line. The lag this was for is handled by asking
         // the OEM for its translation instead - see oemTranslationY().
         placeCollapsedClock(k, y, p);
+        perfPlace(perf0);
+    }
+
+    /**
+     * What one transition costs us, in the module's own log - one line per transition, no
+     * command to remember and no verbose switch to turn on first.
+     *
+     * This exists because the transition's jank has two possible authors and nothing else tells
+     * them apart: our per-frame placement, or the OEM recomputing its variable font on the same
+     * frames (which it does, and which is not ours to make cheaper). The `gap` column is the
+     * frame interval OUR frames arrived at, so a transition that is smooth on the wall clock but
+     * has a 40ms gap in it is a dropped frame whoever caused it; the two `us` columns are what
+     * our own code spent, which is the half this module controls.
+     *
+     * A run ends when a frame does not arrive for PERF_GAP_MS, and the line is written then by a
+     * poll rather than by whoever owns the spring - nothing here has to know how a transition is
+     * driven, or when it ends. The poll costs one message per 250ms while a run is open, and
+     * nothing at all between them.
+     */
+    private static final long PERF_GAP_MS = 250L;
+    private static int sPerfFrames;
+    private static long sPerfLastAt;
+    private static long sPerfPlaceNs, sPerfPlaceMaxNs;
+    private static long sPerfPreNs, sPerfPreMaxNs;
+    private static long sPerfWorstGapMs;
+    /**
+     * The placement's own parts, so a spike in `place` can be read rather than guessed at. Three
+     * counters and a remainder: `rest` is not measured, it is place minus the three, which keeps
+     * the parts adding up to the whole and needs no stopwatch around the body of a function that
+     * returns from a dozen places.
+     */
+    private static final int PERF_MAX = 3;  // 0 card, 1 glass, 2 glyph
+    private static final long[] sPerfSegNs = new long[PERF_MAX];
+    private static final long[] sPerfSegMaxNs = new long[PERF_MAX];
+    private static final String[] PERF_SEG = {"card", "glass", "glyph"};
+    /** What the glyph measurement cost on the frame just placed - consumed by the caller. */
+    private static long sPerfGlyphLastNs;
+
+    private static final Runnable sPerfFlush = new Runnable() {
+        @Override
+        public void run() {
+            if (sPerfFrames == 0) return;
+            if (android.os.SystemClock.uptimeMillis() - sPerfLastAt < PERF_GAP_MS) {
+                main().postDelayed(this, PERF_GAP_MS);   // still travelling
+                return;
+            }
+            flushPerf();
+        }
+    };
+
+    private static void perfFrame() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (sPerfFrames > 0) {
+            long gap = now - sPerfLastAt;
+            if (gap > PERF_GAP_MS) {
+                // The run ended before this frame did anything. Flushing here as well as from the
+                // poll means a gap can never be reported as if it were part of a transition - a
+                // screen-off in the middle of one was showing up as a 1311ms "frame interval".
+                flushPerf();
+            } else if (gap > sPerfWorstGapMs) {
+                sPerfWorstGapMs = gap;
+            }
+        }
+        if (sPerfFrames == 0) {
+            main().postDelayed(sPerfFlush, PERF_GAP_MS);
+            // A new run: the first frame of it has nothing to be a step from.
+            sJerkLastY[0] = Float.NaN;
+            sJerkLastY[1] = Float.NaN;
+            sJerkMax = 0f;
+        }
+        sPerfLastAt = now;
+        sPerfFrames++;
+    }
+
+    private static final int PERF_CARD = 0, PERF_GLASS = 1, PERF_GLYPH = 2;
+
+    private static void perfSeg(int which, long t0) {
+        long ns = System.nanoTime() - t0;
+        sPerfSegNs[which] += ns;
+        if (ns > sPerfSegMaxNs[which]) sPerfSegMaxNs[which] = ns;
+    }
+
+    private static void perfPlace(long t0) {
+        long ns = System.nanoTime() - t0;
+        sPerfPlaceNs += ns;
+        if (ns > sPerfPlaceMaxNs) sPerfPlaceMaxNs = ns;
+    }
+
+    private static void perfPre(long t0) {
+        long ns = System.nanoTime() - t0;
+        sPerfPreNs += ns;
+        if (ns > sPerfPreMaxNs) sPerfPreMaxNs = ns;
+    }
+
+    private static void flushPerf() {
+        int n = sPerfFrames;
+        // Debug builds narrate the transition; release builds stay quiet unless asked, the same
+        // rule the preview pipeline's own narration follows. The accounting itself keeps running
+        // either way, so `op verbose` still gets the line on a release build.
+        if (n > 0 && (DIAG || sVerbose)) {
+            long card = sPerfSegNs[PERF_CARD];
+            long glass = sPerfSegNs[PERF_GLASS];
+            long glyph = sPerfSegNs[PERF_GLYPH];
+            long rest = sPerfPlaceNs - card - glass - glyph;
+            Xp.log(TAG + "transition frames=" + n + " gapMax=" + sPerfWorstGapMs + "ms"
+                    + " | place avg=" + us(sPerfPlaceNs / n) + " max=" + us(sPerfPlaceMaxNs)
+                    + " [avg card " + us(card / n) + " glass " + us(glass / n)
+                    + " glyph " + us(glyph / n) + " rest " + us(rest / n)
+                    + " | max card " + us(sPerfSegMaxNs[PERF_CARD])
+                    + " glass " + us(sPerfSegMaxNs[PERF_GLASS])
+                    + " glyph " + us(sPerfSegMaxNs[PERF_GLYPH]) + "]"
+                    + " | predraw avg=" + us(sPerfPreNs / n) + " max=" + us(sPerfPreMaxNs)
+                    + (sJerkFrames > 0 ? " | jerk max=" + r1(sJerkMax) + "px" : ""));
+        sJerkFrames = 0;
+        sJerkMax = 0f;
+        }
+        sPerfFrames = 0;
+        sPerfPlaceNs = sPerfPlaceMaxNs = 0L;
+        sPerfPreNs = sPerfPreMaxNs = 0L;
+        sPerfWorstGapMs = 0L;
+        for (int i = 0; i < PERF_MAX; i++) {
+            sPerfSegNs[i] = 0L;
+            sPerfSegMaxNs[i] = 0L;
+        }
+    }
+
+    private static String us(long ns) {
+        return ns < 1000000L ? (ns / 1000) + "us" : r1(ns / 1000000f) + "ms";
     }
 
     /**
@@ -2716,7 +2930,7 @@ public class Main extends XposedModule {
         float dateBottom;
         if (sPendAnchored) {
             if (!usableDate(date)) return;
-            int[] loc = new int[2];
+            int[] loc = LOC_PEND;
             date.getLocationOnScreen(loc);
             float here = loc[1] - date.getTranslationY();
             // The same two walks placeCollapsedClock() uses, and it has to be the same
@@ -2741,12 +2955,51 @@ public class Main extends XposedModule {
         } else {
             dateBottom = date == null ? 0f : date.getTop() + date.getHeight();
         }
+        int jerkI = 0;
         for (View root : clockRoots()) {
             View g = clockTarget(root);
             if (g == null) continue;
             float want = (dateBottom + sPendGap - (g.getTop() + sPendGlyph)) * sPendP;
             if (Math.abs(want - g.getTranslationY()) >= 0.5f) g.setTranslationY(want);
+            if (sJerkProbe) jerk(g, jerkI);
+            jerkI++;
         }
+    }
+
+    /**
+     * How far the clock's DRAWN position moves in one frame, in pixels - the probe behind
+     * "the collapse is jerky".
+     *
+     * Deliberately a reading of the screen and not of the numbers this module writes. The clock
+     * is moved by two hands: ours (the group scale and its translation, written here) and the
+     * OEM's (its squeeze translation on `clock_animation_container`, and the layout it swaps to
+     * part-way through a collapse). Only the drawn position sees both, and the date's
+     * compensation exists precisely because the OEM's half steps in one frame: on the two-row
+     * style `oemTrans` was measured going -16.5 -> -84.2 between p=0.861 and p=0.887, which is
+     * 68px in a single frame. Two more frames of that shape and no curve can hide it - the
+     * group's own translation is derived from LAYOUT tops, so the OEM's container movement
+     * cancels out of it rather than being compensated, and the clock rides the step.
+     *
+     * Where it is read: the end of applyPendingTranslation(), which is the last write of the
+     * frame and therefore the position the frame is drawn with. getLocationOnScreen walks the
+     * parent chain, which is why this is a switch and off by default.
+     */
+    private static volatile boolean sJerkProbe;
+    private static final int[] JERK_LOC = new int[2];
+    private static final float[] sJerkLastY = {Float.NaN, Float.NaN};
+    private static float sJerkMax;
+    private static int sJerkFrames;
+
+    private static void jerk(View g, int slot) {
+        if (slot >= sJerkLastY.length) return;
+        g.getLocationOnScreen(JERK_LOC);
+        float y = JERK_LOC[1];
+        float prev = sJerkLastY[slot];
+        sJerkLastY[slot] = y;
+        sJerkFrames++;
+        if (Float.isNaN(prev)) return;
+        float d = Math.abs(y - prev);
+        if (d > sJerkMax) sJerkMax = d;
     }
 
     /**
@@ -2974,7 +3227,12 @@ public class Main extends XposedModule {
             // resolved to, and the frame-by-frame guard reads it - leaving the fast path out of
             // it made every tree look unresolved for as long as the style had a time_group, and
             // the guard re-placed the clock four times a second for ever.
-            sClockTargets.put(root, g);
+            //
+            // Written only when it says something new. The same view comes back on all but the
+            // first frame of a transition, and this is a WeakHashMap keyed on the view - a put
+            // per root per frame, each one re-hashing the key and walking the table, for a value
+            // that was already there.
+            if (sClockTargets.get(root) != g) sClockTargets.put(root, g);
             return g;
         }
         View cached = sClockTargets.get(root);
@@ -3230,19 +3488,36 @@ public class Main extends XposedModule {
             new java.util.WeakHashMap<>();
     /** The date view the cache above was filled against. See placeCollapsedClock(). */
     private static View sDateView;
-    private static boolean sClockComplained;
+    /**
+     * When the last "clock style not understood" dump was written, and how often one is allowed.
+     *
+     * This was a boolean, set here and cleared by the next placement that SUCCEEDED - which is
+     * not the same thing as a style changing, and is what turned a diagnostic into a frame-rate
+     * bug. A clock that alternates between measurable and not - which is what a keyguard does
+     * while it is rebuilding, and what this module's own entry does while the layout swaps
+     * part-way through - cleared the flag on one frame and dumped the whole of both clock trees
+     * on the next. Each dump walks up to eight levels of the tree twice, builds the string, and
+     * writes it to LSPosed over a socket; measured on the device, one transition carried a
+     * `place max=20.1ms` against a `place avg=1.0ms` and a 66ms hole between frames, with the
+     * dump's own line timestamped inside that transition.
+     *
+     * A throttle instead of a flag, so the answer is still in the log for a style that really
+     * cannot be read, and a flapping one costs one dump per interval rather than one per frame.
+     */
+    private static long sClockComplainedAt;
+    private static final long COMPLAIN_MS = 10000L;
 
     /**
-     * Says, once per style, why a clock style could not be taken over.
+     * Says why a clock style could not be taken over, at most once every COMPLAIN_MS.
      *
      * This runs on every frame of the squeeze, so it cannot log freely - but a style it cannot
      * read is exactly the thing that needs reporting, and asking the user to reproduce it with a
-     * dump is worse than having the answer already in the log. Reset whenever a placement
-     * succeeds, so the next broken style speaks up again.
+     * dump is worse than having the answer already in the log.
      */
     private static void reportUnknownClock(View date, RectF pooled) {
-        if (sClockComplained) return;
-        sClockComplained = true;
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - sClockComplainedAt < COMPLAIN_MS) return;
+        sClockComplainedAt = now;
         StringBuilder sb = new StringBuilder("clock style not understood: date=")
                 .append(date == null ? "MISSING" : "ok").append(" glyphs=")
                 .append(pooled == null ? "MISSING" : pooled.toString());
@@ -3947,6 +4222,7 @@ public class Main extends XposedModule {
         if (date != sDateView) {
             sDateView = date;
             sClockTargets.clear();
+            forgetClockRoots();
             forgetGlyphBox();
             // New clock views are a new layout, so the remembered box and its unit describe a
             // clock that is no longer on screen - and the pair is exactly what the next entry
@@ -3961,7 +4237,9 @@ public class Main extends XposedModule {
         }
         // One measurement per frame, pooled across the trees: the top anchors the placement and
         // the middle decides the pivot, and both have to describe the WHOLE clock.
+        long glyph0 = System.nanoTime();
         RectF pooled = glyphBox();
+        perfSeg(PERF_GLYPH, glyph0);
         learnSettledBox(pooled, p);
         // The anchored placement hangs the clock off the date, so a style that uses it and has
         // lost its date has nothing to hang from. The styles that are only scaled where they
@@ -3974,7 +4252,6 @@ public class Main extends XposedModule {
             reportUnknownClock(date, pooled);
             return false;
         }
-        sClockComplained = false;
         float glyph = pooled.top;
 
         // The anchored placement - the date pulled onto one fixed line and the clock hung a gap
@@ -4020,7 +4297,7 @@ public class Main extends XposedModule {
             // `from` only shapes the path, never the destination: at p=1 the placement is
             // `target` whatever it holds, which is why a stale one - a different style, or a
             // first entry that never saw p~0 - costs a slightly different route and no accuracy.
-            int[] loc = new int[2];
+            int[] loc = LOC_PLACE;
             date.getLocationOnScreen(loc);
             dateRead = loc[1];
             float here = loc[1] - date.getTranslationY();
@@ -6324,11 +6601,8 @@ public class Main extends XposedModule {
         sAppliedK = Float.NaN;
         sAppliedGlassV = Float.NaN;
         if (animate) {
-            // RUNNING here as well as on the way out. The OEM's STATE_CHANGED curve settles in
-            // ~600ms over this travel, measured, against ~371ms for RUNNING - so with only the
-            // exit changed the toggle was lopsided, and the wallpaper crossfade could not be in
-            // step with both. Apple's is symmetric and so is this now.
-            springTo(SQUEEZE_FLOOR, EASE_RUNNING[0], EASE_RUNNING[1], "STATE_CHANGED", false);
+            // The same curve in both directions, so the toggle is symmetric - see EASE_COVER.
+            springTo(SQUEEZE_FLOOR, EASE_COVER[0], EASE_COVER[1], "STATE_CHANGED", false);
             // The spring above cannot carry the card on a style that emits no notifY, and the
             // card is not the clock's business anyway. See oemDrivesCard().
             if (!oemDrivesCard()) animateCardTo(1f, null);
@@ -6395,13 +6669,12 @@ public class Main extends XposedModule {
             // what draws every frame of the thumbnail coming back. abandonHold() releases it
             // when the spring lands.
             //
-            // RUNNING, not the STATE_CHANGED curve the entry uses. Measured on device: the
-            // OEM's STATE_CHANGED spring takes 610-636ms to settle over this 681px travel,
-            // and because the card fade and the glass morph are both linear in y, the last
-            // tenth of that is a thumbnail still fading in 300ms after the wallpaper has
-            // landed. RUNNING is critically damped at response 0.18s, which settles in about
-            // 300ms - Apple's number, and the wallpaper crossfade's 320ms.
-            springTo(natural, EASE_RUNNING[0], EASE_RUNNING[1], "STATE_CHANGED", true);
+            // The same curve the entry uses, and EASE_COVER carries the measurement behind it.
+            // The 0.18 that used to be here was chosen to settle in ~300ms so the thumbnail
+            // would not still be fading 300ms after the wallpaper had landed - which it did,
+            // and which is not what the transition on this phone actually looks like. Matching
+            // the reference curve moves the wallpaper's own crossfade with it; see sFadeMs.
+            springTo(natural, EASE_COVER[0], EASE_COVER[1], "STATE_CHANGED", true);
             saveState();
             return;
         }
@@ -7010,7 +7283,7 @@ public class Main extends XposedModule {
         centreCardText(card, (TextView) sCardTitle, centreP);
         centreCardText(card, (TextView) sCardArtist, centreP);
         applyTitleTap((TextView) sCardTitle, sMcTitleTap && sCoverMode && onKeyguard);
-        if (onKeyguard && !sCardForced) sampleCardRect(card);
+        if (onKeyguard && !sCardForced) sampleCardRect(card, p);
     }
 
     /**
@@ -7136,14 +7409,26 @@ public class Main extends XposedModule {
      * position and sit there for a few frames before the animation begins, which is how a
      * reading 244px above the real one got through.
      */
-    private static void sampleCardRect(View card) {
+    private static void sampleCardRect(View card, float p) {
+        // Not mid-morph. The reading below is of a card that has HELD STILL for CARD_SETTLE_MS,
+        // and while the cover is going up or coming down the card is moving on every frame - so
+        // the settle test can never pass and the only thing a read here produces is the bill for
+        // getLocationOnScreen(), which walks the parent chain and its transforms. Asked on every
+        // frame of a transition it measured 100us and up, which was the whole of what the card's
+        // share of a frame cost once the two binder calls were memoised.
+        //
+        // The ends are what it is for: p at 0 is the card as the OEM lays it out, p at 1 is the
+        // restyled one, and both hold still. Skipping the middle cannot lose a reading - the
+        // settle rule stamps its clock from the first read, and the first read after the morph
+        // stops is the same rectangle the skipped ones would have been stamped with.
+        if (p > 0f && p < 1f) return;
         // Not while dozing. AOD shows the keyguard and holds still for as long as it is up, so
         // it sails past the settle rule below - and it lays the card out somewhere else, which
         // is how the preview ended up drawing it too high. isInteractive() is false in doze.
         if (!card.isShown() || !screenOn()) return;
         int w = card.getWidth(), h = card.getHeight();
         if (w <= 0 || h <= 0) return;
-        int[] loc = new int[2];
+        int[] loc = LOC_CARD;
         card.getLocationOnScreen(loc);
         // On the lock screen the card lives in the notification area, below a clock pinned near
         // the top; it is never up by the status bar. Anything that high is the shade's copy of
@@ -7196,8 +7481,15 @@ public class Main extends XposedModule {
         return !Float.isNaN(natural) && natural > SQUEEZE_FLOOR;
     }
 
-    /** Matches the exit spring's settle and the wallpaper crossfade, so they land together. */
-    private static final long CARD_FADE_MS = 320L;
+    /**
+     * Matches the exit spring's settle and the wallpaper crossfade, so they land together.
+     *
+     * Only a stand-in: on a style the OEM drives there is no card animator at all and this rides
+     * the spring. It moved with the other two when the spring changed to EASE_COVER, because a
+     * card that finished 200ms before the clock did would give the same mismatch the wallpaper
+     * was moved to avoid.
+     */
+    private static final long CARD_FADE_MS = 370L;
     private static ValueAnimator sCardAnim;
 
     /**
@@ -7975,10 +8267,58 @@ public class Main extends XposedModule {
      * and the preview then drew the lock screen's card up there too.
      */
     private static boolean keyguardShowing() {
+        refreshSysReads();
+        return sSysLocked;
+    }
+
+    /**
+     * How long one of these two answers is reused before the system is asked again.
+     *
+     * Both are binder calls into system_server - `isKeyguardLocked()` on WindowManagerService
+     * and `isInteractive()` on PowerManagerService - and the card assert makes both of them, on
+     * every frame of a transition, and then the card's own pre-draw makes them a second time in
+     * the same frame. Measured with the cost probe: a steady 230us of every frame's placement,
+     * against 30us for the clock's whole pre-draw, with the two calls unchanged in between.
+     *
+     * 150ms is short enough that nothing can be seen through it - the questions are "is this card
+     * on the lock screen and is the screen lit", and both are invalidated outright by the
+     * broadcasts that answer them (see `lifecycle`), so the moments that matter do not wait for
+     * the timer at all. What the timer covers is everything in between, which is all frames.
+     */
+    private static final long SYS_READ_MS = 150L;
+    private static long sSysReadAt;
+    private static boolean sSysLocked;
+    private static boolean sSysInteractive;
+
+    private static void refreshSysReads() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - sSysReadAt < SYS_READ_MS) return;
+        sSysReadAt = now;
+        // Written before the first question is asked, so a throw inside one of them leaves the
+        // other's answer fresh rather than re-reading both on the next frame.
+        sSysLocked = readKeyguardLocked();
+        sSysInteractive = readInteractive();
+    }
+
+    /** The next caller asks the system again. Called from the broadcasts that change the answers. */
+    private static void forgetSysReads() {
+        sSysReadAt = 0L;
+    }
+
+    private static boolean readKeyguardLocked() {
         try {
             android.app.KeyguardManager km = (android.app.KeyguardManager)
                     sAppCtx.getSystemService(Context.KEYGUARD_SERVICE);
             return km != null && km.isKeyguardLocked();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean readInteractive() {
+        try {
+            PowerManager pm = (PowerManager) sAppCtx.getSystemService(Context.POWER_SERVICE);
+            return pm != null && pm.isInteractive();
         } catch (Throwable t) {
             return false;
         }
@@ -8121,12 +8461,8 @@ public class Main extends XposedModule {
     }
 
     private static boolean screenOn() {
-        try {
-            PowerManager pm = (PowerManager) sAppCtx.getSystemService(Context.POWER_SERVICE);
-            return pm != null && pm.isInteractive();
-        } catch (Throwable t) {
-            return false;
-        }
+        refreshSysReads();
+        return sSysInteractive;
     }
 
     private static void detachCover() {
@@ -8715,16 +9051,56 @@ public class Main extends XposedModule {
      */
     private static View[] clockRoots() {
         View v = sContainer;
-        if (v == null) return new View[0];
+        if (v == null) return NO_ROOTS;
+        View[] cached = sRootsCache;
+        // The pair is remembered for the container it was found in, and only while both halves
+        // are still in a window - a rebuilt keyguard re-inflates them and detaches the old ones,
+        // and the detach is what says so.
+        //
+        // ONLY a complete pair is remembered. The two containers are inflated together on a
+        // normal build, but "together" is not something this can assume: the first call of a
+        // process can land while only the background half exists, and answering that reading
+        // from the cache for the rest of the container's life would leave the minute half at
+        // full size for ever - the same shape of bug as the doodle that answered "no clock
+        // here" once and stayed unscaled. A half answer is therefore not cached, and costs
+        // exactly what it costs today.
+        if (v == sRootsFor && cached != null && rootsAttached(cached)) return cached;
         View root = v.getRootView();
-        java.util.List<View> out = new java.util.ArrayList<>();
-        for (String id : new String[]{"miui_keyguard_clock_container",
-                "miui_keyguard_foreground_clock_container"}) {
+        java.util.List<View> out = new java.util.ArrayList<>(2);
+        for (String id : ROOT_IDS) {
             int resId = resId(root.getResources(), id);
             View c = resId == 0 ? null : root.findViewById(resId);
             if (c != null) out.add(c);
         }
-        return out.toArray(new View[0]);
+        View[] found = out.toArray(new View[0]);
+        if (found.length == ROOT_IDS.length) {
+            sRootsCache = found;
+            sRootsFor = v;
+        } else {
+            sRootsCache = null;
+            sRootsFor = null;
+        }
+        return found;
+    }
+
+    private static final String[] ROOT_IDS = {"miui_keyguard_clock_container",
+            "miui_keyguard_foreground_clock_container"};
+    private static final View[] NO_ROOTS = new View[0];
+    /** The containers the last resolution found, and the container it found them in. */
+    private static View sRootsFor;
+    private static View[] sRootsCache;
+
+    private static boolean rootsAttached(View[] roots) {
+        for (View r : roots) {
+            if (!r.isAttachedToWindow()) return false;
+        }
+        return true;
+    }
+
+    /** A keyguard rebuild re-inflates the clock containers; the pair above is stale from here. */
+    private static void forgetClockRoots() {
+        sRootsCache = null;
+        sRootsFor = null;
     }
 
     private static String viewIdOf(View v) {
