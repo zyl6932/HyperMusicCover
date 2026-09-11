@@ -33,7 +33,16 @@ object ModuleBridge {
         val cover: Boolean = false,
         val auto: Boolean = false,
         val bias: Float = 0.34f,
-        val clockScale: Float = 0.335f,
+        /**
+         * How tall the collapsed clock's digits are, in dp.
+         *
+         * A height rather than the coefficient this used to be. The coefficient multiplied each
+         * clock style's own glyph box and those differ by more than ten times over, so one
+         * number was a different clock on every style - and a different one again on a
+         * different screen. A height is the same clock everywhere: the module divides it by the
+         * glyphs it measures and scales by what comes out.
+         */
+        val clockHeightDp: Float = 36f,
         val glassEnd: Float = 0.75f,
         val cardShowing: Boolean = false,
         val lockWallpaperOk: Boolean = false,
@@ -122,7 +131,8 @@ object ModuleBridge {
 
     fun setBias(context: Context, v: Float) = send(context, "bias") { putExtra("v", v) }
 
-    fun setClockScale(context: Context, v: Float) = send(context, "clockscale") { putExtra("v", v) }
+    fun setClockHeight(context: Context, dp: Float) =
+        send(context, "clockscale") { putExtra("v", dp) }
 
     fun setGlassEnd(context: Context, v: Float) = send(context, "glassend") { putExtra("v", v) }
 
@@ -325,7 +335,7 @@ object ModuleBridge {
             cover = b.getBoolean("cover", false),
             auto = b.getBoolean("auto", false),
             bias = b.getFloat("bias", 0.34f),
-            clockScale = b.getFloat("clock", 0.335f),
+            clockHeightDp = b.getFloat("clock", 36f),
             glassEnd = b.getFloat("glass", 0.75f),
             cardShowing = b.getBoolean("card", false),
             lockWallpaperOk = b.getBoolean("lockwp", false),

@@ -76,7 +76,7 @@ import kotlin.math.roundToInt
 fun LockPreview(
     art: Bitmap?,
     bias: Float,
-    clockScale: Float,
+    clockHeightDp: Float,
     glassEnd: Float,
     geometry: ModuleBridge.Geometry,
     card: ModuleBridge.Shot?,
@@ -168,9 +168,9 @@ fun LockPreview(
             // group alone, so the date keeps its size whatever the size slider says.
             drawShot(date, k)
             if (clockHour == null && clockMinute == null) {
-                drawClockPlaceholder(k, geometry, clockScale, glassEnd)
+                drawClockPlaceholder(k, geometry, clockHeightDp, glassEnd)
             } else {
-                drawClock(k, geometry, clockScale, clockHour, clockMinute)
+                drawClock(k, geometry, clockHeightDp, clockHour, clockMinute)
             }
         }
     }
@@ -190,11 +190,12 @@ fun LockPreview(
 private fun DrawScope.drawClock(
     k: Float,
     geometry: ModuleBridge.Geometry,
-    clockScale: Float,
+    clockHeightDp: Float,
     hour: Bitmap?,
     minute: Bitmap?,
 ) {
     if (!geometry.hasClock) return
+    val clockScale = collapseScale(geometry, clockHeightDp)
     val w = geometry.clockW * clockScale * k
     val h = geometry.clockH * clockScale * k
     // The phone's own transform, repeated: scale about (clockPivotX, clockY). Reproducing it
@@ -227,9 +228,10 @@ private fun DrawScope.drawClock(
 private fun DrawScope.drawClockPlaceholder(
     k: Float,
     geometry: ModuleBridge.Geometry,
-    clockScale: Float,
+    clockHeightDp: Float,
     glassEnd: Float,
 ) {
+    val clockScale = collapseScale(geometry, clockHeightDp)
     val boxW = (if (geometry.hasClock) geometry.clockW else FALLBACK_CLOCK_W) * clockScale * k
     val boxH = (if (geometry.hasClock) geometry.clockH else FALLBACK_CLOCK_H) * clockScale * k
     val top = (if (geometry.clockY > 0f) geometry.clockY else FALLBACK_CLOCK_Y) * k
@@ -510,6 +512,18 @@ private val SAMPLE_ART_SLOT = ModuleBridge.ArtSlot(
     l = 48f / 1116f, t = 48f / 557f, w = 158f / 1116f, h = 158f / 557f, radius = 30f / 1116f
 )
 
+/**
+ * The collapse scale the phone will apply, worked out the way the module works it out: the
+ * height the slider asks for, over the height the captured glyphs actually measure. The capture
+ * is cropped with the pad, so the pad comes back off before the division. Two lengths, so
+ * nothing here needs the screen's density - which is what makes the slider portable.
+ */
+private fun DrawScope.collapseScale(geometry: ModuleBridge.Geometry, heightDp: Float): Float {
+    val glyphH = geometry.clockH - 2f * geometry.clockPad
+    if (!geometry.hasClock || glyphH <= 0f) return FALLBACK_CLOCK_SCALE
+    return (heightDp.dp.toPx() / glyphH).coerceIn(MIN_CLOCK_SCALE, 1f)
+}
+
 // Fallbacks, all measured on the device this was built on (1200x2608 at 480dpi). They only
 // apply when the module has not answered - it reports its own, and its numbers win.
 private const val FALLBACK_SCREEN_W = 1200
@@ -517,3 +531,6 @@ private const val FALLBACK_SCREEN_H = 2608
 private const val FALLBACK_CLOCK_W = 506f
 private const val FALLBACK_CLOCK_H = 336f
 private const val FALLBACK_CLOCK_Y = 334f
+/** What the collapse used to be written down as, for a preview with nothing to measure. */
+private const val FALLBACK_CLOCK_SCALE = 0.335f
+private const val MIN_CLOCK_SCALE = 0.05f

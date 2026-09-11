@@ -14,8 +14,8 @@
     <string name="cover_bias">封面纵向位置</string>
     <string name="cover_bias_summary">0 贴顶，0.5 居中</string>
     <string name="clock_section">时钟</string>
-    <string name="clock_scale">时钟缩放</string>
-    <string name="clock_scale_summary">收起后的时钟大小</string>
+    <string name="clock_height">时钟高度</string>
+    <string name="clock_height_summary">收起后数字有多高（dp）</string>
     <string name="clock_glass">玻璃强度</string>
     <string name="clock_glass_style_unsupported">当前时钟样式没有玻璃效果</string>
     <string name="restart_menu">重启</string>

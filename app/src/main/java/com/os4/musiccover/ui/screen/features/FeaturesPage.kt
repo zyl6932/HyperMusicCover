@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -189,7 +190,7 @@ fun FeaturesPageView(
                 LockPreview(
                     art = art,
                     bias = module.bias,
-                    clockScale = module.clockScale,
+                    clockHeightDp = module.clockHeightDp,
                     glassEnd = module.glassEnd,
                     geometry = module.geometry,
                     card = shots.card,
@@ -269,15 +270,27 @@ private fun ClockGroup(
 ) {
     val context = LocalContext.current
     Column {
+        // The top of the slider is the style's own size whenever that is the smaller of the
+        // two. Asking for a taller clock than the style draws is asking for it to grow, and
+        // the module refuses that - so on the magazine style, whose digits are already 38dp,
+        // the slider stops where the clock stops instead of lying about the rest of its travel.
+        val maxDp = with(LocalDensity.current) {
+            val glyph = module.geometry.clockH - 2f * module.geometry.clockPad
+            if (module.geometry.hasClock && glyph > 0f) {
+                glyph.toDp().value.coerceIn(CLOCK_HEIGHT_MIN_DP + 2f, CLOCK_HEIGHT_MAX_DP)
+            } else {
+                CLOCK_HEIGHT_MAX_DP
+            }
+        }
         ValueSlider(
-            title = stringResource(R.string.clock_scale),
-            summary = stringResource(R.string.clock_scale_summary),
-            value = module.clockScale,
-            valueRange = 0.1f..1f,
+            title = stringResource(R.string.clock_height),
+            summary = stringResource(R.string.clock_height_summary),
+            value = module.clockHeightDp.coerceIn(CLOCK_HEIGHT_MIN_DP, maxDp),
+            valueRange = CLOCK_HEIGHT_MIN_DP..maxDp,
             enabled = enabled,
             onValueChange = {
-                onChange(module.copy(clockScale = it))
-                ModuleBridge.setClockScale(context, it)
+                onChange(module.copy(clockHeightDp = it))
+                ModuleBridge.setClockHeight(context, it)
             },
         )
         // Shown inverted. The module stores the OEM's own number, where updateGlassValue(0) is
@@ -394,6 +407,10 @@ private fun CardGroup(
  * to tell where you have dragged to, which matters here because these values get compared against
  * ones written down in the notes.
  */
+/** The collapsed clock's height in dp, matching DEFAULT_CLOCK_HEIGHT_DP in the module. */
+private const val CLOCK_HEIGHT_MIN_DP = 20f
+private const val CLOCK_HEIGHT_MAX_DP = 64f
+
 @Composable
 private fun ValueSlider(
     title: String,

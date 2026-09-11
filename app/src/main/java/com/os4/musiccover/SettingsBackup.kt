@@ -19,6 +19,8 @@ import org.json.JSONObject
 object SettingsBackup {
 
     private const val KEY_BIAS = "coverBias"
+    private const val KEY_CLOCK_HEIGHT = "clockHeight"
+    /** Written by versions that stored the collapse as a scale coefficient; read, never written. */
     private const val KEY_CLOCK_SCALE = "clockScale"
     private const val KEY_GLASS_END = "glassEnd"
     private const val KEY_CARD_HIDE_ART = "cardHideArt"
@@ -34,7 +36,7 @@ object SettingsBackup {
         val module = ModuleBridge.query(context)
         if (module.alive) {
             json.put(KEY_BIAS, module.bias.toDouble())
-            json.put(KEY_CLOCK_SCALE, module.clockScale.toDouble())
+            json.put(KEY_CLOCK_HEIGHT, module.clockHeightDp.toDouble())
             json.put(KEY_GLASS_END, module.glassEnd.toDouble())
             json.put(KEY_CARD_HIDE_ART, module.mcHideArt)
             json.put(KEY_CARD_CENTER_TEXT, module.mcCenterText)
@@ -51,9 +53,15 @@ object SettingsBackup {
         try {
             val obj = JSONObject(json)
             if (obj.has(KEY_BIAS)) ModuleBridge.setBias(context, obj.getDouble(KEY_BIAS).toFloat())
-            if (obj.has(KEY_CLOCK_SCALE)) {
-                ModuleBridge.setClockScale(context, obj.getDouble(KEY_CLOCK_SCALE).toFloat())
+            // The old key held a coefficient. A value under the new range is recognised as one
+            // of those by the module and converted there against the glyphs actually on screen,
+            // which is the only thing that knows what a coefficient of 0.335 was worth.
+            val clock = when {
+                obj.has(KEY_CLOCK_HEIGHT) -> obj.getDouble(KEY_CLOCK_HEIGHT)
+                obj.has(KEY_CLOCK_SCALE) -> obj.getDouble(KEY_CLOCK_SCALE)
+                else -> null
             }
+            if (clock != null) ModuleBridge.setClockHeight(context, clock.toFloat())
             if (obj.has(KEY_GLASS_END)) {
                 ModuleBridge.setGlassEnd(context, obj.getDouble(KEY_GLASS_END).toFloat())
             }

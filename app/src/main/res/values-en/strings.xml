@@ -14,8 +14,8 @@
     <string name="cover_bias">Vertical position</string>
     <string name="cover_bias_summary">0 is flush with the top, 0.5 is centred</string>
     <string name="clock_section">Clock</string>
-    <string name="clock_scale">Clock scale</string>
-    <string name="clock_scale_summary">Size of the collapsed clock</string>
+    <string name="clock_height">Clock height</string>
+    <string name="clock_height_summary">How tall the collapsed digits are, in dp</string>
     <string name="clock_glass">Glass strength</string>
     <string name="clock_glass_style_unsupported">This clock style has no glass effect</string>
     <string name="restart_menu">Restart</string>
