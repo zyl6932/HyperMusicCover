@@ -507,6 +507,27 @@ public class Main extends XposedModule {
     private static final int ART_TAP_SLOP = 24;
 
     /**
+     * How long a tap on the cover is held back before it means anything.
+     *
+     * GestureDetector reports a single tap the moment the finger lifts, and a fast double tap
+     * is two gestures: the first one had already toggled the cover by the time the second
+     * arrived, and MIUI's own double-tap-to-sleep is decided downstream of this hook
+     * (KeyguardPanelViewInjector, over com.android.keyguard's DoubleTapHelper), so it cannot be
+     * asked first. So the tap is armed instead and fired only once the double tap window has
+     * passed. Reported as "double tap the lock screen and the wallpaper state has changed when
+     * it comes back on".
+     *
+     * The framework's own timeout plus a margin. GestureDetector measures the first DOWN to the
+     * second, MIUI measures the gap between the two taps, so the window it might still call a
+     * double tap can end later than ours - the margin is that difference. Not a guess to be
+     * trimmed without measuring first.
+     */
+    private static final long TAP_CONFIRM_MS =
+            android.view.ViewConfiguration.getDoubleTapTimeout() + 60L;
+    /** Armed by a tap on the cover, cancelled while it is still a candidate double tap. */
+    private static Runnable sPendingTap;
+
+    /**
      * The OEM's own miuix curves, read off AllInOneClockAnimation at runtime as
      * {dampingRatio, response}. miuix derives stiffness = (2*PI/response)^2 and
      * damping = 2*zeta*(2*PI/response) - confirmed against the dumped parameters[].
@@ -1486,7 +1507,12 @@ public class Main extends XposedModule {
                 // how the clock is inked is a per-frame decision. screenOn() itself stays for the
                 // event-time questions, where it is authoritative.
                 if (Intent.ACTION_SCREEN_ON.equals(a)) sScreenOn = true;
-                else if (Intent.ACTION_SCREEN_OFF.equals(a)) sScreenOn = false;
+                else if (Intent.ACTION_SCREEN_OFF.equals(a)) {
+                    sScreenOn = false;
+                    // A tap still waiting out its double tap window was aimed at a screen that
+                    // is gone; whatever was going to cancel it cannot arrive now.
+                    cancelPendingTap("screen off");
+                }
                 if (Intent.ACTION_SCREEN_ON.equals(a)) {
                     // Animated, but briefly - and only now that the pre-draw finishes each
                     // frame off with the geometry it is really drawn with.
@@ -7899,9 +7925,16 @@ public class Main extends XposedModule {
      * window's dispatchTouchEvent rather than any one child: it is the single point every event
      * passes through before the OEM decides what to do with it. The detector's answer is
      * discarded - consuming a DOWN here would take swipe-to-unlock with it.
+     *
+     * What it reports is not acted on the moment it reports it: a tap on the cover is armed and
+     * fires only once it can no longer be the first half of a double tap. See armLockTap.
      */
     private static void feedTap(MotionEvent ev) {
         if (!sTapToggle || ev == null) return;
+        // A gesture the system took away is never going to produce the second tap.
+        if (ev.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+            cancelPendingTap("gesture cancelled");
+        }
         if (sTapDetector == null) {
             Context c = sAppCtx;
             if (c == null) return;
@@ -7910,7 +7943,17 @@ public class Main extends XposedModule {
             sTapDetector = new GestureDetector(c, new GestureDetector.SimpleOnGestureListener() {
                 @Override
                 public boolean onSingleTapUp(MotionEvent e) {
-                    onLockTap(e.getRawY());
+                    armLockTap(e.getRawY());
+                    return false;
+                }
+
+                /**
+                 * Fired on the second DOWN, which is the whole point: two taps this close are
+                 * the user asking the lock screen to sleep, not asking the cover to leave.
+                 */
+                @Override
+                public boolean onDoubleTap(MotionEvent e) {
+                    cancelPendingTap("second tap");
                     return false;
                 }
             });
@@ -7919,6 +7962,53 @@ public class Main extends XposedModule {
             sTapDetector.onTouchEvent(ev);
         } catch (Throwable ignored) {
         }
+    }
+
+    /**
+     * Holds a tap on the cover back until it cannot be the first half of a double tap.
+     *
+     * This decides when the tap runs, not what it does: onLockTap re-reads the screen, the
+     * keyguard and the card when it fires, so a screen that went off inside the window drops
+     * the tap on its own - which is what covers a build whose double tap window is longer than
+     * ours, and every double tap the framework itself did not recognise as one.
+     */
+    private static void armLockTap(final float y) {
+        if (!sTapToggle) return;
+        flushPendingTap();
+        Runnable r = new Runnable() {
+            @Override
+            public void run() {
+                sPendingTap = null;
+                onLockTap(y);
+            }
+        };
+        sPendingTap = r;
+        main().postDelayed(r, TAP_CONFIRM_MS);
+    }
+
+    /**
+     * Runs the tap that was waiting, because a new one has been armed on top of it.
+     *
+     * Reaching a second tap at all means the framework decided the first was not half of a
+     * double tap - it cancels the waiting one on the second DOWN when it is. So the wait is
+     * over: firing it here is what keeps "tap, pause, tap" meaning two toggles rather than the
+     * second tap quietly replacing the first.
+     */
+    private static void flushPendingTap() {
+        Runnable r = sPendingTap;
+        if (r == null) return;
+        sPendingTap = null;
+        main().removeCallbacks(r);
+        r.run();
+    }
+
+    /** A held-back tap that has stopped being one: log what ended it rather than guess later. */
+    private static void cancelPendingTap(String why) {
+        Runnable r = sPendingTap;
+        if (r == null) return;
+        sPendingTap = null;
+        main().removeCallbacks(r);
+        Xp.log(TAG + "held-back cover tap dropped (" + why + ")");
     }
 
     /**
