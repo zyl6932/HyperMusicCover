@@ -37,6 +37,15 @@ sealed interface InstallOutcome {
     /** Nothing on the device would open an APK. */
     data object NoInstaller : InstallOutcome
 
+    /**
+     * The download came back signed by something that is not this project.
+     *
+     * Its own outcome rather than a [Failed] with a message: that one carries whatever an
+     * exception said, and this is a decision - there is no exception, and the sentence the user
+     * needs is a different sentence.
+     */
+    data object NotOurs : InstallOutcome
+
     data class Failed(val message: String) : InstallOutcome
 }
 
@@ -74,7 +83,14 @@ object UpdateInstaller {
         scope.launch {
             val outcome = try {
                 val file = download(app, apkUrls, fileName)
-                if (handOff(app, file)) InstallOutcome.HandedOff else InstallOutcome.NoInstaller
+                if (!UpdateApi.isOurs(app, file)) {
+                    file.delete()
+                    InstallOutcome.NotOurs
+                } else if (handOff(app, file)) {
+                    InstallOutcome.HandedOff
+                } else {
+                    InstallOutcome.NoInstaller
+                }
             } catch (t: Throwable) {
                 Log.w(TAG, "self-update failed", t)
                 InstallOutcome.Failed(t.message ?: t::class.java.simpleName)

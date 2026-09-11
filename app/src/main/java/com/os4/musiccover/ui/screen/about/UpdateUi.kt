@@ -165,6 +165,12 @@ fun rememberUpdateController(refreshKey: Int, checkUpdate: Boolean): UpdateContr
                     return@LaunchedEffect
                 }
 
+                is InstallOutcome.NotOurs -> {
+                    states.installing = false
+                    states.status = resources.getString(R.string.update_not_ours)
+                    return@LaunchedEffect
+                }
+
                 is InstallOutcome.Failed -> {
                     states.installing = false
                     states.status = resources.getString(R.string.update_failed, outcome.message)

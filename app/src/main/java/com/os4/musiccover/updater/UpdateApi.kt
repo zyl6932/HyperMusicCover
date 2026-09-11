@@ -1,6 +1,7 @@
 package com.os4.musiccover.updater
 
 import android.content.Context
+import android.content.pm.PackageManager
 import com.os4.musiccover.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -10,6 +11,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 /** Leading `#`s on a heading line, and the emphasis markers the tag messages are written with. */
@@ -115,12 +118,76 @@ object UpdateApi {
     /**
      * Is this build allowed to update itself at all?
      *
-     * Both halves matter. The package name keeps a fork from being offered the upstream APK,
-     * which it could not install anyway - the signature would not match. `BuildConfig.DEBUG`
-     * keeps a development build from replacing itself with a release.
+     * The package name keeps a fork from being offered the upstream APK, which it could not
+     * install anyway - the signature would not match.
+     *
+     * It used to ask `!BuildConfig.DEBUG` as well, and that was the wrong question twice over.
+     * It is the RUNNING build that was being judged, when what matters is whether the APK that
+     * comes back is the project's own; and it left every development build unable to see an
+     * update at all, which is exactly the build an update is being tested on. The signature
+     * question moved to [isOurs], where the file it is about actually exists.
      */
     fun enabled(context: Context): Boolean =
-        context.packageName == OFFICIAL_APPLICATION_ID && !BuildConfig.DEBUG
+        context.packageName == OFFICIAL_APPLICATION_ID
+
+    /**
+     * The certificate the project publishes releases under.
+     *
+     * Compared by SHA-256 of the certificate, not by its subject: a subject is free-form text
+     * anybody can put in a self-signed certificate, and this is the one value that cannot be
+     * forged without the private key. Taken from the published `v0.0.5` APK, which is signed
+     * with this and nothing else.
+     */
+    private const val RELEASE_CERT_SHA256 =
+        "f5b62166f821734dd854c94a254223b2c49252e3681ee3d31238d1814ad5e6d5"
+
+    /**
+     * Is [file] an APK this project is willing to install?
+     *
+     * EITHER certificate is enough, and that is the point rather than a leniency. The two cannot
+     * both match: a development build is signed with the developer's debug key and a release
+     * never is, so demanding an exact match with the running build is precisely what stopped a
+     * debug install from ever seeing an update. What is being asked here is only "is this ours",
+     * and both of those keys answer yes.
+     *
+     * Whether the system will then accept the swap across two different keys is the installer's
+     * business and not this app's: a stock device refuses it, and a device with the signature
+     * check patched out - CorePatch and its kin - goes through. Refusing here would take that
+     * decision away from the people who have made it possible.
+     */
+    fun isOurs(context: Context, file: File): Boolean {
+        val signer = signerOf(context, file) ?: return false
+        return signer == RELEASE_CERT_SHA256 || signer == ownSigner(context)
+    }
+
+    /** SHA-256 of the certificate [file] is signed with, lowercase hex, or null if unreadable. */
+    private fun signerOf(context: Context, file: File): String? = try {
+        context.packageManager
+            .getPackageArchiveInfo(
+                file.absolutePath,
+                PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()),
+            )
+            ?.signingInfo?.apkContentsSigners?.firstOrNull()
+            ?.toByteArray()?.let(::sha256Hex)
+    } catch (_: Exception) {
+        null
+    }
+
+    /** The same, for the app that is running. */
+    private fun ownSigner(context: Context): String? = try {
+        context.packageManager
+            .getPackageInfo(
+                context.packageName,
+                PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()),
+            )
+            .signingInfo?.apkContentsSigners?.firstOrNull()
+            ?.toByteArray()?.let(::sha256Hex)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun sha256Hex(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     /** The newest stable release, or null when there is nothing newer or nothing was answered. */
     suspend fun latest(): UpdateInfo? = withContext(Dispatchers.IO) {
