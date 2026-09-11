@@ -15,23 +15,6 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
-/** Leading `#`s on a heading line, and the emphasis markers the tag messages are written with. */
-private val HEADING = Regex("""(?m)^#{1,6}[ \t]*""")
-private val BOLD = Regex("""\*\*(.+?)\*\*""")
-private val LINK = Regex("""\[(.+?)]\((.+?)\)""")
-
-/**
- * The release body as it should read in a plain text dialog.
- *
- * `release.yml` publishes the annotated tag's own message, which is Markdown - `**Full
- * Changelog**` and the like. Nothing here renders Markdown, so the markers would show up as
- * literal asterisks; the two constructs the notes actually use are unwrapped instead, and the
- * list markers and blank lines are left alone because they read correctly as they are.
- */
-internal fun String.asPlainNotes(): String = this
-    .replace(HEADING, "")
-    .replace(BOLD) { it.groupValues[1] }
-    .replace(LINK) { "${it.groupValues[1]} (${it.groupValues[2]})" }
 
 /**
  * Finding out whether GitHub has a newer release than the one we are running.
@@ -85,7 +68,10 @@ data class UpdateInfo(
     /** The tag without its `v`, which is what CI stamps as this build's versionName. */
     val versionName: String,
     val versionCode: Int,
-    /** The tag's own message, which `release.yml` publishes as the release body. */
+    /**
+     * The tag's own message, which `release.yml` publishes as the release body. Markdown,
+     * and rendered as such - see `ui/component/markdown/MarkdownContent.kt`.
+     */
     val notes: String,
     /** The release asset, before any mirror is applied. */
     val apkUrl: String,
@@ -245,7 +231,7 @@ object UpdateApi {
         val info = UpdateInfo(
             versionName = release.tagName.removePrefix("v"),
             versionCode = major.toInt() * 10_000 + minor.toInt() * 100 + patch.toInt(),
-            notes = release.body.trim().asPlainNotes(),
+            notes = release.body.trim(),
             apkUrl = apk.url,
             releaseUrl = release.htmlUrl,
         )
