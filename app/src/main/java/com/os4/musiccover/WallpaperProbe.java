@@ -401,12 +401,9 @@ public class WallpaperProbe {
                 Xp.hookAllConstructors(vd, chain -> {
                     Object result = chain.proceed();
                     Object self = chain.getThisObject();
-                    // Desktop has video engines too, and its wallpaper is not ours to touch.
-                    if (self.getClass().getName().contains("Keyguard")) {
-                        sVideoEngine = self;
-                        sVideoDepth = null;
-                        Xp.log(TAG + "video engine captured: " + self.getClass().getName());
-                    }
+                    sVideoEngine = self;
+                    sVideoDepth = null;
+                    Xp.log(TAG + "video engine captured: " + self.getClass().getName());
                     return result;
                 });
                 hookVideoPathGetter(vd);
@@ -416,7 +413,27 @@ public class WallpaperProbe {
             }
         }
 
-        // Intercept WallpaperServiceController.m1159s(2, false) to return cover video when active
+        // Also capture the engine whenever UniversalEngine attaches or switches engines
+        try {
+            Class<?> ue = Xp.findClass("com.miui.miwallpaper.wallpaperservice.UniversalWallpaper$UniversalEngine", sCl);
+            Xp.hookAll(ue, "onCreate", chain -> {
+                Object r = chain.proceed();
+                try {
+                    Object self = chain.getThisObject();
+                    Object eng = Xp.getObjectField(self, "f");
+                    if (eng != null && eng.getClass().getName().contains("Video")) {
+                        sVideoEngine = eng;
+                        sVideoDepth = null;
+                        Xp.log(TAG + "video engine captured via UniversalEngine.onCreate: " + eng.getClass().getName());
+                    }
+                } catch (Throwable ignored) {}
+                return r;
+            });
+        } catch (Throwable t) {
+            Xp.log(TAG + "hook UniversalEngine failed: " + t);
+        }
+
+        // Intercept WallpaperServiceController.m1159s(1/2, false) to return cover video when active
         try {
             Class<?> wsc = Xp.findClass("com.miui.miwallpaper.manager.WallpaperServiceController", sCl);
             for (Method m : wsc.getDeclaredMethods()) {
@@ -430,9 +447,9 @@ public class WallpaperProbe {
                             Object[] args = chain.getArgs().toArray();
                             int which = (Integer) args[0];
                             boolean isPreview = (Boolean) args[1];
-                            if (which == 2 && !isPreview && sCoverVideoActive && sCoverVideoPath != null) {
+                            if ((which == 1 || which == 2) && !isPreview && sCoverVideoActive && sCoverVideoPath != null) {
                                 Xp.log(TAG + "intercepted WallpaperServiceController." + m.getName()
-                                        + "(2, false) -> " + sCoverVideoPath);
+                                        + "(" + which + ", false) -> " + sCoverVideoPath);
                                 return sCoverVideoPath;
                             }
                             return chain.proceed();
@@ -1085,6 +1102,8 @@ public class WallpaperProbe {
             "com.miui.miwallpaper.wallpaperservice.impl.VideoEngineImpl",
             "com.miui.miwallpaper.wallpaperservice.impl.keyguard.KeyguardVideoDepthEngineImpl",
             "com.miui.miwallpaper.wallpaperservice.impl.keyguard.KeyguardVideoEngineImpl",
+            "com.miui.miwallpaper.wallpaperservice.impl.desktop.DesktopVideoDepthEngineImpl",
+            "com.miui.miwallpaper.wallpaperservice.impl.desktop.DesktopVideoEngineImpl",
     };
 
     /**
@@ -1356,15 +1375,47 @@ public class WallpaperProbe {
      * check it rather than trusting the field name.
      */
     private static Object videoDepthManager(Object eng) {
+        if (eng == null) return null;
         try {
             Object mgr = Xp.getObjectField(eng, "p");
             if (mgr != null && mgr.getClass().getName().contains("VideoDepthManager")) {
                 sVideoDepth = mgr;
                 return mgr;
             }
-            Xp.log(TAG + "vgl: engine field p is " + describe(mgr) + ", not a VideoDepthManager");
-        } catch (Throwable t) {
-            Xp.log(TAG + "vgl: cannot reach the VideoDepthManager: " + t);
+        } catch (Throwable ignored) {
+        }
+        // Fallback: search declared fields across class hierarchy by type
+        Class<?> c = eng.getClass();
+        while (c != null && c != Object.class) {
+            for (java.lang.reflect.Field f : c.getDeclaredFields()) {
+                if (f.getType().getName().contains("VideoDepthManager")) {
+                    f.setAccessible(true);
+                    try {
+                        Object mgr = f.get(eng);
+                        if (mgr != null) {
+                            sVideoDepth = mgr;
+                            return mgr;
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+            c = c.getSuperclass();
+        }
+        // Fallback: static instance on VideoDepthManager
+        try {
+            Class<?> vdmCls = Xp.findClass("com.miui.miwallpaper.container.videodepth.VideoDepthManager", sCl);
+            for (java.lang.reflect.Field f : vdmCls.getDeclaredFields()) {
+                if (f.getType() == vdmCls && Modifier.isStatic(f.getModifiers())) {
+                    f.setAccessible(true);
+                    Object mgr = f.get(null);
+                    if (mgr != null) {
+                        sVideoDepth = mgr;
+                        return mgr;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
         }
         return null;
     }
@@ -1379,9 +1430,14 @@ public class WallpaperProbe {
      * identity. Refuses rather than guesses if a build ever has two.
      */
     private static java.lang.reflect.Field videoPathField(Object mgr) {
+        if (mgr == null) return null;
         java.lang.reflect.Field found = null;
         for (java.lang.reflect.Field f : mgr.getClass().getDeclaredFields()) {
             if (f.getType() != String.class || Modifier.isStatic(f.getModifiers())) continue;
+            if ("q".equals(f.getName())) {
+                f.setAccessible(true);
+                return f;
+            }
             if (found != null) {
                 Xp.log(TAG + "vgl: " + mgr.getClass().getSimpleName() + " carries more than one "
                         + "String field (" + found.getName() + ", " + f.getName()
@@ -1494,8 +1550,18 @@ public class WallpaperProbe {
         Object mgr = videoDepthManager(eng);
         if (mgr == null) return;
         String original = sOriginalVideoPath;
+        if (original == null) {
+            try {
+                Class<?> wsc = Xp.findClass("com.miui.miwallpaper.manager.WallpaperServiceController", sCl);
+                Object ctrl = Xp.callStaticMethod(wsc, "m1417l");
+                int which = eng.getClass().getName().contains("Desktop") ? 1 : 2;
+                original = (String) Xp.callMethod(ctrl, "m1457s", which, false);
+            } catch (Throwable ignored) {
+            }
+        }
         if (original != null) {
             setVideoPath(mgr, original);
+            Xp.log(TAG + "vgl: restored video path: " + original);
         } else {
             Xp.log(TAG + "vgl: never learned the wallpaper's own path - the field still holds "
                     + describe(videoPathFieldValue(mgr)) + ", leaving it alone");
@@ -1507,8 +1573,9 @@ public class WallpaperProbe {
     private static void triggerVideoReload(Object eng) {
         new Handler(Looper.getMainLooper()).post(() -> {
             try {
-                Xp.callMethod(eng, "onWallpaperUpdate", "video", 2);
-                Xp.log(TAG + "triggerVideoReload: onWallpaperUpdate('video', 2) called on "
+                int which = eng.getClass().getName().contains("Desktop") ? 1 : 2;
+                Xp.callMethod(eng, "onWallpaperUpdate", "video", which);
+                Xp.log(TAG + "triggerVideoReload: onWallpaperUpdate('video', " + which + ") called on "
                         + eng.getClass().getSimpleName());
             } catch (Throwable t) {
                 Xp.log(TAG + "triggerVideoReload failed: " + t);
@@ -1518,13 +1585,8 @@ public class WallpaperProbe {
 
     private static void hookVideoPathGetter(Class<?> cls) {
         for (Method m : cls.getDeclaredMethods()) {
-            // The path getter is ABSTRACT on the base class and implemented on the Keyguard
-            // subclass, and libxposed refuses to hook an abstract method by throwing - which
-            // aborted the rest of this loop's try block and logged the whole engine as a
-            // failure. Measured on the device, OS4.0.0.35:
-            //   "Cannot hook abstract methods: public abstract java.lang.String
-            //    com.miui.miwallpaper.wallpaperservice.impl.VideoDepthEngineImpl.M()"
-            // Skipping them is what the two concrete names in CLS_VIDEO_ENGINES are for.
+            // The path getter is ABSTRACT on the base class and implemented on the concrete
+            // subclasses, and libxposed refuses to hook an abstract method by throwing.
             if (Modifier.isAbstract(m.getModifiers()) || Modifier.isNative(m.getModifiers())) {
                 continue;
             }
@@ -1534,12 +1596,10 @@ public class WallpaperProbe {
                     && !m.getName().equals("getClass")) {
                 Xp.hook(m, chain -> {
                     Object self = chain.getThisObject();
-                    if (self != null && self.getClass().getName().contains("Keyguard")) {
-                        if (sCoverVideoActive && sCoverVideoPath != null) {
-                            Xp.log(TAG + "video path intercepted (" + cls.getSimpleName()
-                                    + "." + m.getName() + "()) -> " + sCoverVideoPath);
-                            return sCoverVideoPath;
-                        }
+                    if (self != null && sCoverVideoActive && sCoverVideoPath != null) {
+                        Xp.log(TAG + "video path intercepted (" + cls.getSimpleName()
+                                + "." + m.getName() + "()) -> " + sCoverVideoPath);
+                        return sCoverVideoPath;
                     }
                     return chain.proceed();
                 });

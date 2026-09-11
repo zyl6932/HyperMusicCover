@@ -63,19 +63,10 @@ public class CoverVideoEncoder {
 
         long startTime = SystemClock.uptimeMillis();
 
-        // Downscale to target video dimensions (max width 720, 16-aligned) to optimize encoding
-        // latency and memory footprint. GPU bilinear texture filtering in FastPlayer scales it
-        // smoothly to screen size with negligible visual difference for wallpaper backgrounds.
         int srcW = bitmap.getWidth();
         int srcH = bitmap.getHeight();
-        int width = srcW;
-        int height = srcH;
-        if (width > 720) {
-            width = 720;
-            height = (int) Math.round((double) srcH * width / srcW);
-        }
-        width = (width / 16) * 16;
-        height = (height / 16) * 16;
+        int width = (srcW / 2) * 2;
+        int height = (srcH / 2) * 2;
 
         Bitmap scaledBitmap = bitmap;
         if (scaledBitmap.getWidth() != width || scaledBitmap.getHeight() != height) {

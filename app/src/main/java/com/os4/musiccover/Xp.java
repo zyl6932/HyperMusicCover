@@ -198,6 +198,16 @@ final class Xp {
         }
     }
 
+    static Object callStaticMethod(Class<?> cls, String name, Object... args) {
+        Method m = findMethod(cls, name, args);
+        try {
+            return m.invoke(null, args);
+        } catch (ReflectiveOperationException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            throw new IllegalStateException(cls.getName() + "." + name + " threw", cause);
+        }
+    }
+
     private static Method findMethod(Class<?> cls, String name, Object[] args) {
         for (Class<?> c = cls; c != null; c = c.getSuperclass()) {
             for (Method m : c.getDeclaredMethods()) {
