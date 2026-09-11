@@ -14,14 +14,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.FileReader;
-import java.io.RandomAccessFile;
 import android.util.Log;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 import io.github.libxposed.api.XposedInterface;
@@ -449,13 +445,9 @@ public class WallpaperProbe {
             Xp.log(TAG + "hook WallpaperServiceController failed: " + t);
         }
 
-        // Prevent FastPlayer from high-frequency decoding the 1-frame cover video in an infinite loop,
-        // and in depth mode (mode == 12), hide the alpha surface so it is cleared to transparent
-        // while the cover renders cleanly onto mNormalSurface and mLocalSurface (the wallpaper window).
+        // Prevent FastPlayer from high-frequency decoding the 1-frame cover video in an infinite loop
         try {
             Class<?> fp = Xp.findClass("com.miui.fastplayer.FastPlayer", sCl);
-            patchFastPlayerEosLogic();
-
             Xp.hookAll(fp, "setLoop", chain -> {
                 if (sCoverVideoActive) {
                     Object[] args = chain.getArgs().toArray();
@@ -465,28 +457,8 @@ public class WallpaperProbe {
                 return chain.proceed();
             });
             Xp.log(TAG + "hooked FastPlayer.setLoop");
-
-            Xp.hookAll(fp, "setSurface", chain -> {
-                patchFastPlayerEosLogic();
-                Object res = chain.proceed();
-                if (sCoverVideoActive) {
-                    Object[] args = chain.getArgs().toArray();
-                    // In depth mode: setSurface(Surface alpha, Surface normal, Surface local, int mode, Bitmap bitmap)
-                    // mode 12 is ALPHA_VIDEO_EFFECT
-                    if (args.length >= 4 && args[3] instanceof Integer && (Integer) args[3] == 12) {
-                        try {
-                            Xp.callMethod(chain.getThisObject(), "setOpenGLSurfaceVisible", false, true, true);
-                            Xp.log(TAG + "FastPlayer.setSurface: setOpenGLSurfaceVisible(false, true, true) for depth cover");
-                        } catch (Throwable t) {
-                            Xp.log(TAG + "FastPlayer.setSurface setOpenGLSurfaceVisible failed: " + t);
-                        }
-                    }
-                }
-                return res;
-            });
-            Xp.log(TAG + "hooked FastPlayer.setSurface");
         } catch (Throwable t) {
-            Xp.log(TAG + "hook FastPlayer methods failed: " + t);
+            Xp.log(TAG + "hook FastPlayer.setLoop failed: " + t);
         }
 
         // The frosted copy the notification and media cards blur against is regenerated on
@@ -1132,7 +1104,6 @@ public class WallpaperProbe {
     private static volatile boolean sCoverVideoActive;
     private static volatile String sCoverVideoPath;
     private static volatile long sCurrentArtChecksum;
-    private static volatile long sSavedVideoPositionUs;
     /**
      * The wallpaper's own playback path, held while cover mode has the manager's field.
      *
@@ -1171,191 +1142,9 @@ public class WallpaperProbe {
         if (!video && sCoverVideoActive) videoWindowTakeover(true);
     }
 
-    private static volatile boolean sFastPlayerPatched = false;
-
-    private static synchronized void patchFastPlayerEosLogic() {
-        if (sFastPlayerPatched) return;
-        try {
-            Field f = Class.forName("sun.misc.Unsafe").getDeclaredField("theUnsafe");
-            f.setAccessible(true);
-            Object unsafe = f.get(null);
-            Method getInt = unsafe.getClass().getMethod("getInt", long.class);
-
-            BufferedReader reader = new BufferedReader(new FileReader("/proc/self/maps"));
-            String line;
-            long foundBase = 0;
-            while ((line = reader.readLine()) != null) {
-                if (!line.contains("r-xp")) continue;
-                if (!line.contains("MiWallpaper.apk") && !line.contains("libfastplayer.so")) continue;
-                String[] parts = line.split("[ -]");
-                if (parts.length == 0) continue;
-                long segBase;
-                try {
-                    segBase = Long.parseLong(parts[0], 16);
-                } catch (Exception e) {
-                    continue;
-                }
-                try {
-                    int magic = (Integer) getInt.invoke(unsafe, segBase);
-                    if (magic != 0x464c457f) continue;
-                    int insn1 = (Integer) getInt.invoke(unsafe, segBase + 0x42584L);
-                    int insn2 = (Integer) getInt.invoke(unsafe, segBase + 0x42588L);
-                    if ((insn1 == 0x320003f9 || insn1 == 0x32000bf9) && insn2 == 0x1400000f) {
-                        foundBase = segBase;
-                        break;
-                    }
-                } catch (Throwable ignored) {
-                }
-            }
-            reader.close();
-
-            if (foundBase == 0) {
-                Xp.log(TAG + "patchFastPlayerEosLogic: libfastplayer.so base not found with target signature");
-                return;
-            }
-
-            Xp.log(TAG + "patchFastPlayerEosLogic: found libfastplayer.so base=0x" + Long.toHexString(foundBase));
-
-            if (!NativeHelper.isLoaded()) {
-                Xp.log(TAG + "patchFastPlayerEosLogic: NativeHelper not loaded: " + NativeHelper.getLoadError());
-                return;
-            }
-
-            boolean ok = NativeHelper.patchFastPlayer(foundBase);
-            Xp.log(TAG + "patchFastPlayerEosLogic: NativeHelper.patchFastPlayer returned " + ok);
-            if (ok) {
-                sFastPlayerPatched = true;
-            }
-        } catch (Throwable t) {
-            Xp.log(TAG + "patchFastPlayerEosLogic error: " + t);
-        }
-    }
-
     private static boolean isDepthEngine(Object eng) {
         if (eng == null) return false;
         return eng.getClass().getName().contains("Depth");
-    }
-
-    private static long getDepthVideoPositionUs(Object eng) {
-        Object mgr = videoDepthManager(eng);
-        if (mgr == null) return 0;
-        try {
-            Object fp = Xp.getObjectField(mgr, "j");
-            if (fp != null) {
-                long us = (Long) Xp.callMethod(fp, "getCurrentPositionUs");
-                if (us > 0) return us;
-            }
-        } catch (Throwable ignored) {
-        }
-        try {
-            long us = (Long) Xp.getObjectField(mgr, "w");
-            if (us > 0) return us;
-        } catch (Throwable ignored) {
-        }
-        return 0;
-    }
-
-    private static void restoreDepthVideoPosition(Object eng, long posUs) {
-        if (posUs <= 0) return;
-        long posMs = posUs / 1000;
-        if (posMs >= 1500 || posMs <= 100) {
-            Xp.log(TAG + "restoreDepthVideoPosition: posMs=" + posMs + " near end/start, replaying naturally");
-            return;
-        }
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            try {
-                Object mgr = videoDepthManager(eng);
-                if (mgr != null) {
-                    Xp.callMethod(mgr, "m1078h", posMs);
-                    Xp.log(TAG + "restoreDepthVideoPosition: seeked to " + posMs + "ms via depth manager");
-                    return;
-                }
-            } catch (Throwable ignored) {
-            }
-            try {
-                Object mgr = videoDepthManager(eng);
-                if (mgr != null) {
-                    Object fp = Xp.getObjectField(mgr, "j");
-                    if (fp != null) {
-                        Xp.callMethod(fp, "seekto", 0.0f, posMs, 0);
-                        Xp.log(TAG + "restoreDepthVideoPosition: FastPlayer seekto " + posMs + "ms");
-                    }
-                }
-            } catch (Throwable t) {
-                Xp.log(TAG + "restoreDepthVideoPosition failed: " + t);
-            }
-        }, 350L);
-    }
-
-    private static long getVideoPositionUs(Object eng) {
-        if (eng == null) return 0;
-        if (isDepthEngine(eng)) {
-            return getDepthVideoPositionUs(eng);
-        }
-        // Plain engine: KeyguardVideoEngineImpl -> f3121e (field "e", FastPlayerImpl) -> f2256t (field "t", FastPlayer)
-        try {
-            Object player = Xp.getObjectField(eng, "e");
-            if (player != null) {
-                Object fp = Xp.getObjectField(player, "t");
-                if (fp != null) {
-                    try {
-                        long us = (Long) Xp.callMethod(fp, "getCurrentPositionUs");
-                        if (us > 0) return us;
-                    } catch (Throwable ignored) {
-                    }
-                    try {
-                        long ms = (Long) Xp.callMethod(fp, "getCurrentPosition");
-                        if (ms > 0) return ms * 1000L;
-                    } catch (Throwable ignored) {
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        return 0;
-    }
-
-    private static void restoreVideoPosition(Object eng, long posUs) {
-        if (posUs <= 0 || eng == null) return;
-        if (isDepthEngine(eng)) {
-            restoreDepthVideoPosition(eng, posUs);
-            return;
-        }
-        long posMs = posUs / 1000L;
-        // If playback was already near the end (>=1500ms for a ~2000ms lock video) or just starting (<=100ms),
-        // do not seek, let it naturally replay from 0 without jumping.
-        if (posMs >= 1500 || posMs <= 100) {
-            Xp.log(TAG + "restorePlainVideoPosition: posMs=" + posMs
-                    + " is near end/start, replaying naturally from 0 without jump");
-            return;
-        }
-        new Handler(Looper.getMainLooper()).post(() -> {
-            try {
-                Object player = Xp.getObjectField(eng, "e");
-                if (player != null) {
-                    try {
-                        Xp.callMethod(player, "mo1345i", posMs);
-                        Xp.log(TAG + "restorePlainVideoPosition: seeked to " + posMs + "ms via player.mo1345i");
-                        return;
-                    } catch (Throwable ignored) {
-                    }
-                    try {
-                        Xp.callMethod(player, "mo1047i", posMs);
-                        Xp.log(TAG + "restorePlainVideoPosition: seeked to " + posMs + "ms via player.mo1047i");
-                        return;
-                    } catch (Throwable ignored) {
-                    }
-                    Object fp = Xp.getObjectField(player, "t");
-                    if (fp != null) {
-                        Xp.callMethod(fp, "seekto", 0.0f, posMs, 0);
-                        Xp.log(TAG + "restorePlainVideoPosition: seeked to " + posMs + "ms via FastPlayer.seekto");
-                        return;
-                    }
-                }
-            } catch (Throwable t) {
-                Xp.log(TAG + "restorePlainVideoPosition failed: " + t);
-            }
-        });
     }
 
     /**
@@ -1369,6 +1158,19 @@ public class WallpaperProbe {
             return false;
         }
 
+        // The depth shape (KeyguardVideoDepthEngineImpl) relies on dual-stream alpha/depth video
+        // shaders in FastPlayer; feeding it a single-stream RGB MP4 results in a frozen green frame,
+        // and triggering onWallpaperUpdate resets the video playback to 0 ("stutter on entry/exit").
+        // On that shape, SystemUI's keyguard view layer already displays the cover cleanly without
+        // interrupting the live wallpaper. We only take over the wallpaper window on the plain shape
+        // (KeyguardVideoEngineImpl), where the wallpaper window is the sole rendering surface and
+        // the 1-frame MP4 eliminates blur bleed-through with zero side effects.
+        if (isDepthEngine(eng)) {
+            Xp.log(TAG + "videoWindowTakeover: depth engine (" + eng.getClass().getSimpleName()
+                    + ") detected - keeping SystemUI overlay mode to avoid alpha shader green frame and reload stutter");
+            return false;
+        }
+
         if (on) {
             if (!sCoverVideoActive) return true;
             sCoverVideoActive = false;
@@ -1376,10 +1178,6 @@ public class WallpaperProbe {
             Xp.log(TAG + "videoWindowTakeover: restoring original video wallpaper");
             restoreVideoPath(eng);
             triggerVideoReload(eng);
-            if (sSavedVideoPositionUs > 0) {
-                restoreVideoPosition(eng, sSavedVideoPositionUs);
-                sSavedVideoPositionUs = 0;
-            }
             return true;
         } else {
             final Bitmap art = sArt;
@@ -1392,17 +1190,10 @@ public class WallpaperProbe {
                 Xp.log(TAG + "videoWindowTakeover: sCtx is null");
                 return false;
             }
-            if (!sCoverVideoActive) {
-                long posUs = getVideoPositionUs(eng);
-                if (posUs > 0) sSavedVideoPositionUs = posUs;
-                Xp.log(TAG + "videoWindowTakeover: saved playback position: "
-                        + (sSavedVideoPositionUs / 1000) + "ms");
-            }
             final long checksum = sCurrentArtChecksum;
 
             sVideoWorker.submit(() -> {
                 try {
-                    patchFastPlayerEosLogic();
                     File videoFile = new File(ctx.getFilesDir(), COVER_VIDEO_FILE);
                     int w = sReportedW > 0 ? sReportedW : ctx.getResources().getDisplayMetrics().widthPixels;
                     int h = sReportedH > 0 ? sReportedH : ctx.getResources().getDisplayMetrics().heightPixels;

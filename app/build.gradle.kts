@@ -39,19 +39,6 @@ android {
         versionCode = (findProperty("mcVersionCode") as String?)?.toInt() ?: 2
         versionName = ((findProperty("mcVersionName") as String?) ?: "0.0.1") +
                 ((findProperty("mcVersionSuffix") as String?) ?: "")
-
-        ndk {
-            abiFilters.add("arm64-v8a")
-        }
-    }
-
-    ndkVersion = "26.1.10909125"
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
     }
 
     signingConfigs {
