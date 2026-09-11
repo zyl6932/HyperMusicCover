@@ -37,6 +37,16 @@ object ModuleBridge {
         val glassEnd: Float = 0.75f,
         val cardShowing: Boolean = false,
         val lockWallpaperOk: Boolean = false,
+        /**
+         * Whether the clock style loaded right now has a glass channel at all.
+         *
+         * The liquid-glass morph is AllInOneBase.updateGlassValue(float) and it exists exactly
+         * where the glass shader does: the all_in_one family. The rhombus, doodle, oriental and
+         * magazine clocks draw vector digits, bitmaps and plain text, and there is nothing on
+         * them for the slider to drive. Reported by the module rather than guessed here,
+         * because which views carry the channel is the module's business.
+         */
+        val clockHasGlass: Boolean = false,
         val track: String = "",
         val player: String = "",
         val mcHideArt: Boolean = false,
@@ -194,6 +204,8 @@ object ModuleBridge {
          * holding a clock it has nowhere to put.
          */
         val clockGeometry: Geometry? = null,
+        /** See State.clockHasGlass - a property of the style, so it rides with every reply. */
+        val clockHasGlass: Boolean = false,
         val left: Shot? = null,
         val right: Shot? = null,
     )
@@ -228,6 +240,7 @@ object ModuleBridge {
             left = shot(b, "sl"),
             right = shot(b, "sr"),
             clockGeometry = if (b.getFloat("clockw", 0f) > 0f) clockGeometry(b) else null,
+            clockHasGlass = b.getBoolean("clockglass", false),
         )
     }
 
@@ -316,6 +329,7 @@ object ModuleBridge {
             glassEnd = b.getFloat("glass", 0.75f),
             cardShowing = b.getBoolean("card", false),
             lockWallpaperOk = b.getBoolean("lockwp", false),
+            clockHasGlass = b.getBoolean("clockglass", false),
             track = b.getString("track") ?: "",
             player = b.getString("player") ?: "",
             mcHideArt = b.getBoolean("mcart", false),

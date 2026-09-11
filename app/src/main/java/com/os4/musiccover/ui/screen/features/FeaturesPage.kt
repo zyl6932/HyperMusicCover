@@ -122,6 +122,12 @@ fun FeaturesPageView(
             // The clock's geometry rides along with the pictures. Merged into the state rather
             // than replacing it: a poll must never write back bias or the two clock values,
             // which the user may be dragging at this very moment.
+            // Not inside the geometry block above: that one only runs when the clock could
+            // be measured, and this has to reach the settings page on a style whose clock it
+            // could not be measured on - which is exactly when the slider looks wrong.
+            if (reply.clockHasGlass != module.clockHasGlass) {
+                module = module.copy(clockHasGlass = reply.clockHasGlass)
+            }
             reply.clockGeometry?.let { g ->
                 if (g != clockGeometryOf(module)) {
                     module = module.copy(
@@ -279,12 +285,19 @@ private fun ClockGroup(
         // backwards, and dragging right made the effect weaker. The stored value, the adb
         // glassend op and the exported JSON all keep the OEM's meaning; only this slider is
         // flipped.
+        // Off on the styles whose clock has no glass to morph, and saying so. The morph is
+        // AllInOneBase.updateGlassValue(float) - the OEM's own ramp from refracting glass to a
+        // solid fill - and the rhombus, doodle, oriental and magazine clocks have no such thing:
+        // vector digits, bitmaps and plain text. A slider that moves and changes nothing is
+        // worse than one that explains itself.
+        val glassAvailable = module.clockHasGlass
         ValueSlider(
             title = stringResource(R.string.clock_glass),
-            summary = null,
+            summary = if (glassAvailable) null
+                      else stringResource(R.string.clock_glass_style_unsupported),
             value = 1f - module.glassEnd,
             valueRange = 0f..1f,
-            enabled = enabled,
+            enabled = enabled && glassAvailable,
             onValueChange = {
                 val glassEnd = 1f - it
                 onChange(module.copy(glassEnd = glassEnd))
