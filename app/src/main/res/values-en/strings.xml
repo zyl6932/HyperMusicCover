@@ -82,7 +82,6 @@
     <string name="tab_features">Features</string>
     <string name="home_status_active">Module active</string>
     <string name="home_status_inactive">Module not active</string>
-    <string name="home_mode_fullscreen">Full-screen cover</string>
     <string name="home_status_inactive_hint">Enable it in LSPosed and restart System UI</string>
     <string name="home_device_info">Device</string>
     <string name="home_device_name">Device name</string>
@@ -102,4 +101,23 @@
     <string name="fp_avoid_system">Follow system</string>
     <string name="fp_avoid_never">Never avoid</string>
     <string name="fp_avoid_always">Always avoid</string>
+    <string name="get_update">Get update</string>
+    <string name="get_update_detail">Check for software updates and new features</string>
+    <string name="update_available">Update available: %1$s</string>
+    <string name="get_update_directly">Get update directly</string>
+    <string name="get_update_directly_desc">Install the update straight from GitHub</string>
+    <string name="updating">Updating…</string>
+    <string name="update_notes_title">Changelog</string>
+    <string name="update_notes_empty">(This release has no notes)</string>
+    <string name="update_cancel">Cancel</string>
+    <string name="update_close">Close</string>
+    <string name="update_failed">Update failed: %1$s</string>
+    <string name="tl_okhttp">OkHttp</string>
+    <string name="tl_okhttp_summary">Apache-2.0</string>
+    <string name="tl_serialization">kotlinx.serialization</string>
+    <string name="tl_serialization_summary">Apache-2.0</string>
+    <string name="update_status_title">Update</string>
+    <string name="update_no_installer">No app on this device can install an APK - install it from a file manager</string>
+    <string name="update_confirm">Update</string>
+    <string name="home_mode_fullscreen">Full-screen cover</string>
 </resources>

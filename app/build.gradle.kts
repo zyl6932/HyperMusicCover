@@ -3,6 +3,9 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    // Only the self-updater's release JSON is @Serializable; everything else in the app still
+    // parses with the platform org.json, as AppSettings and SettingsBackup always have.
+    alias(libs.plugins.kotlin.serialization)
 }
 
 /**
@@ -86,6 +89,19 @@ dependencies {
     // Modern Xposed API. compileOnly on purpose: the framework provides it at runtime and
     // packaging it would shadow the real one. Zero bytes in the APK either way.
     compileOnly("io.github.libxposed:api:102.0.0")
+
+    // The self-updater, and the app's first network stack. Both ship their own R8 consumer
+    // rules, so proguard-rules.pro needs nothing for them.
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.serialization.json)
+
+    // The release notes are Markdown and are rendered as such in the update dialog.
+    implementation(libs.commonmark)
+    implementation(libs.commonmark.ext.gfm.tables)
+    implementation(libs.commonmark.ext.gfm.strikethrough)
+    implementation(libs.commonmark.ext.autolink)
+    implementation(libs.commonmark.ext.task.list.items)
+    implementation(libs.androidx.webkit)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

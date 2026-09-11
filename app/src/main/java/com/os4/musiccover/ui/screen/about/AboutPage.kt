@@ -81,7 +81,11 @@ import top.yukonga.miuix.kmp.basic.Text as MiuixText
 fun AboutPageContent(
     openLicensePage: () -> Unit,
     isBlurEnabled: Boolean = true,
+    refreshKey: Int = 0,
 ) {
+    // Owns the check, the install and the four dialogs; see UpdateUi.kt. It has to sit above the
+    // Scaffold because the dialogs open their own windows and cannot be nested in the page body.
+    val update = rememberUpdateController(refreshKey)
     val topAppBarScrollBehavior = MiuixScrollBehavior()
     val lazyListState = rememberLazyListState()
 
@@ -138,9 +142,12 @@ fun AboutPageContent(
                 lazyListState = lazyListState,
                 scrollProgressProvider = { scrollProgress },
                 openLicensePage = openLicensePage,
+                update = update,
             )
         }
     }
+
+    UpdateDialogs(update)
 }
 
 @Composable
@@ -150,6 +157,7 @@ private fun AboutContent(
     lazyListState: LazyListState,
     scrollProgressProvider: () -> Float,
     openLicensePage: () -> Unit,
+    update: UpdateController,
 ) {
     val uriHandler = LocalUriHandler.current
     val contentBackdrop = rememberBlurBackdrop()
@@ -209,84 +217,6 @@ private fun AboutContent(
         bgModifier = if (contentBackdrop != null) Modifier.layerBackdrop(contentBackdrop) else Modifier,
         alpha = { 1f - scrollProgressProvider() },
     ) {
-        // Logo area — floating overlay
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    top = logoPadding.calculateTopPadding() + 52.dp,
-                    start = logoPadding.calculateLeftPadding(LayoutDirection.Ltr),
-                    end = logoPadding.calculateRightPadding(LayoutDirection.Ltr),
-                )
-                .onSizeChanged { size ->
-                    with(density) { logoHeightDp = size.height.toDp() }
-                },
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(100.dp)
-                    .graphicsLayer {
-                        val iconProgress = ((scrollProgressProvider() - 0.35f) / 0.15f).coerceIn(0f, 1f)
-                        clip = true
-                        alpha = 1 - iconProgress
-                        scaleX = 1 - (iconProgress * 0.05f)
-                        scaleY = 1 - (iconProgress * 0.05f)
-                    }
-                    .squircleClip(cornerRadius = 28.dp),
-            ) {
-                Image(
-                    modifier = Modifier.size(100.dp),
-                    painter = painterResource(R.drawable.ic_about_logo),
-                    contentDescription = null,
-                )
-            }
-            MiuixText(
-                modifier = Modifier
-                    .padding(top = 12.dp, bottom = 5.dp)
-                    .graphicsLayer {
-                        val projectNameProgress = ((scrollProgressProvider() - 0.20f) / 0.15f).coerceIn(0f, 1f)
-                        alpha = 1 - projectNameProgress
-                        scaleX = 1 - (projectNameProgress * 0.05f)
-                        scaleY = 1 - (projectNameProgress * 0.05f)
-                    }
-                    .then(
-                        if (contentBackdrop != null) {
-                            Modifier.textureBlur(
-                                backdrop = contentBackdrop,
-                                shape = RoundedCornerShape(16.dp),
-                                blurRadius = 150f,
-                                noiseCoefficient = noiseCoefficient,
-                                colors = BlurDefaults.blurColors(
-                                    blendColors = logoBlend,
-                                ),
-                                contentBlendMode = ComposeBlendMode.DstIn,
-                            )
-                        } else {
-                            Modifier
-                        },
-                    ),
-                text = appName,
-                color = colorScheme.onBackground,
-                fontWeight = FontWeight.Bold,
-                fontSize = 35.sp,
-            )
-            MiuixText(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        val versionCodeProgress = ((scrollProgressProvider() - 0.05f) / 0.15f).coerceIn(0f, 1f)
-                        alpha = 1 - versionCodeProgress
-                        scaleX = 1 - (versionCodeProgress * 0.05f)
-                        scaleY = 1 - (versionCodeProgress * 0.05f)
-                    },
-                color = colorScheme.onSurfaceVariantSummary,
-                text = versionName,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-            )
-        }
 
         // Scrollable content
         LazyColumn(
@@ -323,6 +253,40 @@ private fun AboutContent(
                     Card(
                         modifier = Modifier
                             .padding(horizontal = 12.dp)
+                            .then(
+                                if (contentBackdrop != null) {
+                                    Modifier.textureBlur(
+                                        backdrop = contentBackdrop,
+                                        shape = RoundedCornerShape(16.dp),
+                                        blurRadius = blurRadius,
+                                        noiseCoefficient = noiseCoefficient,
+                                        colors = BlurDefaults.blurColors(
+                                            blendColors = cardBlend,
+                                            brightness = brightness,
+                                            contrast = contrast,
+                                            saturation = saturation,
+                                        ),
+                                    )
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                        colors = CardDefaults.defaultColors(
+                            if (contentBackdrop != null) Color.Transparent else colorScheme.surfaceContainer,
+                            Color.Transparent,
+                        ),
+                    ) {
+                        UpdateRows(
+                            update = update.update,
+                            installing = update.installing,
+                            onGetUpdate = update.showLinks,
+                            onDirectUpdate = { update.directUpdate(ctx) },
+                        )
+                    }
+                    Card(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .padding(top = 12.dp)
                             .then(
                                 if (contentBackdrop != null) {
                                     Modifier.textureBlur(
@@ -417,6 +381,94 @@ private fun AboutContent(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                 }
+            }
+        }
+
+        // Logo area — floating overlay
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    top = logoPadding.calculateTopPadding() + 52.dp,
+                    start = logoPadding.calculateLeftPadding(LayoutDirection.Ltr),
+                    end = logoPadding.calculateRightPadding(LayoutDirection.Ltr),
+                )
+                .onSizeChanged { size ->
+                    with(density) { logoHeightDp = size.height.toDp() }
+                },
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(100.dp)
+                    .graphicsLayer {
+                        val iconProgress = ((scrollProgressProvider() - 0.35f) / 0.15f).coerceIn(0f, 1f)
+                        clip = true
+                        alpha = 1 - iconProgress
+                        scaleX = 1 - (iconProgress * 0.05f)
+                        scaleY = 1 - (iconProgress * 0.05f)
+                    }
+                    .squircleClip(cornerRadius = 28.dp),
+            ) {
+                Image(
+                    modifier = Modifier.size(100.dp),
+                    painter = painterResource(R.drawable.ic_about_logo),
+                    contentDescription = null,
+                )
+            }
+            MiuixText(
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 5.dp)
+                    .graphicsLayer {
+                        val projectNameProgress = ((scrollProgressProvider() - 0.20f) / 0.15f).coerceIn(0f, 1f)
+                        alpha = 1 - projectNameProgress
+                        scaleX = 1 - (projectNameProgress * 0.05f)
+                        scaleY = 1 - (projectNameProgress * 0.05f)
+                    }
+                    .then(
+                        if (contentBackdrop != null) {
+                            Modifier.textureBlur(
+                                backdrop = contentBackdrop,
+                                shape = RoundedCornerShape(16.dp),
+                                blurRadius = 150f,
+                                noiseCoefficient = noiseCoefficient,
+                                colors = BlurDefaults.blurColors(
+                                    blendColors = logoBlend,
+                                ),
+                                contentBlendMode = ComposeBlendMode.DstIn,
+                            )
+                        } else {
+                            Modifier
+                        },
+                    ),
+                text = appName,
+                color = colorScheme.onBackground,
+                fontWeight = FontWeight.Bold,
+                fontSize = 35.sp,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        val versionCodeProgress = ((scrollProgressProvider() - 0.05f) / 0.15f).coerceIn(0f, 1f)
+                        alpha = 1 - versionCodeProgress
+                        scaleX = 1 - (versionCodeProgress * 0.05f)
+                        scaleY = 1 - (versionCodeProgress * 0.05f)
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                MiuixText(
+                    color = colorScheme.onSurfaceVariantSummary,
+                    text = versionName,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                )
+                UpdateHint(
+                    modifier = Modifier.fillMaxWidth(),
+                    update = update.update,
+                    onShowNotes = update.showNotes,
+                )
             }
         }
     }

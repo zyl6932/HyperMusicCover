@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!--
+        The downloaded release, handed to whichever installer the device uses. A cache path rather
+        than a files path on purpose: the APK is worthless once it has been installed, and the
+        system is free to reclaim it if this app never gets that far.
+    -->
+    <cache-path name="updates" path="updates/" />
+</paths>

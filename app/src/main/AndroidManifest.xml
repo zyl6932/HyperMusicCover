@@ -7,6 +7,13 @@
         tg scheme entry covers every Telegram client; the three packages cover QQ, TIM and QQ
         International, which is all openQqGroup ever aims at.
     -->
+    <!--
+        The self-updater. INTERNET is install-time and never prompted. There is deliberately no
+        REQUEST_INSTALL_PACKAGES: this app does not install anything itself any more, it hands the
+        downloaded APK to an installer app, and the permission that matters is that app's.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <queries>
         <package android:name="com.tencent.mobileqq" />
         <package android:name="com.tencent.tim" />
@@ -14,6 +21,15 @@
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="tg" />
+        </intent>
+        <!--
+            The APK intent, so the updater can tell a device with no installer at all apart from
+            one that took the file. No installer is named: which app handles this is the user's
+            choice, made in Settings.
+        -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
         </intent>
     </queries>
 
@@ -57,5 +73,19 @@
             android:value="HyperMusicCover by zyl6932 - album art as the HyperOS lock screen wallpaper, with the clock collapsed" />
         <meta-data android:name="xposedminversion" android:value="102" />
         <meta-data android:name="xposedscope" android:resource="@array/xposedscope" />
+
+        <!--
+            Only ever serves the downloaded release to an installer app. Not exported, and the
+            single path it exposes is a cache directory this app clears on every attempt.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

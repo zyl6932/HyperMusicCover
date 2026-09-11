@@ -343,6 +343,7 @@ private fun MainScreen(
                             context.startActivity(Intent(context, LicenseActivity::class.java))
                         },
                         isBlurEnabled = isBlurEnabled,
+                        refreshKey = refreshKey,
                     )
                 }
             }
