@@ -23,3 +23,7 @@ local.properties
 # locally and deliberately untracked - it names the phone, the test device's build, and a
 # running list of what is broken.
 /HANDOFF.md
+
+# The release-notes draft, fed to `git tag -F`. Local only, like HANDOFF.md; the tag message
+# is what actually publishes the notes, so this file must never be committed.
+/日志.txt
