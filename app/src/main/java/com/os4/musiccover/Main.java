@@ -1395,6 +1395,20 @@ public class Main extends XposedModule {
                                 else ensureLockWallpaper(cc, force);
                             }
                         });
+                    } else if ("uncover".equals(op)) {
+                        // PROBE: hide OUR ImageView only, leaving MIUI's own layers exactly as
+                        // they are. Whatever shows through is what the WALLPAPER WINDOW really
+                        // holds - the one question a screenshot of the finished lock screen
+                        // cannot answer, because our own cover is drawn over it.
+                        View cv = sCover;
+                        boolean hide = i.getBooleanExtra("on", true);
+                        if (cv != null) {
+                            cv.setVisibility(hide ? View.INVISIBLE : View.VISIBLE);
+                            Xp.log(TAG + "uncover: our cover ImageView is now "
+                                    + (hide ? "INVISIBLE" : "VISIBLE"));
+                        } else {
+                            Xp.log(TAG + "uncover: no cover ImageView");
+                        }
                     } else if ("cover".equals(op)) {
                         if (i.getBooleanExtra("on", true)) {
                             sCoverWanted = true;
@@ -1631,25 +1645,19 @@ public class Main extends XposedModule {
                     if (sCoverMode) applyMediaCard();
                     return;
                 }
-                // Cover mode outlives the display going off. Its grip on the clock does not.
-                //
-                // The AOD transition is the OEM's own animation of the clock container, and it
-                // is not driven by notifY at all: measured on the way down, notifStateChange and
-                // setNotifY are never called, and what moves is the container itself - the
-                // date's own position (read with our translation divided out) walks 278 -> 912
-                // -> 978 -> 980, and 981 is its UNSQUEEZED layout top. The OEM is taking the
-                // clock back out of the squeeze for the AOD face, and the AOD clock is drawn
-                // where that lands.
-                //
-                // Holding throughout meant the placement dragged the date back to its cover
-                // position on every frame of that walk. The small clock stayed where the big one
-                // no longer was, and what the user sees is the two never meeting - while the
-                // uncollapsed clock, with nothing of ours writing to it, lands exactly on the
-                // AOD face: "大时间可以".
-                //
-                // So the clock is handed back for the AOD and taken again on the way up.
-                // Releasing only releases: the hold, the scale, the tint and the card all go
-                // together, which is what makes the OEM's own transition the whole story.
+                if (Intent.ACTION_USER_PRESENT.equals(a)) {
+                    if (sVideoWallpaper || sCoverMode) {
+                        Intent out = wallpaperIntent("keyguard_state");
+                        out.putExtra("showing", false);
+                        c.sendBroadcast(out);
+                    }
+                } else if (Intent.ACTION_SCREEN_OFF.equals(a) || Intent.ACTION_SCREEN_ON.equals(a)) {
+                    if (sVideoWallpaper || sCoverMode) {
+                        Intent out = wallpaperIntent("keyguard_state");
+                        out.putExtra("showing", true);
+                        c.sendBroadcast(out);
+                    }
+                }
                 if (Intent.ACTION_SCREEN_OFF.equals(a) && sCoverMode) {
                     // Kept, not handed back. The AOD's clock is this same clock - it is
                 // SystemUI's keyguard in doze, not a face belonging to com.miui.aod - so what
@@ -5646,15 +5654,6 @@ public class Main extends XposedModule {
     }
 
     private static void pushArtToWallpaper(Context ctx, boolean on, Bitmap art) {
-        // A live lock wallpaper needs BOTH halves, and returning here after the first was why
-        // the card and the clock glass stayed on the video: this view covers the background,
-        // but those two sample the wallpaper WINDOW, and the only thing that paints it is the
-        // broadcast below. Falling through is what makes the wallpaper process paint it.
-        //
-        // It costs one extra compose per track change on this path - showVideoCover() composes
-        // for the view and the JPEG below composes again. Worth folding into one later; the
-        // correctness of having both matters more than the ~100ms.
-        if (sVideoWallpaper) showVideoCover(ctx, on, art);
         long t0 = android.os.SystemClock.uptimeMillis();
         Intent out = wallpaperIntent("art");
         // Only a request. The wallpaper process falls back to the one-frame swap whenever it
@@ -5663,6 +5662,7 @@ public class Main extends XposedModule {
         // looking at, and the clock is not springing either.
         out.putExtra("fade", sFadeWp && screenOn());
         if (!on) {
+            if (sVideoWallpaper) showVideoCover(ctx, false, null);
             out.putExtra("off", true);
             ctx.sendBroadcast(out);
             sTrackKey = "";
@@ -5674,6 +5674,7 @@ public class Main extends XposedModule {
         }
         if (art == null) { Xp.log(TAG + "pushart: no album art"); return; }
         int w = sScreenW, h = sScreenH;
+        // Compose once for both SystemUI cover view and wallpaper broadcast!
         Bitmap full = composeWallpaper(art, w, h, sBias);
         measureCover(full);
         if (sCoverMode) recolorClock();
@@ -5686,53 +5687,41 @@ public class Main extends XposedModule {
             full.compress(Bitmap.CompressFormat.JPEG, q, bos);
             jpg = bos.toByteArray();
             q -= 15;
-        } while (jpg.length > 700 * 1024 && q > 25);
-        full.recycle();
+        } while (jpg.length > 600 * 1024 && q > 25);
         out.putExtra("jpg", jpg);
+        // Send broadcast first so wallpaper process begins decoding/encoding immediately!
         ctx.sendBroadcast(out);
         Xp.log(TAG + "pushart " + w + "x" + h + " bias=" + sBias
                 + " as " + jpg.length + "B jpeg, draw " + (tc - t0) + "ms encode "
                 + (android.os.SystemClock.uptimeMillis() - tc) + "ms");
+
+        if (sVideoWallpaper) {
+            showVideoCover(ctx, true, full);
+        } else {
+            full.recycle();
+        }
     }
 
     /**
      * The cover, for a lock screen whose wallpaper is a video (or any other live one).
      *
-     * That case looked unreachable - MIUI builds a KeyguardVideoDepthEngineImpl instead of the
-     * image engine, so the GL texture this module replaces never exists - but the video does
-     * not live in the wallpaper process either. Traced on device: the engine decodes into two
-     * SurfaceTextures that SYSTEMUI supplies, drawn by two full-screen TextureViews that
-     * com.miui.keyguard.VideoDepthSurfaceHolder puts in keyguard_background_layer (behind the
-     * clock) and keyguard_foreground_layer (the cut-out subject, in front of it).
-     *
-     * So on this path the wallpaper is already inside our own view tree, and the cover is just
-     * a view above the background one. The rule that sent this module into the wallpaper
-     * process in the first place - that the clock's liquid glass and the card blur sample the
-     * wallpaper WINDOW, so an in-SystemUI cover is never picked up by them - does not hold
-     * here, because MIUI is not using that window either. Confirmed on device: the glass
-     * refracts a video wallpaper normally.
-     *
-     * Cheaper than the image path, too: no JPEG round trip and no cross-process broadcast, so
-     * the composed bitmap goes straight onto the view.
+     * In addition to DesktopVideoDepthEngineImpl playing mc_cover.mp4 in the wallpaper window,
+     * this view sits in keyguard_background_layer. It fades in smoothly across 240ms so that the
+     * background transition visually harmonizes with FastPlayer's first frame rendering in the
+     * wallpaper window (~120-150ms), perfectly synchronizing the background with the notification
+     * cards' liquid glass / blur sampling.
      */
-    private static void showVideoCover(Context ctx, boolean on, Bitmap art) {
+    private static void showVideoCover(Context ctx, boolean on, final Bitmap full) {
         if (!on) {
             detachCover();
             setDepthHidden(false);
             Xp.log(TAG + "video cover off");
             return;
         }
-        if (art == null) {
+        if (full == null) {
             Xp.log(TAG + "video cover: no album art");
             return;
         }
-        long t0 = android.os.SystemClock.uptimeMillis();
-        // Composed here, on the worker, exactly as for the image path - same mirror-extend,
-        // blur and bias, so the two paths produce the same picture.
-        final Bitmap full = composeWallpaper(art, sScreenW, sScreenH, sBias);
-        measureCover(full);
-        if (sCoverMode) recolorClock();
-        final long draw = android.os.SystemClock.uptimeMillis() - t0;
         main().post(new Runnable() {
             @Override
             public void run() {
@@ -5744,10 +5733,12 @@ public class Main extends XposedModule {
                         return;
                     }
                     ImageView iv = sCover;
-                    if (iv == null || iv.getParent() != layer) {
+                    boolean isNew = (iv == null || iv.getParent() != layer);
+                    if (isNew) {
                         detachCover();
                         iv = new ImageView(ctx);
                         iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                        iv.setAlpha(0f);
                         // Added last, so it draws over the video's TextureView. The layer is
                         // ordered, and a TextureView draws in the view hierarchy like any other
                         // view - unlike a SurfaceView, which would punch through whatever we
@@ -5766,8 +5757,20 @@ public class Main extends XposedModule {
                     // exactly the way deducted_image_view did on the image path.
                     setDepthHidden(true);
                     guardVideoCover(iv);
+
+                    // Fade in smoothly to bridge FastPlayer's first frame render (~120-150ms),
+                    // ensuring notification card blur and wallpaper background switch in sync!
+                    if (isNew) {
+                        iv.animate()
+                                .alpha(1f)
+                                .setDuration(240L)
+                                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                                .start();
+                    } else if (iv.getAlpha() < 1f) {
+                        iv.animate().alpha(1f).setDuration(160L).start();
+                    }
                     Xp.log(TAG + "video cover shown " + sScreenW + "x" + sScreenH
-                            + " bias=" + sBias + ", draw " + draw + "ms");
+                            + " bias=" + sBias + (isNew ? " (animated in)" : ""));
                 } catch (Throwable t) {
                     Xp.log(TAG + "video cover failed: " + Log.getStackTraceString(t));
                 }
