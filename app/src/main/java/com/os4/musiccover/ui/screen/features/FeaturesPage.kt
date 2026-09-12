@@ -209,7 +209,7 @@ fun FeaturesPageView(
                     tabs = groups,
                     selectedTabIndex = group,
                     onTabSelected = { group = it },
-                    modifier = Modifier.padding(horizontal = 12.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp),
                 )
                 LazyColumn(
                     overscrollEffect = null,
@@ -220,7 +220,6 @@ fun FeaturesPageView(
                             topAppBarScrollBehavior = scrollBehavior,
                         ),
                     contentPadding = PaddingValues(
-                        top = 12.dp,
                         bottom = innerPadding.calculateBottomPadding() + extraBottomPadding,
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
