@@ -304,8 +304,18 @@ public class Main extends XposedModule {
      * 36dp is 108px on this 480dpi screen - the OPPO clock the look was matched to.
      */
     private static final float DEFAULT_CLOCK_HEIGHT_DP = 36f;
-    /** The slider's own range. Below this a digit is a smudge; above it there is no collapse. */
-    private static final float CLOCK_HEIGHT_MIN_DP = 20f, CLOCK_HEIGHT_MAX_DP = 64f;
+    /** The bottom of the range. Below this a digit is a smudge. */
+    private static final float CLOCK_HEIGHT_MIN_DP = 20f;
+    /**
+     * A sanity ceiling on a stored height, and the app's slider top when it has no clock to
+     * measure.
+     *
+     * Not the top of the travel. That is the style's own glyph height, because the collapse
+     * cannot grow a clock - kForBox() caps k at 1 - so the app stops its slider there and this
+     * only has to stay above any glyph on any screen. 256dp is 768px on this 480dpi device,
+     * against 448px measured for the tallest clock here.
+     */
+    private static final float CLOCK_HEIGHT_MAX_DP = 256f;
     /** The smallest scale ever written to a view, so no style can collapse itself to nothing. */
     private static final float MIN_CLOCK_K = 0.05f;
     /** What the collapse uses before any box has been measured - the old coefficient, which is

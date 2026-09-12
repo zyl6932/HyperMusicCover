@@ -270,14 +270,19 @@ private fun ClockGroup(
 ) {
     val context = LocalContext.current
     Column {
-        // The top of the slider is the style's own size whenever that is the smaller of the
-        // two. Asking for a taller clock than the style draws is asking for it to grow, and
-        // the module refuses that - so on the magazine style, whose digits are already 38dp,
-        // the slider stops where the clock stops instead of lying about the rest of its travel.
+        // The top of the slider is the style's own size, whatever that is.
+        //
+        // Asking for a taller clock than the style draws is asking for it to grow, and the
+        // module refuses that: kForBox() caps the scale at 1, so a digit already shorter than
+        // the setting is left alone. Travel above the glyph height is therefore dead - the
+        // thumb moves and the clock does not - and the old fixed 64dp top cut the styles with
+        // taller digits off from the top of their own range, which is the one setting that
+        // means "do not collapse me at all". The magazine style, already 38dp, stops at 38; a
+        // style whose digits are 149dp rides to 149.
         val maxDp = with(LocalDensity.current) {
             val glyph = module.geometry.clockH - 2f * module.geometry.clockPad
             if (module.geometry.hasClock && glyph > 0f) {
-                glyph.toDp().value.coerceIn(CLOCK_HEIGHT_MIN_DP + 2f, CLOCK_HEIGHT_MAX_DP)
+                glyph.toDp().value.coerceAtLeast(CLOCK_HEIGHT_MIN_DP + 2f)
             } else {
                 CLOCK_HEIGHT_MAX_DP
             }
@@ -409,6 +414,11 @@ private fun CardGroup(
  */
 /** The collapsed clock's height in dp, matching DEFAULT_CLOCK_HEIGHT_DP in the module. */
 private const val CLOCK_HEIGHT_MIN_DP = 20f
+/**
+ * Where the clock slider stops when there is no measured clock to take a size from - the module
+ * has not reported one, or the style it reported draws no glyphs. A measured one gives its own
+ * height instead, which is the real top of the range.
+ */
 private const val CLOCK_HEIGHT_MAX_DP = 64f
 
 @Composable
