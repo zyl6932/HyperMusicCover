@@ -7,7 +7,10 @@
 -->
 <full-backup-content>
     <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+        The updater's crash bookkeeping. It holds a session id and an elapsedRealtime stamp, both
+        of which are about this device's current uptime - restoring them elsewhere would arm a
+        record that can only ever answer wrong.
+    -->
+    <!-- Which download host answered last time: a fact about this device's network. -->
+    <exclude domain="sharedpref" path="update_source.xml"/>
 </full-backup-content>

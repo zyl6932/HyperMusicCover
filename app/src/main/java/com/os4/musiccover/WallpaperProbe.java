@@ -194,12 +194,28 @@ public class WallpaperProbe {
      * Apple's whole exit is about 300ms, but matching that number is not the same as matching
      * the feel: the clock is a critically damped spring, so it has covered most of its distance
      * long before it settles, and a linear-ish wallpaper fade of the same total length reads as
-     * lagging behind it. Hence both the shorter default and the ease-out below.
+     * lagging behind it. Hence the ease-out below.
      *
-     * Tunable, because it is a taste judgement made against a phone:
-     *   --es op fadems --ei v 240
+     * The length itself is matched to the clock's spring rather than picked, and the two moved
+     * together when the spring was changed to the OEM's own curve (EASE_COVER): the clock now
+     * covers 95% of its travel at 235ms, and a cubic ease-out of length T covers its own 95% at
+     * 0.632*T - so 370ms here against the 240 that went with the old, faster spring. Both
+     * numbers reach 95% within a millisecond of each other, which is the whole of the rule:
+     * 240ms of fade against a 235ms clock would have left the wallpaper sitting still while the
+     * clock was still visibly growing, and 430 (the first attempt) is the same fault the other
+     * way round.
+     *
+     * The number is no longer decided here. The clock's response is a setting now, and this is
+     * the fade that belongs to it - proportional, because the same 95%-against-95% rule holds
+     * for every response once zeta is fixed. SystemUI sends it when it changes and again on
+     * every cover entry, and that second push is what covers a restart of this process: the
+     * field below is a static with nothing behind it, so the 370 it starts at is only ever
+     * right until the first push arrives.
+     *
+     * The op is kept for the case where SystemUI is not the one being tested:
+     *   --es op fadems --ei v 370
      */
-    private static volatile long sFadeMs = 240L;
+    private static volatile long sFadeMs = 370L;
     private static final long FADE_STEP_MS = 16L;
     /**
      * Whether the OEM's frosted copy is regenerated on the fade's frames.

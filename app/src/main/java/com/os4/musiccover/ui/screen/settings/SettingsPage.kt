@@ -66,7 +66,9 @@ fun SettingsPageView(
     isLiquidGlass: Boolean,
     onLiquidGlassChange: (Boolean) -> Unit,
     isBlurEnabled: Boolean,
+    checkUpdate: Boolean,
     onBlurEnabledChange: (Boolean) -> Unit,
+    onCheckUpdateChange: (Boolean) -> Unit,
     extraBottomPadding: Dp = 0.dp,
 ) {
     val context = LocalContext.current
@@ -165,6 +167,18 @@ fun SettingsPageView(
             ) {
                 item {
                     Column {
+                        SmallTitle(text = stringResource(R.string.settings_update))
+                        Card(
+                            modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)
+                        ) {
+                            SwitchPreference(
+                                title = stringResource(R.string.check_update),
+                                summary = stringResource(R.string.check_update_summary),
+                                checked = checkUpdate,
+                                onCheckedChange = onCheckUpdateChange
+                            )
+                        }
+
                         SmallTitle(text = stringResource(R.string.settings_interface))
                         Card(
                             modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)

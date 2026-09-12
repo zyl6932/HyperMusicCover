@@ -4,6 +4,8 @@
     <string name="about_source_code_summary">https://github.com/zyl6932/HyperMusicCover</string>
     <string name="about_telegram">Telegram群组</string>
     <string name="about_telegram_summary">https://t.me/HyperMusicCover</string>
+    <string name="about_qq_group">QQ群组</string>
+    <string name="about_qq_group_summary">https://qm.qq.com/q/RcLbYXgBy2</string>
     <string name="about_feedback">反馈与建议</string>
     <string name="about_feedback_summary">https://github.com/zyl6932/HyperMusicCover/issues</string>
     <string name="home_now_playing">当前曲目</string>
@@ -14,14 +16,15 @@
     <string name="cover_bias">封面纵向位置</string>
     <string name="cover_bias_summary">0 贴顶，0.5 居中</string>
     <string name="clock_section">时钟</string>
-    <string name="clock_scale">时钟缩放</string>
-    <string name="clock_scale_summary">收起后的时钟大小</string>
+    <string name="clock_height">时钟高度</string>
+    <string name="clock_height_summary">收起后数字有多高（dp）</string>
+    <string name="clock_response">缩放动画阻尼</string>
+    <string name="clock_response_summary">默认0.38，越大阻尼感越强</string>
     <string name="clock_glass">玻璃强度</string>
+    <string name="clock_glass_style_unsupported">当前时钟样式没有玻璃效果</string>
     <string name="restart_menu">重启</string>
     <string name="restart_systemui">重启系统界面</string>
     <string name="restart_wallpaper">重启壁纸</string>
-    <string name="restart_done">已请求重启</string>
-    <string name="restart_failed">重启失败，需要 Root 权限</string>
 
     <string name="tab_home">主页</string>
     <string name="tab_settings">设置</string>
@@ -29,6 +32,7 @@
     <string name="settings_interface">界面</string>
     <string name="settings_language">语言</string>
     <string name="settings_data">数据管理</string>
+    <string name="settings_update">更新</string>
     <string name="theme_mode">主题模式</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_light">浅色</string>
@@ -79,7 +83,6 @@
     <string name="tab_features">功能</string>
     <string name="home_status_active">模块已激活</string>
     <string name="home_status_inactive">模块未激活</string>
-    <string name="home_mode_fullscreen">全屏封面</string>
     <string name="home_status_inactive_hint">请在 LSPosed 中启用并重启系统界面</string>
     <string name="home_device_info">设备信息</string>
     <string name="home_device_name">设备名称</string>
@@ -99,4 +102,26 @@
     <string name="fp_avoid_system">跟随系统</string>
     <string name="fp_avoid_never">不避让</string>
     <string name="fp_avoid_always">始终避让</string>
+    <string name="get_update">获取更新</string>
+    <string name="get_update_detail">检查软件更新和新功能</string>
+    <string name="update_available">有可用更新：%1$s</string>
+    <string name="get_update_directly">直接更新</string>
+    <string name="get_update_directly_desc">直接从 Github 安装更新</string>
+    <string name="updating">正在更新…</string>
+    <string name="update_notes_title">更新日志</string>
+    <string name="update_notes_empty">（本次发布没有说明）</string>
+    <string name="update_cancel">取消</string>
+    <string name="update_close">关闭</string>
+    <string name="update_failed">更新失败：%1$s</string>
+    <string name="tl_okhttp">OkHttp</string>
+    <string name="tl_okhttp_summary">Apache-2.0</string>
+    <string name="tl_serialization">kotlinx.serialization</string>
+    <string name="tl_serialization_summary">Apache-2.0</string>
+    <string name="update_status_title">更新</string>
+    <string name="update_no_installer">没有找到可以安装 APK 的应用，请在文件管理器里手动安装</string>
+    <string name="update_confirm">更新</string>
+    <string name="update_not_ours">更新包的签名不是本项目的，已丢弃</string>
+    <string name="restart_scope">重启全部作用域</string>
+    <string name="check_update">检查更新</string>
+    <string name="check_update_summary">在应用启动后自动检查是否有最新版</string>
 </resources>

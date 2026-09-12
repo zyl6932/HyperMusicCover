@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -122,6 +123,12 @@ fun FeaturesPageView(
             // The clock's geometry rides along with the pictures. Merged into the state rather
             // than replacing it: a poll must never write back bias or the two clock values,
             // which the user may be dragging at this very moment.
+            // Not inside the geometry block above: that one only runs when the clock could
+            // be measured, and this has to reach the settings page on a style whose clock it
+            // could not be measured on - which is exactly when the slider looks wrong.
+            if (reply.clockHasGlass != module.clockHasGlass) {
+                module = module.copy(clockHasGlass = reply.clockHasGlass)
+            }
             reply.clockGeometry?.let { g ->
                 if (g != clockGeometryOf(module)) {
                     module = module.copy(
@@ -183,7 +190,7 @@ fun FeaturesPageView(
                 LockPreview(
                     art = art,
                     bias = module.bias,
-                    clockScale = module.clockScale,
+                    clockHeightDp = module.clockHeightDp,
                     glassEnd = module.glassEnd,
                     geometry = module.geometry,
                     card = shots.card,
@@ -263,15 +270,48 @@ private fun ClockGroup(
 ) {
     val context = LocalContext.current
     Column {
+        // The top of the slider is the style's own size, whatever that is.
+        //
+        // Asking for a taller clock than the style draws is asking for it to grow, and the
+        // module refuses that: kForBox() caps the scale at 1, so a digit already shorter than
+        // the setting is left alone. Travel above the glyph height is therefore dead - the
+        // thumb moves and the clock does not - and the old fixed 64dp top cut the styles with
+        // taller digits off from the top of their own range, which is the one setting that
+        // means "do not collapse me at all". The magazine style, already 38dp, stops at 38; a
+        // style whose digits are 149dp rides to 149.
+        val maxDp = with(LocalDensity.current) {
+            val glyph = module.geometry.clockH - 2f * module.geometry.clockPad
+            if (module.geometry.hasClock && glyph > 0f) {
+                glyph.toDp().value.coerceAtLeast(CLOCK_HEIGHT_MIN_DP + 2f)
+            } else {
+                CLOCK_HEIGHT_MAX_DP
+            }
+        }
         ValueSlider(
-            title = stringResource(R.string.clock_scale),
-            summary = stringResource(R.string.clock_scale_summary),
-            value = module.clockScale,
-            valueRange = 0.1f..1f,
+            title = stringResource(R.string.clock_height),
+            summary = stringResource(R.string.clock_height_summary),
+            value = module.clockHeightDp.coerceIn(CLOCK_HEIGHT_MIN_DP, maxDp),
+            valueRange = CLOCK_HEIGHT_MIN_DP..maxDp,
             enabled = enabled,
             onValueChange = {
-                onChange(module.copy(clockScale = it))
-                ModuleBridge.setClockScale(context, it)
+                onChange(module.copy(clockHeightDp = it))
+                ModuleBridge.setClockHeight(context, it)
+            },
+        )
+        // The spring the whole transition runs on. The number is miuix's response time in
+        // seconds and it is not flipped, because the label is a description of feel rather than
+        // of the unit: dragging right slows the spring down, and a slower spring with the same
+        // damping ratio is the one that reads as heavier. Zeta is fixed at 0.88 on the module
+        // side and is not on this slider.
+        ValueSlider(
+            title = stringResource(R.string.clock_response),
+            summary = stringResource(R.string.clock_response_summary),
+            value = module.clockResponse.coerceIn(CLOCK_RESPONSE_MIN, CLOCK_RESPONSE_MAX),
+            valueRange = CLOCK_RESPONSE_MIN..CLOCK_RESPONSE_MAX,
+            enabled = enabled,
+            onValueChange = {
+                onChange(module.copy(clockResponse = it))
+                ModuleBridge.setClockResponse(context, it)
             },
         )
         // Shown inverted. The module stores the OEM's own number, where updateGlassValue(0) is
@@ -279,12 +319,19 @@ private fun ClockGroup(
         // backwards, and dragging right made the effect weaker. The stored value, the adb
         // glassend op and the exported JSON all keep the OEM's meaning; only this slider is
         // flipped.
+        // Off on the styles whose clock has no glass to morph, and saying so. The morph is
+        // AllInOneBase.updateGlassValue(float) - the OEM's own ramp from refracting glass to a
+        // solid fill - and the rhombus, doodle, oriental and magazine clocks have no such thing:
+        // vector digits, bitmaps and plain text. A slider that moves and changes nothing is
+        // worse than one that explains itself.
+        val glassAvailable = module.clockHasGlass
         ValueSlider(
             title = stringResource(R.string.clock_glass),
-            summary = null,
+            summary = if (glassAvailable) null
+                      else stringResource(R.string.clock_glass_style_unsupported),
             value = 1f - module.glassEnd,
             valueRange = 0f..1f,
-            enabled = enabled,
+            enabled = enabled && glassAvailable,
             onValueChange = {
                 val glassEnd = 1f - it
                 onChange(module.copy(glassEnd = glassEnd))
@@ -381,6 +428,23 @@ private fun CardGroup(
  * to tell where you have dragged to, which matters here because these values get compared against
  * ones written down in the notes.
  */
+/** The collapsed clock's height in dp, matching DEFAULT_CLOCK_HEIGHT_DP in the module. */
+private const val CLOCK_HEIGHT_MIN_DP = 20f
+/**
+ * Where the clock slider stops when there is no measured clock to take a size from - the module
+ * has not reported one, or the style it reported draws no glyphs. A measured one gives its own
+ * height instead, which is the real top of the range.
+ */
+private const val CLOCK_HEIGHT_MAX_DP = 64f
+
+/**
+ * The clock transition's spring response, in seconds, matching CLOCK_RESPONSE_MIN/MAX in the
+ * module. 0.18 is the fastest this transition has ever shipped and 0.60 is the slow end of what
+ * still reads as one movement.
+ */
+private const val CLOCK_RESPONSE_MIN = 0.18f
+private const val CLOCK_RESPONSE_MAX = 0.60f
+
 @Composable
 private fun ValueSlider(
     title: String,

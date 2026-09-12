@@ -8,7 +8,6 @@
 package com.os4.musiccover.ui.screen.home
 
 import android.annotation.SuppressLint
-import android.widget.Toast
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Box
@@ -199,10 +198,13 @@ fun HomePageView(
                         } else {
                             moduleVersion
                         }
-                        // Hard-coded until there is a second layout to switch to; the
-                        // album-card style is the planned one, and this is where it gets chosen.
+                        // The card's bottom-left corner names the app, not the layout: there is
+                        // only one layout, so a line saying which one it is told the reader
+                        // nothing, while the name is what someone looking at a stranger's lock
+                        // screen would want to read off it. Null while the module is not live,
+                        // because then the hint above is the only line worth having.
                         val workingMode = if (ok) {
-                            stringResource(R.string.home_mode_fullscreen)
+                            stringResource(R.string.app_name)
                         } else {
                             null
                         }
@@ -364,6 +366,7 @@ private fun RestartMenu() {
     var showMenu by remember { mutableStateOf(false) }
 
     val entries = listOf(
+        stringResource(R.string.restart_scope) to { ModuleBridge.restartScope(context) },
         stringResource(R.string.restart_systemui) to ModuleBridge::restartSystemUi,
         stringResource(R.string.restart_wallpaper) to ModuleBridge::restartWallpaper,
     )
@@ -395,14 +398,11 @@ private fun RestartMenu() {
                         index = index,
                         onSelectedIndexChange = {
                             showMenu = false
-                            scope.launch {
-                                val ok = withContext(Dispatchers.IO) { entry.second() }
-                                Toast.makeText(
-                                    context,
-                                    if (ok) R.string.restart_done else R.string.restart_failed,
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            }
+                            // No result is reported. A Toast is not a channel this app has - they
+                            // are dropped whenever notifications are off, which is this app's
+                            // default - and the restart is its own feedback: the screen blinks and
+                            // the lock screen comes back.
+                            scope.launch { withContext(Dispatchers.IO) { entry.second() } }
                         },
                     )
                 }

@@ -33,10 +33,38 @@ object ModuleBridge {
         val cover: Boolean = false,
         val auto: Boolean = false,
         val bias: Float = 0.34f,
-        val clockScale: Float = 0.335f,
+        /**
+         * How tall the collapsed clock's digits are, in dp.
+         *
+         * A height rather than the coefficient this used to be. The coefficient multiplied each
+         * clock style's own glyph box and those differ by more than ten times over, so one
+         * number was a different clock on every style - and a different one again on a
+         * different screen. A height is the same clock everywhere: the module divides it by the
+         * glyphs it measures and scales by what comes out.
+         */
+        val clockHeightDp: Float = 36f,
+        /**
+         * The cover transition's spring response, in seconds - how long the clock takes to
+         * travel. Larger is slower.
+         *
+         * miuix's own unit for a spring: the module derives stiffness and damping from it, so
+         * the number means the same thing on every style and screen, and the card and wallpaper
+         * fades are derived from it too. 0.38 is the OEM's own preset for this transition.
+         */
+        val clockResponse: Float = 0.38f,
         val glassEnd: Float = 0.75f,
         val cardShowing: Boolean = false,
         val lockWallpaperOk: Boolean = false,
+        /**
+         * Whether the clock style loaded right now has a glass channel at all.
+         *
+         * The liquid-glass morph is AllInOneBase.updateGlassValue(float) and it exists exactly
+         * where the glass shader does: the all_in_one family. The rhombus, doodle, oriental and
+         * magazine clocks draw vector digits, bitmaps and plain text, and there is nothing on
+         * them for the slider to drive. Reported by the module rather than guessed here,
+         * because which views carry the channel is the module's business.
+         */
+        val clockHasGlass: Boolean = false,
         val track: String = "",
         val player: String = "",
         val mcHideArt: Boolean = false,
@@ -112,9 +140,13 @@ object ModuleBridge {
 
     fun setBias(context: Context, v: Float) = send(context, "bias") { putExtra("v", v) }
 
-    fun setClockScale(context: Context, v: Float) = send(context, "clockscale") { putExtra("v", v) }
+    fun setClockHeight(context: Context, dp: Float) =
+        send(context, "clockscale") { putExtra("v", dp) }
 
     fun setGlassEnd(context: Context, v: Float) = send(context, "glassend") { putExtra("v", v) }
+
+    fun setClockResponse(context: Context, seconds: Float) =
+        send(context, "clockspring") { putExtra("v", seconds) }
 
     fun setCardHideArt(context: Context, on: Boolean) =
         send(context, "mediacard") { putExtra("hideart", on) }
@@ -194,6 +226,8 @@ object ModuleBridge {
          * holding a clock it has nowhere to put.
          */
         val clockGeometry: Geometry? = null,
+        /** See State.clockHasGlass - a property of the style, so it rides with every reply. */
+        val clockHasGlass: Boolean = false,
         val left: Shot? = null,
         val right: Shot? = null,
     )
@@ -228,6 +262,7 @@ object ModuleBridge {
             left = shot(b, "sl"),
             right = shot(b, "sr"),
             clockGeometry = if (b.getFloat("clockw", 0f) > 0f) clockGeometry(b) else null,
+            clockHasGlass = b.getBoolean("clockglass", false),
         )
     }
 
@@ -312,10 +347,12 @@ object ModuleBridge {
             cover = b.getBoolean("cover", false),
             auto = b.getBoolean("auto", false),
             bias = b.getFloat("bias", 0.34f),
-            clockScale = b.getFloat("clock", 0.335f),
+            clockHeightDp = b.getFloat("clock", 36f),
+            clockResponse = b.getFloat("spring", 0.38f),
             glassEnd = b.getFloat("glass", 0.75f),
             cardShowing = b.getBoolean("card", false),
             lockWallpaperOk = b.getBoolean("lockwp", false),
+            clockHasGlass = b.getBoolean("clockglass", false),
             track = b.getString("track") ?: "",
             player = b.getString("player") ?: "",
             mcHideArt = b.getBoolean("mcart", false),
@@ -349,6 +386,20 @@ object ModuleBridge {
      * cover ever ends up wrong on screen, this is what re-reads it from disk.
      */
     fun restartWallpaper(): Boolean = kill("com.miui.miwallpaper")
+
+    /**
+     * Every process the module is scoped to, in one go.
+     *
+     * Read from the scope list the module ships rather than hard-coded, so this keeps meaning
+     * "everything the module touches" if that list ever grows. For both entries today the process
+     * to restart has the same name as the package.
+     */
+    fun restartScope(context: Context): Boolean {
+        val scoped = context.resources.getStringArray(R.array.xposedscope)
+        var all = true
+        for (pkg in scoped) if (!kill(pkg)) all = false
+        return all
+    }
 
     private fun kill(process: String): Boolean = try {
         val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "kill \$(pidof $process)"))

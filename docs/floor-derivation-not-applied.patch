@@ -1,0 +1,240 @@
+Floor derivation: NOT APPLIED, kept as the starting point for the sampling fix
+==============================================================================
+
+This patch adds the runtime derivation of SQUEEZE_FLOOR described in HANDOFF 10.6.
+It was written, built and run on device on 2026-09-11, and it is deliberately NOT
+in the tree.
+
+Why it is not applied: the algebra is right but the sampling point is wrong.
+
+    floor = knee + containerTy()          where knee = C - maxSpace
+    C     = notifPre + y                  a build constant (2294 on this device)
+
+That reproduces the hardcoded 740 exactly - but only in the NORMAL keyguard layout,
+where maxSpace reads 1386. Cover mode puts the keyguard into its notification layout,
+where maxSpace reads 1196, and there the same formula yields 7.7. learnFloorY() is
+called at the top of enterCoverMode(), by which point the layout has already swapped,
+so on every real entry its own sanity guard rejected the result and kept 740:
+
+    floor: derived 200.6 (C 2294.0 knee 1098.0 refT -897.4) out of range, keeping 740.0
+
+The mechanism is sound and the fields are real; only the moment of sampling is wrong.
+The fix is to sample from the setNotifY hook while sHoldY == null, not at entry - that
+is the only place the normal layout is observable with a known natural y.
+
+Applying this patch as-is will build and run, and will change nothing on this device:
+every derivation is rejected by the range guard. It is here so the next attempt starts
+from working code rather than from the algebra again.
+
+Apply with:  git apply docs/floor-derivation-not-applied.patch
+diff --git a/app/src/main/java/com/os4/musiccover/Main.java b/app/src/main/java/com/os4/musiccover/Main.java
+index 920d145..d6ba0ce 100644
+--- a/app/src/main/java/com/os4/musiccover/Main.java
++++ b/app/src/main/java/com/os4/musiccover/Main.java
+@@ -165,8 +165,32 @@ public class Main extends XposedModule {
+      * never write an animator for it. NaN = off.
+      */
+     private static volatile float sCollapseMin = Float.NaN;
+-    /** Below this notifY the OEM's variable font stops shrinking - the collapse takes over. */
++    /**
++     * Below this notifY the OEM's variable font stops shrinking - the collapse takes over.
++     *
++     * 740 is a RAW PIXEL count measured on the 1200x2608 phone this was tuned on, and it is the
++     * one number in the whole collapse that does not come out of a reading taken at runtime.
++     * coverProgress() divides the travel by it, so on a phone with a different screen the whole
++     * interval is wrong: on a smaller one p never reaches 1 and the clock does not finish
++     * collapsing, on a larger one p saturates early and then waits.
++     *
++     * What the number MEANS is "the y at which the OEM has the clock where its own notification
++     * look puts it", and the OEM will say so itself, out of fields the module can already reach
++     * on KeyguardClockNotifInteractor:
++     *
++     *   notifPre = C - y                 ->  C    = notifPre + y, at the y the OEM last drove
++     *   T(y)     = min(0, y - knee)          the translation it puts on clock_animation_container
++     *   knee     = C - maxSpace              (both views of it agree to a pixel over this device)
++     *
++     * The floor is that knee lifted by the translation the OEM itself had on the container before
++     * the cover took the clock over - containerTy(), which reads 0 in the layouts without a media
++     * card and -168 in the collapsed one. 908 + (-168) = 740: the constant is exactly what the
++     * derivation gives here, which is why it is safe to keep it as the fallback for the paths
++     * where the derivation has nothing to read (a restart, a style that emits no notifY).
++     */
+     private static final float SQUEEZE_FLOOR = 740f;
++    /** The floor actually in use. SQUEEZE_FLOOR until learnFloorY() has something to read. */
++    private static volatile float sFloorY = SQUEEZE_FLOOR;
+     private static volatile float sAppliedK = Float.NaN;
+     /**
+      * How light the strip of the cover that the collapsed clock and its date are drawn on is,
+@@ -2524,7 +2548,7 @@ public class Main extends XposedModule {
+             // Same reading the settle uses: with no natural y observed yet, held at the floor is
+             // a complete collapse by definition, and that definition is what the hold was taken
+             // under. Anything short of settled has a driver of its own and is left alone.
+-            if (Float.isNaN(p)) p = held > SQUEEZE_FLOOR ? 0f : 1f;
++            if (Float.isNaN(p)) p = held > floorY() ? 0f : 1f;
+             if (p < 0.999f) return true;
+             if (!collapseStale()) return true;
+             long now = android.os.SystemClock.uptimeMillis();
+@@ -2727,11 +2751,74 @@ public class Main extends XposedModule {
+      */
+     private static float coverProgress(float y) {
+         float natural = sLastSystemY;
+-        if (Float.isNaN(natural) || natural <= SQUEEZE_FLOOR) return Float.NaN;
+-        float p = (natural - y) / (natural - SQUEEZE_FLOOR);
++        float floor = sFloorY;
++        if (Float.isNaN(natural) || natural <= floor) return Float.NaN;
++        float p = (natural - y) / (natural - floor);
+         return p < 0f ? 0f : (p > 1f ? 1f : p);
+     }
+ 
++    /** The notifY the collapse is parked at. SQUEEZE_FLOOR until learnFloorY() derives one. */
++    private static float floorY() {
++        return sFloorY;
++    }
++
++    /**
++     * Re-derives the floor from the OEM's own accounting, or leaves the constant alone.
++     *
++     * Called at the top of an entry and nowhere else, because the floor must not move under a
++     * collapse that is already in flight or already held: p is measured against it, so a floor
++     * that changes mid-entry is a jump in every value derived from p. At entry there is no
++     * collapse to disturb, and the one reading that has to be taken BEFORE the hold goes on is
++     * the container translation - taking the hold is exactly what stops the OEM putting the
++     * clock into the layout that translation describes.
++     *
++     * Every failure here is a name on someone else's build, and none of them is a reason to stop
++     * collapsing the clock: the fallback is the constant this device has always used.
++     */
++    private static void learnFloorY() {
++        View v = sContainer;
++        float natural = sLastSystemY;
++        if (v == null || Float.isNaN(natural)) return;
++        // Never while a hold is on: notifPre is `C - y` for whatever y went in last, and under a
++        // hold that is OUR y, so the C recovered from it would belong to nobody.
++        if (sHoldY != null) return;
++        // The OEM's own collapsed translation on clock_animation_container, read while the OEM
++        // is still the one setting it. Zero means this style does not translate the container at
++        // all, in which case there is no OEM answer to read and the constant stands.
++        float refT = containerTy();
++        if (!(refT < -0.5f)) return;
++        try {
++            Object it = Xp.getObjectField(v, "keyguardClockNotifInteractor");
++            if (it == null) return;
++            Object pre = Xp.getObjectField(it, "notifPre");
++            Object space = Xp.getObjectField(it, "maxSpace");
++            if (!(pre instanceof Number) || !(space instanceof Number)) return;
++            // notifPre is `C - y` for the y the OEM last drove, so `C = notifPre + y` recovers
++            // the device's own constant, and the translation knee is that minus its max space.
++            float c = ((Number) pre).floatValue() + natural;
++            float knee = c - ((Number) space).intValue();
++            float floor = knee + refT;
++            // A knee read off a notifPre belonging to a different layout is the one way this goes
++            // wrong, so it is only believed inside the band a real one lands in: this device's
++            // derives 740 of a 1438 natural, i.e. 51%. Anything outside is dropped with the
++            // numbers in the log rather than applied.
++            if (!(floor > natural * 0.2f && floor < natural * 0.9f)) {
++                Xp.log(TAG + "floor: derived " + r1(floor) + " (C " + r1(c) + " knee "
++                        + r1(knee) + " refT " + r1(refT) + ") out of range, keeping "
++                        + r1(sFloorY));
++                return;
++            }
++            if (Math.abs(floor - sFloorY) < 0.5f) return;
++            Xp.log(TAG + "floor: " + r1(sFloorY) + " -> " + r1(floor) + " (natural "
++                    + r1(natural) + " notifPre " + r1(((Number) pre).floatValue()) + " maxSpace "
++                    + ((Number) space).intValue() + " knee " + r1(knee) + " refT " + r1(refT)
++                    + ")");
++            sFloorY = floor;
++        } catch (Throwable t) {
++            Xp.log(TAG + "floor: derivation unavailable, keeping " + r1(sFloorY) + ": " + t);
++        }
++    }
++
+     /** The density of whatever screen this process is glued to. */
+     private static float density() {
+         View v = sContainer;
+@@ -4456,7 +4543,7 @@ public class Main extends XposedModule {
+           .append(" videoWallpaper=").append(sVideoWallpaper)
+           .append("\nhold: y=").append(sHoldY).append(" current=").append(r1(sCurrentY))
+           .append(" lastSystem=").append(r1(sLastSystemY))
+-          .append(" floor=").append(SQUEEZE_FLOOR)
++          .append(" floor=").append(floorY())
+           .append(" collapseMin=").append(r2(sCollapseMin))
+           .append(" clockH=").append(r1(sClockHeightDp)).append("dp")
+           // Whether the app's glass slider is live at all: the morph exists only on the styles
+@@ -6226,6 +6313,9 @@ public class Main extends XposedModule {
+      * on - if the album cover is the wallpaper, the clock is small.
+      */
+     private static void enterCoverMode(boolean animate) {
++        // Before the flag and before the hold: this reads the OEM's own container translation,
++        // and taking the hold is what stops the OEM putting the clock there.
++        learnFloorY();
+         sCoverMode = true;
+         sReleasing = false;
+         // Whatever was sampled belongs to the state before this entry - a different layout, or a
+@@ -6252,13 +6342,13 @@ public class Main extends XposedModule {
+             // ~600ms over this travel, measured, against ~371ms for RUNNING - so with only the
+             // exit changed the toggle was lopsided, and the wallpaper crossfade could not be in
+             // step with both. Apple's is symmetric and so is this now.
+-            springTo(SQUEEZE_FLOOR, EASE_RUNNING[0], EASE_RUNNING[1], "STATE_CHANGED", false);
++            springTo(floorY(), EASE_RUNNING[0], EASE_RUNNING[1], "STATE_CHANGED", false);
+             // The spring above cannot carry the card on a style that emits no notifY, and the
+             // card is not the clock's business anyway. See oemDrivesCard().
+             if (!oemDrivesCard()) animateCardTo(1f, null);
+         } else {
+-            sHoldY = SQUEEZE_FLOOR;
+-            drive(SQUEEZE_FLOOR, false, "STATE_CHANGED");
++            sHoldY = floorY();
++            drive(floorY(), false, "STATE_CHANGED");
+         }
+         // The reading may predate this cover - the card can come up on art that was pushed
+         // before the user ever locked the phone - and the OEM will not re-colour on its own.
+@@ -6310,7 +6400,7 @@ public class Main extends XposedModule {
+         float natural = sLastSystemY;
+         boolean canSpring = animate && screenOn() && sContainer != null
+                 && !Float.isNaN(sCollapseMin)
+-                && !Float.isNaN(natural) && natural > SQUEEZE_FLOOR;
++                && !Float.isNaN(natural) && natural > floorY();
+         if (canSpring) {
+             // The cut-out belongs to the wallpaper, and the wallpaper is already on its way
+             // back by the time this runs, so it is restored now rather than at the settle.
+@@ -6396,7 +6486,7 @@ public class Main extends XposedModule {
+         sAppliedGlassV = Float.NaN;
+         sCardP = 1f;
+         applyMediaCard();
+-        rampTo(SQUEEZE_FLOOR, WAKE_RAMP_MS, "STATE_CHANGED", false, WAKE_EASE);
++        rampTo(floorY(), WAKE_RAMP_MS, "STATE_CHANGED", false, WAKE_EASE);
+         // The ramp above cannot carry the card on a style that emits no notifY; see
+         // oemDrivesCard().
+         if (!oemDrivesCard()) animateCardTo(1f, null);
+@@ -6443,11 +6533,11 @@ public class Main extends XposedModule {
+         sGlassV0 = 0f;
+         sGlassV1 = sGlassEnd;
+         Float held = sHoldY;
+-        if (!force && held != null && Math.abs(held - SQUEEZE_FLOOR) < 1f) return;
++        if (!force && held != null && Math.abs(held - floorY()) < 1f) return;
+         sAppliedK = Float.NaN;
+         sAppliedGlassV = Float.NaN;
+-        sHoldY = SQUEEZE_FLOOR;
+-        drive(SQUEEZE_FLOOR, false, "STATE_CHANGED");
++        sHoldY = floorY();
++        drive(floorY(), false, "STATE_CHANGED");
+         settleCollapsedClock(0);
+         Xp.log(TAG + "cover clock re-collapsed after wake");
+     }
+@@ -6515,7 +6605,7 @@ public class Main extends XposedModule {
+             // guess, it is the definition the hold was taken under. (This was the second reason
+             // the first lock screen stayed wrong: the retry loop ran, and every pass through it
+             // returned here.)
+-            if (y > SQUEEZE_FLOOR) return;
++            if (y > floorY()) return;
+             p = 1f;
+         }
+         boolean placed = placeCollapsedClock(1f - p * (1f - sCollapseMin), y, p);
+@@ -7117,7 +7207,7 @@ public class Main extends XposedModule {
+      */
+     private static boolean oemDrivesCard() {
+         float natural = sLastSystemY;
+-        return !Float.isNaN(natural) && natural > SQUEEZE_FLOOR;
++        return !Float.isNaN(natural) && natural > floorY();
+     }
+ 
+     /** Matches the exit spring's settle and the wallpaper crossfade, so they land together. */

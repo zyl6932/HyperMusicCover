@@ -116,6 +116,10 @@ fun LicensePageContent(
         val coroutinesSummary = stringResource(R.string.tl_coroutines_summary)
         val materialIconsName = stringResource(R.string.tl_material_icons)
         val materialIconsSummary = stringResource(R.string.tl_material_icons_summary)
+        val okhttpName = stringResource(R.string.tl_okhttp)
+        val okhttpSummary = stringResource(R.string.tl_okhttp_summary)
+        val serializationName = stringResource(R.string.tl_serialization)
+        val serializationSummary = stringResource(R.string.tl_serialization_summary)
 
         val libraries = remember {
             listOf(
@@ -125,6 +129,8 @@ fun LicensePageContent(
                 LibraryInfo(androidxName, androidxSummary, "https://developer.android.com/jetpack/androidx"),
                 LibraryInfo(coroutinesName, coroutinesSummary, "https://github.com/Kotlin/kotlinx.coroutines"),
                 LibraryInfo(materialIconsName, materialIconsSummary, "https://developer.android.com/jetpack/androidx/compose/material-icons"),
+                LibraryInfo(okhttpName, okhttpSummary, "https://square.github.io/okhttp/"),
+                LibraryInfo(serializationName, serializationSummary, "https://github.com/Kotlin/kotlinx.serialization"),
             )
         }
 

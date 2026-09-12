@@ -16,6 +16,7 @@ data class AppSettings(
     val isFloatingNavbar: Boolean = false,
     val isLiquidGlass: Boolean = false,
     val isBlurEnabled: Boolean = true,
+    val checkUpdate: Boolean = true,
     val language: String = "",
 ) {
     fun toJson(): String = JSONObject().apply {
@@ -23,6 +24,7 @@ data class AppSettings(
         put("isFloatingNavbar", isFloatingNavbar)
         put("isLiquidGlass", isLiquidGlass)
         put("isBlurEnabled", isBlurEnabled)
+        put("checkUpdate", checkUpdate)
         put("language", language)
     }.toString(2)
 
@@ -32,6 +34,7 @@ data class AppSettings(
         private const val KEY_FLOATING_NAVBAR = "floating_navbar"
         private const val KEY_LIQUID_GLASS = "liquid_glass"
         private const val KEY_BLUR_ENABLED = "blur_enabled"
+        private const val KEY_CHECK_UPDATE = "check_update"
 
         fun fromJson(json: String): AppSettings = try {
             val obj = JSONObject(json)
@@ -40,6 +43,7 @@ data class AppSettings(
                 isFloatingNavbar = obj.optBoolean("isFloatingNavbar", false),
                 isLiquidGlass = obj.optBoolean("isLiquidGlass", false),
                 isBlurEnabled = obj.optBoolean("isBlurEnabled", true),
+                checkUpdate = obj.optBoolean("checkUpdate", true),
                 language = obj.optString("language", ""),
             )
         } catch (_: Exception) {
@@ -53,6 +57,7 @@ data class AppSettings(
                 isFloatingNavbar = prefs.getBoolean(KEY_FLOATING_NAVBAR, false),
                 isLiquidGlass = prefs.getBoolean(KEY_LIQUID_GLASS, false),
                 isBlurEnabled = prefs.getBoolean(KEY_BLUR_ENABLED, true),
+                checkUpdate = prefs.getBoolean(KEY_CHECK_UPDATE, true),
                 language = LocaleHelper.getSavedLanguage(context).code,
             )
         }
@@ -63,6 +68,7 @@ data class AppSettings(
                 putBoolean(KEY_FLOATING_NAVBAR, settings.isFloatingNavbar)
                 putBoolean(KEY_LIQUID_GLASS, settings.isLiquidGlass)
                 putBoolean(KEY_BLUR_ENABLED, settings.isBlurEnabled)
+                putBoolean(KEY_CHECK_UPDATE, settings.checkUpdate)
             }
             val lang = LocaleHelper.Language.entries.find { it.code == settings.language }
                 ?: LocaleHelper.Language.SYSTEM

@@ -55,6 +55,8 @@ import com.os4.musiccover.ui.component.effect.BgEffectBackground
 import com.os4.musiccover.ui.util.BlurredBar
 import com.os4.musiccover.ui.util.ColorBlendToken
 import com.os4.musiccover.ui.util.isInDarkTheme
+import com.os4.musiccover.ui.util.openQqGroup
+import com.os4.musiccover.ui.util.openTelegramGroup
 import com.os4.musiccover.ui.util.pageContentPadding
 import com.os4.musiccover.ui.util.pageScrollModifiers
 import com.os4.musiccover.ui.util.rememberBlurBackdrop
@@ -79,7 +81,12 @@ import top.yukonga.miuix.kmp.basic.Text as MiuixText
 fun AboutPageContent(
     openLicensePage: () -> Unit,
     isBlurEnabled: Boolean = true,
+    refreshKey: Int = 0,
+    checkUpdate: Boolean = true,
 ) {
+    // Owns the check, the install and the four dialogs; see UpdateUi.kt. It has to sit above the
+    // Scaffold because the dialogs open their own windows and cannot be nested in the page body.
+    val update = rememberUpdateController(refreshKey, checkUpdate)
     val topAppBarScrollBehavior = MiuixScrollBehavior()
     val lazyListState = rememberLazyListState()
 
@@ -136,9 +143,12 @@ fun AboutPageContent(
                 lazyListState = lazyListState,
                 scrollProgressProvider = { scrollProgress },
                 openLicensePage = openLicensePage,
+                update = update,
             )
         }
     }
+
+    UpdateDialogs(update)
 }
 
 @Composable
@@ -148,6 +158,7 @@ private fun AboutContent(
     lazyListState: LazyListState,
     scrollProgressProvider: () -> Float,
     openLicensePage: () -> Unit,
+    update: UpdateController,
 ) {
     val uriHandler = LocalUriHandler.current
     val contentBackdrop = rememberBlurBackdrop()
@@ -207,6 +218,173 @@ private fun AboutContent(
         bgModifier = if (contentBackdrop != null) Modifier.layerBackdrop(contentBackdrop) else Modifier,
         alpha = { 1f - scrollProgressProvider() },
     ) {
+
+        // Scrollable content
+        LazyColumn(
+            overscrollEffect = null,
+            state = lazyListState,
+            modifier = Modifier
+                .fillMaxSize()
+                .pageScrollModifiers(
+                    showTopAppBar = true,
+                    topAppBarScrollBehavior = topAppBarScrollBehavior,
+                ),
+            contentPadding = PaddingValues(
+                top = scrollPadding.calculateTopPadding(),
+                start = scrollPadding.calculateLeftPadding(LayoutDirection.Ltr),
+                end = scrollPadding.calculateRightPadding(LayoutDirection.Ltr),
+            ),
+        ) {
+            item(key = "logoSpacer") {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(
+                            logoHeightDp + 52.dp + logoPadding.calculateTopPadding() - scrollPadding.calculateTopPadding() + 126.dp,
+                        ),
+                )
+            }
+
+            item(key = "about") {
+                Column(
+                    modifier = Modifier
+                        .fillParentMaxHeight()
+                        .padding(bottom = scrollPadding.calculateBottomPadding()),
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .then(
+                                if (contentBackdrop != null) {
+                                    Modifier.textureBlur(
+                                        backdrop = contentBackdrop,
+                                        shape = RoundedCornerShape(16.dp),
+                                        blurRadius = blurRadius,
+                                        noiseCoefficient = noiseCoefficient,
+                                        colors = BlurDefaults.blurColors(
+                                            blendColors = cardBlend,
+                                            brightness = brightness,
+                                            contrast = contrast,
+                                            saturation = saturation,
+                                        ),
+                                    )
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                        colors = CardDefaults.defaultColors(
+                            if (contentBackdrop != null) Color.Transparent else colorScheme.surfaceContainer,
+                            Color.Transparent,
+                        ),
+                    ) {
+                        UpdateRows(
+                            update = update.update,
+                            installing = update.installing,
+                            onGetUpdate = update.showLinks,
+                            onDirectUpdate = { update.directUpdate(ctx) },
+                        )
+                    }
+                    Card(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .padding(top = 12.dp)
+                            .then(
+                                if (contentBackdrop != null) {
+                                    Modifier.textureBlur(
+                                        backdrop = contentBackdrop,
+                                        shape = RoundedCornerShape(16.dp),
+                                        blurRadius = blurRadius,
+                                        noiseCoefficient = noiseCoefficient,
+                                        colors = BlurDefaults.blurColors(
+                                            blendColors = cardBlend,
+                                            brightness = brightness,
+                                            contrast = contrast,
+                                            saturation = saturation,
+                                        ),
+                                    )
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                        colors = CardDefaults.defaultColors(
+                            if (contentBackdrop != null) Color.Transparent else colorScheme.surfaceContainer,
+                            Color.Transparent,
+                        ),
+                    ) {
+                        ArrowPreference(
+                            title = stringResource(R.string.about_source_code),
+                            summary = stringResource(R.string.about_source_code_summary),
+                            onClick = { uriHandler.openUri("https://github.com/zyl6932/HyperMusicCover") },
+                        )
+                        ArrowPreference(
+                            title = stringResource(R.string.about_telegram),
+                            summary = stringResource(R.string.about_telegram_summary),
+                            onClick = {
+                                // Falls back to the browser only when no Telegram client answered.
+                                if (!ctx.openTelegramGroup("https://t.me/HyperMusicCover")) {
+                                    uriHandler.openUri("https://t.me/HyperMusicCover")
+                                }
+                            },
+                        )
+                        ArrowPreference(
+                            title = stringResource(R.string.about_qq_group),
+                            summary = stringResource(R.string.about_qq_group_summary),
+                            onClick = {
+                                // The group number, not the qm.qq.com link, is what QQ's card
+                                // route takes; the link is only here for the browser fallback.
+                                if (!ctx.openQqGroup("392493127")) {
+                                    uriHandler.openUri("https://qm.qq.com/q/RcLbYXgBy2")
+                                }
+                            },
+                        )
+                        ArrowPreference(
+                            title = stringResource(R.string.about_feedback),
+                            summary = stringResource(R.string.about_feedback_summary),
+                            onClick = { uriHandler.openUri("https://github.com/zyl6932/HyperMusicCover/issues") },
+                        )
+                    }
+                    Card(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .padding(top = 12.dp)
+                            .then(
+                                if (contentBackdrop != null) {
+                                    Modifier.textureBlur(
+                                        backdrop = contentBackdrop,
+                                        shape = RoundedCornerShape(16.dp),
+                                        blurRadius = blurRadius,
+                                        noiseCoefficient = noiseCoefficient,
+                                        colors = BlurDefaults.blurColors(
+                                            blendColors = cardBlend,
+                                            brightness = brightness,
+                                            contrast = contrast,
+                                            saturation = saturation,
+                                        ),
+                                    )
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                        colors = CardDefaults.defaultColors(
+                            if (contentBackdrop != null) Color.Transparent else colorScheme.surfaceContainer,
+                            Color.Transparent,
+                        ),
+                    ) {
+                        ArrowPreference(
+                            title = stringResource(R.string.license_apache),
+                            summary = stringResource(R.string.license_apache_summary),
+                            onClick = { uriHandler.openUri("https://www.apache.org/licenses/LICENSE-2.0.txt") },
+                        )
+                        ArrowPreference(
+                            title = stringResource(R.string.about_dependencies),
+                            onClick = openLicensePage,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+            }
+        }
+
         // Logo area — floating overlay
         Column(
             modifier = Modifier
@@ -270,7 +448,7 @@ private fun AboutContent(
                 fontWeight = FontWeight.Bold,
                 fontSize = 35.sp,
             )
-            MiuixText(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
@@ -279,126 +457,19 @@ private fun AboutContent(
                         scaleX = 1 - (versionCodeProgress * 0.05f)
                         scaleY = 1 - (versionCodeProgress * 0.05f)
                     },
-                color = colorScheme.onSurfaceVariantSummary,
-                text = versionName,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-            )
-        }
-
-        // Scrollable content
-        LazyColumn(
-            overscrollEffect = null,
-            state = lazyListState,
-            modifier = Modifier
-                .fillMaxSize()
-                .pageScrollModifiers(
-                    showTopAppBar = true,
-                    topAppBarScrollBehavior = topAppBarScrollBehavior,
-                ),
-            contentPadding = PaddingValues(
-                top = scrollPadding.calculateTopPadding(),
-                start = scrollPadding.calculateLeftPadding(LayoutDirection.Ltr),
-                end = scrollPadding.calculateRightPadding(LayoutDirection.Ltr),
-            ),
-        ) {
-            item(key = "logoSpacer") {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(
-                            logoHeightDp + 52.dp + logoPadding.calculateTopPadding() - scrollPadding.calculateTopPadding() + 126.dp,
-                        ),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                MiuixText(
+                    color = colorScheme.onSurfaceVariantSummary,
+                    text = versionName,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
                 )
-            }
-
-            item(key = "about") {
-                Column(
-                    modifier = Modifier
-                        .fillParentMaxHeight()
-                        .padding(bottom = scrollPadding.calculateBottomPadding()),
-                ) {
-                    Card(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .then(
-                                if (contentBackdrop != null) {
-                                    Modifier.textureBlur(
-                                        backdrop = contentBackdrop,
-                                        shape = RoundedCornerShape(16.dp),
-                                        blurRadius = blurRadius,
-                                        noiseCoefficient = noiseCoefficient,
-                                        colors = BlurDefaults.blurColors(
-                                            blendColors = cardBlend,
-                                            brightness = brightness,
-                                            contrast = contrast,
-                                            saturation = saturation,
-                                        ),
-                                    )
-                                } else {
-                                    Modifier
-                                },
-                            ),
-                        colors = CardDefaults.defaultColors(
-                            if (contentBackdrop != null) Color.Transparent else colorScheme.surfaceContainer,
-                            Color.Transparent,
-                        ),
-                    ) {
-                        ArrowPreference(
-                            title = stringResource(R.string.about_source_code),
-                            summary = stringResource(R.string.about_source_code_summary),
-                            onClick = { uriHandler.openUri("https://github.com/zyl6932/HyperMusicCover") },
-                        )
-                        ArrowPreference(
-                            title = stringResource(R.string.about_telegram),
-                            summary = stringResource(R.string.about_telegram_summary),
-                            onClick = { uriHandler.openUri("https://t.me/HyperMusicCover") },
-                        )
-                        ArrowPreference(
-                            title = stringResource(R.string.about_feedback),
-                            summary = stringResource(R.string.about_feedback_summary),
-                            onClick = { uriHandler.openUri("https://github.com/zyl6932/HyperMusicCover/issues") },
-                        )
-                    }
-                    Card(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .padding(top = 12.dp)
-                            .then(
-                                if (contentBackdrop != null) {
-                                    Modifier.textureBlur(
-                                        backdrop = contentBackdrop,
-                                        shape = RoundedCornerShape(16.dp),
-                                        blurRadius = blurRadius,
-                                        noiseCoefficient = noiseCoefficient,
-                                        colors = BlurDefaults.blurColors(
-                                            blendColors = cardBlend,
-                                            brightness = brightness,
-                                            contrast = contrast,
-                                            saturation = saturation,
-                                        ),
-                                    )
-                                } else {
-                                    Modifier
-                                },
-                            ),
-                        colors = CardDefaults.defaultColors(
-                            if (contentBackdrop != null) Color.Transparent else colorScheme.surfaceContainer,
-                            Color.Transparent,
-                        ),
-                    ) {
-                        ArrowPreference(
-                            title = stringResource(R.string.license_apache),
-                            summary = stringResource(R.string.license_apache_summary),
-                            onClick = { uriHandler.openUri("https://www.apache.org/licenses/LICENSE-2.0.txt") },
-                        )
-                        ArrowPreference(
-                            title = stringResource(R.string.about_dependencies),
-                            onClick = openLicensePage,
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
+                UpdateHint(
+                    modifier = Modifier.fillMaxWidth(),
+                    update = update.update,
+                    onShowNotes = update.showNotes,
+                )
             }
         }
     }

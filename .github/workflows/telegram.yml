@@ -85,7 +85,7 @@ jobs:
           # The result goes to a file rather than a shell variable: notes are UTF-8 and a
           # variable would put them at the mercy of whatever locale the runner booted with.
           python3 - <<'PY'
-          import html, os
+          import html, os, re
 
           def read(path):
               with open(path, encoding='utf-8') as f:
@@ -94,11 +94,26 @@ jobs:
           body = read('body.md')
           if len(body) > 3400:
               body = body[:3400].rsplit('\n', 1)[0] + '\n…'
+          # The notes are Markdown: the annotated tag's own message, and the app renders them as
+          # such. Telegram has no Markdown parse mode that survives this body - MarkdownV2 400s
+          # on the first unescaped '-' - so the two constructs the notes use are turned into the
+          # HTML they stand for instead. Escaped first, so the tags added afterwards are ours and
+          # nothing in the notes can open one.
+          body = html.escape(body)
+          bold = lambda m: '<b>' + m.group(1) + '</b>'
+          body = re.sub(r'(?m)^#{1,6} *(.+)$', bold, body)
+          body = re.sub(r'[*][*](.+?)[*][*]', bold, body)
 
           head = '🌙' if os.environ.get('PRERELEASE') == 'true' else '🎉'
-          text = (f"{head} <b>{html.escape(read('title.txt'))}</b>  "
-                  f"<code>{html.escape(os.environ['TAG'])}</code>\n\n"
-                  f"{html.escape(body)}\n\n"
+          title = read('title.txt')
+          tag = os.environ['TAG']
+          # release.yml names every tag-driven release after the tag itself, so the bold
+          # name and the code tag below are the same string twice in a row. Both are worth
+          # showing only when a person named the release by hand in the web UI, which is
+          # the one path where the name says something the tag does not.
+          named = '' if title == tag else f"  <code>{html.escape(tag)}</code>"
+          text = (f"{head} <b>{html.escape(title)}</b>{named}\n\n"
+                  f"{body}\n\n"
                   f"🔗 {read('url.txt')}")
           with open('message.txt', 'w', encoding='utf-8') as f:
               f.write(text)
