@@ -130,12 +130,29 @@ jobs:
               echo "::error::$method failed: $(printf '%s' "$out" | jq -r '.description // .')"
               exit 1
             fi
+            # The id of the message this call created, so the caller can pin it.
+            printf '%s' "$out" | jq -r '.result.message_id // empty'
           }
 
-          send sendMessage \
+          msg_id=$(send sendMessage \
             -F parse_mode=HTML \
             -F disable_web_page_preview=true \
-            -F "text=<message.txt"
+            -F "text=<message.txt")
+
+          # Pin the announcement. disable_notification=true pins silently - the group gets a
+          # pinned-message banner but nobody is pinged for it. A missing 'Pin Messages' admin
+          # right is a config problem worth surfacing, not a reason to fail a release that has
+          # already gone out, so it is a warning rather than an error.
+          if [ -n "$msg_id" ]; then
+            if ! curl -sS -X POST "$API/pinChatMessage" \
+              -F chat_id="$CHAT_ID" \
+              ${THREAD_ID:+-F message_thread_id="$THREAD_ID"} \
+              -F message_id="$msg_id" \
+              -F disable_notification=true \
+              | jq -e '.ok' >/dev/null; then
+              echo "::warning::pinChatMessage failed - is the bot an admin with 'Pin Messages'?"
+            fi
+          fi
 
           # One sendDocument per asset instead of a media group: the group form needs the whole
           # batch to succeed at once, and a single oversized APK would take the notes with it.
