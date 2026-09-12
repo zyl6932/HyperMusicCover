@@ -7845,6 +7845,29 @@ public class Main extends XposedModule {
     }
 
     /**
+     * Whether the control centre is pulled down over the lock screen.
+     *
+     * The swipe-down centre does not hide the keyguard the way the full settings expansion does -
+     * measured, the clock container and the card both stay shown - so every guard the cover tap
+     * already has is still true, and a tap aimed at a quick toggle toggles the cover instead.
+     * What does flip with the centre is its window view: GONE while it is shut, VISIBLE while it
+     * is open, under a container and a content wrapper that are themselves always VISIBLE. That
+     * window view has no id of its own, so it is reached as the first child of the content
+     * wrapper rather than looked up directly.
+     *
+     * Falling back to false when the tree cannot be resolved keeps the tap working on a build
+     * that renamed these views, rather than silently switching the whole feature off.
+     */
+    private static boolean controlCenterUp() {
+        View cc = findSysuiView("control_center_container");
+        if (!(cc instanceof ViewGroup)) return false;
+        View content = findByName(cc, "content_container");
+        if (!(content instanceof ViewGroup)) return false;
+        ViewGroup g = (ViewGroup) content;
+        return g.getChildCount() > 0 && g.getChildAt(0).isShown();
+    }
+
+    /**
      * Back to the plain wallpaper, with the card left standing where it is.
      *
      * sTapSuppressed is what holds it that way. A card being up is exactly what the module reads
@@ -8619,6 +8642,9 @@ public class Main extends XposedModule {
         if (c == null || !c.isShown()) return;
         // The pad is up, so the taps on it are its own.
         if (bouncerUp()) return;
+        // The control centre covers the same region without hiding the clock, so none of the
+        // guards above see it: a tap aimed at a quick toggle must not toggle the cover.
+        if (controlCenterUp()) return;
         // Nothing to toggle without music: the card is the switch, and this only chooses
         // whether the cover follows it.
         if (!sCardKnown || !sCardShowing) return;
