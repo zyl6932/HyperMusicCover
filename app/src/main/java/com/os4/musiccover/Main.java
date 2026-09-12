@@ -1317,6 +1317,19 @@ public class Main extends XposedModule {
                 // makes during that transition is already coerced, so there is nothing to jump.
                 // (The screen-off release still applies otherwise - that is what stopped a
                 // stale hold from leaking into the next keyguard.)
+                if (Intent.ACTION_USER_PRESENT.equals(a)) {
+                    if (sVideoWallpaper || sCoverMode) {
+                        Intent out = wallpaperIntent("keyguard_state");
+                        out.putExtra("showing", false);
+                        c.sendBroadcast(out);
+                    }
+                } else if (Intent.ACTION_SCREEN_OFF.equals(a) || Intent.ACTION_SCREEN_ON.equals(a)) {
+                    if (sVideoWallpaper || sCoverMode) {
+                        Intent out = wallpaperIntent("keyguard_state");
+                        out.putExtra("showing", true);
+                        c.sendBroadcast(out);
+                    }
+                }
                 if (Intent.ACTION_SCREEN_OFF.equals(a) && sCoverMode) {
                     stopMotion();
                     Xp.log(TAG + "screen off, cover mode keeps the clock held");

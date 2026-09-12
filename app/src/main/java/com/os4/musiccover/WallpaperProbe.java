@@ -212,6 +212,13 @@ public class WallpaperProbe {
     private static volatile boolean sSkipFrost = true;
     /** Live for the duration of one fade, read by the frosting hook on the GL thread. */
     private static volatile boolean sFrostSkipping;
+    /** Target bitmap to fast-forward setUpMixFrost on the very first frame of a fade. */
+    private static volatile Bitmap sFrostTargetBitmap;
+
+    /** Whether keyguard (lockscreen) is currently showing. Defaults to true. */
+    private static volatile boolean sKeyguardShowing = true;
+    /** Whether video cover is suspended because phone is unlocked into desktop. */
+    private static volatile boolean sCoverSuspended = false;
 
     public static void handle(XposedModuleInterface.PackageLoadedParam param) {
         sCl = param.getDefaultClassLoader();
@@ -407,6 +414,36 @@ public class WallpaperProbe {
                     return result;
                 });
                 hookVideoPathGetter(vd);
+
+                // Hook lock/unlock lifecycle to restore desktop wallpaper when unlocked and re-apply cover when locked
+                for (Method m : vd.getDeclaredMethods()) {
+                    if (Modifier.isAbstract(m.getModifiers()) || Modifier.isNative(m.getModifiers())) {
+                        continue;
+                    }
+                    if ("hideKeyguardWallpaper".equals(m.getName()) && m.getParameterCount() == 0) {
+                        Xp.hook(m, chain -> {
+                            Object self = chain.getThisObject();
+                            onKeyguardStateChanged(self, false, "hideKeyguardWallpaper");
+                            return chain.proceed();
+                        });
+                        Xp.log(TAG + "hooked " + cn.substring(cn.lastIndexOf('.') + 1) + ".hideKeyguardWallpaper()");
+                    } else if ("showKeyguardWallpaper".equals(m.getName()) && m.getParameterCount() == 2) {
+                        Xp.hook(m, chain -> {
+                            Object self = chain.getThisObject();
+                            onKeyguardStateChanged(self, true, "showKeyguardWallpaper");
+                            return chain.proceed();
+                        });
+                        Xp.log(TAG + "hooked " + cn.substring(cn.lastIndexOf('.') + 1) + ".showKeyguardWallpaper(Z, I)");
+                    } else if ("showWallpaperUnlockAnim".equals(m.getName()) && m.getParameterCount() == 0) {
+                        Xp.hook(m, chain -> {
+                            Object self = chain.getThisObject();
+                            onKeyguardStateChanged(self, false, "showWallpaperUnlockAnim");
+                            return chain.proceed();
+                        });
+                        Xp.log(TAG + "hooked " + cn.substring(cn.lastIndexOf('.') + 1) + ".showWallpaperUnlockAnim()");
+                    }
+                }
+
                 Xp.log(TAG + "video engine hooked on " + cn.substring(cn.lastIndexOf('.') + 1));
             } catch (Throwable t) {
                 Xp.log(TAG + "video engine hook failed on " + cn + ": " + t);
@@ -479,14 +516,24 @@ public class WallpaperProbe {
         }
 
         // The frosted copy the notification and media cards blur against is regenerated on
-        // every texture upload. That is the right trade once per track change and the wrong one
-        // twenty times in a row, so a fade can switch it off for its own frames; the upload that
-        // ends the fade is a normal one and puts it right. Only ever engaged from startFade().
+        // every texture upload. During a fade, fast-forward to the target cover's blur on the
+        // very first frame so notification cards update instantly without delay ("慢半拍"),
+        // while skipping intermediate frames (2..N) to preserve 120fps smoothness.
         try {
             Class<?> ap = Xp.findClass(
                     "com.miui.miwallpaper.opengl.ordinary.AnimatorProgram", sCl);
             Xp.hookAll(ap, "setUpMixFrost", chain -> {
-                if (sFrostSkipping) return null;
+                if (sFrostSkipping) {
+                    Bitmap target = sFrostTargetBitmap;
+                    if (target != null && !target.isRecycled()) {
+                        sFrostTargetBitmap = null;
+                        Object[] args = chain.getArgs().toArray();
+                        args[0] = target;
+                        Xp.log(TAG + "setUpMixFrost: fast-forwarded to target art blur on frame 1");
+                        return chain.proceed(args);
+                    }
+                    return null;
+                }
                 return chain.proceed();
             });
             Xp.log(TAG + "frosting hooked");
@@ -679,6 +726,7 @@ public class WallpaperProbe {
         final long t0 = SystemClock.uptimeMillis();
         final long[] spent = {0L, 0L, 0L};  // blend ms, frames, frames waited out
         sFrostSkipping = sSkipFrost;
+        sFrostTargetBitmap = to;
         sFadeInFlight = false;
         final Handler h = new Handler(Looper.getMainLooper());
         h.post(new Runnable() {
@@ -739,6 +787,7 @@ public class WallpaperProbe {
         sFade = null;
         sFadeInFlight = false;
         sFrostSkipping = false;
+        sFrostTargetBitmap = null;
     }
 
     /**
@@ -877,6 +926,7 @@ public class WallpaperProbe {
                         if (i.getBooleanExtra("off", false)) {
                             // A live wallpaper has no texture to fade back to - the way back
                             // is handing the surface to its player again.
+                            sCoverSuspended = false;
                             if (videoPath()) {
                                 sCurrentArtChecksum = 0;
                                 sArt = null;
@@ -966,8 +1016,14 @@ public class WallpaperProbe {
                                 + " engine=" + sKeyguardEngine
                                 + " videoEngine=" + sVideoEngine
                                 + " coverVideo=" + sCoverVideoActive
+                                + " coverSuspended=" + sCoverSuspended
+                                + " kgShowing=" + sKeyguardShowing
                                 + " pinned=" + sPathPinned);
                         dumpVideoManager();
+                    } else if ("keyguard_state".equals(op)) {
+                        boolean showing = i.getBooleanExtra("showing", true);
+                        Xp.log(TAG + "recv keyguard_state showing=" + showing);
+                        onKeyguardStateChanged(sVideoEngine, showing, "broadcast");
                     } else if ("vpath".equals(op)) {
                         dumpVideoManager();
                     } else if ("vgl".equals(op)) {
@@ -1290,6 +1346,49 @@ public class WallpaperProbe {
         });
     }
 
+    private static boolean isDesktopEngine(Object eng) {
+        return eng != null && eng.getClass().getName().contains("Desktop");
+    }
+
+    private static synchronized void onKeyguardStateChanged(Object eng, boolean showing, String reason) {
+        boolean was = sKeyguardShowing;
+        sKeyguardShowing = showing;
+        if (eng == null) eng = sVideoEngine;
+        Xp.log(TAG + "onKeyguardStateChanged: showing=" + showing + " (was " + was + ") reason=" + reason
+                + " coverActive=" + sCoverVideoActive + " coverSuspended=" + sCoverSuspended
+                + " engine=" + (eng == null ? "null" : eng.getClass().getSimpleName()));
+
+        if (eng == null || !isDesktopEngine(eng)) return;
+
+        if (!showing) {
+            // Unlocked into desktop: suspend cover video and restore desktop video wallpaper
+            if (sCoverVideoActive) {
+                sCoverSuspended = true;
+                sCoverVideoActive = false;
+                Xp.log(TAG + "onKeyguardStateChanged: suspending cover video on desktop, restoring desktop wallpaper");
+                restoreVideoPath(eng);
+                triggerVideoReload(eng);
+                if (sSavedVideoPositionUs > 0) {
+                    restoreVideoPosition(eng, sSavedVideoPositionUs);
+                    sSavedVideoPositionUs = 0;
+                }
+            }
+        } else {
+            // Keyguard / lockscreen showing: if cover was suspended and art is still active, restore cover
+            if (sCoverSuspended && sArt != null && sCoverVideoPath != null) {
+                File vf = new File(sCoverVideoPath);
+                if (vf.exists() && vf.length() > 0) {
+                    sCoverSuspended = false;
+                    sCoverVideoActive = true;
+                    Xp.log(TAG + "onKeyguardStateChanged: re-activating cover video for lockscreen on "
+                            + eng.getClass().getSimpleName());
+                    pinVideoPath(eng);
+                    triggerVideoReload(eng);
+                }
+            }
+        }
+    }
+
     /**
      * Controls dynamic video wallpaper cover mode.
      * @param on true to restore the original video wallpaper, false to activate the album cover video
@@ -1302,6 +1401,7 @@ public class WallpaperProbe {
         }
 
         if (on) {
+            sCoverSuspended = false;
             if (!sCoverVideoActive) return true;
             sCoverVideoActive = false;
             sCoverVideoPath = null;
@@ -1332,6 +1432,14 @@ public class WallpaperProbe {
             }
             final long checksum = sCurrentArtChecksum;
 
+            // If phone is currently unlocked on desktop, do NOT reload desktop video!
+            final boolean onDesktop = !sKeyguardShowing && isDesktopEngine(eng);
+            if (onDesktop) {
+                sCoverSuspended = true;
+                sCoverVideoActive = false;
+                Xp.log(TAG + "videoWindowTakeover: phone currently unlocked on desktop, pre-encoding cover in background");
+            }
+
             sVideoWorker.submit(() -> {
                 try {
                     File videoFile = new File(ctx.getFilesDir(), COVER_VIDEO_FILE);
@@ -1342,13 +1450,21 @@ public class WallpaperProbe {
                     boolean ok = CoverVideoEncoder.encodeBitmapToMp4(fitted, videoFile, checksum);
                     if (ok && videoFile.exists() && videoFile.length() > 0) {
                         sCoverVideoPath = videoFile.getAbsolutePath();
-                        sCoverVideoActive = true;
-                        Xp.log(TAG + "videoWindowTakeover: cover video ready (" + videoFile.length()
-                                + "B), triggering reload on " + eng.getClass().getSimpleName());
-                        // Pin BEFORE the reload: the reload is what rebuilds the player, and it
-                        // reads the manager's cached path rather than our hooked getter.
-                        pinVideoPath(eng);
-                        triggerVideoReload(eng);
+                        if (onDesktop || (!sKeyguardShowing && isDesktopEngine(eng))) {
+                            sCoverSuspended = true;
+                            sCoverVideoActive = false;
+                            Xp.log(TAG + "videoWindowTakeover: cover video pre-encoded (" + videoFile.length()
+                                    + "B), waiting for lockscreen to activate");
+                        } else {
+                            sCoverVideoActive = true;
+                            sCoverSuspended = false;
+                            Xp.log(TAG + "videoWindowTakeover: cover video ready (" + videoFile.length()
+                                    + "B), triggering reload on " + eng.getClass().getSimpleName());
+                            // Pin BEFORE the reload: the reload is what rebuilds the player, and it
+                            // reads the manager's cached path rather than our hooked getter.
+                            pinVideoPath(eng);
+                            triggerVideoReload(eng);
+                        }
                     } else {
                         Xp.log(TAG + "videoWindowTakeover: cover video encoding failed");
                     }
@@ -1538,9 +1654,10 @@ public class WallpaperProbe {
                     + "survives only if the engine re-reads its getter on the reload");
             return;
         }
-        if (!sPathPinned) {
-            sOriginalVideoPath = videoPathFieldValue(mgr);
-            Xp.log(TAG + "vgl: the wallpaper's own playback path is " + sOriginalVideoPath);
+        String cur = videoPathFieldValue(mgr);
+        if (cur != null && !cur.equals(sCoverVideoPath)) {
+            sOriginalVideoPath = cur;
+            Xp.log(TAG + "vgl: remembered wallpaper's own playback path: " + sOriginalVideoPath);
         }
         sPathPinned = setVideoPath(mgr, sCoverVideoPath);
     }
@@ -1550,7 +1667,7 @@ public class WallpaperProbe {
         Object mgr = videoDepthManager(eng);
         if (mgr == null) return;
         String original = sOriginalVideoPath;
-        if (original == null) {
+        if (original == null || original.equals(sCoverVideoPath)) {
             try {
                 Class<?> wsc = Xp.findClass("com.miui.miwallpaper.manager.WallpaperServiceController", sCl);
                 Object ctrl = Xp.callStaticMethod(wsc, "m1417l");
@@ -1559,7 +1676,8 @@ public class WallpaperProbe {
             } catch (Throwable ignored) {
             }
         }
-        if (original != null) {
+        if (original != null && !original.equals(sCoverVideoPath)) {
+            sOriginalVideoPath = original;
             setVideoPath(mgr, original);
             Xp.log(TAG + "vgl: restored video path: " + original);
         } else {
@@ -1567,7 +1685,6 @@ public class WallpaperProbe {
                     + describe(videoPathFieldValue(mgr)) + ", leaving it alone");
         }
         sPathPinned = false;
-        sOriginalVideoPath = null;
     }
 
     private static void triggerVideoReload(Object eng) {
