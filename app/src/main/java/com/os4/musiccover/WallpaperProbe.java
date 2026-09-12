@@ -460,6 +460,25 @@ public class WallpaperProbe {
 
     private static final String ART_FILE = "mc_art.jpg";
 
+    /** The whole of a file, or null. Used for the art SystemUI hands over by path. */
+    private static byte[] readBytes(String path) {
+        try {
+            java.io.File f = new java.io.File(path);
+            byte[] buf = new byte[(int) f.length()];
+            java.io.DataInputStream in = new java.io.DataInputStream(
+                    new java.io.FileInputStream(f));
+            try {
+                in.readFully(buf);
+            } finally {
+                in.close();
+            }
+            return buf;
+        } catch (Throwable t) {
+            Xp.log(TAG + "could not read " + path + ": " + t);
+            return null;
+        }
+    }
+
     /**
      * Decodes the pushed JPEG straight to the size the texture wants. SystemUI composes at the
      * screen's size and the texture is the lock wallpaper's, but the two share an aspect ratio,
@@ -796,6 +815,16 @@ public class WallpaperProbe {
         loadArt(ctx);
         // Restored from disk or not: either way the cover that belongs on screen is the one
         // SystemUI holds, and SystemUI has no way to learn ours is missing.
+        //
+        // NOT asked for when something was restored, and that is a bug this file has already
+        // paid for once: on a process that comes back up as the track changes, the art on disk
+        // is the previous track's, this process cannot tell it is the wrong one, and SystemUI
+        // never learns the push it sent was lost - so the lock screen keeps that cover for the
+        // whole track. Asking on every start fixes exactly that, and was reverted because it
+        // does not survive what is underneath it: measured on the phone, an art push takes the
+        // wallpaper process down, so a start that asks is answered by a push that kills the
+        // process that asked. 1.3s a round, for as long as the module is loaded. The push has
+        // to stop killing it before this can be turned back on.
         if (sArt == null) askForArt("process start");
         BroadcastReceiver r = new BroadcastReceiver() {
             @Override
@@ -859,9 +888,16 @@ public class WallpaperProbe {
                         } else {
                             byte[] jpg = i.getByteArrayExtra("jpg");
                             String file = i.getStringExtra("file");
+                            // The image normally arrives as a file rather than as an extra -
+                            // SystemUI writes it where both processes can read it, because a
+                            // large enough JPEG does not survive the trip through Binder at
+                            // all. See the send in Main.pushArt(). Read here rather than
+                            // decodeFile() so that the rest of this is unchanged: the same
+                            // decoder scales to the texture, and the same bytes are what gets
+                            // written to this process's own copy on disk for the next start.
+                            if (jpg == null && file != null) jpg = readBytes(file);
                             Bitmap b = null;
                             if (jpg != null) b = decodeToTextureSize(jpg);
-                            else if (file != null) b = BitmapFactory.decodeFile(file);
                             if (b == null) {
                                 Xp.log(TAG + "art decode failed (jpg="
                                         + (jpg == null ? "null" : jpg.length + "B")

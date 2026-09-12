@@ -1268,8 +1268,10 @@ public class Main extends XposedModule {
                         setCoverEnabled(on, anim, false);
                     } else if ("needart".equals(op)) {
                         // The wallpaper process came up with nothing to draw - see
-                        // WallpaperProbe.askForArt(). It only sends this while its own art is
-                        // null, and stops the moment one arrives, so this cannot loop.
+                        // WallpaperProbe.askForArt(). It asks once per process start, and there
+                        // is a floor between two asks and a ceiling on how many, so this cannot
+                        // loop. What it may well be holding is the previous track's cover off
+                        // its own disk, which is a state it cannot tell from the right one.
                         String why = i.getStringExtra("why");
                         if (!sCoverMode) {
                             // NOT ignored, and that was the bug behind "the wallpaper will not
@@ -5688,7 +5690,22 @@ public class Main extends XposedModule {
             q -= 15;
         } while (jpg.length > 700 * 1024 && q > 25);
         full.recycle();
-        out.putExtra("jpg", jpg);
+        // By path, not by value, and that is not an optimisation.
+        //
+        // Measured on this phone: the largest cover in the library composes to 612KB, the
+        // broadcast carrying it fails on the way out with `Binder transaction failure ...
+        // error: -28 (No space left on device - Binder buffer full)`, system_server gives up on
+        // the send, and Android kills the wallpaper process for a broadcast that could not be
+        // delivered. Everything smaller went through, so size is the whole of the difference.
+        // The process comes back, restores the previous track's cover from its own disk and
+        // never asks for the right one, because as far as it knows it has art - which is the
+        // album cover from the track before, on the lock screen, for the whole track.
+        //
+        // The byte path stays as the fallback: a build whose SELinux refuses the write still
+        // has to work, and that is what it worked with before.
+        String shared = writeSharedArt(jpg);
+        if (shared != null) out.putExtra("file", shared);
+        else out.putExtra("jpg", jpg);
         ctx.sendBroadcast(out);
         Xp.log(TAG + "pushart " + w + "x" + h + " bias=" + sBias
                 + " as " + jpg.length + "B jpeg, draw " + (tc - t0) + "ms encode "
@@ -6028,6 +6045,36 @@ public class Main extends XposedModule {
      * retry that finally found artwork would put the cover back after cover mode had ended.
      */
     private static volatile int sPushGen;
+
+    /**
+     * Where a composed cover is handed to the wallpaper process. See writeSharedArt().
+     *
+     * MIUI's own wallpaper tree: mode 0777 and owned by the wallpaper app, and measured from
+     * inside both processes - SystemUI writes and the wallpaper process reads, under Enforcing
+     * SELinux and with the file made world-readable.
+     */
+    static final String SHARE_DIR = "/data/system/theme_magic/users/0/wallpaper";
+    static final String SHARE_FILE = "mc_art_shared.jpg";
+
+    /**
+     * Puts a composed cover where the wallpaper process can read it, and answers the path - or
+     * null when this process cannot write there, which sends the caller back to the broadcast.
+     *
+     * Readable by everyone on purpose: the two processes do not share a uid.
+     */
+    private static String writeSharedArt(byte[] jpg) {
+        try {
+            java.io.File f = new java.io.File(SHARE_DIR, SHARE_FILE);
+            java.io.FileOutputStream out = new java.io.FileOutputStream(f);
+            out.write(jpg);
+            out.close();
+            f.setReadable(true, false);
+            return f.getAbsolutePath();
+        } catch (Throwable t) {
+            Xp.log(TAG + "shared art write failed, carrying it in the broadcast: " + t);
+            return null;
+        }
+    }
 
     private static void pushArtAsync(final boolean on, final boolean fresh) {
         final Context ctx = sAppCtx;
