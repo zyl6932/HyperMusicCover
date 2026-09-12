@@ -43,6 +43,15 @@ object ModuleBridge {
          * glyphs it measures and scales by what comes out.
          */
         val clockHeightDp: Float = 36f,
+        /**
+         * The cover transition's spring response, in seconds - how long the clock takes to
+         * travel. Larger is slower.
+         *
+         * miuix's own unit for a spring: the module derives stiffness and damping from it, so
+         * the number means the same thing on every style and screen, and the card and wallpaper
+         * fades are derived from it too. 0.38 is the OEM's own preset for this transition.
+         */
+        val clockResponse: Float = 0.38f,
         val glassEnd: Float = 0.75f,
         val cardShowing: Boolean = false,
         val lockWallpaperOk: Boolean = false,
@@ -135,6 +144,9 @@ object ModuleBridge {
         send(context, "clockscale") { putExtra("v", dp) }
 
     fun setGlassEnd(context: Context, v: Float) = send(context, "glassend") { putExtra("v", v) }
+
+    fun setClockResponse(context: Context, seconds: Float) =
+        send(context, "clockspring") { putExtra("v", seconds) }
 
     fun setCardHideArt(context: Context, on: Boolean) =
         send(context, "mediacard") { putExtra("hideart", on) }
@@ -336,6 +348,7 @@ object ModuleBridge {
             auto = b.getBoolean("auto", false),
             bias = b.getFloat("bias", 0.34f),
             clockHeightDp = b.getFloat("clock", 36f),
+            clockResponse = b.getFloat("spring", 0.38f),
             glassEnd = b.getFloat("glass", 0.75f),
             cardShowing = b.getBoolean("card", false),
             lockWallpaperOk = b.getBoolean("lockwp", false),

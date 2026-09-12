@@ -18,6 +18,8 @@
     <string name="clock_section">Clock</string>
     <string name="clock_height">Clock height</string>
     <string name="clock_height_summary">How tall the collapsed digits are, in dp</string>
+    <string name="clock_response">Scale animation damping</string>
+    <string name="clock_response_summary">0.38 by default, higher feels more damped</string>
     <string name="clock_glass">Glass strength</string>
     <string name="clock_glass_style_unsupported">This clock style has no glass effect</string>
     <string name="restart_menu">Restart</string>

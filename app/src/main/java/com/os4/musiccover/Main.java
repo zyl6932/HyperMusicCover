@@ -586,6 +586,36 @@ public class Main extends XposedModule {
      */
     private static final float[] EASE_COVER         = {0.88f, 0.38f};
 
+    /**
+     * The slider's range for the response above, in seconds. Zeta is not on it: the whole of the
+     * change this replaced was the one number, and the curve's shape is the OEM's.
+     *
+     * 0.18 is the bottom because it is the fastest this transition has ever shipped - it is what
+     * EASE_RUNNING was - and the jerk probe measured 30/49/75px of clock movement in a single
+     * frame on it, against 25-41 here. Faster than that is asking for dropped frames on the one
+     * frame the OEM is also recomputing the variable font.
+     */
+    private static final float CLOCK_RESPONSE_MIN = 0.18f, CLOCK_RESPONSE_MAX = 0.60f;
+    /** The wallpaper crossfade that belongs to EASE_COVER[1]. See fadeMsFor(). */
+    private static final long EASE_COVER_FADE_MS = 370L;
+    /** What the transition runs on. Starts at the OEM preset and moves with the slider. */
+    private static volatile float sClockResponse = EASE_COVER[1];
+
+    /**
+     * The fade that belongs to a spring response: the card's stand-in animator and the
+     * wallpaper's crossfade, which have to reach the end with the clock.
+     *
+     * Proportional, and that is the rule rather than a convenience. The wallpaper's fade is a
+     * cubic ease-out, which covers 95% of its length at 0.632*T, and the 370ms that ships with
+     * 0.38 was solved from that against the spring's own 95% at 235ms - see the comment on
+     * WallpaperProbe.sFadeMs. With zeta fixed, a linear spring's step response is a function of
+     * w0*t alone, so its 95% time is exactly proportional to the response, and so is the T that
+     * matches it. 0.18 gives 175ms, 0.60 gives 584.
+     */
+    private static long fadeMsFor(float response) {
+        return Math.round(EASE_COVER_FADE_MS * response / EASE_COVER[1]);
+    }
+
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
         Xp.attach(this);
@@ -1068,6 +1098,7 @@ public class Main extends XposedModule {
                     // setting the user actually had.
                     + "\nclock=" + (Float.isNaN(sClockLegacyK) ? sClockHeightDp : sClockLegacyK)
                     + "\nglass=" + sGlassEnd
+                    + "\nspring=" + sClockResponse
                     + "\nmcart=" + (sMcHideArt ? 1 : 0)
                     + "\nmctext=" + (sMcCenterText ? 1 : 0)
                     + "\nmctap=" + (sMcTitleTap ? 1 : 0)
@@ -1126,6 +1157,9 @@ public class Main extends XposedModule {
                     else if ("bias".equals(k)) sBias = Float.parseFloat(v);
                     else if ("clock".equals(k)) setClockHeightDp(Float.parseFloat(v));
                     else if ("glass".equals(k)) sGlassEnd = Float.parseFloat(v);
+                    // Through the setter, the way "clock" is: the clamp and the push to the
+                    // wallpaper process are both part of reading the value back.
+                    else if ("spring".equals(k)) setClockResponse(Float.parseFloat(v));
                     else if ("mcart".equals(k)) sMcHideArt = "1".equals(v);
                     else if ("mctext".equals(k)) sMcCenterText = "1".equals(v);
                     else if ("mctap".equals(k)) sMcTitleTap = "1".equals(v);
@@ -1342,6 +1376,10 @@ public class Main extends XposedModule {
                         Xp.log(TAG + "glass end = " + sGlassEnd);
                         if (sCoverMode) { sGlassV1 = sGlassEnd; sAppliedGlassV = Float.NaN;
                             reassertCoverClock(true); }
+                    } else if ("clockspring".equals(op)) {
+                        // Nothing forced on screen: see setClockResponse(). The fades it pushes
+                        // are the only thing outside this process.
+                        setClockResponse(i.getFloatExtra("v", EASE_COVER[1]));
                     } else if ("auto".equals(op)) {
                         setAuto(i.getBooleanExtra("on", true));
                     } else if ("reload".equals(op)) {
@@ -1427,6 +1465,7 @@ public class Main extends XposedModule {
                         out.putFloat("bias", sBias);
                         out.putFloat("clock", sClockHeightDp);
                         out.putFloat("glass", sGlassEnd);
+                        out.putFloat("spring", sClockResponse);
                         out.putBoolean("card", sCardShowing);
                         // Checked live rather than reported from the cached flag: the user can
                         // change the wallpaper at any time and that is what breaks the feature.
@@ -3214,6 +3253,26 @@ public class Main extends XposedModule {
     }
 
     /**
+     * The cover transition's spring response, in seconds, from the slider or from a stored value.
+     *
+     * Nothing is re-applied here on purpose. The value is read at the moment a transition starts
+     * and handed to the integrator with it, so a change belongs to the next one - and a spring
+     * that is already flying keeps the parameters it began with, which is what stops a drag from
+     * bending the curve under the clock that is being drawn.
+     *
+     * The fades are the exception and do have to be pushed: they live in another process. See
+     * pushFadeMs().
+     */
+    private static void setClockResponse(float v) {
+        sClockResponse = v < CLOCK_RESPONSE_MIN ? CLOCK_RESPONSE_MIN
+                : (v > CLOCK_RESPONSE_MAX ? CLOCK_RESPONSE_MAX : v);
+        Xp.log(TAG + "clock response = " + sClockResponse + "s, fades "
+                + fadeMsFor(sClockResponse) + "ms");
+        saveState();
+        pushFadeMs(sAppCtx);
+    }
+
+    /**
      * The view a clock style wants scaled, in one tree, or null if this tree draws no time.
      *
      * Two shapes exist on this device and they have nothing in common:
@@ -4774,6 +4833,8 @@ public class Main extends XposedModule {
           .append(" floor=").append(SQUEEZE_FLOOR)
           .append(" collapseMin=").append(r2(sCollapseMin))
           .append(" clockH=").append(r1(sClockHeightDp)).append("dp")
+          .append(" response=").append(r2(sClockResponse)).append("s")
+          .append(" fades=").append(fadeMsFor(sClockResponse)).append("ms")
           // Whether the app's glass slider is live at all: the morph exists only on the styles
           // whose clock view has updateGlassValue, and this is what tells the app which those
           // are. The first thing to look at when the slider appears to do nothing.
@@ -5858,6 +5919,25 @@ public class Main extends XposedModule {
         return out;
     }
 
+    /**
+     * Hands the wallpaper process the crossfade that belongs to the current response.
+     *
+     * It has to be told. Its own copy is a static that starts at 370 and is never persisted,
+     * so a wallpaper process that restarts would fade on the number that goes with 0.38 while
+     * the clock, the card and everything else moved on the slider's - which is the desync the
+     * two of them were moved together to remove, arriving silently instead.
+     *
+     * Called when the setting changes, and again on every cover entry so a restart is caught
+     * before it can be seen.
+     */
+    private static void pushFadeMs(Context ctx) {
+        if (ctx == null) return;
+        ctx.sendBroadcast(wallpaperIntent("fadems")
+                .putExtra("v", (int) fadeMsFor(sClockResponse)));
+        Xp.log(TAG + "wallpaper fade = " + fadeMsFor(sClockResponse) + "ms for response "
+                + sClockResponse);
+    }
+
     private static float clamp01(float v) {
         return v < 0f ? 0f : (v > 1f ? 1f : v);
     }
@@ -6612,7 +6692,9 @@ public class Main extends XposedModule {
         sAppliedGlassV = Float.NaN;
         if (animate) {
             // The same curve in both directions, so the toggle is symmetric - see EASE_COVER.
-            springTo(SQUEEZE_FLOOR, EASE_COVER[0], EASE_COVER[1], "STATE_CHANGED", false);
+            // The response is the slider's, read here and nowhere else, which is what makes a
+            // change land on the next transition and never mid-flight.
+            springTo(SQUEEZE_FLOOR, EASE_COVER[0], sClockResponse, "STATE_CHANGED", false);
             // The spring above cannot carry the card on a style that emits no notifY, and the
             // card is not the clock's business anyway. See oemDrivesCard().
             if (!oemDrivesCard()) animateCardTo(1f, null);
@@ -6624,6 +6706,9 @@ public class Main extends XposedModule {
         // before the user ever locked the phone - and the OEM will not re-colour on its own.
         recolorClock();
         ensureClockGuard();
+        // The wallpaper process cannot remember this one across a restart, and this is the
+        // first moment of a transition it matters for. See pushFadeMs().
+        pushFadeMs(sAppCtx);
         saveState();
     }
 
@@ -6684,7 +6769,7 @@ public class Main extends XposedModule {
             // would not still be fading 300ms after the wallpaper had landed - which it did,
             // and which is not what the transition on this phone actually looks like. Matching
             // the reference curve moves the wallpaper's own crossfade with it; see sFadeMs.
-            springTo(natural, EASE_COVER[0], EASE_COVER[1], "STATE_CHANGED", true);
+            springTo(natural, EASE_COVER[0], sClockResponse, "STATE_CHANGED", true);
             saveState();
             return;
         }
@@ -7491,15 +7576,6 @@ public class Main extends XposedModule {
         return !Float.isNaN(natural) && natural > SQUEEZE_FLOOR;
     }
 
-    /**
-     * Matches the exit spring's settle and the wallpaper crossfade, so they land together.
-     *
-     * Only a stand-in: on a style the OEM drives there is no card animator at all and this rides
-     * the spring. It moved with the other two when the spring changed to EASE_COVER, because a
-     * card that finished 200ms before the clock did would give the same mismatch the wallpaper
-     * was moved to avoid.
-     */
-    private static final long CARD_FADE_MS = 370L;
     private static ValueAnimator sCardAnim;
 
     /**
@@ -7517,7 +7593,11 @@ public class Main extends XposedModule {
             return;
         }
         ValueAnimator a = ValueAnimator.ofFloat(from, target);
-        a.setDuration(CARD_FADE_MS);
+        // The same length the wallpaper crossfades over, and derived from the same response -
+        // a card that finished 200ms before the clock did would be the mismatch the two of them
+        // were moved together to avoid. Only a stand-in: on a style the OEM drives there is no
+        // card animator at all and this rides the spring.
+        a.setDuration(fadeMsFor(sClockResponse));
         a.setInterpolator(new PathInterpolator(0.2f, 0f, 0f, 1f));
         a.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override

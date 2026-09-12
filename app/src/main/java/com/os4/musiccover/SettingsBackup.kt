@@ -22,6 +22,7 @@ object SettingsBackup {
     private const val KEY_CLOCK_HEIGHT = "clockHeight"
     /** Written by versions that stored the collapse as a scale coefficient; read, never written. */
     private const val KEY_CLOCK_SCALE = "clockScale"
+    private const val KEY_CLOCK_RESPONSE = "clockResponse"
     private const val KEY_GLASS_END = "glassEnd"
     private const val KEY_CARD_HIDE_ART = "cardHideArt"
     private const val KEY_CARD_CENTER_TEXT = "cardCenterText"
@@ -37,6 +38,7 @@ object SettingsBackup {
         if (module.alive) {
             json.put(KEY_BIAS, module.bias.toDouble())
             json.put(KEY_CLOCK_HEIGHT, module.clockHeightDp.toDouble())
+            json.put(KEY_CLOCK_RESPONSE, module.clockResponse.toDouble())
             json.put(KEY_GLASS_END, module.glassEnd.toDouble())
             json.put(KEY_CARD_HIDE_ART, module.mcHideArt)
             json.put(KEY_CARD_CENTER_TEXT, module.mcCenterText)
@@ -62,6 +64,9 @@ object SettingsBackup {
                 else -> null
             }
             if (clock != null) ModuleBridge.setClockHeight(context, clock.toFloat())
+            if (obj.has(KEY_CLOCK_RESPONSE)) {
+                ModuleBridge.setClockResponse(context, obj.getDouble(KEY_CLOCK_RESPONSE).toFloat())
+            }
             if (obj.has(KEY_GLASS_END)) {
                 ModuleBridge.setGlassEnd(context, obj.getDouble(KEY_GLASS_END).toFloat())
             }

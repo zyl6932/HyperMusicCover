@@ -205,7 +205,14 @@ public class WallpaperProbe {
      * clock was still visibly growing, and 430 (the first attempt) is the same fault the other
      * way round.
      *
-     * Tunable, because it is a taste judgement made against a phone:
+     * The number is no longer decided here. The clock's response is a setting now, and this is
+     * the fade that belongs to it - proportional, because the same 95%-against-95% rule holds
+     * for every response once zeta is fixed. SystemUI sends it when it changes and again on
+     * every cover entry, and that second push is what covers a restart of this process: the
+     * field below is a static with nothing behind it, so the 370 it starts at is only ever
+     * right until the first push arrives.
+     *
+     * The op is kept for the case where SystemUI is not the one being tested:
      *   --es op fadems --ei v 370
      */
     private static volatile long sFadeMs = 370L;

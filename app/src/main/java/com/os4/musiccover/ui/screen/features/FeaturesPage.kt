@@ -298,6 +298,22 @@ private fun ClockGroup(
                 ModuleBridge.setClockHeight(context, it)
             },
         )
+        // The spring the whole transition runs on. The number is miuix's response time in
+        // seconds and it is not flipped, because the label is a description of feel rather than
+        // of the unit: dragging right slows the spring down, and a slower spring with the same
+        // damping ratio is the one that reads as heavier. Zeta is fixed at 0.88 on the module
+        // side and is not on this slider.
+        ValueSlider(
+            title = stringResource(R.string.clock_response),
+            summary = stringResource(R.string.clock_response_summary),
+            value = module.clockResponse.coerceIn(CLOCK_RESPONSE_MIN, CLOCK_RESPONSE_MAX),
+            valueRange = CLOCK_RESPONSE_MIN..CLOCK_RESPONSE_MAX,
+            enabled = enabled,
+            onValueChange = {
+                onChange(module.copy(clockResponse = it))
+                ModuleBridge.setClockResponse(context, it)
+            },
+        )
         // Shown inverted. The module stores the OEM's own number, where updateGlassValue(0) is
         // transparent refracting glass and (1) is a solid fill - so as "glass strength" it runs
         // backwards, and dragging right made the effect weaker. The stored value, the adb
@@ -420,6 +436,14 @@ private const val CLOCK_HEIGHT_MIN_DP = 20f
  * height instead, which is the real top of the range.
  */
 private const val CLOCK_HEIGHT_MAX_DP = 64f
+
+/**
+ * The clock transition's spring response, in seconds, matching CLOCK_RESPONSE_MIN/MAX in the
+ * module. 0.18 is the fastest this transition has ever shipped and 0.60 is the slow end of what
+ * still reads as one movement.
+ */
+private const val CLOCK_RESPONSE_MIN = 0.18f
+private const val CLOCK_RESPONSE_MAX = 0.60f
 
 @Composable
 private fun ValueSlider(

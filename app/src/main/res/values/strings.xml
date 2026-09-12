@@ -18,6 +18,8 @@
     <string name="clock_section">时钟</string>
     <string name="clock_height">时钟高度</string>
     <string name="clock_height_summary">收起后数字有多高（dp）</string>
+    <string name="clock_response">缩放动画阻尼</string>
+    <string name="clock_response_summary">默认0.38，越大阻尼感越强</string>
     <string name="clock_glass">玻璃强度</string>
     <string name="clock_glass_style_unsupported">当前时钟样式没有玻璃效果</string>
     <string name="restart_menu">重启</string>
