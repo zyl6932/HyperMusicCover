@@ -214,6 +214,16 @@ final class Xp {
         }
     }
 
+    static Object callStaticMethod(Class<?> cls, String name, Object... args) {
+        Method m = findMethod(cls, name, args);
+        try {
+            return m.invoke(null, args);
+        } catch (ReflectiveOperationException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            throw new IllegalStateException(cls.getName() + "." + name + " threw", cause);
+        }
+    }
+
     /**
      * One declared method, with its parameter types kept alongside it.
      *
