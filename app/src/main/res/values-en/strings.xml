@@ -121,6 +121,10 @@
     <string name="update_no_installer">No app on this device can install an APK - install it from a file manager</string>
     <string name="update_confirm">Update</string>
     <string name="update_not_ours">The download was not signed by this project; discarded</string>
+    <string name="update_latest">Already on the latest version</string>
+    <string name="update_current_version">Current version %1$s</string>
+    <string name="update_percent">%1$d%%</string>
+    <string name="update_downloading">Updating</string>
     <string name="restart_scope">Restart all scoped apps</string>
     <string name="check_update">Check for updates</string>
     <string name="check_update_summary">Automatically check for a new version after the app starts</string>

@@ -32,11 +32,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.os4.musiccover.BuildConfig
 import com.os4.musiccover.R
 import com.os4.musiccover.ui.util.openQqGroup
 import com.os4.musiccover.ui.util.openTelegramGroup
@@ -50,7 +50,7 @@ import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
@@ -79,9 +79,13 @@ private const val QQ_GROUP_LINK = "https://qm.qq.com/q/RcLbYXgBy2"
 internal class UpdateStates {
     var update by mutableStateOf<UpdateInfo?>(null)
     var installing by mutableStateOf(false)
+    /** Download progress in 0..1, or null while unknown; see [UpdateInstaller.progress]. */
+    var progress by mutableStateOf<Float?>(null)
     /** What the last attempt has to say, shown in a dialog. Null while there is nothing to say. */
     var status by mutableStateOf<String?>(null)
     var notes by mutableStateOf(false)
+    /** The "already on the latest version" dialog, opened from the version number. */
+    var latest by mutableStateOf(false)
     var links by mutableStateOf(false)
 }
 
@@ -91,10 +95,20 @@ class UpdateController internal constructor(internal val states: UpdateStates) {
 
     val update: UpdateInfo? get() = states.update
     val installing: Boolean get() = states.installing
+    val progress: Float? get() = states.progress
     val status: String? get() = states.status
 
     val showNotes: () -> Unit = { states.notes = true }
     val showLinks: () -> Unit = { states.links = true }
+
+    /**
+     * Tapping the version number: the changelog when there is a release to read, otherwise the
+     * "already on the latest" dialog. The latter is its own dialog rather than a [status] string
+     * because it is not an error - it deserves the changelog's own title/summary/body shape.
+     */
+    fun showVersionNotes() {
+        if (states.update != null) states.notes = true else states.latest = true
+    }
 
     /**
      * Download the release being offered and hand it to the system installer.
@@ -115,6 +129,18 @@ class UpdateController internal constructor(internal val states: UpdateStates) {
             UpdateApi.orderedCandidates(context, target.apkUrl),
             "HyperMusicCover-${target.versionName}.apk",
         )
+    }
+
+    /**
+     * Dismisses the download dialog and aborts the download in flight.
+     *
+     * The download's coroutine reports [InstallOutcome.Cancelled], which the poll loop swallows
+     * without a message - cancelling is the user's own action, not an error to explain.
+     */
+    fun cancelUpdate() {
+        if (!states.installing) return
+        UpdateInstaller.cancel()
+        states.installing = false
     }
 }
 
@@ -158,6 +184,7 @@ fun rememberUpdateController(refreshKey: Int, checkUpdate: Boolean): UpdateContr
     LaunchedEffect(states.installing, allowed) {
         if (!states.installing || !allowed) return@LaunchedEffect
         while (true) {
+            states.progress = UpdateInstaller.progress
             when (val outcome = UpdateInstaller.lastOutcome) {
                 is InstallOutcome.NoInstaller -> {
                     states.installing = false
@@ -178,6 +205,11 @@ fun rememberUpdateController(refreshKey: Int, checkUpdate: Boolean): UpdateContr
                 }
 
                 is InstallOutcome.HandedOff -> {
+                    states.installing = false
+                    return@LaunchedEffect
+                }
+
+                is InstallOutcome.Cancelled -> {
                     states.installing = false
                     return@LaunchedEffect
                 }
@@ -270,6 +302,8 @@ fun UpdateDialogs(controller: UpdateController) {
     )
     UpdateLinksDialog(states.links) { states.links = false }
     UpdateStatusDialog(controller.status) { states.status = null }
+    UpdateLatestDialog(states.latest) { states.latest = false }
+    UpdateProgressDialog(states.installing, controller.progress, controller::cancelUpdate)
 }
 
 /** Everything the install has to say, shown in the page rather than in a Toast. */
@@ -298,6 +332,67 @@ private fun UpdateStatusDialog(status: String?, onDismiss: () -> Unit) {
                 text = stringResource(R.string.update_close),
                 onClick = { dismiss?.invoke() },
             )
+        }
+    }
+}
+
+/**
+ * "Already on the latest version", opened from the version number when nothing newer is offered.
+ *
+ * Kept in the same [WindowDialog] shape as the changelog - a title, a version summary, a body,
+ * and a close button - rather than routed through [UpdateStatusDialog], because that one is for
+ * things that went wrong and this one is not an error. HyperNavBar's UpdateDialog is the model.
+ */
+@Composable
+private fun UpdateLatestDialog(show: Boolean, onDismiss: () -> Unit) {
+    WindowDialog(
+        show = show,
+        title = stringResource(R.string.update_status_title),
+        summary = stringResource(R.string.update_current_version, BuildConfig.VERSION_NAME),
+        onDismissRequest = onDismiss,
+    ) {
+        val dismiss = LocalDismissState.current
+        Column {
+            MiuixText(
+                modifier = Modifier.padding(bottom = 8.dp),
+                text = stringResource(R.string.update_latest),
+                fontSize = 14.sp,
+                color = colorScheme.onSurface,
+            )
+            TextButton(
+                modifier = Modifier.fillMaxWidth(),
+                text = stringResource(R.string.update_close),
+                onClick = { dismiss?.invoke() },
+            )
+        }
+    }
+}
+
+/**
+ * The download itself, as a dialog rather than an inline bar.
+ *
+ * Copied from KernelSU's Miuix dialogs: the standard [WindowDialog] with its own title and a
+ * `Column(Modifier.fillMaxWidth())` body - no custom title alignment, no custom corner radius.
+ * Dismissing it (tap outside or back) cancels the download rather than just hiding the dialog.
+ */
+@Composable
+private fun UpdateProgressDialog(show: Boolean, progress: Float?, onCancel: () -> Unit) {
+    WindowDialog(
+        show = show,
+        title = stringResource(R.string.update_downloading),
+        onDismissRequest = onCancel,
+    ) {
+        val percent = progress?.let { (it * 100).toInt().coerceIn(0, 100) }
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LinearProgressIndicator(progress = progress, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(12.dp))
+                MiuixText(
+                    text = if (percent != null) stringResource(R.string.update_percent, percent) else "",
+                    fontSize = 14.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                )
+            }
         }
     }
 }

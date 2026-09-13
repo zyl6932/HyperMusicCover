@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import okhttp3.Call
 import java.io.File
 import java.io.IOException
 
@@ -47,6 +48,9 @@ sealed interface InstallOutcome {
     data object NotOurs : InstallOutcome
 
     data class Failed(val message: String) : InstallOutcome
+
+    /** The user cancelled the download; nothing was handed off and nothing went wrong. */
+    data object Cancelled : InstallOutcome
 }
 
 object UpdateInstaller {
@@ -75,10 +79,29 @@ object UpdateInstaller {
     var lastOutcome: InstallOutcome? = null
         private set
 
+    /**
+     * How far the current download has got, in 0..1, or null while nothing is downloading or the
+     * total is unknown. Fed to the About page's progress bar; the bar renders null as its
+     * indeterminate form rather than as "no progress".
+     */
+    @Volatile
+    var progress: Float? = null
+        private set
+
+    /** The in-flight OkHttp call, so [cancel] can abort it mid-download. */
+    @Volatile
+    private var currentCall: Call? = null
+
+    /** Set by [cancel] so the coroutine reports [InstallOutcome.Cancelled] rather than a failure. */
+    @Volatile
+    private var cancelled = false
+
     fun start(context: Context, apkUrls: List<String>, fileName: String) {
         if (inFlight) return
         inFlight = true
         lastOutcome = null
+        progress = null
+        cancelled = false
         val app = context.applicationContext
         scope.launch {
             val outcome = try {
@@ -92,13 +115,28 @@ object UpdateInstaller {
                     InstallOutcome.NoInstaller
                 }
             } catch (t: Throwable) {
-                Log.w(TAG, "self-update failed", t)
-                InstallOutcome.Failed(t.message ?: t::class.java.simpleName)
+                if (cancelled) {
+                    InstallOutcome.Cancelled
+                } else {
+                    Log.w(TAG, "self-update failed", t)
+                    InstallOutcome.Failed(t.message ?: t::class.java.simpleName)
+                }
             }
             Log.i(TAG, "self-update outcome: $outcome")
             lastOutcome = outcome
             inFlight = false
         }
+    }
+
+    /**
+     * Aborts the download in flight, if any.
+     *
+     * The coroutine reports [InstallOutcome.Cancelled] rather than a failure; calling this while
+     * nothing is downloading is a no-op.
+     */
+    fun cancel() {
+        cancelled = true
+        currentCall?.cancel()
     }
 
     /**
@@ -117,16 +155,41 @@ object UpdateInstaller {
 
         var lastFailure: Throwable? = null
         for (url in apkUrls) {
+            if (cancelled) throw IOException("cancelled")
+            // A mirror that does not answer has no progress to show; reset so the bar starts at
+            // zero (or indeterminate) again on the next candidate rather than carrying a stale
+            // fraction over from the previous one.
+            progress = null
             try {
-                UpdateApi.openApk(url).use { response ->
+                val call = UpdateApi.newApkCall(url)
+                currentCall = call
+                if (cancelled) call.cancel()
+                call.execute().use { response ->
                     if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
-                    response.body.byteStream().use { input ->
-                        target.outputStream().use { output -> input.copyTo(output) }
+                    val body = response.body
+                    val total = body.contentLength()
+                    body.byteStream().use { input ->
+                        target.outputStream().use { output ->
+                            val buffer = ByteArray(8 * 1024)
+                            var written = 0L
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                output.write(buffer, 0, read)
+                                written += read
+                                progress = if (total > 0) {
+                                    (written.toFloat() / total).coerceIn(0f, 1f)
+                                } else {
+                                    null
+                                }
+                            }
+                        }
                     }
                 }
                 UpdateApi.rememberSource(context, apkUrls.first(), url)
                 return target
             } catch (t: Throwable) {
+                if (cancelled) throw t
                 Log.w(TAG, "self-update could not fetch $url", t)
                 lastFailure = t
                 target.delete()

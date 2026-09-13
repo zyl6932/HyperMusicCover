@@ -8,6 +8,8 @@
 package com.os4.musiccover.ui.screen.about
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -460,6 +462,17 @@ private fun AboutContent(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 MiuixText(
+                    // The version is tappable for the same reason the "update available" line
+                    // below it is: the changelog is the one thing a person wants after seeing a
+                    // version number, and here it is one tap away. Indication stays off so the
+                    // press does not paint a band of shadow across the whole centred text.
+                    modifier = Modifier
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { update.showVersionNotes() },
+                        )
+                        .padding(vertical = 4.dp),
                     color = colorScheme.onSurfaceVariantSummary,
                     text = versionName,
                     fontSize = 14.sp,

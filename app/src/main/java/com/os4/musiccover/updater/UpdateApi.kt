@@ -9,6 +9,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -31,7 +32,7 @@ import java.util.concurrent.TimeUnit
  */
 
 private const val REPO = "zyl6932/HyperMusicCover"
-private const val RELEASES_LATEST = "https://api.github.com/repos/$REPO/releases/latest"
+private const val RELEASES_LIST = "https://api.github.com/repos/$REPO/releases"
 
 /** The package this app ships as. A fork changes it, and a fork must never self-update. */
 private const val OFFICIAL_APPLICATION_ID = "com.github.zyl6932.HyperMusicCover"
@@ -69,8 +70,9 @@ data class UpdateInfo(
     val versionName: String,
     val versionCode: Int,
     /**
-     * The tag's own message, which `release.yml` publishes as the release body. Markdown,
-     * and rendered as such - see `ui/component/markdown/MarkdownContent.kt`.
+     * The changelog accumulated across every stable release newer than the running build, each
+     * headed by its version. Markdown, and rendered as such - see
+     * `ui/component/markdown/MarkdownContent.kt`.
      */
     val notes: String,
     /** The release asset, before any mirror is applied. */
@@ -179,12 +181,12 @@ object UpdateApi {
     suspend fun latest(): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()
-                .url(RELEASES_LATEST)
+                .url(RELEASES_LIST)
                 .header("Accept", "application/vnd.github+json")
                 .build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
-                toUpdateInfo(json.decodeFromString<GithubRelease>(response.body.string()))
+                toUpdateInfo(json.decodeFromString<List<GithubRelease>>(response.body.string()))
             }
         } catch (e: CancellationException) {
             throw e
@@ -194,7 +196,9 @@ object UpdateApi {
     }
 
     /**
-     * The APK body.
+     * A not-yet-executed call for the APK body.
+     *
+     * Returned instead of executed so the caller can hold the [Call] and cancel it mid-download.
      *
      * A client of its own, with a much shorter connect timeout than the shared one. The download
      * hands over a list of candidate hosts and takes the first that answers, and the one that does
@@ -203,9 +207,8 @@ object UpdateApi {
      * that on every update to discover the same thing again is the whole of what made the download
      * feel slow. Six seconds is still far longer than any working connection needs.
      */
-    internal fun openApk(url: String) = downloadClient
+    internal fun newApkCall(url: String): Call = downloadClient
         .newCall(Request.Builder().url(url).build())
-        .execute()
 
     private val downloadClient by lazy {
         client.newBuilder().connectTimeout(6, TimeUnit.SECONDS).build()
@@ -214,12 +217,41 @@ object UpdateApi {
     /**
      * The release worth offering, or null.
      *
-     * A release carrying no APK asset counts as no release rather than as an update that cannot
-     * be installed: the CI contract guarantees `HyperMusicCover-<tag>.apk`, so its absence means
-     * something is wrong upstream, and a "new version available" notice whose button cannot work
-     * is worse than silence.
+     * The changelog is every stable release newer than the running build, so tapping "update
+     * available" reads the whole path from here to the newest - not just the newest release's own
+     * notes. A release carrying no APK asset still counts for the changelog, but the newest one
+     * must ship an APK: the CI contract guarantees `HyperMusicCover-<tag>.apk`, so its absence
+     * means something is wrong upstream, and a "new version available" notice whose button cannot
+     * work is worse than silence.
      */
-    private fun toUpdateInfo(release: GithubRelease): UpdateInfo? {
+    private fun toUpdateInfo(releases: List<GithubRelease>): UpdateInfo? {
+        // Newest first, stable only, newer than the running build. `parseRelease` drops
+        // pre-releases and tags that are not a dotted triple; `isNewer` drops everything at or
+        // below the build we are running.
+        val newer = releases
+            .mapNotNull(::parseRelease)
+            .filter { isNewer(it.versionName, it.versionCode) }
+        val latest = newer.firstOrNull() ?: return null
+        val apkUrl = latest.apkUrl ?: return null
+        return UpdateInfo(
+            versionName = latest.versionName,
+            versionCode = latest.versionCode,
+            notes = accumulatedNotes(newer),
+            apkUrl = apkUrl,
+            releaseUrl = latest.releaseUrl,
+        )
+    }
+
+    /** One stable release, stripped of the fields this app does not use. */
+    private data class Release(
+        val versionName: String,
+        val versionCode: Int,
+        val notes: String,
+        val apkUrl: String?,
+        val releaseUrl: String,
+    )
+
+    private fun parseRelease(release: GithubRelease): Release? {
         if (release.prerelease) return null
         val match = STABLE_TAG.matchEntire(release.tagName) ?: return null
         val (major, minor, patch) = match.destructured
@@ -227,19 +259,34 @@ object UpdateApi {
             ?: release.assets.firstOrNull {
                 it.name.startsWith("HyperMusicCover-v") && it.name.endsWith(".apk")
             }
-            ?: return null
-        val info = UpdateInfo(
+        return Release(
             versionName = release.tagName.removePrefix("v"),
             versionCode = major.toInt() * 10_000 + minor.toInt() * 100 + patch.toInt(),
             notes = release.body.trim(),
-            apkUrl = apk.url,
+            apkUrl = apk?.url,
             releaseUrl = release.htmlUrl,
         )
-        return if (isNewer(info)) info else null
     }
 
     /**
-     * Is [info] newer than the build we are running?
+     * Every version's notes stacked newest-first, each under its own `# vX.Y.Z` heading and cut at
+     * the auto-generated `**Full Changelog**` link, which reads as noise once several are shown.
+     */
+    private fun accumulatedNotes(releases: List<Release>): String =
+        releases.joinToString("\n\n---\n\n") { release ->
+            buildString {
+                append("# v").append(release.versionName).append("\n\n")
+                append(stripChangelogLink(release.notes))
+            }
+        }
+
+    private fun stripChangelogLink(notes: String): String {
+        val index = notes.indexOf("**Full Changelog**")
+        return if (index >= 0) notes.substring(0, index).trim() else notes
+    }
+
+    /**
+     * Is a release newer than the build we are running?
      *
      * The dotted triple is compared part by part and preferred, because the packed versionCode
      * only orders correctly while minor and patch each stay under 100. `v1.2.345` packs to 10545
@@ -247,16 +294,16 @@ object UpdateApi {
      * so nothing upstream prevents that tag. The packed comparison stays as the fallback for a
      * local version name that does not parse at all.
      */
-    private fun isNewer(info: UpdateInfo): Boolean {
+    private fun isNewer(versionName: String, versionCode: Int): Boolean {
         val local = LEADING_TRIPLE.find(BuildConfig.VERSION_NAME)?.value
-        val remote = LEADING_TRIPLE.find(info.versionName)?.value
+        val remote = LEADING_TRIPLE.find(versionName)?.value
         if (local != null && remote != null) {
             val l = local.split('.').map(String::toInt)
             val r = remote.split('.').map(String::toInt)
             for (i in 0..2) if (r[i] != l[i]) return r[i] > l[i]
             return false
         }
-        return info.versionCode > BuildConfig.VERSION_CODE
+        return versionCode > BuildConfig.VERSION_CODE
     }
 
     /**
