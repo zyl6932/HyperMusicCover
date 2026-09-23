@@ -71,8 +71,6 @@ public class Main extends XposedModule {
     private static final String CLS_TIME_VIEW = "com.miui.clock.allInOne.TimeView";
     /** The OEM's own per-style index of clock parts. See dumpClockViewTypes(). */
     private static final String CLS_CLOCK_VIEW_TYPE = "com.miui.clock.module.ClockViewType";
-    /** The date line above the clock - the only thing on the lock screen that draws it. */
-    private static final String CLS_TEXT_AREA = "com.miui.clock.classic.ClassicTextAreaView";
     private static final String CLS_MEDIA_CARD = "com.android.systemui.statusbar.notification"
             + ".mediacontrol.MiuiMediaNotificationControllerImpl";
     private static final String CLS_KG_WALLPAPER_MANAGER =
@@ -1595,23 +1593,12 @@ public class Main extends XposedModule {
             Xp.log(TAG + "TimeView hook failed: " + t);
         }
 
-        // The date line above the clock. Same palette, same cover behind it, and its own class:
-        // the glass never touches it and it takes a plain colour, so it needs a hook of its own
-        // rather than riding the TimeView one. Its setter is the only way in - setTextColor
-        // forwards to setDateTextColor, which is where the AOD and blur-blend variants are
-        // chosen, so hooking the outer one covers every path.
-        try {
-            Class<?> textArea = Xp.findClass(CLS_TEXT_AREA, cl);
-            Xp.hookAll(textArea, "setTextColor", chain -> {
-                View self = (View) chain.getThisObject();
-                if (!glassStyleFor(self)) return chain.proceed();
-                Object[] args = chain.getArgs().toArray();
-                args[0] = legible(self, (Integer) args[0]);
-                return chain.proceed(args);
-            });
-        } catch (Throwable t) {
-            Xp.log(TAG + "date colour hook failed: " + t);
-        }
+        // The date line above the clock is deliberately left to the OEM. On the glass styles it
+        // is blur-blend rendered: setDateTextColor keeps only the green and blue of what it is
+        // given and forces red to 0xff, and those channels weight the blend layers against the
+        // backdrop rather than name a colour. Swapping in the cover's hue moved those weights,
+        // so the date went dark on a light cover and light on a dark one - and our recolour,
+        // which fed getCurrentTextColor() back in, left it that way after cover mode ended.
 
         // The real chokepoint. Everything that squeezes the clock - the OEM's own
         // notification-Y flow, KeyguardClockContainer.notifStateChange, and our own
@@ -9321,17 +9308,6 @@ public class Main extends XposedModule {
                         Xp.log(TAG + "recolor failed: " + t);
                     }
                 }
-                // The date is on neither of those paths - the glass never touches it, and the
-                // palette is the only thing that colours it. Handing it back its own current
-                // colour is enough: the setter hook is what turns that into the legible one.
-                View date = visibleDate();
-                if (date instanceof TextView) {
-                    try {
-                        Xp.callMethod(date, "setTextColor", ((TextView) date).getCurrentTextColor());
-                    } catch (Throwable t) {
-                        Xp.log(TAG + "date recolour failed: " + t);
-                    }
-                }
             }
         });
     }
@@ -9366,10 +9342,9 @@ public class Main extends XposedModule {
             if (declaresGlass(p)) return true;
             if (p == sContainer) break;
         }
-        // The date is not a TimeView and neither is anything above it, so the walk finds nothing
-        // on the styles that need the date handled too - the glass one among them. Asked of the
-        // tree instead: all_in_one is the family whose clock is built this way, and it is the
-        // one that answers `time_group`. See anchoredStyle().
+        // Nothing on the walk answered. Asked of the tree instead: all_in_one is the family whose
+        // clock is built this way, and it is the one that answers `time_group`. The date used to
+        // be the view that landed here; it is no longer coloured at all. See anchoredStyle().
         return anchoredStyle();
     }
 
