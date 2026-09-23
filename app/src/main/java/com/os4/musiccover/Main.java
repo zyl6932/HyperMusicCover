@@ -2289,7 +2289,8 @@ public class Main extends XposedModule {
                                         : NcmLyrics.queryOf(w);
                                 String d = (byHand
                                         ? NcmLyrics.describe(qTitle, qArtist, qAlbum, qDur)
-                                        : NcmLyrics.describe(w)) + WebLyrics.describe(q);
+                                        : NcmLyrics.describe(w)) + WebLyrics.describe(q)
+                                        + OnlineLyrics.probe(w == null ? null : w.getPackageName(), q);
                                 Xp.log(TAG + "ncm: " + d);
                                 try {
                                     java.io.FileOutputStream os = new java.io.FileOutputStream(out);

@@ -100,6 +100,11 @@ fun CreditsPageContent(
             stringResource(R.string.credits_lyricinfo),
             "https://github.com/limczhh/LyricInfo",
         ),
+        Credit(
+            "HyperLyrics Enhanced",
+            stringResource(R.string.credits_hle),
+            "https://github.com/juren233/HyperLyrics-Enhanced",
+        ),
     )
 
     val toolCredits = listOf(

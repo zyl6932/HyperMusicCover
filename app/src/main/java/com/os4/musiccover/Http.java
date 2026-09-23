@@ -82,7 +82,80 @@ final class Http {
         }
     }
 
+    /**
+     * The same request with the parts the other catalogues need: a body to POST (QQ Music takes
+     * its queries as JSON), headers of their own (Kuwo's lyric host answers only a client it
+     * recognises), and the body as bytes (Kuwo's is compressed and not UTF-8). `postBody` null is
+     * a GET; `headers` are name, value pairs. Null body and code 0 when nothing arrived.
+     */
+    static Raw request(String url, String tag, String postBody, String... headers) {
+        long started = android.os.SystemClock.uptimeMillis();
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(READ_TIMEOUT_MS);
+            conn.setRequestProperty("User-Agent", "HyperMusicCover");
+            for (int i = 0; i + 1 < headers.length; i += 2) {
+                conn.setRequestProperty(headers[i], headers[i + 1]);
+            }
+            if (postBody != null) {
+                byte[] b = postBody.getBytes("UTF-8");
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setFixedLengthStreamingMode(b.length);
+                java.io.OutputStream os = conn.getOutputStream();
+                os.write(b);
+                os.close();
+            }
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                Xp.log("[" + tag + "] HTTP " + code + " in "
+                        + (android.os.SystemClock.uptimeMillis() - started) + "ms");
+                return new Raw(null, code);
+            }
+            return new Raw(bytes(conn.getInputStream()), 200);
+        } catch (Throwable t) {
+            Xp.log("[" + tag + "] request failed after "
+                    + (android.os.SystemClock.uptimeMillis() - started) + "ms: " + t);
+            if (conn != null) {
+                try {
+                    conn.disconnect();
+                } catch (Throwable ignored) {
+                }
+            }
+            return new Raw(null, 0);
+        }
+    }
+
+    /** request()'s answer: the bytes as they came, and the status. */
+    static final class Raw {
+        final byte[] body;
+        final int code;
+
+        Raw(byte[] body, int code) {
+            this.body = body;
+            this.code = code;
+        }
+
+        boolean ok() {
+            return body != null;
+        }
+
+        String text() {
+            try {
+                return body == null ? null : new String(body, "UTF-8");
+            } catch (Exception e) {
+                return null;
+            }
+        }
+    }
+
     private static String read(InputStream in) throws Exception {
+        return new String(bytes(in), "UTF-8");
+    }
+
+    private static byte[] bytes(InputStream in) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream(32768);
         byte[] buf = new byte[8192];
         int n;
@@ -92,6 +165,6 @@ final class Http {
         // Read to the end and closed, not disconnected: that is the condition for the socket to
         // go back to the pool rather than be thrown away.
         in.close();
-        return new String(out.toByteArray(), "UTF-8");
+        return out.toByteArray();
     }
 }

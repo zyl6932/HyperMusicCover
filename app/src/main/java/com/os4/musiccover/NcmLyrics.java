@@ -206,12 +206,19 @@ final class NcmLyrics {
         final String translation;
         /** True when body is word-timed yrc rather than line-timed lrc. */
         final boolean words;
+        /** A plain LRC of the romanisation - Japanese and Korean songs carry one - or null. */
+        final String roma;
 
         Found(String id, String body, String translation, boolean words) {
+            this(id, body, translation, words, null);
+        }
+
+        Found(String id, String body, String translation, boolean words, String roma) {
             this.id = id;
             this.body = body;
             this.translation = translation;
             this.words = words;
+            this.roma = roma;
         }
     }
 
@@ -532,15 +539,17 @@ final class NcmLyrics {
         String yrc = body(o, "yrc");
         String lrc = body(o, "lrc");
         String tlyric = body(o, "tlyric");
+        String romalrc = body(o, "romalrc");
         String use = yrc != null ? yrc : lrc;
         if (use == null) {
             Xp.log("[MCNcm] " + id + " has no lyrics at all");
             return null;
         }
         Xp.log("[MCNcm] " + id + " -> " + (yrc != null ? "yrc" : "lrc") + " " + use.length()
-                + " chars" + (tlyric != null ? " + translation" : "") + " in "
+                + " chars" + (tlyric != null ? " + translation" : "")
+                + (romalrc != null ? " + romanisation" : "") + " in "
                 + (android.os.SystemClock.uptimeMillis() - started) + "ms");
-        return new Found(id, use, tlyric, yrc != null);
+        return new Found(id, use, tlyric, yrc != null, romalrc);
     }
 
     /** One of the response's lyric slots, or null when it is absent or empty. */
@@ -619,26 +628,12 @@ final class NcmLyrics {
      * Asked of both ways in: the song search's results, and an album's own track list, which is
      * the same question put to a shorter and much more certain list.
      *
-     * The title has to match. This started out the other way round, scoring duration alone on
-     * the argument that titles differ in punctuation and capitalisation while a duration is
-     * exact - and it picked the wrong song the first time it met a real one. Playing 邓紫棋's
-     * 新的心跳, the candidates included the title track at 561ms off and 多远都要在一起 - a
-     * different song from the same album - at 120ms off. Duration alone took the closer number
-     * and put the wrong lyrics on screen. Two recordings of the same song are indeed never three
-     * seconds apart, but two tracks on one album routinely are, and the album name cannot
-     * separate them because it is the same album.
-     *
-     * So the order is: title first, then artist, then album, then duration as the tie-break.
-     * Titles are compared with everything that varies between catalogues removed - case, spacing,
-     * punctuation, brackets - and an exact match outranks one string containing the other, which
-     * is what keeps the studio take ahead of "...（翻自 Lauv）" and "..._Purplepick" when all
-     * three are the same length.
-     *
-     * Duration stays a hard gate rather than a score: outside the window a candidate is not
-     * considered at all, whatever its title says. That is what separates a live take from its
-     * studio version - same title, same artists, 25 seconds apart. There are two windows rather
-     * than one and the album picks between them, because the same release is pressed and mastered
-     * differently by different catalogues; see SAME_ALBUM_SLACK_MS for the measurement.
+     * Scored by LyricMatch, the one rule every by-name source now shares (and HyperLyrics
+     * Enhanced's, so the two modules agree). What this used to do by hand it still does: the
+     * title has to match (新的心跳 against 多远都要在一起, same album, 441ms nearer), another
+     * singer's song of the same name never passes (粟丹sudan's piano 余波荡漾), a live take 25s
+     * off its studio one is marked down past passing, and the album carries a copy that a
+     * different pressing puts a few seconds out (勇敢, 4.8s, on its own album).
      *
      * Nothing matching is a real answer, and a better one than the wrong song: the caller shows
      * no lyrics, which is what it did before this source existed, and byAlbum gets a second
@@ -648,27 +643,14 @@ final class NcmLyrics {
         if (songs == null) {
             return null;
         }
-        if (q.durationMs <= 0) {
-            // Without a duration there is nothing here that can prove a match, and the
-            // first search result is a guess, not an answer.
-            Xp.log("[MCNcm] session publishes no duration; not guessing");
-            return null;
-        }
-        String wanted = norm(q.title);
-        if (wanted.isEmpty()) {
+        if (norm(q.title).isEmpty()) {
             Xp.log("[MCNcm] session publishes no title to match on");
             return null;
         }
-        String best = null;
-        int bestScore = 0;
-        long bestDiff = Long.MAX_VALUE;
+        java.util.List<LyricMatch.Candidate> cands = new java.util.ArrayList<>();
         for (int i = 0; i < songs.length(); i++) {
             org.json.JSONObject s = songs.optJSONObject(i);
             if (s == null) {
-                continue;
-            }
-            long dur = s.optLong("duration", 0L);
-            if (dur <= 0) {
                 continue;
             }
             // A result with no name is not a candidate: scored, "null" would only ever have been
@@ -677,37 +659,29 @@ final class NcmLyrics {
             if (name == null) {
                 continue;
             }
-            int score = nameScore(wanted, norm(name));
-            if (score == 0) {
-                continue;
-            }
-            if (!byArtist(q.artist, s)) {
-                continue;
-            }
             org.json.JSONObject al = s.optJSONObject("album");
-            String albumName = al == null ? null : str(al, "name");
-            boolean sameAlbum = albumName != null && !q.album.isEmpty()
-                    && norm(q.album).equals(norm(albumName));
-            // Which window applies depends on the album, so the album has to be read before the
-            // window rather than after it as the tie-break it used to be. See SAME_ALBUM_SLACK_MS.
-            long diff = Math.abs(dur - q.durationMs);
-            if (diff > (sameAlbum ? SAME_ALBUM_SLACK_MS : DURATION_SLACK_MS)) {
-                continue;
+            // The search calls it "artists", the album's own track list "ar"; both carry names.
+            org.json.JSONArray ar = s.optJSONArray("artists");
+            if (ar == null) ar = s.optJSONArray("ar");
+            StringBuilder artists = new StringBuilder();
+            for (int k = 0; ar != null && k < ar.length(); k++) {
+                org.json.JSONObject a = ar.optJSONObject(k);
+                String n = a == null ? null : str(a, "name");
+                if (n == null) continue;
+                if (artists.length() > 0) artists.append('/');
+                artists.append(n);
             }
-            if (sameAlbum) {
-                score++;
-            }
-            if (best == null || score > bestScore || (score == bestScore && diff < bestDiff)) {
-                best = String.valueOf(s.optLong("id", 0L));
-                bestScore = score;
-                bestDiff = diff;
-            }
+            long dur = s.optLong("duration", 0L);
+            if (dur <= 0) dur = s.optLong("dt", 0L);
+            cands.add(new LyricMatch.Candidate(String.valueOf(s.optLong("id", 0L)), name,
+                    artists.toString(), al == null ? null : str(al, "name"), dur, null));
         }
-        if (best != null) {
-            Xp.log("[MCNcm] matched " + best + " (score " + bestScore + ", " + bestDiff
-                    + "ms off)");
+        LyricMatch.Pick p = LyricMatch.best(cands, new LyricMatch.Wanted(q));
+        if (p.candidate != null) {
+            Xp.log("[MCNcm] best " + p.candidate + " scored " + p.score
+                    + (p.passes() ? "" : ", under " + LyricMatch.PASS_SCORE));
         }
-        return best;
+        return p.passes() ? p.candidate.id : null;
     }
 
     /**
@@ -883,7 +857,7 @@ final class NcmLyrics {
      * lacks it the name is compared as it is: that is the comparison that was here before, and it
      * is a better failure than every song with a character variant losing its lyrics.
      */
-    private static String folded(String s) {
+    static String folded(String s) {
         android.icu.text.Transliterator t = TRANSLIT;
         if (t == null) {
             return s;

@@ -121,10 +121,15 @@ final class WebLyrics {
      * offline for the length of a lookup has learnt nothing about the song.
      */
     static Found load(NcmLyrics.Query q) {
+        return load(q, true, true);
+    }
+
+    /** One or both of the two, for an order that puts KuGou somewhere other than last-but-one. */
+    static Found load(NcmLyrics.Query q, boolean kugou, boolean lrclib) {
         if (q == null) {
             return null;
         }
-        String key = q.key();
+        String key = q.key() + (kugou ? "|k" : "") + (lrclib ? "|l" : "");
         synchronized (CACHE) {
             Found hit = CACHE.get(key);
             if (hit != null) {
@@ -135,11 +140,11 @@ final class WebLyrics {
         Ask ask = new Ask();
         Found got = null;
         try {
-            got = kugou(q, ask);
+            if (kugou) got = kugou(q, ask);
         } catch (Throwable t) {
             Xp.log("[MCWeb] KuGou failed: " + t);
         }
-        if (got == null) {
+        if (got == null && lrclib) {
             try {
                 got = lrclib(q, ask);
             } catch (Throwable t) {
@@ -252,26 +257,17 @@ final class WebLyrics {
     }
 
     /**
-     * Which recording in a KuGou song search is the session's - or none of them.
-     *
-     * The same order NcmLyrics.choose uses, and for the same reasons: the title has to match,
-     * the artist has to match, and the duration is a hard gate rather than a tie-break, with a
-     * wider window for a candidate on the album the session names.
+     * Which recording in a KuGou song search is the session's - or none of them. Scored by
+     * LyricMatch, the rule every by-name source shares.
      */
     private static String hashOf(String json, NcmLyrics.Query q) {
-        String wanted = NcmLyrics.norm(q.title);
-        if (wanted.isEmpty()) {
-            return null;
-        }
         org.json.JSONArray info;
         try {
             info = new org.json.JSONObject(json).getJSONObject("data").getJSONArray("info");
         } catch (Throwable t) {
             return null;
         }
-        String best = null;
-        int bestScore = 0;
-        long bestDiff = Long.MAX_VALUE;
+        java.util.List<LyricMatch.Candidate> cands = new java.util.ArrayList<>();
         for (int i = 0; i < info.length(); i++) {
             org.json.JSONObject s = info.optJSONObject(i);
             if (s == null) {
@@ -282,31 +278,16 @@ final class WebLyrics {
             if (name == null || hash == null) {
                 continue;
             }
-            int score = NcmLyrics.nameScore(wanted, NcmLyrics.norm(plain(name)));
-            if (score == 0 || !byArtist(q.artist, NcmLyrics.str(s, "singername"))) {
-                continue;
-            }
-            String album = NcmLyrics.str(s, "album_name");
-            boolean sameAlbum = album != null && !q.album.isEmpty()
-                    && NcmLyrics.norm(q.album).equals(NcmLyrics.norm(plain(album)));
-            long diff = Math.abs(millis(s.optLong("duration", 0L)) - q.durationMs);
-            if (diff > (sameAlbum ? NcmLyrics.SAME_ALBUM_SLACK_MS : NcmLyrics.DURATION_SLACK_MS)) {
-                continue;
-            }
-            if (sameAlbum) {
-                score++;
-            }
-            if (best == null || score > bestScore || (score == bestScore && diff < bestDiff)) {
-                best = hash;
-                bestScore = score;
-                bestDiff = diff;
-            }
+            cands.add(new LyricMatch.Candidate(hash, plain(name),
+                    plain(NcmLyrics.str(s, "singername")), plain(NcmLyrics.str(s, "album_name")),
+                    millis(s.optLong("duration", 0L)), null));
         }
-        if (best != null) {
-            Xp.log("[MCWeb] KuGou matched " + best + " (score " + bestScore + ", " + bestDiff
-                    + "ms off)");
+        LyricMatch.Pick p = LyricMatch.best(cands, new LyricMatch.Wanted(q));
+        if (p.candidate != null) {
+            Xp.log("[MCWeb] KuGou best " + p.candidate + " scored " + p.score
+                    + (p.passes() ? "" : ", under " + LyricMatch.PASS_SCORE));
         }
-        return best;
+        return p.passes() ? p.candidate.id : null;
     }
 
     /**
@@ -328,7 +309,7 @@ final class WebLyrics {
         if (cs == null) {
             return null;
         }
-        String wanted = NcmLyrics.norm(q.title);
+        LyricMatch.Wanted w = new LyricMatch.Wanted(q);
         int tried = 0;
         for (int i = 0; i < cs.length() && tried < MAX_CANDIDATES; i++) {
             org.json.JSONObject c = cs.optJSONObject(i);
@@ -342,13 +323,10 @@ final class WebLyrics {
             if (id == 0L || key == null) {
                 continue;
             }
-            if (!trusted) {
-                long diff = Math.abs(millis(c.optLong("duration", 0L)) - q.durationMs);
-                if (diff > NcmLyrics.DURATION_SLACK_MS
-                        || NcmLyrics.nameScore(wanted, NcmLyrics.norm(NcmLyrics.str(c, "song"))) == 0
-                        || !byArtist(q.artist, NcmLyrics.str(c, "singer"))) {
-                    continue;
-                }
+            if (!trusted && LyricMatch.score(new LyricMatch.Candidate(String.valueOf(id),
+                    NcmLyrics.str(c, "song"), NcmLyrics.str(c, "singer"), null,
+                    millis(c.optLong("duration", 0L)), null), w) < LyricMatch.PASS_SCORE) {
+                continue;
             }
             tried++;
             Found f = file(String.valueOf(id), key, ask);
@@ -494,25 +472,25 @@ final class WebLyrics {
         } catch (Throwable t) {
             return null;
         }
-        String wanted = NcmLyrics.norm(q.title);
+        LyricMatch.Wanted w = new LyricMatch.Wanted(q);
         Found best = null;
-        long bestDiff = Long.MAX_VALUE;
+        int bestScore = -1;
         for (int i = 0; i < tracks.length(); i++) {
             org.json.JSONObject o = tracks.optJSONObject(i);
             if (o == null) {
                 continue;
             }
-            long diff = Math.abs(millis(Math.round(o.optDouble("duration", 0)))
-                    - q.durationMs);
-            if (diff > NcmLyrics.DURATION_SLACK_MS
-                    || NcmLyrics.nameScore(wanted, NcmLyrics.norm(NcmLyrics.str(o, "trackName"))) == 0
-                    || !byArtist(q.artist, NcmLyrics.str(o, "artistName"))) {
+            int score = LyricMatch.score(new LyricMatch.Candidate(String.valueOf(o.optLong("id")),
+                    NcmLyrics.str(o, "trackName"), NcmLyrics.str(o, "artistName"),
+                    NcmLyrics.str(o, "albumName"), millis(Math.round(o.optDouble("duration", 0))),
+                    null), w);
+            if (score < LyricMatch.PASS_SCORE || score <= bestScore) {
                 continue;
             }
             Found f = synced(o, "search");
-            if (f != null && diff < bestDiff) {
+            if (f != null) {
                 best = f;
-                bestDiff = diff;
+                bestScore = score;
             }
         }
         return best;
@@ -547,32 +525,6 @@ final class WebLyrics {
     }
 
     // --------------------------------------------------------------- shared
-
-    /**
-     * Whether a result credits the artist the session names, both sides as one string.
-     *
-     * The list form NcmLyrics.byArtist reads does not exist here - KuGou credits "周杰伦" and
-     * LrcLib "Lauv, Troye Sivan" in a single field - but norm() throws away everything that is
-     * not a letter or a digit, so the separators go with it and a session's "LAUV/Troye Sivan"
-     * and a catalogue's "Lauv, Troye Sivan" come out as the same string. When they do not, the
-     * first credited name is tried on its own, which is what a catalogue crediting only the
-     * lead artist has.
-     *
-     * With nothing on either side to compare, the answer is yes: this rules candidates out, it
-     * cannot find one, and a player publishing no artist should not lose its lyrics to it.
-     */
-    private static boolean byArtist(String wanted, String got) {
-        String want = NcmLyrics.norm(wanted);
-        String have = NcmLyrics.norm(got);
-        if (want.isEmpty() || have.isEmpty()) {
-            return true;
-        }
-        if (have.contains(want) || want.contains(have)) {
-            return true;
-        }
-        String first = NcmLyrics.norm(NcmLyrics.firstArtist(wanted));
-        return !first.isEmpty() && (have.contains(first) || first.contains(have));
-    }
 
     /**
      * A duration in whatever unit it arrived in, as milliseconds.

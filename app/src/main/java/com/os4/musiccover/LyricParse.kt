@@ -30,38 +30,92 @@ object LyricParse {
         if (translation.isNullOrBlank() || lines.isEmpty()) return lines
         val tr = lrc(translation)
         if (tr.isEmpty()) return lines
+        val texts = assign(lines, tr)
         val out = ArrayList<LyricLine>(lines.size)
-        for (line in lines) {
-            val text = nearest(tr, line.start)
+        for ((i, line) in lines.withIndex()) {
+            val text = texts[i]
             out.add(if (text == null) line else withTranslation(line, text))
         }
         return out
     }
 
     /**
-     * The translated line for a line that starts at `ms`, or null if none is close enough.
-     *
-     * A window rather than an equality test: yrc and tlyric are timed independently, and the
-     * same line measured here starts at 4390ms in the word-timed copy and 4705ms in the LRC -
-     * close enough to be obviously the same line, far enough apart that matching exactly would
-     * find nothing at all. The window is wide enough for that drift and narrower than the gap
-     * between two sung lines, so the nearest entry inside it is the right one.
+     * The same again with a romanisation beside the translation - QQ Music, NetEase and Kuwo
+     * ship one for Japanese and Korean songs, as a third timed text joined by time like the
+     * translation. It is shown in the translation's place, above the translation when there is
+     * both, and goes with the translation switch.
      */
-    private fun nearest(entries: List<Pair<Int, String>>, ms: Int): String? {
-        var best: String? = null
-        var bestGap = TRANSLATION_WINDOW_MS
+    @JvmStatic
+    fun parse(body: String, translation: String?, roma: String?): List<LyricLine> {
+        val lines = parse(body, translation)
+        if (roma.isNullOrBlank() || lines.isEmpty()) return lines
+        val ro = lrc(roma)
+        if (ro.isEmpty()) return lines
+        val best = assign(lines, ro)
+        val out = ArrayList<LyricLine>(lines.size)
+        for ((i, line) in lines.withIndex()) {
+            val r = best[i]
+            val merged = if (r == null) null else withRoma(r, line.text, line.translation)
+            out.add(if (merged == null || merged == line.translation) line
+                else withTranslation(line, merged))
+        }
+        return out
+    }
+
+    /**
+     * Each timed entry of a translation or romanisation, given to the ONE line nearest it - not
+     * each line taking the nearest entry. A catalogue leaves its credit lines untranslated, and
+     * asked the other way round the credits 500ms before the first verse took the verse's
+     * translation as their own (QQ's Lemon, 2026-09-24). One entry, one line; the closer of two
+     * claimants keeps it. See TRANSLATION_WINDOW_MS for the window.
+     */
+    private fun assign(lines: List<LyricLine>, entries: List<Pair<Int, String>>): Array<String?> {
+        val starts = IntArray(lines.size) { lines[it].start }
+        val best = arrayOfNulls<String>(lines.size)
+        val gaps = IntArray(lines.size) { Int.MAX_VALUE }
         for ((at, text) in entries) {
-            val gap = kotlin.math.abs(at - ms)
-            // Sorted by time: once past the window there is nothing closer further on.
-            if (at > ms && gap > bestGap) break
-            if (gap <= bestGap) {
-                bestGap = gap
-                best = text
+            var i = starts.binarySearch(at)
+            if (i < 0) {
+                val ins = -i - 1
+                i = when {
+                    ins == 0 -> 0
+                    ins >= starts.size -> starts.size - 1
+                    at - starts[ins - 1] <= starts[ins] - at -> ins - 1
+                    else -> ins
+                }
+            }
+            val gap = kotlin.math.abs(starts[i] - at)
+            if (gap <= TRANSLATION_WINDOW_MS && gap < gaps[i]) {
+                gaps[i] = gap
+                best[i] = text
             }
         }
         return best
     }
 
+    /**
+     * The romanisation over the translation, as the one text the renderer draws under a line.
+     * Left out when it only repeats the line - a catalogue "romanises" an English song into
+     * itself.
+     */
+    internal fun withRoma(roma: String?, text: String, translation: String?): String? {
+        val r = roma?.trim()?.replace(Regex("\\s+"), " ")
+        if (r.isNullOrEmpty() || letters(r) == letters(text)) return translation
+        return if (translation.isNullOrBlank()) r else r + "\n" + translation.trim()
+    }
+
+    private fun letters(s: String): String =
+        s.lowercase().filter { it.isLetterOrDigit() }
+
+    /**
+     * How far a translated line's time may sit from its line's and still be its translation.
+     *
+     * A window rather than an equality test: yrc and tlyric are timed independently, and the
+     * same line measured here starts at 4390ms in the word-timed copy and 4705ms in the LRC -
+     * close enough to be obviously the same line, far enough apart that matching exactly would
+     * find nothing at all. The window is wide enough for that drift and narrower than the gap
+     * between two sung lines, so the nearest line inside it is the right one.
+     */
     private const val TRANSLATION_WINDOW_MS = 1500
 
     /** Timestamped lines of a plain LRC, in time order, with the empty ones left out. */
@@ -186,8 +240,11 @@ object LyricParse {
         if (n == 0) return null
         for (k in chars.indices) if (chars[k] > n) chars[k] = n
         closeUntimedTail(starts, ends, line.end, nextStart)
-        return LyricLine(text.substring(0, n), line.translation, line.start, line.end,
-            line.alignment == KaraokeAlignment.End, starts, ends, chars)
+        // The file's own romanisation - TTML's x-roman, a KRC's language block - joins the
+        // translation the same way a separately shipped one does.
+        val shown = text.substring(0, n)
+        return LyricLine(shown, withRoma(line.phonetic, shown, line.translation), line.start,
+            line.end, line.alignment == KaraokeAlignment.End, starts, ends, chars)
     }
 
     /**

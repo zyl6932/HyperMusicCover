@@ -34,6 +34,11 @@ the AGPL-3.0. These files are not relicensed.
   The menu position provider and the menu row are adapted from that project,
   and the home page's status card follows its layout.
 
+  HyperLyrics Enhanced (https://github.com/juren233/HyperLyrics-Enhanced)
+  QQ Music's lyric decryption, the QQ Music search and lyric requests, and the
+  scoring every by-name lyric source uses to pick a song are adapted from that
+  project. The files carrying those changes are marked in their headers.
+
 Apache License, Version 2.0
 ---------------------------
 One-way compatible with the AGPL-3.0, so these files are distributed here as
@@ -60,6 +65,10 @@ part of the whole without being relicensed.
   screen limit, force the clock's colon and keep the soft glass through a global
   theme are adapted from that project. The file carrying those changes is marked
   in its header.
+
+  HyperLyrics Enhanced (https://github.com/juren233/HyperLyrics-Enhanced)
+  The Kuwo lyric source and the TTML Hub catalogue client are adapted from
+  that project's files licensed under Apache-2.0, Copyright 2026 juren233.
 
   accompanist-lyrics-core (https://github.com/6xingyv/accompanist-lyrics-core)
   The lock screen lyric parser, used unmodified as a dependency.

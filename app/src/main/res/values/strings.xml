@@ -93,6 +93,7 @@
     <string name="credits_amll_db">逐字歌词的主要来源</string>
     <string name="credits_accompanist">解析 TTML、LRC、YRC、KRC 四种歌词</string>
     <string name="credits_lyricinfo">播放器歌词的来源之一</string>
+    <string name="credits_hle">QQ 音乐、酷我、TTML Hub 取词与歌曲匹配规则</string>
     <string name="credits_lsposed">模块赖以运行的框架</string>
     <string name="credits_installerx">把更新交给安装器、隐藏图标和拨号密令的做法</string>
     <string name="rules_cancel">取消</string>

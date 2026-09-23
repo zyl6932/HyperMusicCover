@@ -93,6 +93,7 @@
     <string name="credits_amll_db">Where the word-by-word lyrics come from</string>
     <string name="credits_accompanist">Parses TTML, LRC, YRC and KRC lyrics</string>
     <string name="credits_lyricinfo">One of the places player lyrics come from</string>
+    <string name="credits_hle">QQ Music, Kuwo and TTML Hub lyrics, and the song matching rules</string>
     <string name="credits_lsposed">The framework this module runs in</string>
     <string name="credits_installerx">Handing an update to an installer app, hiding the icon, and the dial code</string>
     <string name="rules_cancel">Cancel</string>

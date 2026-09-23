@@ -54,6 +54,12 @@ final class LyricSource {
     static final int SRC_KUGOU = 4;
     /** Found by name on LrcLib - the last net, and the one with the western catalogue. */
     static final int SRC_LRCLIB = 5;
+    /** Found by name on QQ Music. */
+    static final int SRC_QQ = 8;
+    /** Found by name on Kuwo. */
+    static final int SRC_KUWO = 9;
+    /** LunaBeat's TTML Hub, keyed by the platform's song id like the AMLL database. */
+    static final int SRC_HUB = 10;
 
     interface Callback {
         /**
@@ -748,7 +754,7 @@ final class LyricSource {
                     local(ctx, controller, r);
                 }
                 if (r.lines.isEmpty() && (id != null || q != null)) {
-                    race(gen, id, dir, q, r);
+                    race(gen, pkg, ctx, id, dir, q, r);
                 }
                 // The other two catalogues, in order, and only for a song the first three could
                 // not place. Sequential rather than raced: this is the slow path by definition,
@@ -756,7 +762,7 @@ final class LyricSource {
                 // already works never reaches it, so what it costs is paid only by songs that
                 // would otherwise show nothing at all.
                 if (r.lines.isEmpty() && q != null) {
-                    web(q, r);
+                    web(pkg, q, r);
                 }
                 Xp.log("[MCLyric] " + pkg + " -> " + r.why);
                 onMain(cb, r.lines, r.why, r.source);
@@ -793,10 +799,12 @@ final class LyricSource {
      * started, and the fallback is the one that actually had the song. Run together, a miss on
      * one costs nothing on the other.
      */
-    private static void race(final int gen, final String id, final String dir,
+    private static void race(final int gen, final String pkg, final android.content.Context ctx,
+                             final String id, final String dir,
                              final NcmLyrics.Query q, Rows out) {
         final Rows db = new Rows();
         final Rows ncm = new Rows();
+        final Rows hub = new Rows();
         // Tags rather than the rows themselves: a row says nothing about which route produced it
         // once that route has come up empty, and "which one just finished" is the whole question.
         final BlockingQueue<Integer> done = new LinkedBlockingQueue<>();
@@ -814,13 +822,27 @@ final class LyricSource {
                 }
             }, "MCLyricDb").start();
         }
+        // The TTML Hub beside the database: the same kind of file, keyed by the same ids.
+        if (id != null && TtmlHub.kindOf(dir) != null) {
+            pending++;
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        hub(ctx, id, dir, hub);
+                    } finally {
+                        done.offer(3);
+                    }
+                }
+            }, "MCLyricHub").start();
+        }
         if (q != null) {
             pending++;
             new Thread(new Runnable() {
                 @Override
                 public void run() {
                     try {
-                        netease(q, ncm);
+                        online(pkg, q, ncm);
                     } finally {
                         done.offer(2);
                     }
@@ -851,6 +873,12 @@ final class LyricSource {
                 out.source = db.source;
                 return;
             }
+            if (tag == 3 && !hub.lines.isEmpty()) {
+                out.lines = hub.lines;
+                out.why = join(out.why, hub.why);
+                out.source = hub.source;
+                return;
+            }
             if (tag == 2 && !ncm.lines.isEmpty()) {
                 haveNcm = true;
                 // Hold the answer briefly in case the database is about to beat it on quality.
@@ -868,8 +896,8 @@ final class LyricSource {
         }
         // Neither had it. Both accounts are worth keeping - which one failed and how is the
         // first thing asked of a song that showed no lyrics.
-        String both = join(db.why == null || id == null ? null : db.why,
-                q == null ? null : ncm.why);
+        String both = join(join(db.why == null || id == null ? null : db.why,
+                hub.why == null || id == null ? null : hub.why), q == null ? null : ncm.why);
         out.why = join(out.why, both == null ? "nothing found" : both);
     }
 
@@ -1054,48 +1082,69 @@ final class LyricSource {
         }
     }
 
-    /** By name, from NetEase - the only source that covers a player publishing no id at all. */
-    private static void netease(NcmLyrics.Query q, Rows r) {
-        String before = r.why;
+    /** LunaBeat's TTML Hub, by the same id the database is asked for. */
+    private static void hub(android.content.Context ctx, String id, String dir, Rows r) {
         try {
-            NcmLyrics.Found f = NcmLyrics.load(q);
-            if (f == null) {
-                r.why = join(before, "no match on NetEase");
+            String ttml = TtmlHub.lookup(ctx, dir, id);
+            if (ttml == null) {
+                r.why = "not in the TTML Hub";
                 return;
             }
-            r.lines = LyricParse.parse(f.body, f.translation);
-            r.why = r.lines.isEmpty()
-                    ? join(before, "NetEase " + f.id + " parsed to nothing " + shape(f.body))
-                    : r.lines.size() + " lines from NetEase " + f.id
-                    + " (" + (f.words ? "yrc" : "lrc") + ")";
-            if (!r.lines.isEmpty()) r.source = SRC_NETEASE;
+            r.lines = LyricParse.parse(ttml);
+            r.why = r.lines.isEmpty() ? "the TTML Hub's file parsed to nothing"
+                    : r.lines.size() + " lines from the TTML Hub";
+            if (!r.lines.isEmpty()) r.source = SRC_HUB;
         } catch (Throwable t) {
-            Xp.log("[MCLyric] NetEase lookup failed: " + t);
-            r.why = join(before, "NetEase error");
+            Xp.log("[MCLyric] TTML Hub lookup failed: " + t);
+            r.why = "TTML Hub error";
         }
     }
 
-    /** KuGou, then LrcLib - the catalogues asked when NetEase could not place the song. */
-    private static void web(NcmLyrics.Query q, Rows r) {
+    /**
+     * By name, from the first two catalogues in this player's order - QQ Music and NetEase for
+     * most players. See OnlineLyrics.
+     */
+    private static void online(String pkg, NcmLyrics.Query q, Rows r) {
         String before = r.why;
         try {
-            WebLyrics.Found f = WebLyrics.load(q);
+            OnlineLyrics.Found f = OnlineLyrics.first(pkg, q);
             if (f == null) {
-                r.why = join(before, "no match on KuGou or LrcLib");
+                r.why = join(before, "no match on " + OnlineLyrics.describe(pkg).split(">")[0]
+                        + " or " + OnlineLyrics.describe(pkg).split(">")[1]);
                 return;
             }
-            // No second argument: a KRC carries its translation inside the body it hands over,
-            // where the parser reads it, and LrcLib publishes none at all.
-            r.lines = LyricParse.parse(f.body);
-            r.why = r.lines.isEmpty()
-                    ? join(before, f.who() + " " + f.id + " parsed to nothing " + shape(f.body))
-                    : r.lines.size() + " lines from " + f.who() + " " + f.id
-                    + " (" + (f.words ? "word-timed" : "line-timed") + ")";
-            if (!r.lines.isEmpty()) r.source = f.source;
+            take(f, r, before);
+        } catch (Throwable t) {
+            Xp.log("[MCLyric] the by-name lookup failed: " + t);
+            r.why = join(before, "by-name error");
+        }
+    }
+
+    /** The rest of the order - Kuwo, KuGou, LrcLib for most players - one at a time. */
+    private static void web(String pkg, NcmLyrics.Query q, Rows r) {
+        String before = r.why;
+        try {
+            OnlineLyrics.Found f = OnlineLyrics.rest(pkg, q);
+            if (f == null) {
+                r.why = join(before, "no match on the rest of " + OnlineLyrics.describe(pkg));
+                return;
+            }
+            take(f, r, before);
         } catch (Throwable t) {
             Xp.log("[MCLyric] the second net failed: " + t);
-            r.why = join(before, "KuGou/LrcLib error");
+            r.why = join(before, "second net error");
         }
+    }
+
+    private static void take(OnlineLyrics.Found f, Rows r, String before) {
+        r.lines = LyricParse.parse(f.body, f.translation, f.roma);
+        r.why = r.lines.isEmpty()
+                ? join(before, f.who() + " " + f.id + " parsed to nothing " + shape(f.body))
+                : r.lines.size() + " lines from " + f.who() + " " + f.id
+                + " (" + (f.words ? "word-timed" : "line-timed")
+                + (f.translation != null ? " + translation" : "")
+                + (f.roma != null ? " + romanisation" : "") + ")";
+        if (!r.lines.isEmpty()) r.source = f.source();
     }
 
     /** Both halves of why it failed, when more than one source was asked and all came up empty. */

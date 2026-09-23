@@ -789,6 +789,12 @@ final class LockLyrics {
                 return "kugou";
             case LyricSource.SRC_LRCLIB:
                 return "lrclib";
+            case LyricSource.SRC_QQ:
+                return "qq";
+            case LyricSource.SRC_KUWO:
+                return "kuwo";
+            case LyricSource.SRC_HUB:
+                return "ttmlhub";
             default:
                 return "none";
         }
