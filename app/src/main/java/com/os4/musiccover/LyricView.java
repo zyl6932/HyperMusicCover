@@ -414,6 +414,37 @@ final class LyricView extends View {
         postOnAnimation(frame);
     }
 
+    /**
+     * A frame now even if nothing moves in it: the AOD's still mode lets the display up for this
+     * one, and a frame drawn while it was held down may never have reached the panel.
+     */
+    void redraw() {
+        invalidate();
+        kick();
+    }
+
+    /**
+     * The playback time after pos at which the stack next moves, or -1 if it will not. The AOD's
+     * still mode wakes the phone for these moments and no others, so every way the focus can move
+     * is here: the next lines' switch times, and the ends that hand over to interlude dots. A
+     * candidate that turns out not to move anything only costs one wake.
+     */
+    long nextMoveAfter(int pos) {
+        int n = lines.size();
+        if (n == 0 || dotsTop.length != n) return -1L;
+        int idx = indexAt(pos);
+        long best = Long.MAX_VALUE;
+        for (int k = Math.max(0, idx); k <= Math.min(n - 1, idx + 2); k++) {
+            long t = switchAt(k);
+            if (t > pos && t < best) best = t;
+            if (k > 0 && !Float.isNaN(dotsTop[k])) {
+                long end = lines.get(k - 1).end;
+                if (end > pos && end < best) best = end;
+            }
+        }
+        return best == Long.MAX_VALUE ? -1L : best;
+    }
+
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
@@ -451,6 +482,11 @@ final class LyricView extends View {
         boolean changed = followAodDim();
         changed |= followBouncer(dt);
         int why = 0;
+        // The AOD's still mode: every frame here is one the display was let up for, and the next
+        // is a line away, so nothing eases - each value is put where it is heading. See
+        // LockLyrics.still().
+        boolean still = LockLyrics.still();
+        float dtTo = still ? Float.POSITIVE_INFINITY : dt;
         // Not before the first layout: a width of zero would wrap every line a character a row.
         // Leaving, the lines are frozen like the band below: switching the lyrics off empties
         // them, and laying the empty set out at once cut the lines off in one frame instead of
@@ -481,7 +517,7 @@ final class LyricView extends View {
         // centre, so a correction from the previous song cannot outlive it.
         anchorFixWant = anchorFixTarget();
         float before = anchorFix;
-        if (dt <= 0f || show < 0.02f || !centring()) {
+        if (dt <= 0f || still || show < 0.02f || !centring()) {
             anchorFix = anchorFixWant;
         } else {
             anchorFix = approach(anchorFix, anchorFixWant, dt, TAU_ANCHOR);
@@ -495,7 +531,7 @@ final class LyricView extends View {
         }
 
         float showTo = showTarget();
-        float s = approach(show, showTo, dt, showTo < show ? TAU_HIDE : TAU_SHOW);
+        float s = approach(show, showTo, dtTo, showTo < show ? TAU_HIDE : TAU_SHOW);
         if (Math.abs(s - showTo) < 0.004f) s = showTo;
         if (s != show) {
             show = s;
@@ -643,10 +679,19 @@ final class LyricView extends View {
                 continue;
             }
             // Position: the line's own ripple delay, then the move's spring.
-            boolean started = now >= aimAt[i];
+            boolean started = still || now >= aimAt[i];
             if (aim[i] != nextAim[i] && started) aim[i] = nextAim[i];
             float x = scroll[i] - aim[i];
-            if (dt > 0f && (Math.abs(x) > 0.3f || Math.abs(vel[i]) > 2f)) {
+            if (still) {
+                // Cut to, not scrolled to: the ripple and the spring are both left out.
+                if (aimAt[i] > now) aimAt[i] = now;
+                if (x != 0f || vel[i] != 0f) {
+                    scroll[i] = aim[i];
+                    vel[i] = 0f;
+                    changed = true;
+                    why |= 32;
+                }
+            } else if (dt > 0f && (Math.abs(x) > 0.3f || Math.abs(vel[i]) > 2f)) {
                 float left = dt;
                 while (left > 0f) {
                     float h = Math.min(left, 1f / 240f);
@@ -676,7 +721,7 @@ final class LyricView extends View {
             boolean on = focused || (dotsFor < 0 && i < focus && i >= focus - 2
                     && ms >= l.start && ms < l.end);
             float eTo = on ? 1f : 0f;
-            float e = approach(emph[i], eTo, dt, eTo > emph[i] ? TAU_EMPH_IN : TAU_EMPH_OUT);
+            float e = approach(emph[i], eTo, dtTo, eTo > emph[i] ? TAU_EMPH_IN : TAU_EMPH_OUT);
             if (Math.abs(e - eTo) < 0.003f) e = eTo;
             if (e != emph[i]) {
                 emph[i] = e;
@@ -684,8 +729,9 @@ final class LyricView extends View {
                 why |= 64;
             }
             // A line-timed line lights when it is sung, not when the stack arrives a second early.
-            float lTo = on && ms >= l.start ? 1f : 0f;
-            float lv = approach(lit[i], lTo, dt, lTo > lit[i] ? TAU_EMPH_IN : TAU_EMPH_OUT);
+            // Still, it lights with the move: there is no frame a second later to light it in.
+            float lTo = on && (still || ms >= l.start) ? 1f : 0f;
+            float lv = approach(lit[i], lTo, dtTo, lTo > lit[i] ? TAU_EMPH_IN : TAU_EMPH_OUT);
             if (Math.abs(lv - lTo) < 0.003f) lv = lTo;
             if (lv != lit[i]) {
                 lit[i] = lv;
@@ -694,7 +740,7 @@ final class LyricView extends View {
             }
             // Size: the focus at full size, the rest a little smaller, travelling with the scroll.
             float scTo = focused ? 1f : INACTIVE_SCALE;
-            float sc = started ? approach(scale[i], scTo, dt, TAU_SCALE) : scale[i];
+            float sc = started ? approach(scale[i], scTo, dtTo, TAU_SCALE) : scale[i];
             if (Math.abs(sc - scTo) < 0.0005f) sc = scTo;
             if (sc != scale[i]) {
                 scale[i] = sc;
@@ -704,7 +750,7 @@ final class LyricView extends View {
             // Depth: the line leaving goes out of focus fast, the one arriving clears a little
             // slower (about 100ms and 200ms in the frames).
             float bt = blurTarget(i);
-            float b = approach(blur[i], bt, dt, bt > blur[i] ? TAU_BLUR_IN : TAU_BLUR_OUT);
+            float b = approach(blur[i], bt, dtTo, bt > blur[i] ? TAU_BLUR_IN : TAU_BLUR_OUT);
             if (Math.abs(b - bt) < 0.05f) b = bt;
             if (b != blur[i]) {
                 blur[i] = b;
@@ -712,7 +758,7 @@ final class LyricView extends View {
                 why |= 128;
             }
         }
-        if (wordsLive() || dotsLive()) why |= 256;
+        if (!still && (wordsLive() || dotsLive())) why |= 256;
         LockLyrics.setGlowing(glowSoon());
         noteWhy(why);
         return changed || (why & 256) != 0;
@@ -861,8 +907,9 @@ final class LyricView extends View {
             if (blur[i] != blurTarget(i)) return true;
         }
         // The words move every frame while they are being sung - the fill, the lift, a held
-        // note's glow - and the interlude dots breathe for as long as they are up.
-        return wordsLive() || dotsLive();
+        // note's glow - and the interlude dots breathe for as long as they are up. Not in the
+        // AOD's still mode, where they are drawn at rest.
+        return !LockLyrics.still() && (wordsLive() || dotsLive());
     }
 
     /** Inside a frame, that frame's vsync time; outside one, the uptime clock it is based on. */
@@ -1287,6 +1334,7 @@ final class LyricView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
+        LockLyrics.noteStill("draw");
         long t0 = System.nanoTime();
         drawLyrics(canvas);
         long took = System.nanoTime() - t0;
@@ -1359,7 +1407,8 @@ final class LyricView extends View {
         if (ms >= exitEnd) return;
 
         float group = 1f, fade = 1f, u = 0f;
-        if (ms >= appear) {
+        // Still, they sit at rest and unlit: the breath and the lighting are both movement.
+        if (ms >= appear && !LockLyrics.still()) {
             long span = exitStart - appear;
             long t = Math.min(ms, exitStart) - appear;
             u = span <= 0 ? 3f : 3f * t / (float) span;
@@ -1405,7 +1454,10 @@ final class LyricView extends View {
         float sc = scale[i];
         // Pivot on the line's own edge, so a size change does not shift it sideways.
         float pivotX = l.opposite ? lay.getWidth() : 0f;
-        boolean words = l.hasWords() && e > 0f;
+        // In the AOD's still mode a word-timed line is drawn whole, like a line-timed one: a fill
+        // frozen at whatever syllable the one frame caught would be wrong for the whole line.
+        boolean still = LockLyrics.still();
+        boolean words = l.hasWords() && e > 0f && !still;
         int save = canvas.save();
         canvas.translate(x, y);
         canvas.scale(sc, sc, pivotX, 0f);
@@ -1439,7 +1491,7 @@ final class LyricView extends View {
             float t = hi > lo ? clamp01((r - lo) / (hi - lo)) : 0f;
             // A word-timed line that is not the focus is all unsung colour; a line-timed one is
             // lit while it is sung.
-            float w = l.hasWords() ? 0f : lit[i];
+            float w = l.hasWords() && !still ? 0f : lit[i];
             float base = a * (INACTIVE + (1f - INACTIVE) * w);
             if (t < 1f) drawBlurLevel(canvas, i, lo, base * (1f - t), hi, w);
             if (t > 0f) drawBlurLevel(canvas, i, hi, base * t, lo, w);

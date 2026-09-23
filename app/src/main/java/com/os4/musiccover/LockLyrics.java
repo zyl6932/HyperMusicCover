@@ -689,6 +689,8 @@ final class LockLyrics {
         if (wantsAttached()) attach();
         LyricView v = sView;
         if (v != null) v.kick();
+        // A new song or a switch in the still AOD: nothing is shown until the display is let up.
+        if (sStill) drawStill();
         CoverCardLayer.refresh();
     }
 
@@ -809,6 +811,8 @@ final class LockLyrics {
                 + " blur=" + (blurWanted() ? "on" : "off") + "@" + (sBlurSent >>> 1)
                 + " phase=" + ClockCollapse.phase()
                 + " inAod=" + inHeldAod() + " held=" + ClockCollapse.aodHeld()
+                + " still=" + sStill + " display=" + displayState()
+                + " stillLog=[" + sStillLog + "]"
                 + " cardP=" + Main.cardProgress()
                 + " container=" + (c == null ? "none" : c.getAlpha() + "/shown=" + c.isShown())
                 + " card=" + (card == null ? "none" : "shown=" + card.isShown())
@@ -931,7 +935,17 @@ final class LockLyrics {
             long delay = 1000L;
             holdScreen(v);
             updateHdr();
-            if ((Main.screenOnCached() || inHeldAod()) && !sLines.isEmpty()) {
+            updateStill();
+            if (sStill) {
+                // The alarm draws in the still mode, and only the alarm: a frame from here is
+                // drawn with the display held down, where it never reaches the panel - and
+                // re-arming from here moved the alarm on to the next line before it could fire,
+                // so every line was drawn that way (measured: one draw lock in a whole song).
+                if (!sStillWakeSet && !sLines.isEmpty()) {
+                    readState(false);
+                    scheduleStillWake();
+                }
+            } else if ((Main.screenOnCached() || inHeldAod()) && !sLines.isEmpty()) {
                 readState(false);
                 v.kick();
                 if (playing()) {
@@ -945,6 +959,319 @@ final class LockLyrics {
             Main.main().postDelayed(this, delay);
         }
     };
+
+    // ------------------------------------------------------------------ the AOD's still mode
+
+    /**
+     * The full-screen AOD has put the panel into its low-power still mode, and the lyrics are
+     * drawn the way that mode allows: one settled picture per line, cut to, nothing animated.
+     *
+     * How the AOD refreshes, read off com.miui.aod (DozeMachine.State.screenState and
+     * DozeScreenState): the doze starts with the display ON for about 6s, then the plugin asks for
+     * Display.STATE_DOZE_SUSPEND. In that state the panel holds its last frame on its own and the
+     * CPU is free to sleep - which is what froze the lyrics: the tick is a Handler and the view's
+     * frames are vsync callbacks, and neither runs again until something wakes the phone. The OEM's
+     * own clock gets through the same way this does: an exact wake-up alarm at the moment the
+     * picture has to change, and a DRAW_WAKE_LOCK held over the redraw, which the power manager
+     * answers by lifting the display from DOZE_SUSPEND to DOZE until it is let go.
+     *
+     * Latched: the display reads DOZE while our own draw lock is held, and that is not the AOD
+     * leaving its still mode. Cleared only when the doze ends.
+     */
+    private static boolean sStill;
+
+    /**
+     * Measurement only (op stilloff): the still mode is entered as usual but never redraws, so the
+     * lyrics hold still exactly as they did before it existed. Comparing the battery current with
+     * and without it is what prices the per-line redraw.
+     */
+    static volatile boolean sStillOff;
+
+    /**
+     * The redraw is driven by the display, not by a clock: take the lock, wait until the display
+     * is actually in DOZE, draw one frame, wait for that frame to be committed, give the panel
+     * STILL_PANEL_MS to show it, let go. Measured 2026-09-24: DOZE arrives 10-54ms after the lock
+     * and a frame is on the panel 10-20ms after it is ready. The first version held the display up
+     * for a fixed 300ms and drew three frames in it - one before the display was up, one
+     * redundant - and cost about 60mA over the same AOD with the lyrics standing still.
+     */
+    private static final long STILL_PANEL_MS = 40L;
+    /** Drawn anyway if DOZE has not been seen by then; not counted as the frame that was shown. */
+    private static final long STILL_UP_FALLBACK_MS = 100L;
+    /** The lock's own timeout, for whatever step fails to happen. */
+    private static final long STILL_LOCK_MAX_MS = 400L;
+
+    /** The display has been seen in DOZE since the current lock was taken. */
+    private static boolean sStillUp;
+    /** A frame was drawn after that, and releasing waits only on its commit. */
+    private static boolean sStillDrawnUp;
+
+    /** Late by this much on purpose, so the frame lands after the move rather than before it. */
+    private static final long STILL_WAKE_SLACK_MS = 30L;
+
+    /** PowerManager.DRAW_WAKE_LOCK, which the SDK hides. SystemUI holds DEVICE_POWER. */
+    private static final int DRAW_WAKE_LOCK = 0x80;
+
+    private static android.os.PowerManager.WakeLock sDrawLock;
+    private static boolean sStillWakeSet;
+    private static boolean sDisplayWatched;
+
+    /** The lyric view's display state, for the probe: 2 ON, 3 DOZE, 4 DOZE_SUSPEND. */
+    private static int displayState() {
+        LyricView v = sView;
+        android.view.Display d = v == null ? null : v.getDisplay();
+        return d == null ? -1 : d.getState();
+    }
+
+    /**
+     * The still mode's recent events, for the probe: each draw lock, each display state the
+     * listener saw and each frame the view drew, in ms after the lock that preceded it. What it
+     * answers is how long the lock has to be held for a frame to reach the panel.
+     */
+    private static final StringBuilder sStillLog = new StringBuilder();
+    private static long sStillLockAt;
+
+    static void noteStill(String what) {
+        if (!sStill) return;
+        long now = SystemClock.uptimeMillis();
+        if ("acq".equals(what)) {
+            sStillLockAt = now;
+            sStillLog.append(" |");
+        }
+        sStillLog.append(' ').append(what).append('@').append(now - sStillLockAt);
+        if (sStillLog.length() > 1500) sStillLog.delete(0, sStillLog.length() - 1200);
+    }
+
+    /**
+     * Whether the AOD is showing at all. It goes dark on its own while the doze goes on (the
+     * plugin sets Display.STATE_OFF), and the still mode stays latched through that, since the
+     * doze has not ended; waking the phone per line to draw onto a display that is off
+     * was measured going on every few seconds (2026-09-24). The display listener picks it up
+     * again when the AOD comes back.
+     */
+    private static boolean stillVisible() {
+        int s = displayState();
+        return s == android.view.Display.STATE_DOZE || s == android.view.Display.STATE_DOZE_SUSPEND;
+    }
+
+    /** Whether the lyrics are in the AOD's still mode. The view settles instead of animating. */
+    static boolean still() {
+        return sStill;
+    }
+
+    /**
+     * The next move, two ways at once. The alarm alone was not enough: the alarm manager holds
+     * every app uid's alarms at least min_futurity (5s here) out, SystemUI's included, so a fast
+     * song moved on only every 5s. The handler is exact and runs whenever the CPU is up - which
+     * it is for as long as music plays, measured - and the alarm is the floor for a CPU that
+     * went to sleep anyway. Whichever comes first draws, and sets both again.
+     */
+    private static final android.app.AlarmManager.OnAlarmListener STILL_WAKE =
+            new android.app.AlarmManager.OnAlarmListener() {
+                @Override
+                public void onAlarm() {
+                    onStillWake("al");
+                }
+            };
+
+    private static final Runnable STILL_WAKE_NOW = new Runnable() {
+        @Override
+        public void run() {
+            onStillWake("h");
+        }
+    };
+
+    /** When the wake that is set is due, so the log can say how late it came and by which way. */
+    private static long sStillDueAt;
+
+    private static void onStillWake(String by) {
+        noteStill(by + "+" + (SystemClock.uptimeMillis() - sStillDueAt));
+        cancelStillWake();
+        updateStill();
+        if (sStill) drawStill();
+    }
+
+    /**
+     * The display changing state is when the still mode starts, and the picture it holds from
+     * then on is whatever the last frame happened to be - often a line half way through its
+     * scroll. Caught here so a settled one replaces it at once, not at the next line.
+     */
+    private static void watchDisplay() {
+        if (sDisplayWatched || Main.sAppCtx == null) return;
+        try {
+            android.hardware.display.DisplayManager dm = Main.sAppCtx.getSystemService(
+                    android.hardware.display.DisplayManager.class);
+            dm.registerDisplayListener(new android.hardware.display.DisplayManager.DisplayListener() {
+                @Override
+                public void onDisplayAdded(int id) {
+                }
+
+                @Override
+                public void onDisplayRemoved(int id) {
+                }
+
+                @Override
+                public void onDisplayChanged(int id) {
+                    LyricView v = sView;
+                    android.view.Display d = v == null ? null : v.getDisplay();
+                    if (d == null || d.getDisplayId() != id) return;
+                    noteStill("s" + d.getState());
+                    if (d.getState() == android.view.Display.STATE_DOZE && sDrawLock != null
+                            && sDrawLock.isHeld() && !sStillUp) {
+                        sStillUp = true;
+                        drawStillFrame();
+                    }
+                    boolean was = sStill;
+                    updateStill();
+                    // Entering, and coming back after the AOD went dark: either way nothing is
+                    // set to wake it, and the picture on the panel is whatever was there last.
+                    // Not on every 3/4 flip - our own draw lock makes those, with a wake set.
+                    if (sStill && (!was || (!sStillWakeSet && playing() && stillVisible()))) {
+                        drawStill();
+                    }
+                }
+            }, Main.main());
+            sDisplayWatched = true;
+        } catch (Throwable t) {
+            Xp.log(TAG + "display listener failed: " + t);
+        }
+    }
+
+    /** Enters the still mode when the display has gone to DOZE_SUSPEND, leaves it with the doze. */
+    private static void updateStill() {
+        watchDisplay();
+        if (!inHeldAod()) {
+            if (sStill) {
+                sStill = false;
+                cancelStillWake();
+                Xp.log(TAG + "AOD still mode off");
+                LyricView v = sView;
+                if (v != null) v.kick();
+            }
+            return;
+        }
+        if (sStill) return;
+        LyricView v = sView;
+        android.view.Display d = v == null ? null : v.getDisplay();
+        if (d != null && d.getState() == android.view.Display.STATE_DOZE_SUSPEND) {
+            sStill = true;
+            Xp.log(TAG + "AOD still mode on");
+        }
+    }
+
+    /** One settled frame, with the display let up long enough to show it; then the next wake. */
+    private static void drawStill() {
+        if (sStillOff || !stillVisible()) return;
+        LyricView v = sView;
+        if (v == null || !v.isAttachedToWindow()) return;
+        try {
+            if (sDrawLock == null) {
+                android.os.PowerManager pm = Main.sAppCtx.getSystemService(
+                        android.os.PowerManager.class);
+                sDrawLock = pm.newWakeLock(DRAW_WAKE_LOCK, "MusicCover:lyricDraw");
+                sDrawLock.setReferenceCounted(false);
+            }
+            sDrawLock.acquire(STILL_LOCK_MAX_MS);
+            noteStill("acq");
+        } catch (Throwable t) {
+            Xp.log(TAG + "draw wake lock failed: " + t);
+        }
+        readState(true);
+        sStillDrawnUp = false;
+        Main.main().removeCallbacks(STILL_UP_FALLBACK);
+        Main.main().removeCallbacks(STILL_RELEASE);
+        // Already up - the OEM's own lock can be holding it there - or not yet, in which case the
+        // display listener draws the moment it is.
+        sStillUp = displayState() == android.view.Display.STATE_DOZE;
+        if (sStillUp) {
+            drawStillFrame();
+        } else {
+            Main.main().postDelayed(STILL_UP_FALLBACK, STILL_UP_FALLBACK_MS);
+        }
+        scheduleStillWake();
+    }
+
+    /**
+     * The one frame, and once it is committed the release. Only a frame drawn with the display up
+     * releases the lock early; the fallback's frame may never have reached the panel, so after it
+     * the lock waits for the display to come up and draw again, or runs out.
+     */
+    private static void drawStillFrame() {
+        LyricView v = sView;
+        if (v == null || !v.isAttachedToWindow() || sStillDrawnUp) return;
+        final boolean up = sStillUp;
+        sStillDrawnUp = up;
+        Main.main().removeCallbacks(STILL_UP_FALLBACK);
+        v.getViewTreeObserver().registerFrameCommitCallback(new Runnable() {
+            @Override
+            public void run() {
+                noteStill(up ? "commit" : "commit-early");
+                if (up) Main.main().postDelayed(STILL_RELEASE, STILL_PANEL_MS);
+            }
+        });
+        v.redraw();
+    }
+
+    private static final Runnable STILL_UP_FALLBACK = new Runnable() {
+        @Override
+        public void run() {
+            noteStill("fallback");
+            drawStillFrame();
+        }
+    };
+
+    private static final Runnable STILL_RELEASE = new Runnable() {
+        @Override
+        public void run() {
+            android.os.PowerManager.WakeLock l = sDrawLock;
+            if (l != null && l.isHeld()) {
+                l.release();
+                noteStill("rel");
+            }
+        }
+    };
+
+    /** A wake at the next moment the stack moves, or none if it will not. See STILL_WAKE. */
+    private static void scheduleStillWake() {
+        LyricView v = sView;
+        if (!sStill || sStillOff || v == null || sLines.isEmpty() || !playing()
+                || !stillVisible()) {
+            cancelStillWake();
+            return;
+        }
+        int pos = positionMs();
+        long at = v.nextMoveAfter(pos);
+        if (at < 0) {
+            cancelStillWake();
+            return;
+        }
+        long delay = at - pos + STILL_WAKE_SLACK_MS;
+        Main.main().removeCallbacks(STILL_WAKE_NOW);
+        Main.main().postDelayed(STILL_WAKE_NOW, delay);
+        sStillDueAt = SystemClock.uptimeMillis() + delay;
+        sStillWakeSet = true;
+        try {
+            android.app.AlarmManager am = Main.sAppCtx.getSystemService(
+                    android.app.AlarmManager.class);
+            // Replaces the one already set: the same listener is one alarm.
+            am.setExact(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + delay, "MusicCover:lyric", STILL_WAKE,
+                    Main.main());
+            sStillWakeSet = true;
+        } catch (Throwable t) {
+            Xp.log(TAG + "still wake failed: " + t);
+        }
+    }
+
+    private static void cancelStillWake() {
+        if (!sStillWakeSet) return;
+        sStillWakeSet = false;
+        Main.main().removeCallbacks(STILL_WAKE_NOW);
+        try {
+            Main.sAppCtx.getSystemService(android.app.AlarmManager.class).cancel(STILL_WAKE);
+        } catch (Throwable ignored) {
+        }
+    }
 
     /**
      * Keeps the lock screen lit while the lyrics are playing, and lets it sleep again once they

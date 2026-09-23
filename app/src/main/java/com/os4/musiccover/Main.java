@@ -2156,6 +2156,14 @@ public class Main extends XposedModule {
                         // (2026-09-16 04:10) spent its last seconds in removeCallbacksAndMessages,
                         // which is only slow over a very long queue - this says whose it is.
                         setResultData(looperCensus());
+                    } else if ("stilloff".equals(op)) {
+                        LockLyrics.sStillOff = i.getBooleanExtra("on", !LockLyrics.sStillOff);
+                        setResultData("still redraws " + (LockLyrics.sStillOff ? "off" : "on"));
+                    } else if ("frames".equals(op)) {
+                        // Who is asking the main thread for frames. The keyguard window was
+                        // found rendering at 60fps through the AOD's still mode (2026-09-24)
+                        // with nothing of the lyrics moving.
+                        setResultData(frameCensus());
                     } else if ("slowlog".equals(op)) {
                         // The framework's own slow-message log on the main looper: every message
                         // that takes longer than `ms` to run is logged under the tag Looper with
@@ -9310,6 +9318,147 @@ public class Main extends XposedModule {
                 }
             }
         });
+    }
+
+    /**
+     * Every callback queued on the main thread's Choreographer and every animator its
+     * AnimationHandler is running, by class - a view asking for frames forever shows up here as
+     * the same entry on every read.
+     */
+    private static String frameCensus() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            Object ch = android.view.Choreographer.getInstance();
+            Object[] queues = (Object[]) reflectField(ch, "mCallbackQueues");
+            for (int q = 0; q < queues.length; q++) {
+                for (Object rec = reflectField(queues[q], "mHead"); rec != null;
+                     rec = reflectField(rec, "next")) {
+                    Object action = reflectField(rec, "action");
+                    sb.append(" q").append(q).append('=').append(censusName(action));
+                    Object vri = action == null ? null : reflectField(action, "this$0");
+                    if (vri != null && vri.getClass().getName().equals("android.view.ViewRootImpl")) {
+                        describeDirty(vri, sb);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            sb.append(" choreographer: ").append(t);
+        }
+        try {
+            Object h = Class.forName("android.animation.AnimationHandler")
+                    .getMethod("getInstance").invoke(null);
+            for (Object cb : (java.util.List<?>) reflectField(h, "mAnimationCallbacks")) {
+                if (cb == null) continue;
+                sb.append(" anim=").append(censusName(cb));
+                if (cb instanceof android.animation.ObjectAnimator) {
+                    sb.append(" target=").append(
+                            censusName(((android.animation.ObjectAnimator) cb).getTarget()));
+                }
+                if (cb instanceof android.animation.AnimatorSet) {
+                    for (android.animation.Animator a
+                            : ((android.animation.AnimatorSet) cb).getChildAnimations()) {
+                        sb.append(" child=").append(censusName(a));
+                        if (a instanceof android.animation.ObjectAnimator) {
+                            sb.append("->").append(censusName(
+                                    ((android.animation.ObjectAnimator) a).getTarget()));
+                        }
+                        sb.append(" running=").append(a.isRunning());
+                    }
+                }
+                if (cb instanceof android.animation.ValueAnimator) {
+                    android.animation.ValueAnimator va = (android.animation.ValueAnimator) cb;
+                    sb.append(" dur=").append(va.getDuration())
+                            .append(" repeat=").append(va.getRepeatCount());
+                    Object ls = reflectField(va, "mUpdateListeners");
+                    if (ls instanceof java.util.List) {
+                        for (Object l : (java.util.List<?>) ls) {
+                            sb.append(" upd=").append(censusName(l));
+                        }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            sb.append(" animators: ").append(t);
+        }
+        return sb.length() == 0 ? "nothing queued" : sb.toString();
+    }
+
+    /**
+     * The window a traversal is queued for, and the deepest views in it that asked for one: the
+     * ones marked invalidated (PFLAG_INVALIDATED) or waiting on a layout, with no child that is.
+     * A view that invalidates itself from its own draw is the one left standing on every read.
+     */
+    private static void describeDirty(Object vri, StringBuilder sb) {
+        try {
+            Object lp = reflectField(vri, "mWindowAttributes");
+            if (lp instanceof android.view.WindowManager.LayoutParams) {
+                sb.append(" window=").append(((android.view.WindowManager.LayoutParams) lp).getTitle());
+            }
+            sb.append(" layoutReq=").append(reflectField(vri, "mLayoutRequested"));
+            Object root = reflectField(vri, "mView");
+            if (root instanceof View) {
+                java.util.List<String> hits = new java.util.ArrayList<>();
+                collectDirty((View) root, hits);
+                sb.append(" dirty=").append(hits);
+            }
+        } catch (Throwable t) {
+            sb.append(" dirty: ").append(t);
+        }
+    }
+
+    /** @return whether this view or anything under it is dirty */
+    private static boolean collectDirty(View v, java.util.List<String> hits) {
+        // A view that is not visible keeps its flags from whenever it was hidden, and draws
+        // nothing: it cannot be what the window is redrawing for.
+        if (v.getVisibility() != View.VISIBLE) return false;
+        boolean below = false;
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) below |= collectDirty(g.getChildAt(i), hits);
+        }
+        int flags = 0;
+        try {
+            Object f = reflectField(v, "mPrivateFlags");
+            if (f instanceof Integer) flags = (Integer) f;
+        } catch (Throwable ignored) {
+        }
+        boolean invalidated = (flags & 0x80000000) != 0;
+        boolean layout = v.isLayoutRequested();
+        if ((invalidated || layout) && !below && hits.size() < 20) {
+            String id = "";
+            try {
+                if (v.getId() != View.NO_ID) id = "#" + v.getResources().getResourceEntryName(v.getId());
+            } catch (Throwable ignored) {
+            }
+            hits.add(v.getClass().getName() + id + (invalidated ? "(inv)" : "") + (layout ? "(lay)" : "")
+                    + (v.isShown() ? "" : "(hidden)"));
+        }
+        return below || invalidated || layout;
+    }
+
+    /** A class name, and the outer instance's for an anonymous or inner one. */
+    private static String censusName(Object o) {
+        if (o == null) return "null";
+        String n = o.getClass().getName();
+        try {
+            Object outer = reflectField(o, "this$0");
+            if (outer != null) n += "<" + outer.getClass().getName();
+        } catch (Throwable ignored) {
+        }
+        return n;
+    }
+
+    /** A field by name anywhere up the class chain, or null when there is none. */
+    private static Object reflectField(Object o, String name) throws IllegalAccessException {
+        for (Class<?> k = o.getClass(); k != null; k = k.getSuperclass()) {
+            try {
+                java.lang.reflect.Field f = k.getDeclaredField(name);
+                f.setAccessible(true);
+                return f.get(o);
+            } catch (NoSuchFieldException ignored) {
+            }
+        }
+        return null;
     }
 
     /** Whether a class declares this field at all - getObjectField throws when it does not. */
