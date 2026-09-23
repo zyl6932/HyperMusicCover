@@ -49,7 +49,7 @@ final class AppleLyrics {
      * previous build - and a change that only shows up as a line NOT being logged looks
      * identical to not having loaded at all. It cost a round trip once.
      */
-    private static final String BUILD = "bg-1";
+    private static final String BUILD = "duet-other-1";
 
     /** The player's package, and the only process this class ever runs in. */
     static final String PKG = "com.apple.android.music";
@@ -182,9 +182,9 @@ final class AppleLyrics {
     /** A built song: read it, turn it into a payload, and get it onto the session. */
     private static void onSong(Object song) {
         String id = str(call(song, "getAdamId"));
-        List<String> voices = readVoices(song);
-        note("agents: " + describeAgents(song) + " -> voices=" + voices);
         List<Line> lines = readLines(song);
+        List<String> voices = readVoices(song, lines);
+        note("agents: " + describeAgents(song) + " -> voices=" + voices);
         if (lines.isEmpty()) {
             note("song " + id + " built with no lines");
             return;
@@ -271,26 +271,76 @@ final class AppleLyrics {
      * The song's singers, in the order Apple lists them.
      *
      * A duet is not marked on the line - the line names an agent, and whether that means the
-     * left or the right side is decided here, by which of the song's people it is. Only people
-     * count: a song's agents also include groups and characters, and a lyric credited to a band
-     * and one of its members is not a duet, it is one voice.
+     * left or the right side is decided here. The lead is the first person. The answering voice
+     * is the next agent that is not a group and actually sings a line: a lyric credited to a band
+     * and one of its members is still not a duet, it is one voice, and that is the case the group
+     * exclusion is for.
+     *
+     * It used to be people only, and Apple does not always call the second voice a person: 于是
+     * (G.E.M.) names its agents {Person v1} {Other v2000}, so the duet came out as one voice and
+     * replaced the AMLL copy - which does split it - a second after the track started
+     * (2026-09-24).
      *
      * Two is the whole vocabulary. Apple can name more, the lock screen has two sides, and a
      * third voice would have to share one of them - so anything past the second is left on the
      * default side rather than being given a side at random.
      */
-    private static List<String> readVoices(Object song) {
+    private static List<String> readVoices(Object song, List<Line> lines) {
         List<String> out = new ArrayList<>();
-        for (Object a : vector(call(song, "getAgents"))) {
+        List<Object> agents = vector(call(song, "getAgents"));
+        for (Object a : agents) {
             if (!person(call(a, "getType"))) {
                 continue;
             }
             String id = str(call(a, "getId"));
-            if (id != null && !id.isEmpty() && !out.contains(id)) {
+            if (id != null && !id.isEmpty()) {
                 out.add(id);
+                break;
+            }
+        }
+        for (Object a : agents) {
+            Object type = call(a, "getType");
+            if (group(type)) {
+                continue;
+            }
+            String id = str(call(a, "getId"));
+            if (id == null || id.isEmpty() || out.contains(id) || !sings(id, lines)) {
+                continue;
+            }
+            if (out.isEmpty()) {
+                out.add(id);
+            } else {
+                out.add(id);
+                break;
             }
         }
         return out;
+    }
+
+    /** Whether any line is credited to this agent. */
+    private static boolean sings(String id, List<Line> lines) {
+        for (Line l : lines) {
+            if (id.equals(l.agent)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether an agent is a group - the band, or everyone together - however the build says so.
+     *
+     * Only the enum's name is known (the vector hands over enums, measured). A number is a build
+     * this has not seen, and there only a person counts, which is how voices were read before.
+     */
+    private static boolean group(Object type) {
+        if (type == null) {
+            return false;
+        }
+        if (type instanceof Number) {
+            return ((Number) type).longValue() != AGENT_PERSON;
+        }
+        return "Group".equalsIgnoreCase(type.toString().trim());
     }
 
     /**
