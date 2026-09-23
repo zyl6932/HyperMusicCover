@@ -2601,6 +2601,11 @@ public class Main extends XposedModule {
                         dumpGeom();
                     } else if ("ink".equals(op)) {
                         dumpInk();
+                    } else if ("alphasweep".equals(op)) {
+                        // --ei ms N starts a sweep; without it, reads the last one back.
+                        int ms = i.getIntExtra("ms", 0);
+                        if (ms > 0) MotionTrace.startAlphaSweep(ms);
+                        setResultData(MotionTrace.sSweep);
                     } else if ("motiontrace".equals(op)) {
                         MotionTrace.arm(i.getIntExtra("n", 4));
                     } else if ("geomtrace".equals(op)) {
@@ -6152,7 +6157,8 @@ public class Main extends XposedModule {
         }
         CoverCardStyle.Rect r = sCoverCardStyle.place(layer.getWidth(), layer.getHeight(),
                 layer.getResources().getDisplayMetrics().density,
-                ClockCollapse.contentBottomOnScreen() - xy[1], mediaTop - xy[1]);
+                ClockCollapse.contentBottomFor(layer) - xy[1],
+                ClockCollapse.unzoomY(layer, mediaTop) - xy[1]);
         return r == null ? null : CoverMorphMotion.cardBox(xy[0] + r.x,
                 xy[1] + r.y, r.side, CoverCardLayer.renderedScale(layer),
                 CoverCardStyle.aspect(art.getWidth(), art.getHeight()));

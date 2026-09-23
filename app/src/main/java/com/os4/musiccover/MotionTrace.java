@@ -85,6 +85,91 @@ final class MotionTrace {
         });
     }
 
+    /**
+     * Which view the OEM fades, and by how much: for ms milliseconds, every frame, the alpha and
+     * transitionAlpha of each view from a few leaves (the media card, the clock, our square) up
+     * to the window, keeping each one's minimum. Read back with `op alphasweep` after the fact -
+     * a swipe is over long before anyone could ask about it while it happened.
+     */
+    static void startAlphaSweep(final int ms) {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            sSweep = "running";
+            Main.main().post(new Runnable() {
+                @Override
+                public void run() {
+                    startAlphaSweep(ms);
+                }
+            });
+            return;
+        }
+        View base = Main.sContainer;
+        if (base == null) {
+            sSweep = "no container";
+            return;
+        }
+        final View root = base.getRootView();
+        final String[] leaves = {"mi_media_controls", "time_group", "keyguard_background_layer",
+                "keyguard_bottom_area", "keyguard_foreground_layer"};
+        final View[] from = new View[leaves.length];
+        for (int i = 0; i < leaves.length; i++) {
+            int id = root.getResources().getIdentifier(leaves[i], "id", "com.android.systemui");
+            from[i] = id == 0 ? null : Main.findLockScreenView(leaves[i]);
+        }
+        final java.util.LinkedHashMap<View, float[]> mins = new java.util.LinkedHashMap<>();
+        final long t0 = System.nanoTime();
+        sSweep = "running";
+        Choreographer.getInstance().postFrameCallback(new Choreographer.FrameCallback() {
+            int frames;
+
+            @Override
+            public void doFrame(long frameTimeNanos) {
+                frames++;
+                for (View leaf : from) {
+                    for (View v = leaf; v != null;
+                         v = v.getParent() instanceof View ? (View) v.getParent() : null) {
+                        float[] m = mins.get(v);
+                        if (m == null) {
+                            m = new float[]{1f, 1f, 1f, 0f};
+                            mins.put(v, m);
+                        }
+                        m[0] = Math.min(m[0], v.getAlpha());
+                        m[1] = Math.min(m[1], v.getTransitionAlpha());
+                        if (v.getScaleY() < m[2]) {
+                            m[2] = v.getScaleY();
+                            m[3] = v.getPivotY();
+                        }
+                    }
+                }
+                if ((System.nanoTime() - t0) / 1000000L < ms) {
+                    Choreographer.getInstance().postFrameCallback(this);
+                    return;
+                }
+                StringBuilder sb = new StringBuilder("frames=").append(frames);
+                for (int i = 0; i < from.length; i++) {
+                    sb.append(" || ").append(leaves[i]).append(from[i] == null ? " (none)" : ":");
+                    for (View v = from[i]; v != null;
+                         v = v.getParent() instanceof View ? (View) v.getParent() : null) {
+                        float[] m = mins.get(v);
+                        String id = v.getClass().getSimpleName();
+                        try {
+                            if (v.getId() != View.NO_ID) id = v.getResources().getResourceEntryName(v.getId());
+                        } catch (Throwable ignored) {
+                        }
+                        sb.append(' ').append(id);
+                        if (m != null && (m[0] < 0.995f || m[1] < 0.995f || m[2] < 0.995f)) {
+                            sb.append("[a=").append(r2(m[0])).append(" ta=").append(r2(m[1]))
+                              .append(" s=").append(r3(m[2])).append(" py=").append(Math.round(m[3]))
+                              .append(']');
+                        }
+                    }
+                }
+                sSweep = sb.toString();
+            }
+        });
+    }
+
+    static volatile String sSweep = "never run";
+
     private static String r1(float v) {
         return String.valueOf(Math.round(v * 10f) / 10f);
     }

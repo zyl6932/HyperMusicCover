@@ -481,6 +481,8 @@ final class LyricView extends View {
 
         boolean changed = followAodDim();
         changed |= followBouncer(dt);
+        // Before the band below, which reads this view's scale.
+        changed |= followSwipeZoom();
         int why = 0;
         // The AOD's still mode: every frame here is one the display was let up for, and the next
         // is a line away, so nothing eases - each value is put where it is heading. See
@@ -826,7 +828,7 @@ final class LyricView extends View {
      * for frame, and looked up again whenever it is not attached - the keyguard is rebuilt.
      */
     private float dimTarget() {
-        if (!LockLyrics.inHeldAod()) return 1f;
+        if (!LockLyrics.inHeldAod()) return swipeFade();
         View s = dimSource;
         if (s == null || !s.isAttachedToWindow()) {
             View root = getRootView();
@@ -836,6 +838,89 @@ final class LyricView extends View {
             dimSource = s;
         }
         return s == null ? 1f : s.getTransitionAlpha();
+    }
+
+    /**
+     * The media card's container, whose fade and zoom a swipe up puts on the media card and not
+     * on this layer - see swipeFade and followSwipeZoom.
+     */
+    private View swipeSource;
+
+    private View swipeSource() {
+        View s = swipeSource;
+        if (s == null || !s.isAttachedToWindow()) {
+            View root = getRootView();
+            int id = getContext().getResources()
+                    .getIdentifier("shared_notification_container", "id", "com.android.systemui");
+            s = id == 0 || root == null ? null : root.findViewById(id);
+            swipeSource = s;
+        }
+        return s;
+    }
+
+    /**
+     * The swipe's fade, taken from the media card's, as the square card does
+     * (CoverCardLayer.followSwipeFade): the OEM fades the media card's and the clock's containers
+     * through transitionAlpha, and nothing above this layer (`op alphasweep`, 2026-09-24). Under
+     * the pad the lyrics stay and blur instead (followBouncer). Not in the doze: the doze clock
+     * is not fading, and a held doze dims through keyguard_info_layer above.
+     */
+    private float swipeFade() {
+        if (ClockCollapse.phase() == ClockCollapse.Phase.AOD) return 1f;
+        View s = swipeSource();
+        return s == null ? 1f : Math.max(s.getTransitionAlpha(), bouncerP);
+    }
+
+    /**
+     * The swipe's zoom, taken from the media card's. A swipe up scales the media card's container
+     * (0.943 about y=1043 in that sweep) and not this layer, so the text kept its size while the
+     * clock and the card shrank round it. This view gets the part of the container's scale its
+     * own ancestors lack, about the same point on screen - 1 whenever the two agree, which is
+     * the doze, where both carry the keyguard's 0.95. The band is laid out through
+     * ClockCollapse.unzoomY, which reads this view's own scale too, so the lines still sit
+     * against the clock as drawn.
+     */
+    private boolean followSwipeZoom() {
+        float want = 1f, pivotX = getPivotX(), pivotY = getPivotY();
+        View s = ClockCollapse.phase() == ClockCollapse.Phase.AOD ? null : swipeSource();
+        if (s != null && getParent() instanceof View) {
+            View parent = (View) getParent();
+            float sc = chainScaleY(s), sp = chainScaleY(parent);
+            if (sp > 0f && Math.abs(sc / sp - 1f) > 1e-3f) {
+                want = sc / sp;
+                // The container's pivot on screen, and where that point is in this view.
+                s.getLocationOnScreen(loc);
+                float sx = loc[0] + chainScaleX(s) * s.getPivotX();
+                float sy = loc[1] + sc * s.getPivotY();
+                parent.getLocationOnScreen(loc);
+                float spx = chainScaleX(parent);
+                pivotX = spx > 0f ? (sx - loc[0]) / spx - getLeft() - getTranslationX() : pivotX;
+                pivotY = (sy - loc[1]) / sp - getTop() - getTranslationY();
+            }
+        }
+        if (getScaleY() == want && (want == 1f
+                || (getPivotX() == pivotX && getPivotY() == pivotY))) {
+            return false;
+        }
+        if (want != 1f) {
+            setPivotX(pivotX);
+            setPivotY(pivotY);
+        }
+        setScaleX(want);
+        setScaleY(want);
+        return true;
+    }
+
+    private static float chainScaleY(View v) {
+        float k = 1f;
+        for (Object p = v; p instanceof View; p = ((View) p).getParent()) k *= ((View) p).getScaleY();
+        return k;
+    }
+
+    private static float chainScaleX(View v) {
+        float k = 1f;
+        for (Object p = v; p instanceof View; p = ((View) p).getParent()) k *= ((View) p).getScaleX();
+        return k;
     }
 
     /** @return whether it moved, so a dim of the keyguard keeps this view asking for frames */
@@ -1247,12 +1332,14 @@ final class LyricView extends View {
         // Two getLocationOnScreen walks a frame are not free, and this runs from the keyguard's
         // pre-draw: nothing to show, nothing to measure.
         if (lines.isEmpty() && show == 0f) return false;
-        float clock = ClockCollapse.contentBottomOnScreen();
+        // Both edges as drawn, in this view's unzoomed frame: a swipe zooms the clock's and the
+        // card's containers and not this layer. See ClockCollapse.contentBottomFor.
+        float clock = ClockCollapse.contentBottomFor(this);
         // The band's own lower edge, not the card view: the lock screen's media card can be hidden
         // for a whole song - the music capsule hides it outright, see
         // LockLyrics.bandBottomOnScreen() - and when it is, the band fills the block the card
         // would have taken rather than stopping above a card nobody is drawing.
-        float floor = LockLyrics.bandBottomOnScreen();
+        float floor = ClockCollapse.unzoomY(this, LockLyrics.bandBottomOnScreen());
         boolean ok = false;
         float top = bandTop, bottom = bandBottom;
         if (!Float.isNaN(clock) && isAttachedToWindow()) {

@@ -251,10 +251,9 @@ final class ClockCollapse {
      * contentBottomOnScreen(), but where it is actually drawn right now: the ink box and the
      * signature bars mapped through every view's own transform up to the window.
      *
-     * The pose is written in the lock screen's own pixels, and outside a doze those are the
-     * screen's. Inside one the OEM zooms and shifts the clock's ancestors on top of the pose, so
-     * the pose's bottom says 515 while the digits end at 491 (measured 2026-09-24) - which is what
-     * whoever has to sit against the dozing clock needs.
+     * The pose is in unzoomed pixels, and outside the OEM's zooms those are the screen's. Inside
+     * a doze or a swipe the zooms move the clock off its pose - which is what whoever has to sit
+     * against the clock needs to know. See also contentBottomFor.
      */
     static float contentBottomDrawn() {
         View g = firstTarget();
@@ -269,6 +268,37 @@ final class ClockCollapse {
             if (b > bottom) bottom = b;
         }
         return bottom;
+    }
+
+    /**
+     * contentBottomOnScreen(), as it is drawn, taken into v's own unzoomed frame: v's screen
+     * origin plus the drawn distance over the scale v is drawn at. Subtract v's screen origin and
+     * it is in v's coordinates.
+     *
+     * For whoever lays out against the clock from outside its tree. The pose is in unzoomed
+     * pixels (parentTop), and the zooms on the clock's side are not all on theirs - a swipe
+     * scales the clock's container but not keyguard_background_layer or the foreground layer -
+     * so only the drawn clock is one they can sit against. Mapped from the pose through the
+     * clock's ANCESTORS, which are the OEM's and already this frame's, rather than read off the
+     * clock's own transform, which this frame's pre-draw may not have written yet.
+     */
+    static float contentBottomFor(View v) {
+        float pose = contentBottomOnScreen();
+        if (Float.isNaN(pose)) return Float.NaN;
+        View g = firstTarget();
+        if (g == null || !(g.getParent() instanceof View)) return pose;
+        View parent = (View) g.getParent();
+        float drawn = drawnY(parent, 0f, 0f) + chainScaleY(parent) * (pose - parentTop(g));
+        return unzoomY(v, drawn);
+    }
+
+    /** A drawn screen y taken into v's unzoomed frame; see contentBottomFor. */
+    static float unzoomY(View v, float screenY) {
+        if (v == null || Float.isNaN(screenY)) return screenY;
+        float k = chainScaleY(v);
+        if (k <= 0f) return screenY;
+        v.getLocationOnScreen(LOC);
+        return LOC[1] + (screenY - LOC[1]) / k;
     }
 
     /** Where a point in a view's own coordinates is drawn on screen, every transform included. */
@@ -1568,10 +1598,30 @@ final class ClockCollapse {
 
     private static final Live LIVE = new Live();
 
+    /**
+     * Where v's parent's origin would be on screen with every scale above it at 1 - translations
+     * kept. The pixels every pose is in.
+     *
+     * Scales are the OEM's zooms: 0.95 on keyguard_root_view through a doze, and a swipe up puts
+     * 0.95 there and 0.943 on the clock's and the notifications' containers besides (`op
+     * alphasweep`, 2026-09-24). A pose in these pixels is scaled by them exactly as the OEM's own
+     * clock would be, about their own pivots. It used to be the parent's DRAWN origin plus
+     * unzoomed offsets, which scales about the parent's top instead: fitted off a recording, the
+     * media card went 0.91 about y=1044 and the clock 0.91 about y=111 - up 24px while
+     * everything else came in - reported as 上滑时时钟的轨迹跟封面和媒体卡片不同, and in the
+     * held doze as 时钟往上移而不是向内缩.
+     */
     private static float parentTop(View v) {
         if (!(v.getParent() instanceof View)) return 0f;
-        ((View) v.getParent()).getLocationOnScreen(LOC);
-        return LOC[1];
+        float y = 0f;
+        View p = (View) v.getParent();
+        while (p.getParent() instanceof View) {
+            View pp = (View) p.getParent();
+            y += p.getTop() + p.getTranslationY() - pp.getScrollY();
+            p = pp;
+        }
+        p.getLocationOnScreen(LOC);
+        return y + LOC[1];
     }
 
     /**
@@ -1603,38 +1653,6 @@ final class ClockCollapse {
     private static float aboveScaleY(View v) {
         return v.getParent() instanceof View ? chainScaleY((View) v.getParent()) : 1f;
     }
-
-    /**
-     * How far the ancestors' scales move this view's parent on screen: its drawn origin less the
-     * one it would have with every scale above it at 1, translations kept in both.
-     *
-     * A pose held still in writePose's pixels is drawn at P + above * (pose - P), P being the
-     * parent's drawn origin - a zoom about the parent's top. Adding this to the pose turns it
-     * into the zoom the keyguard applies to everything else, about its own pivot. 0 whenever
-     * nothing above is scaled.
-     */
-    private static float zoomLift(View v) {
-        if (v == null || !(v.getParent() instanceof View)) return 0f;
-        float[] pt = PT;
-        pt[0] = 0f;
-        pt[1] = 0f;
-        float flat = 0f;
-        View cur = (View) v.getParent();
-        while (true) {
-            android.graphics.Matrix mx = cur.getMatrix();
-            if (!mx.isIdentity()) mx.mapPoints(pt);
-            pt[1] += cur.getTop();
-            flat += cur.getTop() + cur.getTranslationY();
-            if (!(cur.getParent() instanceof View)) break;
-            View p = (View) cur.getParent();
-            pt[1] -= p.getScrollY();
-            flat -= p.getScrollY();
-            cur = p;
-        }
-        return pt[1] - flat;
-    }
-
-    private static final float[] PT = new float[2];
 
     private static View firstTarget() {
         for (View root : Main.clockRoots()) {
@@ -1739,21 +1757,13 @@ final class ClockCollapse {
                 // lock screen was showing rather than the doze's own - see sAodHoldY. Cheap: hold()
                 // only reaches the OEM when the value is news, so this is one notifStateChange.
                 if (!Float.isNaN(sAodHoldY)) hold(sAodHoldY);
-                // Shifted by the doze zoom, so the held clock goes IN with the rest of the screen.
-                // writePose's pixels are the parent's zoomed origin plus unzoomed offsets, so a
-                // pose held still in them shrinks about the parent's top, not the zoom's pivot:
-                // measured, digits ending at 491 while the screen around them put them at ~550,
-                // reported as 进入全屏息屏时时钟往上移而不是向内缩. The shift is the parent's
-                // drawn origin less its unzoomed one - 0 on the lock screen, and it follows the
-                // zoom frame by frame on the way down.
-                float top = sFromTop + zoomLift(firstTarget());
-                float date = m.date == null ? sFromDate : sFromDate + zoomLift(m.date);
-                writePose(m, top, sFromUnit, date, false);
-                // The wake starts from what is on screen, which is this pose - shifted, so the
-                // first frame of the wake is drawn where the doze's last one was.
-                sAodTop = top;
+                // Held still in the unzoomed pixels, so the doze's zoom takes it in with the rest
+                // of the screen - see parentTop().
+                writePose(m, sFromTop, sFromUnit, sFromDate, false);
+                // The wake starts from what is on screen, which is this pose.
+                sAodTop = sFromTop;
                 sAodUnit = sFromUnit;
-                sAodDate = date;
+                sAodDate = sFromDate;
                 return;
             } else {
                 // The OEM's clock as it is. What it looks like here is the wake's start.
@@ -1925,7 +1935,8 @@ final class ClockCollapse {
 
     /**
      * Puts one pose on the clock: the ink top, the height of one row of digits, and the top of
-     * the date, all in screen pixels, mapped onto whatever the OEM is about to draw.
+     * the date, all in unzoomed screen pixels (parentTop), mapped onto whatever the OEM is about
+     * to draw.
      *
      * The single place the clock's views are moved. The mapping is absolute rather than relative -
      * the translation is measured from the box about to be drawn to the pose asked for - so
@@ -1936,18 +1947,14 @@ final class ClockCollapse {
      */
     private static void writePose(Live m, float top, float unit, float date, boolean holdWidth) {
         // A pose is in the lock screen's OWN pixels, and the OEM is free to scale the lock
-        // screen as a whole underneath it. It does: `keyguard_root_view` sits at 0.95 through a
-        // doze and walks back to 1 across the wake (measured 2026-09-22). The clock rides that
-        // like the notifications, the media card and everything else in the keyguard do - the
-        // ink lands where this says on a keyguard drawn at 1, and wherever the keyguard is
-        // drawn at 0.95, a 48px zoom at the top of the screen, the clock goes with it.
+        // screen underneath it - the doze's 0.95 on keyguard_root_view, a swipe's zoom on the
+        // clock's container. The clock rides those like the notifications, the media card and
+        // everything else do, about the zoom's own pivot (see parentTop).
         //
         // Dividing that scale out was tried and put back (2026-09-22). It pins the clock and the
         // date to absolute screen pixels, which makes them the only two things on the lock
         // screen NOT zooming out of the AOD - reported as 息屏稳定后点亮和反复息屏点亮的
-        // 动画不一样, since a wake that never reached the doze has no zoom to divide out. What
-        // the ride leaves behind is a few pixels: the zoom is 0.995 by the time our spring
-        // lands and 1 some 135ms later, and it converges with the rest of the screen.
+        // 动画不一样, since a wake that never reached the doze has no zoom to divide out.
         float scale = unit / m.unit;
         sInkBottom = top + m.box.height() * scale;
         float scaleX = scale;

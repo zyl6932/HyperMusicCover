@@ -185,13 +185,14 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
                 // The pad coming up or going moves nothing of ours, so nothing else asks for the
                 // frames the blur eases over.
                 if (!ticking && bouncerP != bouncerTarget()) start();
+                followSwipeFade();
                 // Every frame of the window while the wash is up: the doze zoom it has to undo
                 // animates, and nothing else of ours is drawing frames through it.
                 if (wash.getVisibility() == VISIBLE) wash.fit();
                 int[] loc = tmpLoc;
                 getLocationOnScreen(loc);
-                float clock = ClockCollapse.contentBottomOnScreen();
-                float media = Main.coverCardMediaTop();
+                float clock = ClockCollapse.contentBottomFor(CoverCardLayer.this);
+                float media = ClockCollapse.unzoomY(CoverCardLayer.this, Main.coverCardMediaTop());
                 if (lastWidth != getWidth() || lastHeight != getHeight() || lastTop != loc[1]
                         || Float.floatToIntBits(lastClock) != Float.floatToIntBits(clock)
                         || Float.floatToIntBits(lastMedia) != Float.floatToIntBits(media)) {
@@ -400,6 +401,40 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         return bouncerP != want;
     }
 
+    /**
+     * The swipe's fade, taken from the media card's.
+     *
+     * Swiping up, the OEM fades the keyguard's foreground through transitionAlpha on two
+     * containers - shared_notification_container, which holds the media card, and
+     * miui_keyguard_clock_container - and on nothing between this layer and the window, so the
+     * square stood out bright and whole while the clock and the card went (`op alphasweep`,
+     * 2026-09-24: both at 0.63 at the deepest, keyguard_background_layer's chain untouched).
+     * Its dim and blur, what the OEM gives its own background views, was tried first and was
+     * not it. Read every frame of the window, so it is the finger's own curve.
+     *
+     * Not in the doze - the square fades with the wallpaper there, see SLEEP_FADE_S - and not
+     * under the pad, which keeps the square and blurs it (followBouncer).
+     */
+    private View fadeSource;
+    private static int sFadeSourceId = -1;
+
+    private void followSwipeFade() {
+        float a = 1f;
+        if (ClockCollapse.phase() != ClockCollapse.Phase.AOD) {
+            View src = fadeSource;
+            if (src == null || !src.isAttachedToWindow()) {
+                if (sFadeSourceId == -1) {
+                    sFadeSourceId = getResources().getIdentifier("shared_notification_container",
+                            "id", "com.android.systemui");
+                }
+                src = sFadeSourceId == 0 ? null : getRootView().findViewById(sFadeSourceId);
+                fadeSource = src;
+            }
+            if (src != null) a = Math.max(src.getTransitionAlpha(), bouncerP);
+        }
+        if (getTransitionAlpha() != a) setTransitionAlpha(a);
+    }
+
     private void hideImmediately() {
         stop();
         opacity = 0f;
@@ -470,7 +505,8 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         return "aodPlace=[" + v.aodPlaceNote + "] view.playing=" + v.playing
                 + " scale=" + v.scale.value
                 + " ticking=" + v.ticking + " opacity=" + v.opacity
-                + " attached=" + v.isAttachedToWindow() + " chain=" + chain;
+                + " attached=" + v.isAttachedToWindow()
+                + " fade=" + v.getTransitionAlpha() + " chain=" + chain;
     }
 
     static float renderedScale(ViewGroup layer) {
@@ -558,7 +594,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
      */
     private float reveal() {
         CoverCardStyle.Rect r = restPlace;
-        float clock = ClockCollapse.contentBottomOnScreen();
+        float clock = ClockCollapse.contentBottomFor(this);
         if (r == null || Float.isNaN(clock) || r.side <= 0f) return 0f;
         int[] loc = tmpLoc;
         getLocationOnScreen(loc);
@@ -569,13 +605,19 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         return p * p * (3f - 2f * p);
     }
 
-    /** The square's place from the live clock and media card, in this view's coordinates. */
+    /**
+     * The square's place from the live clock and media card, in this view's coordinates.
+     *
+     * Both as drawn, not as laid out: a swipe zooms the clock's and the card's containers and
+     * not this layer, so a place taken from their layout sat still while they came in round it.
+     */
     private CoverCardStyle.Rect placeNow() {
+        float clock = ClockCollapse.contentBottomFor(this);
+        float media = ClockCollapse.unzoomY(this, Main.coverCardMediaTop());
         int[] loc = tmpLoc;
         getLocationOnScreen(loc);
         return style.place(getWidth(), getHeight(), getResources().getDisplayMetrics().density,
-                ClockCollapse.contentBottomOnScreen() - loc[1],
-                Main.coverCardMediaTop() - loc[1]);
+                clock - loc[1], media - loc[1]);
     }
 
     /**
