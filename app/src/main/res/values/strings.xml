@@ -138,7 +138,7 @@
     <string name="lock_lyrics">锁屏歌词</string>
     <string name="lock_lyrics_summary">封面模式下在时钟和卡片之间显示歌词，双指单击可在封面和歌词之间切换</string>
     <string name="lyric_band_fill">歌词区域高度</string>
-    <string name="lyric_band_fill_summary">占时钟与媒体卡片之间空间的比例，100% 为铺满</string>
+    <string name="lyric_band_fill_summary" formatted="false">占时钟与媒体卡片之间空间的比例，100% 为铺满</string>
     <string name="lyric_band_pos">歌词区域位置</string>
     <string name="lyric_band_pos_summary">区域未铺满时，在剩余空间里靠上或靠下</string>
     <string name="lyric_horizontal_margin">左右留白</string>

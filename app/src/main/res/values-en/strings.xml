@@ -138,7 +138,7 @@
     <string name="lock_lyrics">Lock screen lyrics</string>
     <string name="lock_lyrics_summary">Shows lyrics between the clock and the card in cover mode. A two-finger tap switches between the cover and the lyrics</string>
     <string name="lyric_band_fill">Lyric area height</string>
-    <string name="lyric_band_fill_summary">Share of the space between the clock and the media card; 100% fills it</string>
+    <string name="lyric_band_fill_summary" formatted="false">Share of the space between the clock and the media card; 100% fills it</string>
     <string name="lyric_band_pos">Lyric area position</string>
     <string name="lyric_band_pos_summary">Where an area that does not fill the space sits in what is left</string>
     <string name="lyric_horizontal_margin">Side margins</string>
