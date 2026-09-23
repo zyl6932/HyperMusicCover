@@ -36,16 +36,17 @@ final class LockLyrics {
     static volatile boolean sEnabled;
 
     /**
-     * Whether the lock screen's two-finger tap has taken the lyrics away for this look.
+     * Whether the lock screen's two-finger tap has taken the lyrics away.
      *
-     * A view of the switch, not the switch. The setting above is what the user asked for and
-     * what the state file holds; this says only that one lock screen is showing the cover
-     * instead, so a tap costs the lyrics until the next look and never the setting itself.
+     * A view of the switch, not the switch: the app's setting is untouched, and this only says
+     * the lock screen shows the cover instead. It stands until the next two-finger tap - across
+     * songs, lock screens, the card going away and coming back, and a SystemUI restart (it is in
+     * the state file). It used to be dropped on every fresh entry into cover mode, which the user
+     * read as the choice being forgotten whenever the media card went.
      *
-     * It is cleared when the switch is set - off and on again brings them back rather than
-     * returning to a hidden lock screen - and when cover mode comes up, because a tap is an
-     * answer about the lock screen it was made on. Written by setEnabled and toggleByTap and
-     * nowhere else; Main reads it, never writes it.
+     * The one other thing that clears it is the app's switch: turning the lyrics on while a tap
+     * had hidden them would otherwise leave the switch saying on over a lock screen showing the
+     * cover. Written by setEnabled, toggleByTap and the state file, and nowhere else.
      */
     static volatile boolean sTapHidden;
 
@@ -263,18 +264,38 @@ final class LockLyrics {
         return sEnabled && !sTapHidden || sDemo;
     }
 
-    /** Whether the view belongs in the keyguard right now. */
-    static boolean wantsAttached() {
-        return wanted() && Main.coverModeOn();
+    /**
+     * Whether this track has lyrics to show - the lyric page is only the page while it does, and
+     * a track without (a Douyin or Bilibili video, a song no source has) keeps the cover. It was
+     * the page whenever the switch was on, and in card mode that hid the square over nothing.
+     *
+     * Through a lookup the last answer stands, the same hold the cover's blur has: a song with
+     * lyrics followed by one still being looked up keeps the lyric page rather than flashing the
+     * cover up for the length of the lookup, and a song without keeps the cover.
+     *
+     * The cache counts as well as the lines on screen: a two-finger tap that hides the lyrics
+     * drops the lines, and the song still has them to bring back.
+     */
+    static boolean hasLyrics() {
+        return sDemo || !sLines.isEmpty() || CACHE.containsKey(sKey)
+                || (sLoading && sHadLyrics);
     }
 
-    /** The lyric page after a tap enters cover mode, including newLook's tap-hidden rule. */
-    static boolean willAttachOnTapEntry(boolean tappedBack) {
-        return CoverMorphRoute.lyricsAfterEntry(sEnabled, sTapHidden, tappedBack, sDemo);
+    /** Whether the last settled answer - not one still loading - had lines. See hasLyrics(). */
+    private static boolean sHadLyrics;
+
+    /** Whether the view belongs in the keyguard right now. */
+    static boolean wantsAttached() {
+        return wanted() && Main.coverModeOn() && hasLyrics();
+    }
+
+    /** The lyric page a tap into cover mode will land on. */
+    static boolean willAttachOnEntry() {
+        return hasLyrics() && CoverMorphRoute.lyricsAfterEntry(sEnabled, sTapHidden, sDemo);
     }
 
     static boolean willAttachAfterTapToggle() {
-        return CoverMorphRoute.lyricsAfterToggle(sEnabled, sTapHidden, sDemo);
+        return hasLyrics() && CoverMorphRoute.lyricsAfterToggle(sEnabled, sTapHidden, sDemo);
     }
 
     /**
@@ -683,10 +704,9 @@ final class LockLyrics {
     }
 
     /**
-     * The lock screen's two-finger tap: the cover and the lyrics, swapped for this look at the
-     * lock screen and nothing else. The switch and the file it is written to are not touched -
-     * writing them was the old behaviour, and it meant a tap that was not meant left the lyrics
-     * off the next time the phone was locked, which reads as the setting turning itself off.
+     * The lock screen's two-finger tap: the cover and the lyrics, swapped until the next one.
+     * The app's switch is not touched - a tap that was not meant would otherwise read as the
+     * setting turning itself off - but the page it picked is saved, see sTapHidden.
      *
      * With the switch off the tap does nothing at all rather than turning the lyrics on: that
      * would be the lock screen writing the app's setting, which is what it no longer does.
@@ -696,31 +716,7 @@ final class LockLyrics {
         sTapHidden = !sTapHidden;
         Xp.log(TAG + "two-finger tap: lyrics " + (sTapHidden ? "hidden" : "shown"));
         show(!sTapHidden, key, c, "hidden by the two-finger tap");
-    }
-
-    /**
-     * Cover mode has come up again. The tap's answer was about the lock screen it was made on -
-     * hiding the cover's lyrics is not a decision about every lock screen after it - so it is
-     * dropped here and the switch speaks for the new one.
-     *
-     * fromTap is the one entry that is not a new one: the user tapped the cover away and tapped
-     * it back, which is the same look seen twice rather than a new one, so the answer made about
-     * it stands. Its lines are left dropped with it - showing them again is the two-finger tap's
-     * own job, and it asks for them then.
-     *
-     * Otherwise the lines are asked for again as well. Hiding dropped them, and with the track
-     * key unchanged nothing else would look them up until the next song, which would leave the
-     * lyrics off every lock screen until then.
-     */
-    static void newLook(String key, MediaController c, boolean fromTap) {
-        if (!sTapHidden) return;
-        if (fromTap) {
-            Xp.log(TAG + "back through a tap: the lyrics stay hidden");
-            return;
-        }
-        sTapHidden = false;
-        Xp.log(TAG + "a new lock screen: back to the switch");
-        show(true, key, c, "shown again");
+        Main.saveState();
     }
 
     /**
@@ -802,6 +798,7 @@ final class LockLyrics {
         View card = card();
         return "enabled=" + sEnabled + " tap=" + (sTapHidden ? "hidden" : "shown")
                 + " demo=" + sDemo + " key=" + sKey + " lines=" + sLines.size()
+                + " has=" + hasLyrics() + " loading=" + sLoading
                 + " (" + sWhy + ") src=" + srcName(sSource)
                 + " sessionHasLyric=" + LyricSource.hasLyricInfo(sController)
                 + " pos=" + positionMs() + " playing=" + playing()
@@ -887,6 +884,8 @@ final class LockLyrics {
 
     private static void setLines(List<LyricLine> lines, String why) {
         sLines = lines == null ? Collections.<LyricLine>emptyList() : lines;
+        // Only a settled answer: the empty set a track change puts up while it looks is not one.
+        if (!sLoading) sHadLyrics = !sLines.isEmpty();
         sVersion++;
         sWhy = why;
         Xp.log(TAG + sLines.size() + " lines: " + why);

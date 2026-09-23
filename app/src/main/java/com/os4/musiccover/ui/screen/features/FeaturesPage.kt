@@ -253,9 +253,9 @@ internal fun CoverPageView(
                 art = art,
                 bias = module.bias,
                 coverStyle = module.coverStyle,
-                coverCardSizeDp = module.coverCardSizeDp,
-                coverCardMarginDp = module.coverCardMarginDp,
-                coverCardOffsetDp = module.coverCardOffsetDp,
+                coverCardFill = module.coverCardFill,
+                coverCardPos = module.coverCardPos,
+                coverCardCorner = module.coverCardCorner,
                 clockHeightDp = module.clockHeightDp,
                 clockSize = module.clockSize,
                 clockOffsetDp = module.clockOffsetDp,
@@ -309,7 +309,6 @@ private fun CoverGroup(
     Column {
         WindowDropdownPreference(
             title = stringResource(R.string.cover_style),
-            summary = stringResource(R.string.cover_style_summary),
             items = listOf(stringResource(R.string.cover_style_full),
                 stringResource(R.string.cover_style_card)),
             selectedIndex = module.coverStyle.coerceIn(0, 1),
@@ -322,7 +321,6 @@ private fun CoverGroup(
         if (module.coverStyle == 0) {
             ValueSlider(
                 title = stringResource(R.string.cover_bias),
-                summary = stringResource(R.string.cover_bias_summary),
                 value = module.bias,
                 valueRange = 0f..1f,
                 enabled = enabled,
@@ -334,41 +332,56 @@ private fun CoverGroup(
         } else {
             ValueSlider(
                 title = stringResource(R.string.cover_card_size),
-                summary = stringResource(R.string.cover_card_size_summary),
-                value = module.coverCardSizeDp.coerceIn(120f, 420f),
-                valueRange = 120f..420f,
+                value = module.coverCardFill.coerceIn(0.4f, 1f),
+                valueRange = 0.4f..1f,
                 enabled = enabled,
-                label = { "${it.roundToInt()} dp" },
+                label = { "${(it * 100).roundToInt()}%" },
                 onValueChange = {
-                    val value = it.roundToInt().toFloat()
-                    onChange(module.copy(coverCardSizeDp = value))
-                    ModuleBridge.setCoverStyle(context, "size", value)
+                    val value = (it * 100).roundToInt() / 100f
+                    onChange(module.copy(coverCardFill = value))
+                    ModuleBridge.setCoverStyle(context, "fill", value)
                 },
             )
+            val top = stringResource(R.string.cover_card_pos_top)
+            val centre = stringResource(R.string.cover_card_pos_centre)
+            val bottom = stringResource(R.string.cover_card_pos_bottom)
             ValueSlider(
-                title = stringResource(R.string.cover_card_margin),
-                summary = stringResource(R.string.cover_card_margin_summary),
-                value = module.coverCardMarginDp.coerceIn(8f, 48f),
-                valueRange = 8f..48f,
-                enabled = enabled,
-                label = { "${it.roundToInt()} dp" },
+                title = stringResource(R.string.cover_card_pos),
+                value = module.coverCardPos.coerceIn(0f, 1f),
+                valueRange = 0f..1f,
+                // A card that fills its room has no height left to move in.
+                enabled = enabled && module.coverCardFill < 1f,
+                detent = 0.5f,
+                label = {
+                    when ((it * 100).roundToInt()) {
+                        0 -> top
+                        50 -> centre
+                        100 -> bottom
+                        else -> "${(it * 100).roundToInt()}%"
+                    }
+                },
                 onValueChange = {
-                    val value = it.roundToInt().toFloat()
-                    onChange(module.copy(coverCardMarginDp = value))
-                    ModuleBridge.setCoverStyle(context, "margin", value)
+                    val value = (it * 100).roundToInt() / 100f
+                    onChange(module.copy(coverCardPos = value))
+                    ModuleBridge.setCoverStyle(context, "pos", value)
                 },
             )
+            val round = stringResource(R.string.cover_card_corner_round)
             ValueSlider(
-                title = stringResource(R.string.cover_card_offset),
-                summary = stringResource(R.string.cover_card_offset_summary),
-                value = module.coverCardOffsetDp.coerceIn(-120f, 120f),
-                valueRange = -120f..120f,
+                title = stringResource(R.string.cover_card_corner),
+                value = module.coverCardCorner.coerceIn(0f, 1f),
+                valueRange = 0f..1f,
                 enabled = enabled,
-                label = { "${it.roundToInt()} dp" },
+                // The corner it had before it was a setting.
+                detent = 0.12f,
+                label = {
+                    val percent = (it * 100).roundToInt()
+                    if (percent == 100) round else "$percent%"
+                },
                 onValueChange = {
-                    val value = it.roundToInt().toFloat()
-                    onChange(module.copy(coverCardOffsetDp = value))
-                    ModuleBridge.setCoverStyle(context, "offset", value)
+                    val value = (it * 100).roundToInt() / 100f
+                    onChange(module.copy(coverCardCorner = value))
+                    ModuleBridge.setCoverStyle(context, "corner", value)
                 },
             )
         }
@@ -451,17 +464,14 @@ private fun ClockGroup(
         // backwards, and dragging right made the effect weaker. The stored value, the adb
         // glassend op and the exported JSON all keep the OEM's meaning; only this slider is
         // flipped.
-        // Off on the styles whose clock has no glass to morph, and saying so - the one row on this
-        // page that keeps a summary. The morph is AllInOneBase.updateGlassValue(float) - the OEM's
-        // own ramp from refracting glass to a solid fill - and the rhombus, doodle, oriental and
-        // magazine clocks have no such thing: vector digits, bitmaps and plain text, so there is
-        // nothing for this slider to move. A slider that cannot be moved and does not say why
-        // reads as broken, and this is the only one here that is ever in that state.
+        // Off on the styles whose clock has no glass to morph. The morph is
+        // AllInOneBase.updateGlassValue(float) - the OEM's own ramp from refracting glass to a
+        // solid fill - and the rhombus, doodle, oriental and magazine clocks have no such thing:
+        // vector digits, bitmaps and plain text, so there is nothing for this slider to move.
+        // It used to say so in a summary; this page carries none now, by the user's choice.
         val glassAvailable = module.clockHasGlass
         ValueSlider(
             title = stringResource(R.string.clock_glass),
-            summary = if (glassAvailable) null
-                      else stringResource(R.string.clock_glass_style_unsupported),
             value = 1f - module.glassEnd,
             valueRange = 0f..1f,
             enabled = enabled && glassAvailable,
@@ -595,30 +605,44 @@ private fun LyricsGroup(
                 ModuleBridge.setLyrics(context, it)
             },
         )
+        // The same two shares as the square card: how much of the room between the clock and
+        // the media card the band takes, and where it sits in the rest.
         ValueSlider(
-            title = stringResource(R.string.lyric_window_offset),
-            summary = stringResource(R.string.lyric_window_offset_summary),
-            value = module.lyricOffsetDp.coerceIn(-80f, 80f),
-            valueRange = -80f..80f,
+            title = stringResource(R.string.lyric_band_fill),
+            summary = stringResource(R.string.lyric_band_fill_summary),
+            value = module.lyricFill.coerceIn(0.4f, 1f),
+            valueRange = 0.4f..1f,
             enabled = enabled && module.lyrics,
-            label = { "${it.roundToInt()} dp" },
+            label = { "${(it * 100).roundToInt()}%" },
             onValueChange = {
-                val value = it.roundToInt().toFloat()
-                onChange(module.copy(lyricOffsetDp = value))
-                ModuleBridge.setLyricStyle(context, "offset", value)
+                val value = (it * 100).roundToInt() / 100f
+                onChange(module.copy(lyricFill = value))
+                ModuleBridge.setLyricStyle(context, "fill", value)
             },
         )
+        val top = stringResource(R.string.cover_card_pos_top)
+        val centre = stringResource(R.string.cover_card_pos_centre)
+        val bottom = stringResource(R.string.cover_card_pos_bottom)
         ValueSlider(
-            title = stringResource(R.string.lyric_vertical_gap),
-            summary = stringResource(R.string.lyric_vertical_gap_summary),
-            value = module.lyricGapDp.coerceIn(0f, 48f),
-            valueRange = 0f..48f,
-            enabled = enabled && module.lyrics,
-            label = { "${it.roundToInt()} dp" },
+            title = stringResource(R.string.lyric_band_pos),
+            summary = stringResource(R.string.lyric_band_pos_summary),
+            value = module.lyricPos.coerceIn(0f, 1f),
+            valueRange = 0f..1f,
+            // A band that fills its room has no height left to move in.
+            enabled = enabled && module.lyrics && module.lyricFill < 1f,
+            detent = 0.5f,
+            label = {
+                when ((it * 100).roundToInt()) {
+                    0 -> top
+                    50 -> centre
+                    100 -> bottom
+                    else -> "${(it * 100).roundToInt()}%"
+                }
+            },
             onValueChange = {
-                val value = it.roundToInt().toFloat()
-                onChange(module.copy(lyricGapDp = value))
-                ModuleBridge.setLyricStyle(context, "gap", value)
+                val value = (it * 100).roundToInt() / 100f
+                onChange(module.copy(lyricPos = value))
+                ModuleBridge.setLyricStyle(context, "pos", value)
             },
         )
         ValueSlider(

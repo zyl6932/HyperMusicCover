@@ -695,14 +695,6 @@ public class Main extends XposedModule {
      * decision that was made about a different song.
      */
     private static volatile boolean sTapSuppressed;
-    /**
-     * The tap that brought the cover back, still owed to the entry it leads to. One-shot.
-     *
-     * A tap that took the cover away and a tap that brings it back are one look at the lock
-     * screen, so the two-finger tap's answer - the lyrics hidden - stands across the pair. Every
-     * other way back into cover mode is a new look and starts from the switch.
-     */
-    private static boolean sTappedBack;
     private static GestureDetector sTapDetector;
     /** Set for the length of one gesture that started on the card's artwork and is ours. */
     private static boolean sArtSwallow;
@@ -1715,9 +1707,9 @@ public class Main extends XposedModule {
             f.write(("cover=" + (sCoverMode ? 1 : 0)
                     + "\nbias=" + sBias
                     + "\ncoverstyle=" + sCoverCardStyle.mode
-                    + "\ncovercardsize=" + sCoverCardStyle.sizeDp
-                    + "\ncovercardmargin=" + sCoverCardStyle.marginDp
-                    + "\ncovercardoffset=" + sCoverCardStyle.offsetDp
+                    + "\ncovercardfill=" + sCoverCardStyle.fill
+                    + "\ncovercardpos=" + sCoverCardStyle.pos
+                    + "\ncovercardcorner=" + sCoverCardStyle.corner
                     // A pending pre-dp value is written as itself: it cannot be converted until
                     // a confirmed box exists, and writing the default over it would lose the
                     // setting the user actually had.
@@ -1746,13 +1738,14 @@ public class Main extends XposedModule {
                     + "\nseekglow=" + (HyperTweaks.sBarGlow ? 1 : 0)
                     + "\nlyrics=" + (LockLyrics.sEnabled ? 1 : 0)
                     + "\nlyrickeep=" + (LockLyrics.sKeepOn ? 1 : 0)
+                    + "\nlyrichidden=" + (LockLyrics.sTapHidden ? 1 : 0)
                     + "\nlyrichdr=" + (LockLyrics.sHdr ? 1 : 0)
                     // Written as 1 or 0 like the rest, but read back as the default when absent:
                     // the key did not exist before this setting did, and the lyrics are supposed
                     // to look the way they always have on a file that predates it.
                     + "\nlyrictrans=" + (LockLyrics.sTrans ? 1 : 0)
-                    + "\nlyricoff=" + LockLyrics.sStyle.offsetDp
-                    + "\nlyricgap=" + LockLyrics.sStyle.gapDp
+                    + "\nlyricfill=" + LockLyrics.sStyle.fill
+                    + "\nlyricpos=" + LockLyrics.sStyle.pos
                     + "\nlyricside=" + LockLyrics.sStyle.sideDp
                     + "\nlyricsize=" + LockLyrics.sStyle.sizeSp
                     + "\nlyricweight=" + LockLyrics.sStyle.weight
@@ -1823,12 +1816,17 @@ public class Main extends XposedModule {
                         else if ("bias".equals(k)) sBias = Float.parseFloat(v);
                         else if ("coverstyle".equals(k)) sCoverCardStyle =
                                 sCoverCardStyle.with("mode", Float.parseFloat(v));
+                        else if ("covercardfill".equals(k)) sCoverCardStyle =
+                                sCoverCardStyle.with("fill", Float.parseFloat(v));
+                        else if ("covercardpos".equals(k)) sCoverCardStyle =
+                                sCoverCardStyle.with("pos", Float.parseFloat(v));
+                        else if ("covercardcorner".equals(k)) sCoverCardStyle =
+                                sCoverCardStyle.with("corner", Float.parseFloat(v));
+                        // The dp size from before the shares. The file is rewritten without it,
+                        // so this runs once; the old margin and offset are dropped.
                         else if ("covercardsize".equals(k)) sCoverCardStyle =
-                                sCoverCardStyle.with("size", Float.parseFloat(v));
-                        else if ("covercardmargin".equals(k)) sCoverCardStyle =
-                                sCoverCardStyle.with("margin", Float.parseFloat(v));
-                        else if ("covercardoffset".equals(k)) sCoverCardStyle =
-                                sCoverCardStyle.with("offset", Float.parseFloat(v));
+                                sCoverCardStyle.with("fill", CoverCardStyle
+                                        .fillFromLegacySizeDp(Float.parseFloat(v)));
                         else if ("clock".equals(k)) setClockHeightDp(Float.parseFloat(v));
                         else if ("clocksize".equals(k)) setClockSize(Float.parseFloat(v));
                         else if ("clockoff".equals(k)) setClockOffsetDp(Float.parseFloat(v));
@@ -1851,12 +1849,15 @@ public class Main extends XposedModule {
                         else if ("seekglow".equals(k)) HyperTweaks.sBarGlow = "1".equals(v);
                         else if ("lyrics".equals(k)) LockLyrics.sEnabled = "1".equals(v);
                         else if ("lyrickeep".equals(k)) LockLyrics.sKeepOn = "1".equals(v);
+                        else if ("lyrichidden".equals(k)) LockLyrics.sTapHidden = "1".equals(v);
                         else if ("lyrichdr".equals(k)) LockLyrics.sHdr = "1".equals(v);
                         else if ("lyrictrans".equals(k)) LockLyrics.sTrans = "1".equals(v);
-                        else if ("lyricoff".equals(k)) LockLyrics.sStyle =
-                                LockLyrics.sStyle.with("offset", Float.parseFloat(v));
-                        else if ("lyricgap".equals(k)) LockLyrics.sStyle =
-                                LockLyrics.sStyle.with("gap", Float.parseFloat(v));
+                        // The dp lyricoff and lyricgap from before the shares are dropped: what
+                        // they meant depends on the room, which is not known here.
+                        else if ("lyricfill".equals(k)) LockLyrics.sStyle =
+                                LockLyrics.sStyle.with("fill", Float.parseFloat(v));
+                        else if ("lyricpos".equals(k)) LockLyrics.sStyle =
+                                LockLyrics.sStyle.with("pos", Float.parseFloat(v));
                         else if ("lyricside".equals(k)) LockLyrics.sStyle =
                                 LockLyrics.sStyle.with("side", Float.parseFloat(v));
                         else if ("lyricsize".equals(k)) LockLyrics.sStyle =
@@ -2192,6 +2193,8 @@ public class Main extends XposedModule {
                     } else if ("wpart".equals(op)) {
                         // The wallpaper has begun showing the new cover; see CoverCardLayer.
                         CoverCardLayer.releaseHeld();
+                    } else if ("bouncer".equals(op)) {
+                        setResultData(sBouncerTrace.toString());
                     } else if ("cardstate".equals(op)) {
                         // The square card's playback scale, next to what the session says - for
                         // "the card stayed small", where the log is not there to read.
@@ -2516,9 +2519,9 @@ public class Main extends XposedModule {
                         out.putBoolean("auto", sAuto);
                         out.putFloat("bias", sBias);
                         out.putInt("coverstyle", sCoverCardStyle.mode);
-                        out.putFloat("covercardsize", sCoverCardStyle.sizeDp);
-                        out.putFloat("covercardmargin", sCoverCardStyle.marginDp);
-                        out.putFloat("covercardoffset", sCoverCardStyle.offsetDp);
+                        out.putFloat("covercardfill", sCoverCardStyle.fill);
+                        out.putFloat("covercardpos", sCoverCardStyle.pos);
+                        out.putFloat("covercardcorner", sCoverCardStyle.corner);
                         out.putFloat("clock", sClockHeightDp);
                         out.putFloat("clocksize", effectiveClockSize());
                         out.putFloat("clockoff", sClockOffsetDp);
@@ -2552,8 +2555,8 @@ public class Main extends XposedModule {
                         out.putBoolean("lyrickeep", LockLyrics.sKeepOn);
                         out.putBoolean("lyrichdr", LockLyrics.sHdr);
                         out.putBoolean("lyrictrans", LockLyrics.sTrans);
-                        out.putFloat("lyricoff", LockLyrics.sStyle.offsetDp);
-                        out.putFloat("lyricgap", LockLyrics.sStyle.gapDp);
+                        out.putFloat("lyricfill", LockLyrics.sStyle.fill);
+                        out.putFloat("lyricpos", LockLyrics.sStyle.pos);
                         out.putFloat("lyricside", LockLyrics.sStyle.sideDp);
                         out.putFloat("lyricsize", LockLyrics.sStyle.sizeSp);
                         out.putInt("lyricweight", LockLyrics.sStyle.weight);
@@ -5927,14 +5930,8 @@ public class Main extends XposedModule {
         armTransitionTrace("entering cover mode");
         // Whatever the user decided about the last song does not carry into this one.
         sTapSuppressed = false;
-        // One-shot: a tap-in is this look coming back, anything else is a new one. See the field.
-        boolean tappedBack = sTappedBack;
-        sTappedBack = false;
-        // Nor does a two-finger tap - but it hides the lyrics for the look it was made on, and
-        // coming back through a tap is still that look. Every other entry is a new one and goes
-        // back to the switch. Before the lyric state below is read, since that read decides
-        // whether the entry brings the thumbnail back.
-        LockLyrics.newLook(sTrackKey, sWatched, tappedBack);
+        // The two-finger tap's page is NOT reset here: it stands until the next two-finger tap,
+        // across songs, lock screens and a card that comes and goes. See LockLyrics.sTapHidden.
         setDepthHidden(true);
         // Start the card where the OEM has it when animating, so the thumbnail fades out across
         // the clock's own frames instead of blinking away before the clock has begun to move.
@@ -6028,12 +6025,12 @@ public class Main extends XposedModule {
 
     static boolean coverCardVisible() {
         View c = sContainer;
-        // Not under the PIN pad: the OEM fades the clock and the notifications for it, but this
-        // layer is the keyguard's background and stays, so the square showed through the pad -
-        // most plainly when a tapped notification is what brought the pad up.
+        // The PIN pad is not a reason to hide it: taken away there, the square cut out as the pad
+        // came up and popped back as it went. It stays and blurs under the pad instead, the way
+        // the lyrics do - see CoverCardLayer.followBouncer.
         return (sCoverMode || ClockCollapse.phase() == ClockCollapse.Phase.EXIT)
                 && keyguardShowing() && c != null && c.isShown()
-                && (sScreenOn || coverCardInAod() || coverCardFallingAsleep()) && !bouncerShown();
+                && (sScreenOn || coverCardInAod() || coverCardFallingAsleep());
     }
 
     /**
@@ -6152,8 +6149,9 @@ public class Main extends XposedModule {
         CoverCardStyle.Rect r = sCoverCardStyle.place(layer.getWidth(), layer.getHeight(),
                 layer.getResources().getDisplayMetrics().density,
                 ClockCollapse.contentBottomOnScreen() - xy[1], mediaTop - xy[1]);
-        return r == null ? null : CoverMorphMotion.cardSquare(xy[0] + r.x,
-                xy[1] + r.y, r.side, CoverCardLayer.renderedScale(layer));
+        return r == null ? null : CoverMorphMotion.cardBox(xy[0] + r.x,
+                xy[1] + r.y, r.side, CoverCardLayer.renderedScale(layer),
+                CoverCardStyle.aspect(art.getWidth(), art.getHeight()));
     }
 
     /** Keep the shared media card at its real state while the moving copy owns its pixels. */
@@ -7262,6 +7260,99 @@ public class Main extends XposedModule {
     }
 
     /**
+     * How far up the PIN pad is, 0..1, for the blur the lyrics and the square put on under it.
+     *
+     * Not bouncerShown(): the container only goes INVISIBLE once the pad's exit has finished,
+     * ~300ms after it started, so a blur keyed on it began clearing after the OEM's own blur had
+     * already gone. Nor the container's own alpha or its direct child's - they only jump at the
+     * two ends. What fades is the security view itself (KeyguardPatternView, the PIN or password
+     * one), 1 to 0 over ~270ms from the first frame of the exit, while its header slides down
+     * (measured 2026-09-23, `op bouncer` tracing the whole subtree). So the level is the product
+     * of the alphas from the container down to it. A build where it cannot be found reads 1
+     * until the container hides, which is what bouncerShown() gave.
+     */
+    static float bouncerLevel() {
+        if (!bouncerShown()) {
+            sSecurityView = null;
+            sBouncerSince = 0L;
+            noteBouncer(0f, 0f);
+            return 0f;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        if (sBouncerSince == 0L) sBouncerSince = now;
+        // The pad's view reads fully opaque for the first frame or two, before the OEM resets it
+        // to 0 and fades it in (measured: shown, 1.0, 1.0, then 0 at +15ms and up over ~70ms).
+        // Followed as fast as the blur now follows, that was a flash of blur at the start.
+        if (now - sBouncerSince < BOUNCER_SETTLE_MS) {
+            noteBouncer(0f, -1f);
+            return 0f;
+        }
+        View b = sBouncerView;
+        View sec = sSecurityView;
+        if (sec == null || !sec.isAttachedToWindow() || sec.getVisibility() != View.VISIBLE
+                || !isAncestor(b, sec)) {
+            sec = findSecurityView(b, 0);
+            sSecurityView = sec;
+        }
+        float level = b.getAlpha();
+        if (sec != null) {
+            for (View v = sec; v != null && v != b; ) {
+                level *= v.getAlpha();
+                Object p = v.getParent();
+                v = p instanceof View ? (View) p : null;
+            }
+        }
+        level = Math.max(0f, Math.min(1f, level));
+        noteBouncer(level, b.getAlpha());
+        return level;
+    }
+
+    /** The pad's own view under the container, kept for the length of one showing. */
+    private static View sSecurityView;
+    /** When the container was first seen shown this time, 0 while it is not. */
+    private static long sBouncerSince;
+    private static final long BOUNCER_SETTLE_MS = 40L;
+
+    /**
+     * The shown security view: KeyguardPatternView, KeyguardPINView, KeyguardPasswordView and
+     * the SIM ones all name themselves Keyguard...View, and the frames around them do not end so.
+     */
+    private static View findSecurityView(View v, int depth) {
+        if (v.getVisibility() != View.VISIBLE || depth > 7) return null;
+        String n = v.getClass().getSimpleName();
+        if (depth > 0 && n.startsWith("Keyguard") && n.endsWith("View")
+                && !n.startsWith("KeyguardSecurity") && !n.contains("Message")) return v;
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                View found = findSecurityView(g.getChildAt(i), depth + 1);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /** The last few changes of what bouncerLevel() read, for `op bouncer`. */
+    private static final StringBuilder sBouncerTrace = new StringBuilder();
+    private static int sBouncerTraceLines;
+    private static String sBouncerLast = "";
+
+    private static void noteBouncer(float level, float own) {
+        String now = String.format(java.util.Locale.ROOT, "lvl=%.2f own=%.2f sec=%s", level, own,
+                sSecurityView == null ? "-" : sSecurityView.getClass().getSimpleName());
+        if (now.equals(sBouncerLast)) return;
+        sBouncerLast = now;
+        if (sBouncerTraceLines >= 80) {
+            int cut = sBouncerTrace.indexOf("\n");
+            if (cut >= 0) sBouncerTrace.delete(0, cut + 1);
+        } else {
+            sBouncerTraceLines++;
+        }
+        sBouncerTrace.append(android.os.SystemClock.uptimeMillis()).append(' ').append(now)
+                .append('\n');
+    }
+
+    /**
      * Whether the control centre is pulled down over the lock screen.
      *
      * The swipe-down centre does not hide the keyguard the way the full settings expansion does -
@@ -7467,14 +7558,9 @@ public class Main extends XposedModule {
      * composed: the track may well have moved on while the cover was off.
      */
     private static void enterFromTapNow(String why) {
-        // Read before it is cleared: with it set, the cover was taken away by a tap on this same
-        // look, so this tap is that look coming back rather than a new one. See enterCoverMode.
-        //
-        // Guarded on the two questions onMediaUpdate asks before it does anything, so a tap that
-        // leads to no entry at all cannot leave the answer standing for one made later.
-        sTappedBack = sTapSuppressed && sAuto && sCardShowing;
+        // Guarded on the two questions onMediaUpdate asks before it does anything.
         if (sAuto && sCardShowing && CoverMorphRoute.shouldMorph(CoverMorphRoute.NORMAL,
-                LockLyrics.willAttachOnTapEntry(sTappedBack)
+                LockLyrics.willAttachOnEntry()
                         ? CoverMorphRoute.LYRICS : CoverMorphRoute.COVER)) {
             beginMorph(true);
         } else {
@@ -8630,6 +8716,13 @@ public class Main extends XposedModule {
             // lyrics back would be writing the app's setting from here, which is the whole of
             // what this gesture stopped doing.
             sTwoWhy = "blocked: the lyrics switch is off";
+            return;
+        }
+        if (!LockLyrics.hasLyrics()) {
+            // The cover is the only page a track without lyrics has. Taken as a toggle, the tap
+            // would flip the hidden flag with nothing changing, and the next song that does have
+            // lyrics would then open on the cover for no reason anyone could see.
+            sTwoWhy = "blocked: this track has no lyrics";
             return;
         }
         long t0 = android.os.SystemClock.uptimeMillis();

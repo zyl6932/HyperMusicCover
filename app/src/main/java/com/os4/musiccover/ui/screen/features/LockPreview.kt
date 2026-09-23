@@ -77,9 +77,9 @@ fun LockPreview(
     art: Bitmap?,
     bias: Float,
     coverStyle: Int,
-    coverCardSizeDp: Float,
-    coverCardMarginDp: Float,
-    coverCardOffsetDp: Float,
+    coverCardFill: Float,
+    coverCardPos: Float,
+    coverCardCorner: Float,
     clockHeightDp: Float,
     clockSize: Float,
     clockOffsetDp: Float,
@@ -165,7 +165,7 @@ fun LockPreview(
             if (coverStyle == 1) {
                 drawSquareCover(cover, k, screenW, screenH, geometry, shownCard,
                     clockHeightDp, clockSize, clockOffsetDp,
-                    coverCardSizeDp, coverCardMarginDp, coverCardOffsetDp)
+                    coverCardFill, coverCardPos, coverCardCorner)
             }
             // Under the clock, as on the phone: the card is part of the notification area and
             // the collapsed clock sits above it, but a tall cover can bring them close.
@@ -203,12 +203,12 @@ private fun DrawScope.drawSquareCover(
     clockHeightDp: Float,
     clockSize: Float,
     clockOffsetDp: Float,
-    sizeDp: Float,
-    marginDp: Float,
-    offsetDp: Float,
+    fill: Float,
+    pos: Float,
+    corner: Float,
 ) {
     val density = 1.dp.toPx()
-    val gap = marginDp.coerceIn(8f, 48f) * density
+    val gap = 16f * density
     val clockBottom = if (geometry.hasClock) {
         geometry.clockY + clockOffsetDp * density +
             geometry.clockH * collapseScale(geometry, clockHeightDp, clockSize)
@@ -216,24 +216,27 @@ private fun DrawScope.drawSquareCover(
     val top = clockBottom.coerceAtLeast(0f) + gap
     val bottom = (if (media != null && media.t > screenH / 3)
         media.t.toFloat() else screenH * 0.70f) - gap
-    val side = min(sizeDp.coerceIn(120f, 420f) * density,
-        min(screenW - 2f * gap, bottom - top))
-    if (side < 96f * density) return
-    val center = (top + bottom) / 2f + offsetDp.coerceIn(-120f, 120f) * density
-    // Not coerceIn: with the side limited by the room, bottom - side can land a rounding error
-    // below top, and an empty range throws. Same order as CoverCardStyle.place().
-    val y = max(top, min(bottom - side, center - side / 2f))
-    val rect = Rect((screenW - side) * k / 2f, y * k,
-        (screenW + side) * k / 2f, (y + side) * k)
-    val radius = min(20f * density, side * 0.10f) * k
+    val room = min(screenW - 2f * gap, bottom - top)
+    if (room < 96f * density) return
+    val side = max(96f * density, room * fill.coerceIn(0.4f, 1f))
+    val y = top + (bottom - top - side) * pos.coerceIn(0f, 1f)
+    // The artwork's own shape inside the square, as CoverCardStyle.aspect and cardBox have it.
+    val aspect = (cover.width / cover.height.toFloat()).coerceIn(0.5f, 2f)
+    val w = if (aspect >= 1f) side else side * aspect
+    val h = if (aspect >= 1f) side / aspect else side
+    val cx = screenW / 2f
+    val cy = y + side / 2f
+    val rect = Rect((cx - w / 2f) * k, (cy - h / 2f) * k, (cx + w / 2f) * k, (cy + h / 2f) * k)
+    val radius = min(w, h) * 0.5f * corner.coerceIn(0f, 1f) * k
     val outline = Path().apply { addRoundRect(RoundRect(rect, CornerRadius(radius))) }
-    val crop = min(cover.width, cover.height)
-    val left = (cover.width - crop) / 2
-    val cropTop = (cover.height - crop) / 2
+    val cropW = min(cover.width, (cover.height * aspect).roundToInt())
+    val cropH = min(cover.height, (cover.width / aspect).roundToInt())
+    val left = (cover.width - cropW) / 2
+    val cropTop = (cover.height - cropH) / 2
     clipPath(outline) {
         drawImage(cover.asImageBitmap(),
             srcOffset = IntOffset(left, cropTop),
-            srcSize = IntSize(crop, crop),
+            srcSize = IntSize(cropW, cropH),
             dstOffset = IntOffset(rect.left.roundToInt(), rect.top.roundToInt()),
             dstSize = IntSize(rect.width.roundToInt().coerceAtLeast(1),
                 rect.height.roundToInt().coerceAtLeast(1)),

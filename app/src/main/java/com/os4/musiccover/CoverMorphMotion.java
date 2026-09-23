@@ -46,6 +46,17 @@ final class CoverMorphMotion {
         return new Box(x + inset, y + inset, drawn, drawn);
     }
 
+    /**
+     * The card as drawn: the reserved square at its playback scale, with artwork of this aspect
+     * (width over height) fitted inside it - the long side on the square's side, centred.
+     */
+    static Box cardBox(float x, float y, float side, float scale, float aspect) {
+        Box s = cardSquare(x, y, side, scale);
+        float w = aspect >= 1f ? s.w : s.w * aspect;
+        float h = aspect >= 1f ? s.h / aspect : s.h;
+        return new Box(s.cx() - w * 0.5f, s.cy() - h * 0.5f, w, h);
+    }
+
     /** Decoration grows with the travelling cover and is fully present at the handoff. */
     static float cardDecoration(float progress) {
         float p = Math.max(0f, Math.min(1f, progress));

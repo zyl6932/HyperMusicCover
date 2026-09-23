@@ -15,12 +15,11 @@ public class CoverMorphRouteTest {
         assertFalse(CoverMorphRoute.shouldMorph(CoverMorphRoute.LYRICS, CoverMorphRoute.LYRICS));
     }
 
-    @Test public void aReturnTapKeepsLyricsHiddenButAFreshEntryRestoresThem() {
-        assertFalse(CoverMorphRoute.lyricsAfterEntry(true, true, true, false));
-        assertTrue(CoverMorphRoute.lyricsAfterEntry(true, true, false, false));
-        assertTrue(CoverMorphRoute.lyricsAfterEntry(true, false, true, false));
-        assertFalse(CoverMorphRoute.lyricsAfterEntry(false, false, false, false));
-        assertTrue(CoverMorphRoute.lyricsAfterEntry(false, true, true, true));
+    @Test public void aTwoFingerDismissalOutlastsEveryEntry() {
+        assertFalse(CoverMorphRoute.lyricsAfterEntry(true, true, false));
+        assertTrue(CoverMorphRoute.lyricsAfterEntry(true, false, false));
+        assertFalse(CoverMorphRoute.lyricsAfterEntry(false, false, false));
+        assertTrue(CoverMorphRoute.lyricsAfterEntry(false, true, true));
     }
 
     @Test public void aTwoFingerTapOnlyMorphsIfItActuallyChangesThePage() {

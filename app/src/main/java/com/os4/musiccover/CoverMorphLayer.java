@@ -225,10 +225,11 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
                 box.x + box.w - root[0], box.y + box.h - root[1]);
         float p = Math.max(0f, Math.min(1f, motion.value));
         float startRadius = Math.min(14f * density, Math.min(thumb.w, thumb.h) * 0.20f);
-        float endRadius = cardMode ? Math.min(20f * density, cover.w * 0.10f) : 0f;
+        CoverCardStyle style = Main.sCoverCardStyle;
+        float endRadius = cardMode ? style.radius(Math.min(cover.w, cover.h)) : 0f;
         float radius = startRadius + (endRadius - startRadius) * p;
         float decoration = cardMode ? CoverMorphMotion.cardDecoration(motion.value) : 0f;
-        CoverCardLayer.drawShadow(canvas, drawn, radius, density, decoration, paint);
+        CoverCardLayer.drawShadow(canvas, drawn, style.corner, decoration, paint);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(0xFFFFFFFF);
         // The full wallpaper already contains the final sharp band. Hand its pixels over near
@@ -241,9 +242,15 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         int saved = canvas.save();
         canvas.clipPath(clip);
         int side = Math.min(art.getWidth(), art.getHeight());
-        float reveal = cardMode ? 0f : p;
-        int cropW = Math.round(side + (art.getWidth() - side) * reveal);
-        int cropH = Math.round(side + (art.getHeight() - side) * reveal);
+        int cropW = Math.round(side + (art.getWidth() - side) * p);
+        int cropH = Math.round(side + (art.getHeight() - side) * p);
+        if (cardMode) {
+            // The card lands in the artwork's own shape (CoverCardStyle.aspect), so the art is
+            // cut to the box it is in on every frame: square at the thumbnail, its own at the end.
+            float shape = drawn.width() / Math.max(1f, drawn.height());
+            cropW = Math.min(art.getWidth(), Math.round(art.getHeight() * shape));
+            cropH = Math.min(art.getHeight(), Math.round(art.getWidth() / shape));
+        }
         Rect source = srcRect;
         source.set((art.getWidth() - cropW) / 2, (art.getHeight() - cropH) / 2,
                 (art.getWidth() + cropW) / 2, (art.getHeight() + cropH) / 2);

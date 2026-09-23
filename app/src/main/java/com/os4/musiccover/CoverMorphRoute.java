@@ -12,10 +12,9 @@ final class CoverMorphRoute {
         return from != to && (from == COVER || to == COVER);
     }
 
-    /** Mirrors newLook: only a fresh entry clears the two-finger lyric dismissal. */
-    static boolean lyricsAfterEntry(boolean enabled, boolean tapHidden,
-                                    boolean tappedBack, boolean demo) {
-        return demo || enabled && (!tapHidden || !tappedBack);
+    /** No entry clears the two-finger lyric dismissal: only the next two-finger tap does. */
+    static boolean lyricsAfterEntry(boolean enabled, boolean tapHidden, boolean demo) {
+        return demo || enabled && !tapHidden;
     }
 
     static boolean lyricsAfterToggle(boolean enabled, boolean tapHidden, boolean demo) {

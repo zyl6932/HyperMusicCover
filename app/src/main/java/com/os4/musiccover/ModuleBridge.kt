@@ -34,9 +34,12 @@ object ModuleBridge {
         val auto: Boolean = false,
         val bias: Float = 0.34f,
         val coverStyle: Int = 0,
-        val coverCardSizeDp: Float = 240f,
-        val coverCardMarginDp: Float = 16f,
-        val coverCardOffsetDp: Float = 0f,
+        /** The square's side as a share of the room between the clock and the media card. */
+        val coverCardFill: Float = 0.8f,
+        /** Where the square sits in the height it leaves: 0 top, 0.5 centre, 1 bottom. */
+        val coverCardPos: Float = 0.5f,
+        /** How round the square's corners are: 0 square, 1 a circle. */
+        val coverCardCorner: Float = 0.12f,
         /**
          * How tall the collapsed clock's digits are, in dp.
          *
@@ -98,8 +101,10 @@ object ModuleBridge {
         val lyricsHdr: Boolean = false,
         /** Draw each line's translation under it. On unless the user turns it off. */
         val lyricsTrans: Boolean = true,
-        val lyricOffsetDp: Float = 0f,
-        val lyricGapDp: Float = 16f,
+        /** The lyric band's height as a share of the room between the clock and the card. */
+        val lyricFill: Float = 1f,
+        /** Where the band sits in the height it leaves: 0 top, 0.5 centre, 1 bottom. */
+        val lyricPos: Float = 0.5f,
         val lyricSideDp: Float = 30f,
         val lyricSizeSp: Float = 25f,
         val lyricWeight: Int = 600,
@@ -475,9 +480,9 @@ object ModuleBridge {
             auto = b.getBoolean("auto", false),
             bias = b.getFloat("bias", 0.34f),
             coverStyle = b.getInt("coverstyle", 0),
-            coverCardSizeDp = b.getFloat("covercardsize", 240f),
-            coverCardMarginDp = b.getFloat("covercardmargin", 16f),
-            coverCardOffsetDp = b.getFloat("covercardoffset", 0f),
+            coverCardFill = b.getFloat("covercardfill", 0.8f),
+            coverCardPos = b.getFloat("covercardpos", 0.5f),
+            coverCardCorner = b.getFloat("covercardcorner", 0.12f),
             clockHeightDp = b.getFloat("clock", 36f),
             clockSize = sizeOf(b),
             clockOffsetDp = b.getFloat("clockoff", 0f),
@@ -499,8 +504,8 @@ object ModuleBridge {
             lyricsHdr = b.getBoolean("lyrichdr", false),
             // Defaults the other way: this one is on for anyone whose module predates the key.
             lyricsTrans = b.getBoolean("lyrictrans", true),
-            lyricOffsetDp = b.getFloat("lyricoff", 0f),
-            lyricGapDp = b.getFloat("lyricgap", 16f),
+            lyricFill = b.getFloat("lyricfill", 1f),
+            lyricPos = b.getFloat("lyricpos", 0.5f),
             lyricSideDp = b.getFloat("lyricside", 30f),
             lyricSizeSp = b.getFloat("lyricsize", 25f),
             lyricWeight = b.getInt("lyricweight", 600),

@@ -182,6 +182,9 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
                     lastLockEligible = true;
                     start();
                 }
+                // The pad coming up or going moves nothing of ours, so nothing else asks for the
+                // frames the blur eases over.
+                if (!ticking && bouncerP != bouncerTarget()) start();
                 // Every frame of the window while the wash is up: the doze zoom it has to undo
                 // animates, and nothing else of ours is drawing frames through it.
                 if (wash.getVisibility() == VISIBLE) wash.fit();
@@ -250,11 +253,15 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
             readable = source.getConfig() == Bitmap.Config.HARDWARE
                     ? source.copy(Bitmap.Config.ARGB_8888, false) : source;
             int w = readable.getWidth(), h = readable.getHeight();
-            int side = Math.min(w, h);
-            Rect crop = new Rect((w - side) / 2, (h - side) / 2,
-                    (w + side) / 2, (h + side) / 2);
-            art = Bitmap.createBitmap(Math.min(512, side), Math.min(512, side),
-                    Bitmap.Config.ARGB_8888);
+            // The artwork's own shape, cropped only past CoverCardStyle.MAX_ASPECT. It was
+            // cropped to a square here, which cut the sides off a video's cover.
+            float aspect = CoverCardStyle.aspect(w, h);
+            int cw = Math.min(w, Math.round(h * aspect));
+            int ch = Math.min(h, Math.round(w / aspect));
+            Rect crop = new Rect((w - cw) / 2, (h - ch) / 2, (w + cw) / 2, (h + ch) / 2);
+            float down = Math.min(1f, 512f / Math.max(cw, ch));
+            art = Bitmap.createBitmap(Math.max(1, Math.round(cw * down)),
+                    Math.max(1, Math.round(ch * down)), Bitmap.Config.ARGB_8888);
             new Canvas(art).drawBitmap(readable, crop,
                     new Rect(0, 0, art.getWidth(), art.getHeight()),
                     new Paint(Paint.FILTER_BITMAP_FLAG));
@@ -357,6 +364,40 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
             Xp.log("[MCCard] hidden outside keyguard on " + from);
         }
         if (getVisibility() != GONE || ticking || opacity != 0f) hideImmediately();
+    }
+
+    /**
+     * How far the PIN pad's blur has come over the square, 0..1.
+     *
+     * The OEM blurs the lock screen under the pad, but this layer is the keyguard's background
+     * and is not among what it blurs, so the square stood sharp through the pad. It used to be
+     * hidden for the pad instead, which cut it out as the pad came up and popped it back as the
+     * pad went. It blurs itself now, eased with the pad - the same as LyricView.followBouncer.
+     */
+    private float bouncerP;
+    private static final float BOUNCER_BLUR_DP = 24f;
+    /**
+     * Time constant of the ease, in seconds. Short: the level is the pad's own fade already
+     * (Main.bouncerLevel), so this only smooths it. At 80ms it trailed the OEM's blur both ways.
+     */
+    private static final float BOUNCER_TAU = 0.03f;
+
+    private static float bouncerTarget() {
+        return Main.bouncerLevel();
+    }
+
+    /** @return whether the blur is still moving, so the frames keep coming until it lands */
+    private boolean followBouncer(float dt) {
+        float want = bouncerTarget();
+        if (bouncerP == want) return false;
+        // The first step of a frame has no dt; it still has to start moving.
+        float k = dt <= 0f ? 0.25f : (float) (1.0 - Math.exp(-dt / BOUNCER_TAU));
+        bouncerP += (want - bouncerP) * k;
+        if (Math.abs(want - bouncerP) < 0.01f) bouncerP = want;
+        float r = bouncerP * BOUNCER_BLUR_DP * getResources().getDisplayMetrics().density;
+        setRenderEffect(r < 0.5f ? null : android.graphics.RenderEffect.createBlurEffect(
+                r, r, android.graphics.Shader.TileMode.DECAL));
+        return bouncerP != want;
     }
 
     private void hideImmediately() {
@@ -615,6 +656,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         float dt = lastFrame == 0L ? 1f / 60f
                 : Math.min(0.05f, Math.max(0f, (nowNs - lastFrame) / 1e9f));
         lastFrame = nowNs;
+        boolean blurring = followBouncer(dt);
         ClockCollapse.Phase phase = ClockCollapse.phase();
         boolean inAod = Main.coverCardInAod();
         boolean visible = style.mode == CoverCardStyle.CARD && Main.coverCardVisible();
@@ -695,7 +737,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         int visibility = opacity > 0f || target > 0f ? VISIBLE : GONE;
         if (getVisibility() != visibility) setVisibility(visibility);
         if (visibility == VISIBLE) invalidate();
-        boolean settling = Math.abs(target - opacity) > 0.001f
+        boolean settling = blurring || Math.abs(target - opacity) > 0.001f
                 || (phase != ClockCollapse.Phase.AOD && !scale.atRest(scaleTarget))
                 || previous != null || placing || (rise < 1f && opacity > 0f)
                 // Still waking from the big clock: keep looking until the clock has landed.
@@ -721,12 +763,11 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
                 || (Main.coverCardInAod() && LockLyrics.wantsAttached())) return;
         float density = getResources().getDisplayMetrics().density;
         if (Float.isNaN(drawX)) return;
-        CoverMorphMotion.Box actual = CoverMorphMotion.cardSquare(drawX, drawY,
-                drawSide, scale.value * (RISE_FROM + (1f - RISE_FROM) * rise));
-        float scaled = actual.w;
+        CoverMorphMotion.Box actual = CoverMorphMotion.cardBox(drawX, drawY,
+                drawSide, scale.value * (RISE_FROM + (1f - RISE_FROM) * rise), shownAspect());
         square.set(actual.x, actual.y, actual.x + actual.w, actual.y + actual.h);
-        float radius = Math.min(20f * density, scaled * 0.10f);
-        drawShadow(canvas, square, radius, density, opacity, paint);
+        float radius = style.radius(Math.min(actual.w, actual.h));
+        drawShadow(canvas, square, style.corner, opacity, paint);
         int save = canvas.save();
         clipPath.reset();
         clipPath.addRoundRect(square, radius, radius, Path.Direction.CW);
@@ -754,42 +795,69 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
      * keeps its proportions to the square: at a 300dp square it is the 16dp blur, 6dp inset and
      * 8dp drop it was drawn with before.
      */
-    static void drawShadow(Canvas canvas, RectF box, float radius, float density,
-                           float strength, Paint paint) {
-        if (strength <= 0f || box.width() <= 0f) return;
-        Bitmap tile = shadowTile();
-        float k = box.width() / SHADOW_UNIT;
-        float pad = SHADOW_PAD * k, dy = SHADOW_DROP * box.width();
-        sShadowDst.set(box.left - pad, box.top - pad + dy, box.right + pad, box.bottom + pad + dy);
+    static void drawShadow(Canvas canvas, RectF box, float corner, float strength, Paint paint) {
+        if (strength <= 0f || box.width() <= 0f || box.height() <= 0f) return;
+        Bitmap tile = shadowTile(corner);
+        float shortSide = Math.min(box.width(), box.height());
+        float k = shortSide / SHADOW_UNIT;
+        float pad = SHADOW_PAD * k, drop = SHADOW_DROP * shortSide;
         paint.setShader(null);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(0xFF000000);
         paint.setAlpha(Math.round(strength * 90f));
-        canvas.drawBitmap(tile, null, sShadowDst, paint);
+        // Nine slices rather than one stretch, so a card that is not square keeps the corners and
+        // the fall-off of a square one: the quarters at the short side's scale, and the tile's
+        // middle row and column - the shadow along a straight edge - stretched across the rest.
+        int t = tile.getWidth(), half = t / 2;
+        int[] sx = {0, half, t - half, t};
+        float q = half * k;
+        float l = box.left - pad, r = box.right + pad;
+        float top = box.top - pad + drop, bottom = box.bottom + pad + drop;
+        float[] dx = {l, Math.min(l + q, (l + r) * 0.5f), Math.max(r - q, (l + r) * 0.5f), r};
+        float[] dy = {top, Math.min(top + q, (top + bottom) * 0.5f),
+                Math.max(bottom - q, (top + bottom) * 0.5f), bottom};
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                if (dx[j + 1] - dx[j] <= 0f || dy[i + 1] - dy[i] <= 0f) continue;
+                sShadowSrc.set(sx[j], sx[i], sx[j + 1], sx[i + 1]);
+                sShadowDst.set(dx[j], dy[i], dx[j + 1], dy[i + 1]);
+                canvas.drawBitmap(tile, sShadowSrc, sShadowDst, paint);
+            }
+        }
     }
 
     /** The tile's square, in its own pixels; the ratios below are the old dp values over 300dp. */
     private static final float SHADOW_UNIT = 200f;
     private static final float SHADOW_BLUR = SHADOW_UNIT * 16f / 300f;
     private static final float SHADOW_INSET = SHADOW_UNIT * 6f / 300f;
-    private static final float SHADOW_RADIUS = SHADOW_UNIT * 20f / 300f;
     private static final float SHADOW_DROP = 8f / 300f;
     /** Room round the square for the blur to fall off in. */
     private static final float SHADOW_PAD = SHADOW_BLUR * 2f;
     private static Bitmap sShadowTile;
+    /** The corner setting, in whole percent, sShadowTile was drawn with. */
+    private static int sShadowCorner = -1;
     private static final RectF sShadowDst = new RectF();
+    private static final Rect sShadowSrc = new Rect();
 
-    private static Bitmap shadowTile() {
+    /**
+     * Drawn at the card's corner setting, not the live radius: the morph eases the radius every
+     * frame, and a tile per frame would be the per-frame blur this replaced. The shadow only
+     * shows as the morph lands on the card, where the two agree.
+     */
+    private static Bitmap shadowTile(float corner) {
+        int key = Math.round(corner * 100f);
         Bitmap t = sShadowTile;
-        if (t != null && !t.isRecycled()) return t;
+        if (t != null && !t.isRecycled() && key == sShadowCorner) return t;
         int side = Math.round(SHADOW_UNIT + 2f * SHADOW_PAD);
         t = Bitmap.createBitmap(side, side, Bitmap.Config.ALPHA_8);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         p.setColor(0xFF000000);
         p.setMaskFilter(new BlurMaskFilter(SHADOW_BLUR, BlurMaskFilter.Blur.NORMAL));
         float lo = SHADOW_PAD + SHADOW_INSET, hi = SHADOW_PAD + SHADOW_UNIT - SHADOW_INSET;
-        new Canvas(t).drawRoundRect(lo, lo, hi, hi, SHADOW_RADIUS, SHADOW_RADIUS, p);
+        float r = (hi - lo) * 0.5f * key / 100f;
+        new Canvas(t).drawRoundRect(lo, lo, hi, hi, r, r, p);
         sShadowTile = t;
+        sShadowCorner = key;
         return t;
     }
 
@@ -921,12 +989,37 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         return 1f - (1f - t) * (1f - t) * (1f - t);
     }
 
+    private static float aspectOf(Prepared p) {
+        return p == null ? 1f : CoverCardStyle.aspect(p.art.getWidth(), p.art.getHeight());
+    }
+
+    /**
+     * The card's shape right now: the current art's, eased from the previous one's over the same
+     * crossfade the art itself takes, so a song followed by a video's cover changes shape as it
+     * turns over rather than jumping.
+     */
+    private float shownAspect() {
+        float to = aspectOf(current);
+        if (previous == null) return to;
+        float from = aspectOf(previous);
+        return from + (to - from) * fadeFraction();
+    }
+
+    private final Rect artSrc = new Rect();
+
     private void drawArt(Canvas canvas, Prepared p, float fraction) {
         if (p == null || fraction <= 0f) return;
         paint.setShader(null);
         paint.setColor(0xFFFFFFFF);
         paint.setAlpha(Math.round(255f * opacity * fraction));
-        canvas.drawBitmap(p.art, null, square, paint);
+        // Centre-cropped to the card's shape, which is only ever off this art's own through a
+        // crossfade between two shapes - drawn into it as it is, one of the two would stretch.
+        int w = p.art.getWidth(), h = p.art.getHeight();
+        float box = square.width() / Math.max(1f, square.height());
+        int cw = Math.min(w, Math.round(h * box));
+        int ch = Math.min(h, Math.round(w / box));
+        artSrc.set((w - cw) / 2, (h - ch) / 2, (w + cw) / 2, (h + ch) / 2);
+        canvas.drawBitmap(p.art, artSrc, square, paint);
     }
 
 }

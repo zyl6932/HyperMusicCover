@@ -387,12 +387,18 @@ final class LyricView extends View {
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
     }
 
+    /** The screen's short side, which the text column is as wide as - see LyricStyle.sidePx. */
+    private int shortSide() {
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        return Math.min(dm.widthPixels, dm.heightPixels);
+    }
+
     private void applyPaintStyle(LyricStyle style) {
         layoutStyle = style;
         textPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, style.sizeSp,
                 getResources().getDisplayMetrics());
         wordPad = (int) Math.ceil(glowPx * 1.6f + liftPx + textPx * GLOW_SWELL);
-        sidePx = style.sidePx(getWidth(), density, textPx);
+        sidePx = style.sidePx(getWidth(), shortSide(), density, textPx);
         paint.setTextSize(textPx);
         paint.setTypeface(Typeface.create(Typeface.DEFAULT, style.weight, false));
         transPaint.setTextSize(textPx * TRANS_SP / TEXT_SP);
@@ -804,12 +810,15 @@ final class LyricView extends View {
      */
     private float bouncerP;
     private static final float BOUNCER_BLUR_DP = 24f;
-    /** Time constant of the ease, in seconds - about the pad's own slide. */
-    private static final float BOUNCER_TAU = 0.08f;
+    /**
+     * Time constant of the ease, in seconds. Short: the level is the pad's own fade already
+     * (Main.bouncerLevel), so this only smooths it. At 80ms it trailed the OEM's blur both ways.
+     */
+    private static final float BOUNCER_TAU = 0.03f;
 
     /** @return whether the blur moved, so the pad coming up keeps this view asking for frames */
     private boolean followBouncer(float dt) {
-        float want = Main.bouncerShown() ? 1f : 0f;
+        float want = Main.bouncerLevel();
         if (bouncerP == want) return false;
         // The first step of a frame has no dt; it still has to start moving.
         float k = dt <= 0f ? 0.25f : (float) (1.0 - Math.exp(-dt / BOUNCER_TAU));
@@ -831,7 +840,7 @@ final class LyricView extends View {
         // dimTarget() is 1 outside the AOD and the frame that wakes the keyguard may change
         // nothing else.
         if (getTransitionAlpha() != dimTarget()) return true;
-        if (bouncerP != (Main.bouncerShown() ? 1f : 0f)) return true;
+        if (bouncerP != Main.bouncerLevel()) return true;
         // The block sliding to a new centre is a movement like any other, and the slowest one
         // here: without this the loop would stop the moment the springs settled and leave the
         // correction half way.
@@ -994,7 +1003,7 @@ final class LyricView extends View {
                 && style.sameLayout(wantStyle)) return false;
         final float buildTextPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,
                 style.sizeSp, getResources().getDisplayMetrics());
-        final float buildSidePx = style.sidePx(width, density, buildTextPx);
+        final float buildSidePx = style.sidePx(width, shortSide(), density, buildTextPx);
         // Copies, including the requested typography: the current paints keep drawing the old
         // layout until the replacement is ready. A rapid slider drag cannot mix both styles.
         final TextPaint p = new TextPaint(paint);

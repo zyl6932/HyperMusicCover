@@ -20,9 +20,11 @@ object SettingsBackup {
 
     private const val KEY_BIAS = "coverBias"
     private const val KEY_COVER_STYLE = "coverStyle"
+    private const val KEY_COVER_CARD_FILL = "coverCardFill"
+    private const val KEY_COVER_CARD_POS = "coverCardPos"
+    private const val KEY_COVER_CARD_CORNER = "coverCardCorner"
+    /** The dp size from before the shares; read, never written. Its margin and offset are dropped. */
     private const val KEY_COVER_CARD_SIZE = "coverCardSizeDp"
-    private const val KEY_COVER_CARD_MARGIN = "coverCardMarginDp"
-    private const val KEY_COVER_CARD_OFFSET = "coverCardOffsetDp"
     private const val KEY_CLOCK_HEIGHT = "clockHeight"
     /** Written by versions that stored the collapse as a scale coefficient; read, never written. */
     private const val KEY_CLOCK_SCALE = "clockScale"
@@ -41,8 +43,9 @@ object SettingsBackup {
     private const val KEY_LYRICS_KEEP_ON = "lyricsKeepOn"
     private const val KEY_LYRICS_HDR = "lyricsHdr"
     private const val KEY_LYRICS_TRANS = "lyricsTranslation"
-    private const val KEY_LYRIC_OFFSET = "lyricWindowOffsetDp"
-    private const val KEY_LYRIC_GAP = "lyricVerticalGapDp"
+    /** The old dp window offset and gap are not read: what they meant depended on the room. */
+    private const val KEY_LYRIC_FILL = "lyricBandFill"
+    private const val KEY_LYRIC_POS = "lyricBandPos"
     private const val KEY_LYRIC_SIDE = "lyricSideMarginDp"
     private const val KEY_LYRIC_SIZE = "lyricMainSizeSp"
     private const val KEY_LYRIC_WEIGHT = "lyricMainWeight"
@@ -58,9 +61,9 @@ object SettingsBackup {
         if (module.alive) {
             json.put(KEY_BIAS, module.bias.toDouble())
             json.put(KEY_COVER_STYLE, module.coverStyle)
-            json.put(KEY_COVER_CARD_SIZE, module.coverCardSizeDp.toDouble())
-            json.put(KEY_COVER_CARD_MARGIN, module.coverCardMarginDp.toDouble())
-            json.put(KEY_COVER_CARD_OFFSET, module.coverCardOffsetDp.toDouble())
+            json.put(KEY_COVER_CARD_FILL, module.coverCardFill.toDouble())
+            json.put(KEY_COVER_CARD_POS, module.coverCardPos.toDouble())
+            json.put(KEY_COVER_CARD_CORNER, module.coverCardCorner.toDouble())
             json.put(KEY_CLOCK_HEIGHT, module.clockHeightDp.toDouble())
             if (module.clockSize > 0f) json.put(KEY_CLOCK_SIZE, module.clockSize.toDouble())
             json.put(KEY_CLOCK_OFFSET, module.clockOffsetDp.toDouble())
@@ -76,8 +79,8 @@ object SettingsBackup {
             json.put(KEY_LYRICS_KEEP_ON, module.lyricsKeepOn)
             json.put(KEY_LYRICS_HDR, module.lyricsHdr)
             json.put(KEY_LYRICS_TRANS, module.lyricsTrans)
-            json.put(KEY_LYRIC_OFFSET, module.lyricOffsetDp.toDouble())
-            json.put(KEY_LYRIC_GAP, module.lyricGapDp.toDouble())
+            json.put(KEY_LYRIC_FILL, module.lyricFill.toDouble())
+            json.put(KEY_LYRIC_POS, module.lyricPos.toDouble())
             json.put(KEY_LYRIC_SIDE, module.lyricSideDp.toDouble())
             json.put(KEY_LYRIC_SIZE, module.lyricSizeSp.toDouble())
             json.put(KEY_LYRIC_WEIGHT, module.lyricWeight)
@@ -97,14 +100,18 @@ object SettingsBackup {
         try {
             val obj = JSONObject(json)
             if (obj.has(KEY_BIAS)) ModuleBridge.setBias(context, obj.getDouble(KEY_BIAS).toFloat())
-            if (obj.has(KEY_COVER_CARD_SIZE)) {
-                ModuleBridge.setCoverStyle(context, "size", obj.getDouble(KEY_COVER_CARD_SIZE).toFloat())
+            if (obj.has(KEY_COVER_CARD_FILL)) {
+                ModuleBridge.setCoverStyle(context, "fill", obj.getDouble(KEY_COVER_CARD_FILL).toFloat())
+            } else if (obj.has(KEY_COVER_CARD_SIZE)) {
+                // Only the old slider's top translates without the room: it meant "as big as fits".
+                val fill = if (obj.getDouble(KEY_COVER_CARD_SIZE) >= 420.0) 1f else 0.8f
+                ModuleBridge.setCoverStyle(context, "fill", fill)
             }
-            if (obj.has(KEY_COVER_CARD_MARGIN)) {
-                ModuleBridge.setCoverStyle(context, "margin", obj.getDouble(KEY_COVER_CARD_MARGIN).toFloat())
+            if (obj.has(KEY_COVER_CARD_POS)) {
+                ModuleBridge.setCoverStyle(context, "pos", obj.getDouble(KEY_COVER_CARD_POS).toFloat())
             }
-            if (obj.has(KEY_COVER_CARD_OFFSET)) {
-                ModuleBridge.setCoverStyle(context, "offset", obj.getDouble(KEY_COVER_CARD_OFFSET).toFloat())
+            if (obj.has(KEY_COVER_CARD_CORNER)) {
+                ModuleBridge.setCoverStyle(context, "corner", obj.getDouble(KEY_COVER_CARD_CORNER).toFloat())
             }
             ModuleBridge.setCoverStyle(context, "mode",
                 if (obj.has(KEY_COVER_STYLE)) obj.getInt(KEY_COVER_STYLE).toFloat() else 0f)
@@ -159,11 +166,11 @@ object SettingsBackup {
             if (obj.has(KEY_LYRICS_TRANS)) {
                 ModuleBridge.setLyricsTrans(context, obj.getBoolean(KEY_LYRICS_TRANS))
             }
-            if (obj.has(KEY_LYRIC_OFFSET)) {
-                ModuleBridge.setLyricStyle(context, "offset", obj.getDouble(KEY_LYRIC_OFFSET).toFloat())
+            if (obj.has(KEY_LYRIC_FILL)) {
+                ModuleBridge.setLyricStyle(context, "fill", obj.getDouble(KEY_LYRIC_FILL).toFloat())
             }
-            if (obj.has(KEY_LYRIC_GAP)) {
-                ModuleBridge.setLyricStyle(context, "gap", obj.getDouble(KEY_LYRIC_GAP).toFloat())
+            if (obj.has(KEY_LYRIC_POS)) {
+                ModuleBridge.setLyricStyle(context, "pos", obj.getDouble(KEY_LYRIC_POS).toFloat())
             }
             if (obj.has(KEY_LYRIC_SIDE)) {
                 ModuleBridge.setLyricStyle(context, "side", obj.getDouble(KEY_LYRIC_SIDE).toFloat())
