@@ -1,6 +1,7 @@
 package com.os4.musiccover
 
 import android.content.Context
+import android.content.ContextWrapper
 import io.github.proify.lyricon.lyric.model.RichLyricLine
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.subscriber.ActivePlayerListener
@@ -57,6 +58,9 @@ object LyriconSource {
 
     private var sAttached = false
 
+    /** The package this subscriber registers as - see attach. Our applicationId, so it is unique. */
+    private const val SUBSCRIBER_NAME = "com.github.zyl6932.HyperMusicCover"
+
     /**
      * Start listening, once, from wherever the process first has a Context.
      *
@@ -77,7 +81,17 @@ object LyriconSource {
             sAttached = true
         }
         try {
-            val subscriber = LyriconFactory.createSubscriber(ctx)
+            // Under a name of our own. The central keys a subscriber by (package, process) and a
+            // second one under a key it already has is handed the FIRST one's connection, which
+            // holds a single listener - so ours, registered from SystemUI as
+            // com.android.systemui, took over the listener of whichever display module had
+            // subscribed from SystemUI before us. HyperLyrics Enhanced does, with its central
+            // built in, and its island lost every lyric from 0.3 on. The library takes the
+            // package from the Context and nothing else from it: the register broadcast is sent
+            // to com.android.systemui by name.
+            val subscriber = LyriconFactory.createSubscriber(object : ContextWrapper(ctx) {
+                override fun getPackageName(): String = SUBSCRIBER_NAME
+            })
             subscriber.addConnectionListener(object : ConnectionListener {
                 override fun onConnected(subscriber: LyriconSubscriber) {
                     sState = "connected"
