@@ -67,6 +67,24 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
     private static final float RISE_FROM = 0.92f;
     /** How far down the square the big clock has to reach for it to be fully covered. */
     private static final float REVEAL_SPAN = 0.8f;
+    /**
+     * Falling asleep, the wallpaper goes to black in ~200ms along (1 - t)^2 (read frame by frame
+     * off a recording), and the square goes with it. It used to ease at the clock's response and
+     * was still half lit when the doze took the layer away, so it hung over black and then cut.
+     */
+    private static final float SLEEP_FADE_S = 0.2f;
+    /** When this fall began (frame time, 0 when not falling) and the opacity it began from. */
+    private long fallAt;
+    private float fallFrom;
+    /**
+     * Waking, the wallpaper comes back from black in ~350ms along 1 - (1 - t)^3, read off the
+     * same recording. The square was lit in one frame at 3/4 while the screen was still dark.
+     */
+    private static final float WAKE_FADE_S = 0.35f;
+    /** How lit the wallpaper is taken to be, 0..1: what a wake starts from. */
+    private float lit = 1f;
+    private long wakeAt;
+    private float wakeFrom;
 
     private CoverCardLayer(Context context) {
         super(context);
@@ -583,9 +601,28 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         float response = Math.max(0.18f, Main.sClockResponse);
         // Tied to the clock's own flight on the lit screen, and to the big clock's edge on the way
         // into and out of its doze. Otherwise falling asleep it eases.
+        if (!bigFall) fallAt = 0L;
+        if (!bigWake) wakeAt = 0L;
+        if (!afterBigClock) lit = 1f;
+        else if (phase == ClockCollapse.Phase.AOD) lit = 0f;
         if (bigFall) {
-            // A slow fade under it as well, for a big clock that stops short of covering it.
-            opacity = Math.min(target, opacity * (1f - Math.min(1f, dt / response)));
+            // Out with the wallpaper as well, for a big clock that stops short of covering it.
+            if (fallAt == 0L) {
+                fallAt = nowNs;
+                fallFrom = opacity;
+            }
+            float u = Math.min(1f, (nowNs - fallAt) / 1e9f / SLEEP_FADE_S);
+            lit = (1f - u) * (1f - u);
+            opacity = Math.min(target, fallFrom * lit);
+        } else if (bigWake) {
+            // And back in with it - from wherever a fall pressed short of the doze had left it.
+            if (wakeAt == 0L) {
+                wakeAt = nowNs;
+                wakeFrom = lit;
+            }
+            float u = 1f - Math.min(1f, (nowNs - wakeAt) / 1e9f / WAKE_FADE_S);
+            lit = wakeFrom + (1f - wakeFrom) * (1f - u * u * u);
+            opacity = target * lit;
         } else if ((inAod && lyrics) || phase == ClockCollapse.Phase.ENTER
                 || (phase == ClockCollapse.Phase.EXIT && Main.screenOn())) {
             opacity = target;
