@@ -197,6 +197,14 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
                     lastTop = loc[1];
                     lastClock = clock;
                     lastMedia = media;
+                    // In this frame, not the next: the card has already been moved for it.
+                    if (carries(ClockCollapse.phase()) && opacity > 0f) {
+                        CoverCardStyle.Rect goal = placeNow();
+                        if (goal != null) {
+                            carry(goal, true);
+                            invalidate();
+                        }
+                    }
                     start();
                 }
                 return true;
@@ -485,6 +493,13 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
 
     /** Where the square is drawn, eased towards placeNow(); NaN until it has a place. */
     private float drawX = Float.NaN, drawY, drawSide;
+    /** The goal as last seen, so the part of its move the media card made can be carried over. */
+    private float goalX = Float.NaN, goalY, goalSide;
+    /**
+     * A goal move bigger than this share of the square in one frame is a jump - a rebuilt media
+     * card - and is eased. Under a finger the card moves a few dozen px a frame.
+     */
+    private static final float CARRY_MAX = 0.25f;
     /** The last place the lit lock screen gave it - what the doze keeps. */
     private CoverCardStyle.Rect lockPlace;
     /**
@@ -546,7 +561,11 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
             if (goal != null) lockPlace = goal;
             if (goal != null && phase == ClockCollapse.Phase.ON) restPlace = goal;
         }
-        if (goal == null) return false;
+        if (goal == null) {
+            goalX = Float.NaN;
+            return false;
+        }
+        carry(goal, carries(phase));
         if (Float.isNaN(drawX) || opacity <= 0f) {
             drawX = goal.x;
             drawY = goal.y;
@@ -565,6 +584,30 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
             drawSide = goal.side;
         }
         return moving;
+    }
+
+    /**
+     * On the settled lock screen the goal only moves when the media card does - dragged, or
+     * springing back after the finger lets go - and the square has to keep off it frame for
+     * frame. Eased there, it lagged its own easing plus a frame and ran over the card.
+     */
+    private boolean carries(ClockCollapse.Phase phase) {
+        return phase == ClockCollapse.Phase.ON && !afterBigClock;
+    }
+
+    /** Moves the drawn place by however far the goal moved since it was last seen. */
+    private void carry(CoverCardStyle.Rect goal, boolean follow) {
+        if (follow && !Float.isNaN(goalX) && !Float.isNaN(drawX)) {
+            float dy = goal.y - goalY, ds = goal.side - goalSide;
+            if (Math.abs(dy) + Math.abs(ds) < goal.side * CARRY_MAX) {
+                drawX += goal.x - goalX;
+                drawY += dy;
+                drawSide += ds;
+            }
+        }
+        goalX = goal.x;
+        goalY = goal.y;
+        goalSide = goal.side;
     }
 
     @Override public void doFrame(long nowNs) {
