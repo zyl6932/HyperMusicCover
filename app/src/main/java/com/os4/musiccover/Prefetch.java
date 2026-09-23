@@ -77,7 +77,38 @@ final class Prefetch {
             this.mediaId = mediaId;
             this.artist = artist;
         }
+
+        /** The same track: by the platform id where there is one, else by title. */
+        boolean sameTrack(Item o) {
+            if (o == null) return false;
+            if (mediaId != null && o.mediaId != null) return mediaId.equals(o.mediaId);
+            return title != null && title.equals(o.title);
+        }
     }
+
+    /**
+     * The tracks played before this one, most recent first.
+     *
+     * Kept here because Apple Music's queue does not hold them: it always publishes the current
+     * item at index 0 and what comes after (measured 2026-09-23 with `op queue`: "active id=0
+     * (index 0)"), so a skip back found nothing before it and waited the whole ~0.8s for the
+     * player, where a skip on was answered at once.
+     */
+    private static final java.util.ArrayList<Item> sHistory = new java.util.ArrayList<>();
+    private static final int HISTORY_MAX = 4;
+    /** The item that was current at the last queue read, to notice it changing. */
+    private static Item sCurrent;
+    /** How many skips back have been predicted from sHistory since the last queue read. */
+    private static int sBackDepth;
+    /** The session's last playback state, for where in the track a skip back is pressed. */
+    private static volatile PlaybackState sState;
+
+    /**
+     * How far into a track a skip back only restarts it. media3's default
+     * (maxSeekToPreviousPositionMs), which Apple Music is built on. Past it the cover is not
+     * going to change, so nothing is predicted rather than flashing the previous album.
+     */
+    private static final long RESTART_MS = 3000L;
 
     /** Which player the queue belongs to; the lyric half is only run for one of them. */
     private static volatile String sPkg;
@@ -146,6 +177,10 @@ final class Prefetch {
      * Called on the thread that asked for the skip, so it only reads what is already in hand.
      */
     static Bitmap take(int dir) {
+        if (dir < 0) {
+            Bitmap back = takeBack();
+            if (back != null) return back;
+        }
         List<Item> items = sItems;
         int at = sIndex;
         if (items.isEmpty() || at < 0) return null;
@@ -182,6 +217,69 @@ final class Prefetch {
     }
 
     /**
+     * A skip back, answered from the tracks this has seen play rather than from the queue, which
+     * does not hold them. Null past RESTART_MS, where the press restarts the track instead.
+     */
+    private static Bitmap takeBack() {
+        if (positionMs() > RESTART_MS) return null;
+        Item it;
+        synchronized (sHistory) {
+            // A player whose queue does hold the past is answered by the queue itself.
+            if (sIndex > 0) return null;
+            if (sBackDepth >= sHistory.size()) return null;
+            it = sHistory.get(sBackDepth);
+        }
+        if (it.icon == null) return null;
+        Bitmap b;
+        synchronized (CACHE) {
+            b = CACHE.get(it.icon.toString());
+        }
+        if (b == null || b.isRecycled()) return null;
+        synchronized (sHistory) {
+            sBackDepth++;
+        }
+        // The queue's place no longer says where the press is landing, so a skip on before the
+        // player reports is left to the player rather than predicted from the wrong track.
+        sIndex = -1;
+        sPredicted = it.title;
+        sPredictedAt = SystemClock.uptimeMillis();
+        Xp.log(TAG + "predicting \"" + it.title + "\" for a skip back, from history");
+        return b;
+    }
+
+    /** Where the session last said it was, carried forward to now. */
+    private static long positionMs() {
+        PlaybackState s = sState;
+        if (s == null) return 0L;
+        long pos = s.getPosition();
+        if (s.getState() == PlaybackState.STATE_PLAYING) {
+            pos += (long) ((SystemClock.elapsedRealtime() - s.getLastPositionUpdateTime())
+                    * s.getPlaybackSpeed());
+        }
+        return pos;
+    }
+
+    /**
+     * Notes the current item changing: the one it replaced goes onto the history, or - when the
+     * new one is the history's latest, a skip back - comes off it.
+     */
+    private static void noteCurrent(Item now) {
+        synchronized (sHistory) {
+            sBackDepth = 0;
+            if (now == null) return;
+            Item was = sCurrent;
+            sCurrent = now;
+            if (was == null || was.sameTrack(now)) return;
+            if (!sHistory.isEmpty() && sHistory.get(0).sameTrack(now)) {
+                sHistory.remove(0);
+                return;
+            }
+            sHistory.add(0, was);
+            while (sHistory.size() > HISTORY_MAX) sHistory.remove(sHistory.size() - 1);
+        }
+    }
+
+    /**
      * Whether the track the player has now is the one already pushed for. Consumes the
      * prediction either way: it has been answered.
      */
@@ -204,7 +302,11 @@ final class Prefetch {
         synchronized (CACHE) {
             n = CACHE.size();
         }
-        return "queue=" + items.size() + " at=" + sIndex + " cached=" + n
+        int back;
+        synchronized (sHistory) {
+            back = sHistory.size();
+        }
+        return "queue=" + items.size() + " at=" + sIndex + " history=" + back + " cached=" + n
                 + " predicted=" + sPredicted
                 // What reading ahead has in hand. The module's own log cannot be read back on
                 // this device, so this line is the only place the lyric prefetch is visible.
@@ -214,7 +316,15 @@ final class Prefetch {
     // ------------------------------------------------------------------ internals
 
     private static void readQueue(MediaController c) {
-        sPkg = c.getPackageName();
+        String pkg = c.getPackageName();
+        if (sPkg != null && !sPkg.equals(pkg)) {
+            // Another player's past is not this one's.
+            synchronized (sHistory) {
+                sHistory.clear();
+                sCurrent = null;
+            }
+        }
+        sPkg = pkg;
         List<MediaSession.QueueItem> q = c.getQueue();
         if (q == null || q.isEmpty()) {
             sItems = new ArrayList<>();
@@ -232,6 +342,7 @@ final class Prefetch {
         }
         long active = -1L;
         PlaybackState ps = c.getPlaybackState();
+        sState = ps;
         if (ps != null) active = ps.getActiveQueueItemId();
         int at = -1;
         for (int n = 0; n < items.size(); n++) {
@@ -242,6 +353,7 @@ final class Prefetch {
         }
         sItems = items;
         sIndex = at;
+        if (at >= 0) noteCurrent(items.get(at));
     }
 
     private static String str(CharSequence cs) {
@@ -323,13 +435,23 @@ final class Prefetch {
             fetch(items, at + d);
             fetch(items, at - d);
         }
+        // What a skip back lands on, which the queue does not hold. Usually still cached from
+        // when it was the track ahead; fetched again if it was trimmed since.
+        Item back;
+        synchronized (sHistory) {
+            back = sHistory.isEmpty() ? null : sHistory.get(0);
+        }
+        fetch(back);
         trim();
     }
 
     private static void fetch(List<Item> items, int at) {
         if (at < 0 || at >= items.size()) return;
-        Item it = items.get(at);
-        if (it.icon == null) return;
+        fetch(items.get(at));
+    }
+
+    private static void fetch(Item it) {
+        if (it == null || it.icon == null) return;
         String key = it.icon.toString();
         synchronized (CACHE) {
             Bitmap have = CACHE.get(key);
