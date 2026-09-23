@@ -467,7 +467,8 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
                 .append(" at=").append(at[0]).append(',').append(at[1])
                 .append(" screen=").append(Main.screenWidth()).append('x')
                 .append(Main.screenHeight()).append(']');
-        return "view.playing=" + v.playing + " scale=" + v.scale.value
+        return "aodPlace=[" + v.aodPlaceNote + "] view.playing=" + v.playing
+                + " scale=" + v.scale.value
                 + " ticking=" + v.ticking + " opacity=" + v.opacity
                 + " attached=" + v.isAttachedToWindow() + " chain=" + chain;
     }
@@ -596,7 +597,8 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
             // Placed live, the big clock's bottom pushes it small and low against the media card.
             goal = restPlace;
         } else if (phase == ClockCollapse.Phase.AOD) {
-            goal = lockPlace != null ? lockPlace : placeNow();
+            CoverCardStyle.Rect held = lockPlace != null ? lockPlace : placeNow();
+            goal = held == null ? null : aodPlace(held);
         } else {
             goal = placeNow();
             if (goal != null) lockPlace = goal;
@@ -625,6 +627,67 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
             drawSide = goal.side;
         }
         return moving;
+    }
+
+    /**
+     * How long into a doze the place keeps being re-derived. aodPlace() reads things that are
+     * still moving when the doze starts - the zoom (529ms to settle), the held clock, the compact
+     * media card swapping in - and the loop stops the first frame the square has caught up with
+     * its goal. It stopped at k=0.967 with the clock 32px from where it came to rest, and the
+     * gaps came out 158/131 instead of equal (2026-09-24).
+     */
+    private static final long AOD_SETTLE_NS = 1_500_000_000L;
+    /** When the current doze began, 0 outside one. */
+    private long aodSince;
+
+    /** What aodPlace() last worked from, for `op cardstate`. */
+    private String aodPlaceNote = "none";
+
+    /**
+     * The held place, moved to sit centred between the doze's own clock and its own media card.
+     *
+     * Held alone it rode the doze zoom exactly, and still came out off-centre, because the two
+     * things it sits between do not ride that zoom: the held clock sits higher than the zoomed
+     * lock screen's would (59px) and the AOD swaps in a compact media card whose top is lower
+     * (135px). Measured 2026-09-24: gaps 48/50px lit, 105/183px in the AOD. Size and x are kept
+     * - only the height it sits at follows the doze - and the move goes through followPlace's
+     * easing, so it slides there with the dim rather than jumping.
+     *
+     * The live media card is read here, not coverCardMediaTop()'s stand-in: that one exists for
+     * the place the doze is not allowed to re-derive. Anything unreadable, or no room, keeps held.
+     */
+    private CoverCardStyle.Rect aodPlace(CoverCardStyle.Rect held) {
+        // Where the dozing clock is drawn, not the pose: inside the doze the two part by the
+        // OEM's zoom and shifts (24px, which was the whole of what was left off-centre).
+        float clock = ClockCollapse.contentBottomDrawn();
+        float media = Main.liveMediaTop();
+        float k = ancestorScale();
+        if (Float.isNaN(clock) || Float.isNaN(media) || k <= 0f || media <= clock) {
+            aodPlaceNote = "held clock=" + clock + " media=" + media;
+            return held;
+        }
+        int[] loc = tmpLoc;
+        getLocationOnScreen(loc);
+        // Screen distances into this view's own coordinates, which the zoom above it scales.
+        float top = (clock - loc[1]) / k, bottom = (media - loc[1]) / k;
+        float room = bottom - top - held.side;
+        if (room < 0f) {
+            aodPlaceNote = "no room clock=" + clock + " media=" + media;
+            return held;
+        }
+        float y = top + room / 2f;
+        aodPlaceNote = "centred clock=" + clock + " media=" + media + " k=" + k
+                + " y=" + Math.round(held.y) + "->" + Math.round(y);
+        return new CoverCardStyle.Rect(held.x, y, held.side);
+    }
+
+    /** The product of every ancestor's vertical scale - the doze's 0.95 among them. */
+    private float ancestorScale() {
+        float k = 1f;
+        for (Object p = getParent(); p instanceof View; p = ((View) p).getParent()) {
+            k *= ((View) p).getScaleY();
+        }
+        return k;
     }
 
     /**
@@ -658,6 +721,8 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         lastFrame = nowNs;
         boolean blurring = followBouncer(dt);
         ClockCollapse.Phase phase = ClockCollapse.phase();
+        if (phase != ClockCollapse.Phase.AOD) aodSince = 0L;
+        else if (aodSince == 0L) aodSince = nowNs;
         boolean inAod = Main.coverCardInAod();
         boolean visible = style.mode == CoverCardStyle.CARD && Main.coverCardVisible();
         // 0.2.2 can keep lyrics in the full-screen AOD. The selected lyric page owns this space.
@@ -740,6 +805,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         boolean settling = blurring || Math.abs(target - opacity) > 0.001f
                 || (phase != ClockCollapse.Phase.AOD && !scale.atRest(scaleTarget))
                 || previous != null || placing || (rise < 1f && opacity > 0f)
+                || (aodSince != 0L && nowNs - aodSince < AOD_SETTLE_NS)
                 // Still waking from the big clock: keep looking until the clock has landed.
                 || (afterBigClock && phase != ClockCollapse.Phase.AOD);
         if (settling) {

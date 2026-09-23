@@ -6064,6 +6064,15 @@ public class Main extends XposedModule {
 
     static float coverCardMediaTop() {
         if (coverCardInAod()) return sScreenH * 0.70f;
+        return liveMediaTop();
+    }
+
+    /**
+     * The media card's top on screen as it is drawn right now, the AOD's compact card included;
+     * NaN when it is not up. coverCardMediaTop() answers a stand-in in the AOD instead - for the
+     * callers that must not follow the card through the doze's own transition.
+     */
+    static float liveMediaTop() {
         View card = sCardGuarded != null ? sCardGuarded : LockLyrics.card();
         if (card != null && card.isShown() && card.getHeight() > 0) {
             int[] xy = new int[2];

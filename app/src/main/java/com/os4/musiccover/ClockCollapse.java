@@ -247,6 +247,50 @@ final class ClockCollapse {
         return bottom;
     }
 
+    /**
+     * contentBottomOnScreen(), but where it is actually drawn right now: the ink box and the
+     * signature bars mapped through every view's own transform up to the window.
+     *
+     * The pose is written in the lock screen's own pixels, and outside a doze those are the
+     * screen's. Inside one the OEM zooms and shifts the clock's ancestors on top of the pose, so
+     * the pose's bottom says 515 while the digits end at 491 (measured 2026-09-24) - which is what
+     * whoever has to sit against the dozing clock needs.
+     */
+    static float contentBottomDrawn() {
+        View g = firstTarget();
+        RectF box = Main.glyphBox(true);
+        if (g == null || box == null || box.height() <= 0f) return Float.NaN;
+        float bottom = drawnY(g, box.centerX(), box.bottom);
+        Live m = LIVE;
+        for (int i = 0; i < m.sigN; i++) {
+            Sig s = m.sig[i];
+            if (s.v == null || !s.v.isShown()) continue;
+            float b = drawnY(s.v, s.v.getWidth() / 2f, s.v.getHeight());
+            if (b > bottom) bottom = b;
+        }
+        return bottom;
+    }
+
+    /** Where a point in a view's own coordinates is drawn on screen, every transform included. */
+    private static float drawnY(View v, float x, float y) {
+        float[] pt = {x, y};
+        View cur = v;
+        while (true) {
+            android.graphics.Matrix mx = cur.getMatrix();
+            if (!mx.isIdentity()) mx.mapPoints(pt);
+            pt[0] += cur.getLeft();
+            pt[1] += cur.getTop();
+            if (!(cur.getParent() instanceof View)) break;
+            View p = (View) cur.getParent();
+            pt[0] -= p.getScrollX();
+            pt[1] -= p.getScrollY();
+            cur = p;
+        }
+        // The root's own place is the window's.
+        cur.getLocationOnScreen(LOC);
+        return pt[1] + LOC[1];
+    }
+
     static Phase phase() {
         return sPhase;
     }
