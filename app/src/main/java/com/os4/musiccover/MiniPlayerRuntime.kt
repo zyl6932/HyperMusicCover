@@ -288,7 +288,7 @@ object MiniPlayerRuntime {
         synchronized(controllers) { controllers.values.any { it.controller.wantsNativeArtworkGesture() } }
 
     /**
-     * The card can be swiped down into the pill: in the sliding mode when it is up by choice,
+     * The card can be swiped down into the pill: when it is up by choice,
      * and in the cover or lyrics - where the card stands in for the pill - whenever the pill
      * is what the lock screen goes back to.
      */
@@ -374,7 +374,7 @@ object MiniPlayerRuntime {
         when (action) {
             MotionEvent.ACTION_MOVE -> {
                 if (!routedMorph && -dy > DRAG_THRESHOLD_DP * d) {
-                    // Pulled far enough up to mean it: in the sliding mode the pill starts
+                    // Pulled far enough up to mean it: the pill starts
                     // turning into the card under the finger, the nudge handed over as it is.
                     val owner = live().firstOrNull { it.canDrag(fromNative = false) }
                     if (owner != null && beginDrag(fromNative = false, ev, startY = routedY)) {
@@ -612,6 +612,12 @@ object MiniPlayerRuntime {
     @JvmStatic fun shortcutView(): View? = synchronized(controllers) {
         controllers.values.firstOrNull()?.left
     }
+
+    /**
+     * For the settings preview, in px: host width, then the torch's and the camera's laid-out
+     * centre and icon size (x, y, w, h each). Null until a shortcut row has been built.
+     */
+    @JvmStatic fun shortcutGeometry(): FloatArray? = live().firstNotNullOfOrNull { it.shortcutGeometry() }
 
     /** For `op mini`: the pill, the card, and the torch button's chain as they are right now. */
     @JvmStatic fun describe(): String {
@@ -993,6 +999,35 @@ private class MiniPlayerController(
 
     fun isShowing(): Boolean = player?.visibility == View.VISIBLE
 
+    fun shortcutGeometry(): FloatArray? {
+        if (host.width <= 0 || left.width <= 0 || right.width <= 0) return null
+        val l = restCentre(left)
+        val r = restCentre(right)
+        val li = iconSize(left)
+        val ri = iconSize(right)
+        return floatArrayOf(host.width.toFloat(), l[0], l[1], li[0], li[1], r[0], r[1], ri[0], ri[1])
+    }
+
+    /** The drawn icon inside a shortcut button: its image fitted into the padded box; 0 if none. */
+    private fun iconSize(v: View): FloatArray {
+        val image = findImage(v) ?: return floatArrayOf(0f, 0f)
+        val w = (image.width - image.paddingLeft - image.paddingRight).toFloat()
+        val h = (image.height - image.paddingTop - image.paddingBottom).toFloat()
+        val d = image.drawable
+        val iw = d.intrinsicWidth.toFloat()
+        val ih = d.intrinsicHeight.toFloat()
+        if (w <= 0f || h <= 0f || iw <= 0f || ih <= 0f) return floatArrayOf(w, h)
+        val k = min(w / iw, h / ih)
+        return floatArrayOf(iw * k, ih * k)
+    }
+
+    private fun findImage(v: View): ImageView? {
+        if (v is ImageView && v.drawable != null && v.visibility == View.VISIBLE) return v
+        if (v !is ViewGroup) return null
+        for (i in 0 until v.childCount) findImage(v.getChildAt(i))?.let { return it }
+        return null
+    }
+
     fun describe(): String {
         val v = player ?: return "no pill"
         val xy = IntArray(2).also(v::getLocationOnScreen)
@@ -1038,9 +1073,8 @@ private class MiniPlayerController(
         }
         val view = player ?: return false
         val token = controller?.sessionToken ?: return false
-        // With both shown side by side (mode 0) the card is already there: nothing to become.
-        if (scene && (config.getInt(MiniPlayerConfig.MEDIA_MODE) == 0
-                || MiniPlayerRuntime.nativeRequested(token))) return false
+        // The card already chosen: nothing to become.
+        if (scene && MiniPlayerRuntime.nativeRequested(token)) return false
         if (!view.isAttachedToWindow || !Main.miniPlayerMorphAllowed()) return false
         val native = transitionHeader() ?: return false
         view.visibility = View.VISIBLE
@@ -1101,7 +1135,6 @@ private class MiniPlayerController(
     fun wantsNativeArtworkGesture(): Boolean {
         val token = controller?.sessionToken
         return config.getBoolean(MiniPlayerConfig.ENABLED) &&
-            config.getInt(MiniPlayerConfig.MEDIA_MODE) == 2 &&
             MiniPlayerRuntime.nativeRequested(token) &&
             Main.miniPlayerCanShow()
     }
@@ -1111,10 +1144,6 @@ private class MiniPlayerController(
     /** The dynamic switch can be pulled from this end right now. */
     fun canDrag(fromNative: Boolean): Boolean {
         if (!config.getBoolean(MiniPlayerConfig.ENABLED) || morph != null) return false
-        val mode = config.getInt(MiniPlayerConfig.MEDIA_MODE)
-        // The sliding mode; or, in any mode that hides the card, a pull back into the scene.
-        val backIntoScene = !fromNative && mode != 0 && MiniPlayerRuntime.restorePending()
-        if (mode != 2 && !backIntoScene) return false
         val token = controller?.sessionToken ?: return false
         if (!Main.miniPlayerMorphAllowed()) return false
         return MiniPlayerRuntime.nativeRequested(token) == fromNative
@@ -1171,8 +1200,7 @@ private class MiniPlayerController(
         if (!config.getBoolean(MiniPlayerConfig.ENABLED)) return false
         val current = controller ?: return false
         if (!isUsable(current)) return false
-        val mode = config.getInt(MiniPlayerConfig.MEDIA_MODE)
-        return if (Main.coverModeOn()) mode != 0 else wantsNativeArtworkGesture()
+        return Main.coverModeOn() || wantsNativeArtworkGesture()
     }
 
     fun preferMini() {
@@ -1269,9 +1297,7 @@ private class MiniPlayerController(
         val config = this.config
         forceHeaderRefresh = true
         val enabled = config.getBoolean(MiniPlayerConfig.ENABLED)
-        val mediaMode = config.getInt(MiniPlayerConfig.MEDIA_MODE)
         if (!enabled) MiniPlayerRuntime.resetDynamicChoice("feature disabled")
-        else if (mediaMode != 2) MiniPlayerRuntime.resetDynamicChoice("dynamic mode left")
         if (!enabled) {
             player?.visibility = View.GONE
             restoreHeader()
@@ -1342,8 +1368,7 @@ private class MiniPlayerController(
             {
                 // Up undoes down: out of the cover or lyrics by a swipe, back into it by one.
                 if (MiniPlayerRuntime.takeRestoreScene()) Main.miniPlayerEnterCover()
-                else if (config.getInt(MiniPlayerConfig.MEDIA_MODE) == 2)
-                    MiniPlayerRuntime.selectNative(current.sessionToken)
+                else MiniPlayerRuntime.selectNative(current.sessionToken)
             },
             {
                 MiniPlayerRuntime.forgetRestoreScene()
@@ -1470,7 +1495,6 @@ private class MiniPlayerController(
             MiniPlayerPresentationInput(
                 enabled = enabled,
                 sessionUsable = sessionUsable,
-                mediaMode = config.getInt(MiniPlayerConfig.MEDIA_MODE),
                 nativeRequested = nativeRequested,
                 keyguardOwned = keyguardOwned,
                 sceneVisible = sceneVisible,
@@ -1489,7 +1513,7 @@ private class MiniPlayerController(
         updateNativeSuppression(presentation.suppressNative)
         if (morph == null && keyguardOwned &&
             (nativeRequested || Main.coverSceneActive())) ensureNativeHeaderVisible()
-        val log = "mode=${config.getInt(MiniPlayerConfig.MEDIA_MODE)} nativeRequested=$nativeRequested " +
+        val log = "nativeRequested=$nativeRequested " +
             "showMini=${presentation.showMini} suppressNative=${presentation.suppressNative} " +
             "keyguardOwned=$keyguardOwned sceneVisible=$sceneVisible center=$controlCenterOpen " +
             "sceneOverride=${Main.coverSceneActive()} transition=${morph != null}"

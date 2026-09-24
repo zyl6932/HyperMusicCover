@@ -8,14 +8,12 @@ import org.json.JSONObject
 /** Portable settings for the HyperChanger lockscreen mini player. */
 object MiniPlayerConfig {
     const val ENABLED = "enabled"
-    const val MEDIA_MODE = "mediaMode"
     const val WIDTH = "widthDp"
     const val HEIGHT_RADIUS = "heightRadiusDp"
     const val ART_RADIUS = "artRadiusDp"
 
     private val defaults = linkedMapOf<String, Any>(
         ENABLED to false,
-        MEDIA_MODE to 0,
         WIDTH to 240f,
         HEIGHT_RADIUS to 36f,
         ART_RADIUS to 12f,
@@ -37,15 +35,12 @@ object MiniPlayerConfig {
             }.getOrDefault(fallback)
             out.put(key, value)
         }
-        fun integer(key: String, min: Int, max: Int) =
-            out.put(key, out.getInt(key).coerceIn(min, max))
         fun decimal(key: String, min: Float, max: Float) {
             val value = out.getDouble(key).toFloat()
             out.put(key, if (value.isFinite()) value.coerceIn(min, max) else defaults[key])
         }
-        integer(MEDIA_MODE, 0, 2)
         decimal(WIDTH, 160f, 360f)
-        decimal(HEIGHT_RADIUS, 10f, 60f)
+        decimal(HEIGHT_RADIUS, 24f, 60f)
         decimal(ART_RADIUS, 0f, 60f)
         return out.toString()
     }

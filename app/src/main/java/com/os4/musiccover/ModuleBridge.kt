@@ -130,6 +130,8 @@ object ModuleBridge {
          */
         val shade: Map<String, Int> = emptyMap(),
         val miniConfig: String = MiniPlayerConfig.defaultJson(),
+        /** The lock screen's torch and camera, in px; see MiniPlayerRuntime.shortcutGeometry. */
+        val miniShortcuts: FloatArray? = null,
         val geometry: Geometry = Geometry(),
     ) {
         /** "Artist - Title" out of the module's packageName|song|artist key. */
@@ -519,6 +521,7 @@ object ModuleBridge {
                 .filter { it.startsWith("shade_") }
                 .associate { it.removePrefix("shade_") to b.getInt(it, 0) },
             miniConfig = MiniPlayerConfig.normalizedJson(b.getString("minicfg")),
+            miniShortcuts = b.getFloatArray("minishortcuts")?.takeIf { it.size == 9 },
             geometry = Geometry(
                 screenW = b.getInt("sw", 0),
                 screenH = b.getInt("sh", 0),

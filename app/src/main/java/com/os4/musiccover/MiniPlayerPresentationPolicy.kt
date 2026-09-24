@@ -7,7 +7,6 @@ import java.util.WeakHashMap
 internal data class MiniPlayerPresentationInput(
     val enabled: Boolean,
     val sessionUsable: Boolean,
-    val mediaMode: Int,
     val nativeRequested: Boolean,
     val keyguardOwned: Boolean,
     val sceneVisible: Boolean,
@@ -25,13 +24,12 @@ internal data class MiniPlayerPresentation(
 internal object MiniPlayerPresentationPolicy {
     fun evaluate(input: MiniPlayerPresentationInput): MiniPlayerPresentation {
         val available = input.enabled && input.sessionUsable
-        val miniSelected = input.mediaMode != 2 || !input.nativeRequested
+        val miniSelected = !input.nativeRequested
         val lockscreenSurfaceVisible = input.sceneVisible || input.controlCenterOpen
         return MiniPlayerPresentation(
             showMini = available &&
                 (input.transitionActive || miniSelected && lockscreenSurfaceVisible),
-            suppressNative = available && miniSelected && input.mediaMode != 0 &&
-                input.keyguardOwned && lockscreenSurfaceVisible &&
+            suppressNative = available && miniSelected && input.keyguardOwned && lockscreenSurfaceVisible &&
                 !input.nativeSceneOverride && !input.transitionActive,
         )
     }

@@ -7,7 +7,6 @@ import org.junit.Test
 
 class MiniPlayerPresentationPolicyTest {
     private fun presentation(
-        mode: Int = 2,
         nativeRequested: Boolean = false,
         keyguardOwned: Boolean = true,
         sceneVisible: Boolean = true,
@@ -20,7 +19,6 @@ class MiniPlayerPresentationPolicyTest {
         MiniPlayerPresentationInput(
             enabled,
             sessionUsable,
-            mode,
             nativeRequested,
             keyguardOwned,
             sceneVisible,
@@ -90,10 +88,6 @@ class MiniPlayerPresentationPolicyTest {
             nativeSceneOverride = true,
             transitionActive = true,
         ))
-    }
-
-    @Test fun simultaneousModeNeverSuppressesTheVendorCard() {
-        assertEquals(MiniPlayerPresentation(true, false), presentation(mode = 0))
     }
 
     @Test fun leavingTheKeyguardRestoresNativeWithoutChangingTheChoice() {

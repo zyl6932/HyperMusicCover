@@ -2548,6 +2548,8 @@ public class Main extends XposedModule {
                         out.putBoolean("alive", true);
                         out.putBoolean("cover", sCoverMode);
                         out.putString("minicfg", MiniPlayerRuntime.configJson(c));
+                        float[] shortcuts = MiniPlayerRuntime.shortcutGeometry();
+                        if (shortcuts != null) out.putFloatArray("minishortcuts", shortcuts);
                         out.putBoolean("auto", sAuto);
                         out.putFloat("bias", sBias);
                         out.putInt("coverstyle", sCoverCardStyle.mode);
