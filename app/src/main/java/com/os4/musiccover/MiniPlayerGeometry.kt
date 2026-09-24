@@ -33,4 +33,18 @@ internal object MiniPlayerGeometry {
         if (rightCx != null) half = min(half, (rightCx - discPx / 2f) - centerX - gapPx)
         return max(min(minPx, widthPx), (half * 2f).toInt()).coerceAtMost(widthPx)
     }
+
+    /**
+     * The pill's width with a small island of [islandPx] beside it, [gapPx] apart: the pair takes
+     * the pill's own [widthPx] and gives the pill no less than [minPx] - but never reaches past
+     * [roomPx], the most the row has between the two discs (clearOfDiscsPx with no minimum).
+     * The first version let the minimum win, and the pair grew into the camera's disc: its
+     * touch area took the small island's taps (filmed 2026-09-25). Only when even that room
+     * is too small for a pill as wide as it is tall does the pair press on the discs.
+     */
+    fun pillBesideIslandPx(widthPx: Int, roomPx: Int, islandPx: Int, gapPx: Int, minPx: Int): Int {
+        val wanted = max(minPx, widthPx - gapPx - islandPx)
+        val fits = roomPx - gapPx - islandPx
+        return max(min(wanted, fits), min(wanted, islandPx)).coerceAtLeast(1)
+    }
 }

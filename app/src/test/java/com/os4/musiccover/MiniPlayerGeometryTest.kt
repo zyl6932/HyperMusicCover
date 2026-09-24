@@ -28,4 +28,16 @@ class MiniPlayerGeometryTest {
         assertEquals(240, MiniPlayerGeometry.clearOfDiscsPx(240, 200f, null, null, 72f, 8f, 140))
     }
 
+    @Test fun pillBesideAnIslandStaysClearOfTheDiscs() {
+        // The device filmed: a 477 pill, 162 island, 24 gap, 420 floor, 664 of room - the floor
+        // wins and the pair is 606 wide, inside the room.
+        assertEquals(420, MiniPlayerGeometry.pillBesideIslandPx(477, 664, 162, 24, 420))
+        // Room for less than the floor: the room wins, the pair ends at the room's edge.
+        assertEquals(314, MiniPlayerGeometry.pillBesideIslandPx(477, 500, 162, 24, 420))
+        // A wide pill gives the island its room out of its own width.
+        assertEquals(514, MiniPlayerGeometry.pillBesideIslandPx(700, 900, 162, 24, 420))
+        // No room at all: never narrower than a circle; the discs are pressed on instead.
+        assertEquals(162, MiniPlayerGeometry.pillBesideIslandPx(477, 250, 162, 24, 420))
+    }
+
 }

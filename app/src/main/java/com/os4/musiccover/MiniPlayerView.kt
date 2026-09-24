@@ -315,6 +315,14 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     }
 
     val artworkView: View get() = artwork
+
+    /** For `op mini`: the artwork as it stands - shown, alpha, frame, bitmap. */
+    fun artworkState(): String {
+        val b = (artwork.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+        return "v=${artwork.visibility} a=${"%.2f".format(artwork.alpha)} ${artwork.left},${artwork.top} " +
+            "${artwork.width}x${artwork.height} bmp=${b?.let { "${it.width}x${it.height}${if (it.isRecycled) " RECYCLED" else ""}" }} " +
+            "hidden=$artworkHidden text=${"%.2f".format(textColumn.alpha)}"
+    }
     val titleView: TextView get() = title
     val artistView: TextView get() = artist
     val toggleView: View get() = toggle
@@ -352,6 +360,9 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
 
     fun acceptsTouch(): Boolean = interactionsEnabled && (!morphing || layoutOnly)
 
+    /** A frame of its own is on: a morph, a switch or the row's spring is drawing it. */
+    fun inMorph(): Boolean = morphing
+
     /** For `op mini`: why it would not take a touch. */
     fun touchState(): String = "interactive=$interactionsEnabled morphing=$morphing"
 
@@ -362,11 +373,18 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         if (!enabled) finish()
     }
 
-    /** While a cover flight owns the artwork's pixels, the slot stays empty. */
+    /**
+     * While a cover flight owns the artwork's pixels, the slot stays empty. A morph that only
+     * moves the frame in the row - a switch, the row's spring - does not own the artwork's
+     * alpha: the flight out of the cover landed while the small island was pushing the pill
+     * narrower, the artwork was left hidden until that spring had settled, and it vanished
+     * and came back (filmed 2026-09-25).
+     */
     fun setArtworkHidden(hidden: Boolean) {
         if (artworkHidden == hidden) return
         artworkHidden = hidden
         if (!morphing) artwork.alpha = if (hidden) 0f else 1f
+        else if (layoutOnly) artwork.alpha = if (hidden) 0f else contentAlpha
     }
 
     /**
@@ -419,6 +437,13 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         translationX = box.x - xy[0] - left
         translationY = box.y - xy[1] - top
         materialLayer.alpha = materialAlpha.coerceIn(0f, 1f)
+        // Moving and resizing in the row, the play button keeps to the frame's right end. The
+        // layout is already at the new width: laid out there, the button jumped to where the
+        // pill was going the moment it set off, and the pill caught up with it (2026-09-25).
+        if (layoutOnly) {
+            val dx = (morphW - restWidth()).toFloat()
+            if (toggle.translationX != dx) toggle.translationX = dx
+        }
         invalidateOutline()
         materialLayer.invalidateOutline()
     }
@@ -433,6 +458,8 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     fun endMorph() {
         if (!morphing) return
         morphing = false
+        // The play button back in its own place, where a row move had carried it (setMorphFrame).
+        if (layoutOnly) toggle.translationX = 0f
         layoutOnly = false
         artworkMorphRadius = Float.NaN
         artwork.invalidateOutline()
@@ -497,11 +524,43 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
      * The pill's content - artwork, text, button - at one alpha, the glass left alone: an
      * island switch brings the new island's content in over the frame as it grows.
      */
+    /** The content's alpha a switch last set, for the artwork coming back from a cover flight. */
+    private var contentAlpha = 1f
+
+    /** For `op mini`: the content's alpha as drawn (the text column's). */
+    fun contentAlphaNow(): Float = textColumn.alpha
+
     fun setContentAlpha(alpha: Float) {
         val a = alpha.coerceIn(0f, 1f)
+        contentAlpha = a
         artwork.alpha = if (artworkHidden) 0f else a
         textColumn.alpha = a
         toggle.alpha = a
+    }
+
+    /** The text and the button alone: an island shrinking to its circle keeps its picture. */
+    fun setTextAlpha(alpha: Float) {
+        val a = alpha.coerceIn(0f, 1f)
+        textColumn.alpha = a
+        toggle.alpha = a
+    }
+
+    private var contentBlur = 0f
+
+    /**
+     * The content blurred by [radius] pixels, the glass left sharp: the super island's
+     * BIG_ISLAND_BLUR, an island's content going out of focus as it leaves the big island's
+     * place and coming into focus as it arrives there.
+     */
+    fun setContentBlur(radius: Float) {
+        val r = if (radius < 0.5f) 0f else radius
+        if (kotlin.math.abs(r - contentBlur) < 0.25f && (r == 0f) == (contentBlur == 0f)) return
+        contentBlur = r
+        val effect = if (r == 0f) null
+            else android.graphics.RenderEffect.createBlurEffect(r, r, android.graphics.Shader.TileMode.DECAL)
+        artwork.setRenderEffect(effect)
+        textColumn.setRenderEffect(effect)
+        toggle.setRenderEffect(effect)
     }
 
     private fun updateGeometry(heightRadiusDp: Float, artworkRadiusDp: Float) {

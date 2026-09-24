@@ -36,9 +36,12 @@ internal class MiniCardMorph(
     landing: Landing = Landing.mediaCard(header),
     /**
      * The mini player's end on screen, when it is not the pill's own rest place: a small
-     * island's circle, for a notification opening straight out of it.
+     * island's circle, for a notification opening straight out of it; the row's own spring,
+     * for a pill still widening or narrowing as the small island goes or comes.
      */
     private val restBox: (() -> CoverMorphMotion.Box?)? = null,
+    /** That end is a small island's circle, holding only its picture. */
+    private val circle: Boolean = restBox != null,
 ) : Choreographer.FrameCallback {
     class Landing(val art: View?, val title: View?, val text: View?, val radius: Float, val artRadius: Float) {
         companion object {
@@ -52,6 +55,9 @@ internal class MiniCardMorph(
         fun canSettle(morph: MiniCardMorph, toNative: Boolean): Boolean
         fun artBridged(): Boolean
         fun onSettled(morph: MiniCardMorph, toNative: Boolean, completed: Boolean)
+
+        /** Every frame drawn, with the progress it was drawn at (0 the mini end, 1 the far one). */
+        fun onFrame(morph: MiniCardMorph, progress: Float) {}
     }
 
     /**
@@ -172,7 +178,10 @@ internal class MiniCardMorph(
         if (!running) return
         dragging = false
         motion.aim(toNative)
-        motion.velocity = velocity
+        // A hard fling handed on whole crossed the rest of the way in one frame: a flight let go
+        // at 0.3 was past its end on the next, and its crossfade onto the island happened all at
+        // once (2026-09-25). Fast, but over frames.
+        motion.velocity = velocity.coerceIn(-MAX_RELEASE_SPEED, MAX_RELEASE_SPEED)
         nudge.target = 0f
         nudgeX.target = 0f
         lastFrame = 0L
@@ -289,8 +298,13 @@ internal class MiniCardMorph(
         boxDrawn = box
         mini.setMorphFrame(box, radius, materialOut(c))
 
-        // Its content: first scaled with the container, then onto the card's own elements.
-        val m = box.w / miniRest.w
+        // Its content: first scaled with the container, then onto the card's own elements. From
+        // a small island's circle, the pill's layout is not what is at rest there: the circle
+        // holds only its picture, centred, and the lines come in out of it as it widens. Laid
+        // out as a whole pill in a circle, the flight drew its title and text out over the
+        // camera for its last frames home, then snapped to the circle (filmed 2026-09-25).
+        val laidW = max(1, mini.layoutParams?.width ?: mini.width).toFloat()
+        val m = if (circle) box.w / laidW else box.w / miniRest.w
         val mix = pieceMix(c)
         val bridged = listener.artBridged()
         pieces.forEach { piece ->
@@ -304,6 +318,15 @@ internal class MiniCardMorph(
             var ty = (layoutY + piece.baseTy + ay) * m
             var kx = m
             var ky = m
+            if (circle && piece.art) {
+                // The small island's picture: its share of the circle, in the middle of it -
+                // growing with the container's height as the circle becomes the row.
+                val side = box.h * CIRCLE_ICON_SHARE
+                kx = side / max(1, v.width)
+                ky = side / max(1, v.height)
+                tx = (min(box.w, box.h) - side) / 2f
+                ty = (box.h - side) / 2f
+            }
             if (piece.paired) {
                 val n = piece.native!!
                 val nx = (offsetIn(n, header, true) + anchorX(n, piece.text)) * s
@@ -328,6 +351,9 @@ internal class MiniCardMorph(
             v.translationY = ty - layoutY - ay * ky
             v.alpha = when {
                 piece.art && bridged -> 0f
+                // Out of a circle, only the picture is there at first; the lines join it once
+                // the shape has room for them.
+                circle && !piece.art -> if (piece.paired) circleIn(c) * pairedOut(c) else 0f
                 piece.paired -> pairedOut(c)
                 else -> earlyOut(c)
             }
@@ -337,9 +363,12 @@ internal class MiniCardMorph(
                 // Round in the card's own corner by the time it lies on the card's artwork.
                 val landed = if (piece.paired) nativeArtRadius * s / max(0.01f, kx)
                     else mini.artworkRestRadius()
-                mini.setArtworkMorphRadius(lerp(mini.artworkRestRadius(), landed, mix))
+                // A small island's picture is round.
+                val home = if (circle) min(v.width, v.height) / 2f else mini.artworkRestRadius()
+                mini.setArtworkMorphRadius(lerp(home, landed, mix))
             }
         }
+        listener.onFrame(this, c)
         return true
     }
 
@@ -477,6 +506,9 @@ internal class MiniCardMorph(
         if (text && v is TextView && v.baseline > 0) v.baseline.toFloat() else 0f
 
     companion object {
+        /** The most progress per second a let-go hands the spring. */
+        private const val MAX_RELEASE_SPEED = 5f
+
         /** Past this the destination is handed back even if the scene is still moving. */
         private const val SETTLE_LIMIT_MS = 2200L
 
@@ -500,6 +532,12 @@ internal class MiniCardMorph(
             val top = lerp(a.y, b.y, p)
             return CoverMorphMotion.Box(cx - w / 2f, top, w, h)
         }
+
+        /** A small island's picture against its circle: ShortcutDisc's ICON_SHARE. */
+        const val CIRCLE_ICON_SHARE = 0.62f
+
+        /** Out of a circle, a line comes in once the shape has grown past its first stretch. */
+        fun circleIn(p: Float) = smooth(0.12f, 0.4f, p)
 
         /** The mini player's own controls leave first, before the shape has grown much. */
         fun earlyOut(p: Float) = 1f - smooth(0f, 0.3f, p)

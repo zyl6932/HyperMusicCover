@@ -6130,6 +6130,14 @@ public class Main extends XposedModule {
         return miniPlayerDisplayEligible() && !miniControlCenterUp();
     }
 
+    /**
+     * The same for a row of notification islands with no music in it: no media card to be up.
+     * Asked through miniPlayerCanShow, a row with no card never took a touch at all.
+     */
+    static boolean miniPlayerIslandsCanShow() {
+        return islandsDisplayEligible() && !miniControlCenterUp();
+    }
+
     static boolean miniPlayerControlCenterUp() { return miniControlCenterUp(); }
 
     private static long sMiniCentreCheckedAt;
@@ -6153,7 +6161,11 @@ public class Main extends XposedModule {
 
     /** A translucent control center keeps the selected mini card visible but blocks its taps. */
     static boolean miniPlayerDisplayEligible() {
-        if (!sCardShowing || coverSceneActive() || !screenOnCached() ||
+        return sCardShowing && islandsDisplayEligible();
+    }
+
+    private static boolean islandsDisplayEligible() {
+        if (coverSceneActive() || !screenOnCached() ||
                 !keyguardShowing() || !onKeyguardNow()) return false;
         long now = android.os.SystemClock.uptimeMillis();
         if (now - sMiniBouncerCheckedAt > 100L) {
@@ -7466,7 +7478,7 @@ public class Main extends XposedModule {
                         // A notification the row of islands let out goes back into it.
                         String key = sCardSwipeRow;
                         sCardSwipeRow = null;
-                        MiniPlayerRuntime.collapseRow(key);
+                        MiniPlayerRuntime.collapseRow(key, ev);
                         return SWIPE_FIRED;
                     }
                     // With notifications to fold, the pull is not cancelled out from under the

@@ -89,6 +89,17 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         if (first && w > 1 && h > 1) applyDress()
     }
 
+    /**
+     * The picture in the round end at the shape's start rather than in its middle: where a
+     * pill's artwork sits, for a small island taking over from a flight still wider than round.
+     */
+    var iconAtStart = false
+        set(value) {
+            if (field == value) return
+            field = value
+            placeElement()
+        }
+
     private fun placeElement() {
         val l = (width - shapeW) / 2 + shapeDx
         val t = (height - shapeH) / 2
@@ -96,7 +107,7 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         icon?.let {
             // Inset from the shape, round: an app icon or an album cover sits inside the glass.
             val side = (min(shapeW, shapeH) * ICON_SHARE).toInt()
-            val il = l + (shapeW - side) / 2
+            val il = if (iconAtStart) l + (min(shapeW, shapeH) - side) / 2 else l + (shapeW - side) / 2
             val it0 = (height - side) / 2
             it.layout(il, it0, il + side, it0 + side)
         }
@@ -117,6 +128,15 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         view.visibility = if (drawable == null) View.GONE else View.VISIBLE
         placeElement()
     }
+
+    /** For `op mini`: the picture as it stands - shown, alpha, frame, drawable and its bounds. */
+    fun iconState(): String = icon?.let { v ->
+        val d = v.drawable
+        "v=${v.visibility} a=${"%.2f".format(v.alpha)} ${v.left},${v.top} ${v.width}x${v.height} " +
+            "d=${d?.javaClass?.simpleName}@${d?.let { Integer.toHexString(System.identityHashCode(it)) }} " +
+            "b=${d?.bounds?.toShortString()} i=${d?.intrinsicWidth}x${d?.intrinsicHeight} " +
+            "shape=${shapeW}x${shapeH}+$shapeDx"
+    } ?: "no icon"
 
     /** The picture's alpha: it comes in last on a small island forming out of the pill. */
     fun setIconAlpha(alpha: Float) {
@@ -199,6 +219,7 @@ internal class MiniSqueeze(private val gapPx: Float, private val onFrame: () -> 
     Choreographer.FrameCallback {
 
     private val pillPress = Jelly(PRESS_RESPONSE, PRESS_DAMPING)
+    private val smallPress = Jelly(PRESS_RESPONSE, PRESS_DAMPING)
     private val press = arrayOf(Jelly(PRESS_RESPONSE, PRESS_DAMPING), Jelly(PRESS_RESPONSE, PRESS_DAMPING))
 
     /** Where each disc's place is on its way to: its share of the push, sprung. */
@@ -214,12 +235,30 @@ internal class MiniSqueeze(private val gapPx: Float, private val onFrame: () -> 
     private val squash = FloatArray(2)
     private val push = FloatArray(2)
     private val pillGive = FloatArray(2)
+
+    /**
+     * The small island against the pill, pushed together by a finger on either: the small
+     * island flattened on its pill side (a share of its width, sprung like a disc's shape) and
+     * the pill's right end drawn back (pixels).
+     */
+    private val smallShaped = Jelly(SHAPE_RESPONSE, SHAPE_DAMPING)
+    private var smallSquash = 0f
+    private var pillBack = 0f
+
+    /** The row's width this frame - the pill's, or the pill and its small island's together. */
+    private var rowWidth = 0f
     private var posted = false
     private var lastFrame = 0L
 
     /** A finger down on, or lifted off, the pill. */
     fun pressPill(down: Boolean) {
         aimPress(pillPress, down)
+        kick()
+    }
+
+    /** A finger down on, or lifted off, the small island beside the pill. */
+    fun pressSmall(down: Boolean) {
+        aimPress(smallPress, down)
         kick()
     }
 
@@ -242,14 +281,41 @@ internal class MiniSqueeze(private val gapPx: Float, private val onFrame: () -> 
     /**
      * This frame's row. [pill] is null when there is none on screen; [pillGives] is false while
      * a morph owns the container's shape. The discs are the rest circles, before any press.
+     * [small] is the small island beside the pill, where the finger has it: the row's end
+     * against the camera, and soft against the pill itself.
      */
     fun setScene(pill: CoverMorphMotion.Box?, pillGives: Boolean,
-                 left: CoverMorphMotion.Box?, right: CoverMorphMotion.Box?) {
+                 left: CoverMorphMotion.Box?, right: CoverMorphMotion.Box?,
+                 small: CoverMorphMotion.Box? = null) {
         val swell = if (pillGives) pillPressScale() else 1f
         val p = pill?.let { scaled(it, swell, swell) }
         val l = left?.let { scaled(it, discSwell(0), discSwell(0)) }
         val r = right?.let { scaled(it, discSwell(1), discSwell(1)) }
-        val t = targets(p, l, r, gapPx, pillGives)
+        val sm = if (p != null) small?.let { scaled(it, smallSwell(), smallSwell()) } else null
+        // With a small island the row runs from the pill's left end to the small island's right.
+        val row = if (p != null && sm != null) {
+            CoverMorphMotion.Box(p.x, p.y, max(p.w, sm.x + sm.w - p.x), p.h)
+        } else p
+        val t = targets(row, l, r, gapPx, pillGives, sm)
+        rowWidth = row?.w ?: 0f
+        // The pill and the small island, pushed together: the small island takes most of it
+        // as flattening, the pill's end the rest, as a disc and the pill share a push.
+        var flat = 0f
+        pillBack = 0f
+        if (p != null && sm != null && sm.w > 0f) {
+            val into = ramp(p.x + p.w + gapPx - sm.x, gapPx * (1f - CONTACT_SHARE)) *
+                verticalOverlap(p, sm)
+            if (into > 0f) {
+                pillBack = if (pillGives) min(into * (1f - DISC_SHARE), MAX_GIVE * p.w) else 0f
+                flat = ((into - pillBack) / sm.w).coerceIn(0f, HARD_SQUASH)
+            }
+        }
+        smallShaped.target = flat
+        if (smallShaped.value < flat) {
+            smallShaped.value = flat
+            if (smallShaped.velocity < 0f) smallShaped.velocity = 0f
+        }
+        smallSquash = smallShaped.value.coerceIn(-MAX_WOBBLE, HARD_SQUASH)
         pillGive[0] = t[2]
         pillGive[1] = t[3]
         for (side in 0..1) {
@@ -307,11 +373,43 @@ internal class MiniSqueeze(private val gapPx: Float, private val onFrame: () -> 
     /** The pill's centre, as a share of its width, pushed away from whichever side pressed. */
     fun pillShift() = (pillGive[0] - pillGive[1]) / 2f
 
+    /**
+     * What the row gives on [side], in pixels. With a small island the row is wider than the
+     * pill: the camera's push takes the small island back by this much and the pill's right end
+     * with it - the shares above, of the row, were once applied to the pill alone, which moved
+     * the pill off a small island that stayed where the camera was pushing.
+     */
+    fun rowGivePx(side: Int) = pillGive[side] * rowWidth
+
+    /**
+     * The pill across, [widthPx] wide: pressed, less what the row gave on each side and what
+     * the small island pushed its right end back by.
+     */
+    fun pillScaleX(widthPx: Float) = if (widthPx <= 0f) pillScaleX()
+        else pillPressScale() * (1f - (rowGivePx(0) + rowGivePx(1) + pillBack) / widthPx)
+
+    /** The pill's centre, in pixels, pushed away from whichever side pressed. */
+    fun pillShiftPx() = (rowGivePx(0) - rowGivePx(1) - pillBack) / 2f
+
+    /** The small island under a finger, as a scale: it sinks, as the super island's does. */
+    fun smallSwell() = 1f - (1f - DISC_PRESSED) * smallPress.value
+
+    /** The small island's shape across and up, against its diameter: flattened by the pill. */
+    fun smallShapeX() = 1f - smallSquash
+
+    fun smallShapeY() = 1f + BULGE * smallSquash
+
+    /**
+     * How far the small island's centre moves off the pill, in shares of its diameter: its
+     * flattened side is the pill's, so the far side stays where the finger has it.
+     */
+    fun smallShift() = smallSquash / 2f
+
     fun atRest() = allAtRest()
 
     /** Everything back to rest at once: the row is going away, nothing should spring later. */
     fun reset() {
-        (listOf(pillPress) + press + placed + shaped).forEach {
+        (listOf(pillPress, smallPress) + press + placed + shaped).forEach {
             it.value = 0f
             it.velocity = 0f
             it.target = 0f
@@ -319,13 +417,19 @@ internal class MiniSqueeze(private val gapPx: Float, private val onFrame: () -> 
         squash.fill(0f)
         push.fill(0f)
         pillGive.fill(0f)
+        smallShaped.value = 0f
+        smallShaped.velocity = 0f
+        smallShaped.target = 0f
+        smallSquash = 0f
+        pillBack = 0f
+        rowWidth = 0f
         Choreographer.getInstance().removeFrameCallback(this)
         posted = false
         lastFrame = 0L
     }
 
-    private fun allAtRest() = pillPress.atRest() && press.all { it.atRest() } &&
-        placed.all { it.atRest() } && shaped.all { it.atRest() }
+    private fun allAtRest() = pillPress.atRest() && smallPress.atRest() && press.all { it.atRest() } &&
+        placed.all { it.atRest() } && shaped.all { it.atRest() } && smallShaped.atRest()
 
     private fun kick() {
         if (posted) return
@@ -340,9 +444,11 @@ internal class MiniSqueeze(private val gapPx: Float, private val onFrame: () -> 
             else ((frameTimeNanos - lastFrame) / 1e9f).coerceIn(0f, 0.05f)
         lastFrame = frameTimeNanos
         pillPress.step(dt)
+        smallPress.step(dt)
         press.forEach { it.step(dt) }
         placed.forEach { it.step(dt) }
         shaped.forEach { it.step(dt) }
+        smallShaped.step(dt)
         onFrame()
         if (!allAtRest() && !posted) {
             posted = true
@@ -411,16 +517,20 @@ internal class MiniSqueeze(private val gapPx: Float, private val onFrame: () -> 
          * The six shares for one frame: the torch's and the camera's flattening (of their
          * width), the pill's give on its left and right (of its width), then how far the torch
          * and the camera move aside (of their width). The discs come in at their pressed size.
+         * [end] is what meets the camera when it is not the pill's own right end: the small
+         * island, which a finger can carry up or down off the row's line.
          */
         fun targets(pill: CoverMorphMotion.Box?, left: CoverMorphMotion.Box?,
-                    right: CoverMorphMotion.Box?, gap: Float, pillGives: Boolean): FloatArray {
+                    right: CoverMorphMotion.Box?, gap: Float, pillGives: Boolean,
+                    end: CoverMorphMotion.Box? = null): FloatArray {
             val out = FloatArray(6)
             if (pill == null) return out
             val share = if (pillGives) DISC_SHARE else 1f
             val soft = gap * (1f - CONTACT_SHARE)
-            fun disc(into: Float, disc: CoverMorphMotion.Box, squashAt: Int, pushAt: Int) {
+            fun disc(into: Float, disc: CoverMorphMotion.Box, squashAt: Int, pushAt: Int,
+                     meets: CoverMorphMotion.Box = pill) {
                 val w = disc.w
-                val p = ramp(into, soft) * verticalOverlap(pill, disc)
+                val p = ramp(into, soft) * verticalOverlap(meets, disc)
                 if (p <= 0f || w <= 0f) return
                 val part = p * share
                 var moved = min(part * PUSH_GAIN, MAX_PUSH * w)
@@ -438,7 +548,10 @@ internal class MiniSqueeze(private val gapPx: Float, private val onFrame: () -> 
                 if (pillGives) out[squashAt + 2] = give / pill.w
             }
             left?.let { disc(it.x + it.w + gap - pill.x, it, 0, 4) }
-            right?.let { disc(pill.x + pill.w + gap - it.x, it, 1, 5) }
+            right?.let {
+                val e = end ?: pill
+                disc(e.x + e.w + gap - it.x, it, 1, 5, e)
+            }
             return out
         }
 
