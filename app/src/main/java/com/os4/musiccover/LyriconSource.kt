@@ -52,6 +52,22 @@ object LyriconSource {
     @Volatile
     private var sProvider: String? = null
 
+    /** The player the active provider reads from - whether a new song is on its way. */
+    @Volatile
+    private var sPlayer: String? = null
+
+    /** Notified on every song the bridge publishes, for a lookup waiting out a stale one. */
+    private val sSongLock = Object()
+
+    /**
+     * How long a lookup waits for the bridge to catch up with a track change.
+     *
+     * Only ever spent when the active provider is reading this very player, i.e. when the new
+     * song is known to be coming; the provider has to fetch the lyric before it publishes, so
+     * this is a fetch's worth of time rather than a callback's.
+     */
+    private const val CATCH_UP_MS = 2000L
+
     /** The last thing that went wrong, if anything did. Never thrown onward. */
     @Volatile
     private var sError: String? = null
@@ -131,9 +147,12 @@ object LyriconSource {
     private object Listener : ActivePlayerListener {
         override fun onSongChanged(song: Song?) {
             try {
-                sSong = song
-                if (song != null) {
-                    sSongs++
+                synchronized(sSongLock) {
+                    sSong = song
+                    if (song != null) {
+                        sSongs++
+                    }
+                    sSongLock.notifyAll()
                 }
             } catch (t: Throwable) {
                 sError = t.toString()
@@ -145,6 +164,7 @@ object LyriconSource {
                 sProvider = providerInfo?.let {
                     it.providerPackageName + " -> " + it.playerPackageName
                 }
+                sPlayer = providerInfo?.playerPackageName
             } catch (t: Throwable) {
                 sError = t.toString()
             }
@@ -174,17 +194,42 @@ object LyriconSource {
      * song's screen for as long as it played. Compared the way the session's own payload is
      * compared, by containment either way, because a title carries decorations the bridge's copy
      * need not repeat.
+     *
+     * The title has to agree; the artist only must not disagree. Either one used to be enough,
+     * and in a playlist of one singer the artist always agrees - so "轨迹" took the "周大侠"
+     * the bridge was still holding, and the per-track cache kept it for every later play.
+     *
+     * When the song in hand is not this one but the active provider is reading this player, the
+     * right one is on its way, so this waits for it - briefly, on the lookup's worker - rather
+     * than handing the track to the catalogues, which is where the bridge's copy would be lost.
      */
     @JvmStatic
-    fun linesFor(title: String?, artist: String?): List<LyricLine>? {
-        val song = sSong ?: return null
-        val rich = song.lyrics
-        if (rich.isNullOrEmpty()) return null
-        if (!names(song.name, title) && !names(song.artist, artist)) {
-            Xp.log("[MCLyricon] holding \"" + song.name + "\" while the track is \"" + title
-                    + "\"; not reading it")
-            return null
+    fun linesFor(title: String?, artist: String?, player: String?): List<LyricLine>? {
+        var song = sSong
+        if (song == null || !isTrack(song, title, artist)) {
+            if (player != null && player == sPlayer) {
+                val until = android.os.SystemClock.uptimeMillis() + CATCH_UP_MS
+                synchronized(sSongLock) {
+                    while (true) {
+                        song = sSong
+                        if (song != null && isTrack(song!!, title, artist)) break
+                        val left = until - android.os.SystemClock.uptimeMillis()
+                        if (left <= 0) break
+                        sSongLock.wait(left)
+                    }
+                }
+            }
+            val held = song
+            if (held == null || !isTrack(held, title, artist)) {
+                if (held != null) {
+                    Xp.log("[MCLyricon] holding \"" + held.name + "\" while the track is \""
+                            + title + "\"; not reading it")
+                }
+                return null
+            }
         }
+        val rich = song!!.lyrics
+        if (rich.isNullOrEmpty()) return null
         val out = ArrayList<LyricLine>(rich.size)
         // Where the tail of a line may run to when the bridge gave its last word no end of its
         // own: the arrival of the line after it, the same room every other word-timed source
@@ -198,6 +243,12 @@ object LyriconSource {
         if (out.isEmpty()) return null
         out.sortBy { it.start }
         return out
+    }
+
+    /** Whether the bridge's song is this track: a title that agrees, and an artist that does not disagree. */
+    private fun isTrack(song: Song, title: String?, artist: String?): Boolean {
+        if (song.name.isNullOrBlank() || title.isNullOrBlank()) return false
+        return names(song.name, title) && names(song.artist, artist)
     }
 
     /** Whether two names agree, or say nothing. A blank on either side is not a contradiction. */

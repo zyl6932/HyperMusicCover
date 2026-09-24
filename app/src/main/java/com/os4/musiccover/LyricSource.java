@@ -997,7 +997,8 @@ final class LyricSource {
             MediaMetadata md = c == null ? null : c.getMetadata();
             String title = md == null ? null : md.getString(MediaMetadata.METADATA_KEY_TITLE);
             String artist = md == null ? null : md.getString(MediaMetadata.METADATA_KEY_ARTIST);
-            List<LyricLine> lines = LyriconSource.linesFor(title, artist);
+            List<LyricLine> lines = LyriconSource.linesFor(title, artist,
+                    c == null ? null : c.getPackageName());
             if (lines == null || lines.isEmpty()) {
                 return;
             }
