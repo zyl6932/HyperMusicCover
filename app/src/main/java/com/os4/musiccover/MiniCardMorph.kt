@@ -133,6 +133,9 @@ internal class MiniCardMorph(
     val toNative: Boolean get() = motion.target == 1f
     val progress: Float get() = motion.value
 
+    /** A finger is on it: its progress is the finger's, not its spring's. */
+    val held: Boolean get() = dragging
+
     /** Lays out the first frame now, in the same pass as the switch, so no frame shows either end bare. */
     fun start(): Boolean {
         if (!measure()) return false
@@ -166,6 +169,23 @@ internal class MiniCardMorph(
         nudge.value = nudgePx / NUDGE_UNIT
         nudge.velocity = 0f
         nudgeX.value = nudgeXPx / NUDGE_UNIT
+        nudgeX.velocity = 0f
+        apply()
+    }
+
+    /**
+     * Another morph's pose, on its frame: [share] of the way from [from] to the leader's
+     * progress and nudge. The islands that go with the music's morph run on its one spring -
+     * the same progress, the same overshoot - and differ only by their own two ends. A follower
+     * whose row came late joins it over a few frames rather than jumping to it.
+     */
+    fun follow(leader: MiniCardMorph, share: Float = 1f, from: Float = leader.motion.value) {
+        if (!running) return
+        motion.value = lerp(from, leader.motion.value, share)
+        motion.velocity = 0f
+        nudge.value = leader.nudge.value * share
+        nudge.velocity = 0f
+        nudgeX.value = leader.nudgeX.value * share
         nudgeX.velocity = 0f
         apply()
     }

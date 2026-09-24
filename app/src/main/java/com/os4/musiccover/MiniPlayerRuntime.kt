@@ -428,6 +428,12 @@ object MiniPlayerRuntime {
      */
     @JvmStatic fun wantsNativeCardSwipe(): Boolean = live().any { it.wantsCardSwipe() }
 
+    /**
+     * The lock screen's notifications are the row's islands: a pull down on the media card
+     * brings their rows home into the row with it, so it is not the stack's to fold them away.
+     */
+    @JvmStatic fun islandsTakeRows(): Boolean = live().any { it.takesRows() }
+
     /** The pill is what the lock screen returns to, without starting a morph of its own. */
     @JvmStatic fun preferMini() = live().forEach { it.preferMini() }
 
@@ -526,6 +532,11 @@ object MiniPlayerRuntime {
                 routedOwner = live().firstOrNull { it.pill() === target }
                 routedIsland = routedOwner?.islandCount()?.let { it >= 2 } == true &&
                     kotlin.math.abs(dx) > kotlin.math.abs(dy)
+                // Up on the music: the rows its card takes along are asked for now, so they are
+                // there by the time the pull opens it.
+                if (!routedIsland && dy < 0f && -dy >= kotlin.math.abs(dx)) {
+                    routedOwner?.anticipateRows(routedSmall)
+                }
             } else {
                 // A tap on the small island is the small island's: it takes the pill.
                 if (!routedSmall) dispatchTo(target, ev, action)
@@ -541,12 +552,12 @@ object MiniPlayerRuntime {
         when (action) {
             MotionEvent.ACTION_MOVE -> {
                 if (!routedMorph && !routedIsland && !routedNote && -dy > DRAG_THRESHOLD_DP * d) {
-                    // Pulled far enough up to mean it: the pill starts
-                    // turning into the card under the finger, the nudge handed over as it is.
-                    val owner = if (routedSmall) null else live().firstOrNull { it.canDrag(fromNative = false) }
-                    if (owner != null && beginDrag(fromNative = false, ev, startY = routedY)) {
+                    // Pulled far enough up to mean it: the music - the pill, or the small island -
+                    // starts turning into the card under the finger, the nudge handed over as it is.
+                    val owner = live().firstOrNull { it.canDrag(fromNative = false, small = routedSmall) }
+                    if (owner != null && beginDrag(fromNative = false, ev, startY = routedY, small = routedSmall)) {
                         routedMorph = true
-                        target.clearNudge()
+                        if (!routedSmall) target.clearNudge()
                         noteTouch("pull up: pill to card (small=$routedSmall)")
                     } else {
                         // A notification island - the pill's or the small one - opens into its row.
@@ -653,6 +664,7 @@ object MiniPlayerRuntime {
     internal const val PRESS_SMALL = -2
 
     private fun endRoute() {
+        routedOwner?.stopAnticipating()
         routedIsland = false
         routedNote = false
         routedOwner = null
@@ -700,8 +712,9 @@ object MiniPlayerRuntime {
      * container starts changing shape under the finger; the lift decides.
      */
     @JvmStatic @JvmOverloads
-    fun beginDrag(fromNative: Boolean, ev: MotionEvent, startY: Float = ev.rawY): Boolean {
-        val owner = live().firstOrNull { it.canDrag(fromNative) } ?: return false
+    fun beginDrag(fromNative: Boolean, ev: MotionEvent, startY: Float = ev.rawY,
+                  small: Boolean = false): Boolean {
+        val owner = live().firstOrNull { it.canDrag(fromNative, small) } ?: return false
         val span = owner.dragSpan() ?: return false
         if (!owner.beginDragMorph(fromNative)) return false
         dragCaught = false
@@ -1122,6 +1135,7 @@ private class MiniPlayerController(
         override fun onSessionDestroyed() = scheduleRefresh()
     }
     private val preDraw = ViewTreeObserver.OnPreDrawListener {
+        holdRows()
         updateVisibility()
         if (player?.visibility == View.VISIBLE) {
             position()
@@ -1152,7 +1166,7 @@ private class MiniPlayerController(
                 "@${xy[0]},${xy[1]} ${view.width}x${view.height} z${view.translationZ.toInt()}"
         }
         val sb = StringBuilder("${android.os.SystemClock.uptimeMillis() % 100000} morph=${morph != null} " +
-            "scene=${Main.coverSceneActive()} landed=${sceneLandedAt != 0L} solo=$soloRow")
+            "scene=${Main.coverSceneActive()} landed=${sceneLandedAt != 0L} group=${group != null}")
         sb.append(v("pill", player)).append(v("small", smallIsland)).append(v("flight", flight))
             .append(v("ghost", ghostPill)).append(v("gdisc", ghostDisc))
         sb.append(" pillArt=[").append(player?.artworkState()).append(']')
@@ -1185,10 +1199,12 @@ private class MiniPlayerController(
         val view = player ?: return
         // A flight's morph is not the pill's: the pill (and the small island coming up beside
         // it) still ride with the buttons while the flight is out.
-        if (morph != null && flight == null) {
+        if (pillMorph() != null) {
             view.setAnimationMatrix(null)
-            // Sliding back in under the pill's end as the pill widens over it.
-            if (soloRow) smallIsland?.let { placeSmallIsland(null, it.transitionAlpha) }
+            lastFollow.fill(0f)
+            // The small island still in its place under the media card's morph: waiting for its
+            // row, or coming and going there with no row.
+            if (group != null) smallIsland?.let { placeSmallIsland(null, it.transitionAlpha) }
             return
         }
         if (shortcutRow?.get()?.isAttachedToWindow != true) findRow()?.let { shortcutRow = WeakReference(it) }
@@ -1560,7 +1576,7 @@ private class MiniPlayerController(
         val ty = smallRest[1] - fh / 2f - v.top + smallNudgeY()
         // Flattened by the pill, by its shape - a scale would draw its edge jagged - when nothing
         // else is shaping it this frame.
-        if (swap == null && !smallGrowing && !islandDragging) {
+        if (swap == null && !smallGrowing && !islandDragging && group?.inPlace != true) {
             v.setShape((d * squeeze.smallShapeX()).roundToInt().coerceAtLeast(1),
                 (d * squeeze.smallShapeY()).roundToInt().coerceAtLeast(1), 0)
         }
@@ -2149,9 +2165,8 @@ private class MiniPlayerController(
             rowLast = frameTimeNanos
             rowLeft.step(dt)
             rowWidth.step(dt)
-            // Under the media card's morph the morph draws the pill, reading the spring; under a
-            // switch the switch does.
-            if (!soloRow && swap == null) applyRow()
+            // Under the media card's morph the morph draws the pill; under a switch the switch does.
+            if (group == null && swap == null) applyRow()
             if (rowLeft.atRest() && rowWidth.atRest()) endRow()
             else Choreographer.getInstance().postFrameCallback(this)
         }
@@ -2162,9 +2177,8 @@ private class MiniPlayerController(
         val view = player
         // A flight's morph moves the flight, not the pill: the pill still gives room on its
         // spring. Counted busy, it jumped to its new width the moment a flight set out.
-        // The media card's morph is the exception: its pill end is the row's spring, so the
-        // spring carries on under it (soloRow).
-        val pillMorphing = morph != null && flight == null && !soloRow
+        // A media card's morph lands on the row as it is laid out, so the row is put there at once.
+        val pillMorphing = morph != null && flight == null || group != null
         val busy = swap != null || pillMorphing || view == null || view.visibility != View.VISIBLE
         if (!rowKnown || busy) {
             // Nothing drawn to move from, or another motion owns the frame: straight there.
@@ -2180,7 +2194,7 @@ private class MiniPlayerController(
         if (!rowAnimating) {
             rowAnimating = true
             rowLast = 0L
-            if (!soloRow) applyRow()
+            applyRow()
             Choreographer.getInstance().postFrameCallback(rowFrame)
         }
     }
@@ -2211,49 +2225,486 @@ private class MiniPlayerController(
         rowLeft.value = rowLeft.target; rowLeft.velocity = 0f
         rowWidth.value = rowWidth.target; rowWidth.velocity = 0f
         // The media card's morph owns the pill's frame: not the row's to hand back.
-        if (!soloRow) player?.endMorph()
+        if (group == null) player?.endMorph()
+    }
+
+    // ---- the row and the lock screen's cards, into each other together
+
+    /**
+     * The media card's morph with the row: the card and the notification rows that are the
+     * row's islands change into those islands together, each into its own place, and back.
+     * Pulled down, the card becomes the music's island - the pill, or the small island - while
+     * the notification that is the row's other island comes down out of its row into its place
+     * at the same time; pulled up, the reverse. One spring moves them all, the music's: the
+     * other morph follows its progress frame by frame (MiniCardMorph.follow), so the two differ
+     * only by their ends - a small island's circle, a card's size. The islands with no place
+     * in the row (a third one on) have no island to become: their rows go as the stack folds
+     * its notifications away (foldRows), and come back as it unfolds them.
+     *
+     * The first version laid the row out as the pill alone for the morph: the card landed as
+     * the whole pill, and only then did the small island come out from under its end and
+     * narrow it, while the rows went into their islands on the stack's own animation - one
+     * motion after another, where each was to go home at once (2026-09-25).
+     */
+    private class Group(val musicSmall: Boolean, val down: Boolean) {
+        /** The view drawing the small island's place through the morph: the music's, or [other]'s. */
+        var smallView: MiniPlayerView? = null
+        /** The notification in the row's other place, when there is one. */
+        var other: String? = null
+        /** ...and that place is the small island's. */
+        var otherSmall = false
+        /** [other]'s morph with its row, once the row is there. */
+        var follower: MiniCardMorph? = null
+        /** It set out after the music's, from [joinFrom], and comes up to it over GROUP_JOIN_MS. */
+        var joinedAt = 0L
+        var joinFrom = 0f
+        /** Since when [other]'s row has been waited for. */
+        var waitSince = 0L
+        /** [other] has no row to go to or come from: its island comes and goes in its place. */
+        var inPlace = false
+        /** The real small island is under the view landing on it, taking over from it. */
+        var smallLanding = false
+
+        /**
+         * The rows with no place in the row, as the stack's own fold moves them: down with the
+         * finger (FOLD_PULL_RANGE_DP, the stack's friction), back up on the fold's release
+         * spring, and out or in on its alpha spring (NormalNotificationsVisibleAnimatorImpl:
+         * FolmeEase -2, 1.0, 0.2) once the lift has decided.
+         */
+        val foldDy = Jelly(FOLD_BACK_RESPONSE, HIDDEN_DAMPING)
+        val foldAlpha = Jelly(HIDDEN_RESPONSE, HIDDEN_DAMPING)
+        /** How far into the pile they are, 0 laid out to 1 piled (stackRows). */
+        val foldK = Jelly(FOLD_BACK_RESPONSE, HIDDEN_DAMPING)
+        var foldLast = 0L
+        /** Where the card stood when the finger took it, on screen: what the pull is measured from. */
+        var cardTop = Float.NaN
+        /** Rows moved by the fold, to be given their own place back. */
+        val folded = java.util.WeakHashMap<View, Boolean>()
+    }
+
+    private var group: Group? = null
+
+    /**
+     * A finger is pulling the music up and has not reached the threshold yet: the stack is
+     * given the rows now, out of sight, so they are laid out by the time the morph wants them.
+     */
+    private var rowsAnticipated = false
+
+    /** The stack may still show the rows for a moment after it was asked to leave them out. */
+    private var rowsHeldUntil = 0L
+
+    /** The row's islands are the stack's rows for now: the stack is not to leave them out. */
+    private fun rowsHeld(): Boolean = group != null || rowsAnticipated
+
+    /** The morph drawing the pill: the media card's, or in a group whichever has the pill. */
+    private fun pillMorph(): MiniCardMorph? {
+        val g = group ?: return morph?.takeIf { flight == null }
+        return if (g.musicSmall) g.follower?.takeIf { !g.otherSmall } else morph
+    }
+
+    /** Whether the small island shows while a group runs; null with no group running. */
+    private fun groupShowsSmall(): Boolean? {
+        val g = group ?: return null
+        val drawnByView = g.musicSmall || g.otherSmall && g.follower != null
+        return if (drawnByView) g.smallLanding else g.otherSmall
+    }
+
+    /** The small island [selected] would have beside it, as updateSmallIsland picks it. */
+    private fun smallAfter(keys: List<String>, selected: String): String? {
+        if (keys.size < 2) return null
+        preferredSmall?.takeIf { it in keys && it != selected }?.let { return it }
+        return keys[(keys.indexOf(selected).coerceAtLeast(0) + 1) % keys.size]
     }
 
     /**
-     * The pill's end of the media card's morph: the row's spring as it is now, so a pill that
-     * is still widening (the small island going) or narrowing is followed, not jumped to.
+     * Sets the row up for the media card's morph and makes the music's morph, not started yet:
+     * [toNative] the music goes up into the card, else the card comes down into the row.
      */
-    private fun rowBoxOnScreen(): CoverMorphMotion.Box? {
-        val rest = player?.restBoxOnScreen() ?: return null
-        if (!rowKnown) return rest
-        val xy = IntArray(2).also(host::getLocationOnScreen)
-        return CoverMorphMotion.Box(xy[0] + rowLeft.value, rest.y,
-            rowWidth.value.coerceAtLeast(rest.h), rest.h)
-    }
-
-    /**
-     * A media card morph is running: the row is laid out as the pill alone. Into the card, the
-     * small island slides back under the pill's end while the pill widens over its place; out
-     * of it, the card lands as the whole pill, and only then does the small island come out
-     * from under the end and the pill give it room - the super island's order, one motion
-     * after the other. It used to land straight on the narrowed pill with the small island
-     * already there, and going up the small island stayed till the card had landed, then went.
-     */
-    private var soloRow = false
-
-    /** The media card morph has just landed on the pill: the small island comes out once. */
-    private var soloEnded = false
-
-    /**
-     * Before a media card morph: [fromPill] the pill is what is on screen and widens on its
-     * spring; otherwise nothing is drawn to move from and the row is put at its end at once.
-     */
-    private fun beginSoloRow(fromPill: Boolean) {
+    private fun prepareGroup(native: View, toNative: Boolean): MiniCardMorph? {
+        val view = player ?: return null
+        if (controller?.takeIf(::isUsable) == null || noteMorphKey != null || flight != null) return null
+        if (toNative && selectedIsland != MUSIC_ISLAND && smallKey != MUSIC_ISLAND) return null
+        endSwap()
         endRow()
-        soloRow = true
-        if (!fromPill) rowKnown = false
+        resetIslandDrag()
+        clearSmallNudge()
+        if (!toNative) {
+            // Down: the music goes back where it was - the pill, or the small island - unless
+            // that is out of sight now (the row moved on while the card was up), or the pill
+            // would hold a notification with no row on screen to come down out of.
+            val keys = islandKeys
+            if (MUSIC_ISLAND !in keys) return null
+            val selected = selectedIsland?.takeIf { it in keys } ?: MUSIC_ISLAND
+            selectedIsland = if (selected != MUSIC_ISLAND && smallAfter(keys, selected) == MUSIC_ISLAND &&
+                rowFor(selected)?.let(::rowReady) == true) selected else MUSIC_ISLAND
+        }
+        val g = Group(musicSmall = selectedIsland != MUSIC_ISLAND, down = !toNative)
+        // Coming down the other rows are there, whole; going up they come out of the fold.
+        g.foldAlpha.value = if (toNative) 0f else 1f
+        g.foldAlpha.target = g.foldAlpha.value
+        // Going up they come out of the pile.
+        g.foldK.value = if (toNative) 1f else 0f
+        g.foldK.target = g.foldK.value
+        group = g
+        rowsAnticipated = false
+        view.visibility = View.VISIBLE
+        updateNativeSuppression(false)
+        refresh()
+        position()
+        // The small place keeps what it holds till the morph is over, whatever comes in meanwhile.
+        preferredSmall = smallKey
+        g.other = (if (g.musicSmall) selectedIsland else smallKey)?.takeIf { it != MUSIC_ISLAND }
+        g.otherSmall = g.other != null && !g.musicSmall
+        g.waitSince = android.os.SystemClock.uptimeMillis()
+        val lead = if (g.musicSmall) prepareSmallView(MUSIC_ISLAND) else view
+        if (lead == null) {
+            group = null
+            return null
+        }
+        if (g.musicSmall) {
+            // The view is the small island from here, in its very place.
+            g.smallView = lead
+            smallIsland?.visibility = View.GONE
+        }
+        val next = MiniCardMorph(lead, native, toNative, morphListener,
+            restBox = if (g.musicSmall) { { smallBoxOnScreen() } } else null, circle = g.musicSmall)
+        // The other island's row, if the stack has it laid out already: coming down it always
+        // has; going up, only if the pull was seen coming (rowsAnticipated). Otherwise the music
+        // sets out alone and the other island joins it the moment its row is there (groupFrame).
+        g.other?.let { key ->
+            val row = rowFor(key)?.takeIf(::rowReady)
+            if (row != null) {
+                if (!startFollower(g, row, fromIsland = toNative, joining = false)) g.inPlace = true
+            } else if (!toNative) g.inPlace = true
+        }
+        landTrace.clear()
+        trace("group ${if (toNative) "up" else "down"} musicSmall=${g.musicSmall} " +
+            "other=${g.other?.takeLast(6)} small=${g.otherSmall} follower=${g.follower != null} " +
+            "inPlace=${g.inPlace} " + smallState())
+        return next
     }
 
-    /** The media card morph is over, or never started. */
-    private fun endSoloRow() {
-        if (!soloRow) return
-        soloRow = false
-        soloEnded = true
+    /** A view of its own for the small island's place through a morph, bound to [key]'s island. */
+    private fun prepareSmallView(key: String): MiniPlayerView? {
+        val pill = player ?: return null
+        val music = controller?.takeIf(::isUsable)
+        val note = if (key == MUSIC_ISLAND) null
+            else LockIslands.notes.firstOrNull { it.key == key } ?: LockIslands.noteFor(key)
+        if (if (key == MUSIC_ISLAND) music == null else note == null) return null
+        val w = pill.layoutParams.width.coerceAtLeast(1)
+        val h = pill.layoutParams.height.coerceAtLeast(1)
+        val view = MiniPlayerView(context)
+        host.addView(view, lockScreenLayerIndex(), ViewGroup.LayoutParams(w, h))
+        if (music != null && note == null) bindMusic(view, music, config) else bindNote(view, note!!, config)
+        // Laid out here and now, as a flight is: its morph starts on this frame.
+        view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
+        view.layout(0, 0, w, h)
+        view.visibility = View.VISIBLE
+        view.alpha = 1f
+        return view
+    }
+
+    /** A notification's row, laid out and on screen above the row of islands. */
+    private fun rowReady(row: View): Boolean = row.isAttachedToWindow && row.isLaidOut &&
+        row.width > 0 && row.height > 0 && rowOnScreen(row)
+
+    /**
+     * The other island goes with the music's morph from here, between its place and [row]:
+     * [fromIsland] it starts at its island (going up), else at the row (coming down).
+     * [joining] the music's morph is already under way: it comes up to it over a few frames.
+     */
+    private fun startFollower(g: Group, row: View, fromIsland: Boolean, joining: Boolean): Boolean {
+        val key = g.other ?: return false
+        val view = (if (g.otherSmall) prepareSmallView(key) else player) ?: return false
+        // Out of sight while it waited (holdRows): the morph saves the row's own alpha.
+        showRow(row)
+        val f = MiniCardMorph(view, row, fromIsland, followerListener, rowLanding(row),
+            restBox = if (g.otherSmall) { { smallBoxOnScreen() } } else null, circle = g.otherSmall)
+        if (!f.startDragging()) {
+            if (g.otherSmall) runCatching { host.removeView(view) }
+            hideRow(row)
+            return false
+        }
+        if (g.otherSmall) {
+            g.smallView = view
+            smallIsland?.visibility = View.GONE
+        }
+        g.follower = f
+        g.joinFrom = f.progress
+        g.joinedAt = if (joining) android.os.SystemClock.uptimeMillis() else 0L
+        trace("group follower ${key.takeLast(6)} joining=$joining from=${"%.2f".format(g.joinFrom)}")
+        return true
+    }
+
+    /** A follower ends with the music's morph: the group finishes it, never its own springs. */
+    private val followerListener = object : MiniCardMorph.Listener {
+        override fun canSettle(morph: MiniCardMorph, toNative: Boolean) = true
+        override fun artBridged() = false
+        override fun onSettled(morph: MiniCardMorph, toNative: Boolean, completed: Boolean) {}
+    }
+
+    /** Every frame of the music's morph: the rest of the row moves with it. */
+    private fun groupFrame(lead: MiniCardMorph) {
+        val g = group ?: return
+        if (morph !== lead) return
+        val now = android.os.SystemClock.uptimeMillis()
+        val other = g.other
+        // Going up, the other island's row may come a few frames after the music set out. Coming
+        // back before it has, the island never left its place and needs none.
+        if (other != null && g.follower == null && !g.inPlace && lead.toNative) {
+            val row = rowFor(other)
+            if (row != null && rowReady(row)) {
+                if (!startFollower(g, row, fromIsland = true, joining = true)) g.inPlace = true
+            } else if (now - g.waitSince > ROW_WAIT_MS) {
+                Xp.log("MCIsland: $other has no row for the card's morph; in place")
+                g.inPlace = true
+            }
+        }
+        g.follower?.let { f ->
+            val share = if (g.joinedAt == 0L) 1f
+                else MiniCardMorph.smooth(0f, 1f, (now - g.joinedAt) / GROUP_JOIN_MS.toFloat())
+            if (share >= 1f) g.joinedAt = 0L
+            f.follow(lead, share, g.joinFrom)
+        }
+        foldRows(g, lead, now)
+        // The small place: the view drawing it hands over to the real small island on its last
+        // stretch home, as a flight does (FLIGHT_HANDOFF), overshoot and all.
+        val smallMorph = if (g.musicSmall) lead else g.follower?.takeIf { g.otherSmall }
+        val view = g.smallView
+        if (smallMorph != null && view != null) {
+            val p = smallMorph.progress
+            val landing = !lead.toNative && p < FLIGHT_HANDOFF
+            if (landing) smallMorph.containerBox()?.let(::landSmall)
+            else if (g.smallLanding) unlandSmall()
+            g.smallLanding = landing
+            val a = if (landing) MiniCardMorph.smooth(0f, FLIGHT_HANDOFF, p) else 1f
+            if (kotlin.math.abs(view.alpha - a) > 0.002f) view.alpha = a
+        }
+        if (g.inPlace && other != null) {
+            // No row: the island grows out of its place as the card comes down and shrinks
+            // away there as the music goes up, on the same progress.
+            val v = (1f - lead.progress).coerceIn(0f, 1f)
+            if (g.otherSmall) {
+                val small = smallIsland
+                if (small != null && smallKey == other) {
+                    if (small.visibility != View.VISIBLE) small.visibility = View.VISIBLE
+                    smallGrow.value = v
+                    applySmallGrow()
+                }
+            } else player?.let { if (kotlin.math.abs(it.alpha - v) > 0.002f) it.alpha = v }
+        }
+        val box = lead.containerBox()
+        trace("g c=${"%.3f".format(lead.progress)} to=${if (lead.toNative) "card" else "row"} " +
+            "lead=${box?.cx()?.toInt()},${box?.y?.toInt()} ${box?.w?.toInt()}x${box?.h?.toInt()} " +
+            "fol=${g.follower?.progress?.let { "%.3f".format(it) }} land=${g.smallLanding} " +
+            "sv=${view?.alpha?.let { "%.2f".format(it) }} " +
+            "small=${smallIsland?.let { "${it.visibility}/${"%.2f".format(it.alpha)}" }}")
+    }
+
+    /** The real small island in the shape and place of the view landing on it, this frame. */
+    private fun landSmall(box: CoverMorphMotion.Box) {
+        val small = smallIsland ?: return
+        if (small.visibility != View.VISIBLE) {
+            small.visibility = View.VISIBLE
+            small.alpha = 1f
+        }
+        landOn(box)
+    }
+
+    /** Turned back before landing: the view has the small place to itself again. */
+    private fun unlandSmall() {
+        if (landingBox != null) {
+            landingBox = null
+            smallIsland?.iconAtStart = false
+            restoreSmallIslandShape()
+        }
+        smallIsland?.visibility = View.GONE
+    }
+
+    /**
+     * The music's morph is over, [toNative] at the card: the rows are the stack's again, the
+     * islands' views are done. At the row: the islands are in their places, and the stack is
+     * let leave their rows out - out of sight until it has taken them away.
+     */
+    private fun endGroup(toNative: Boolean) {
+        val g = group ?: return
+        group = null
+        g.follower?.cancel()
+        g.smallView?.let { runCatching { host.removeView(it) } }
+        landingBox = null
+        smallIsland?.iconAtStart = false
+        if (g.inPlace) {
+            player?.alpha = 1f
+            smallGrow.value = 1f
+            smallGrow.target = 1f
+        }
+        restoreSmallIslandShape()
+        for (row in g.folded.keys) row.setAnimationMatrix(null)
+        for (note in LockIslands.notes) {
+            val (row, top) = findRow(note.key) ?: continue
+            if (toNative) {
+                showRow(row)
+                showRow(top)
+            } else hideRowUntilGone(top, note.key)
+        }
+        if (!toNative) {
+            snapSmallOnce = true
+            rowsHeldUntil = android.os.SystemClock.uptimeMillis() + ROW_GONE_MS
+        } else rowsHeldUntil = 0L
+        trace("group end at=${if (toNative) "card" else "row"} " + smallState())
+        traceFrames = 30
+        Choreographer.getInstance().removeFrameCallback(traceFrame)
+        Choreographer.getInstance().postFrameCallback(traceFrame)
+    }
+
+    /**
+     * Before every frame is drawn, the rows the stack has for the row's islands while it has
+     * been asked to keep them (rowsHeld): one whose island is still waiting for it stays out
+     * of sight; one with no place in the row fades with the card - out as the card comes down,
+     * in as the music goes up; one being morphed is its morph's. Just after, whatever the stack
+     * still shows of them for a moment is not drawn.
+     */
+    private fun holdRows() {
+        val g = group
+        val holding = rowsHeld()
+        if (!holding && android.os.SystemClock.uptimeMillis() > rowsHeldUntil) return
+        // The row the other island is morphing with: a group holding it is not folded whole.
+        val keep = g?.other?.let(::rowFor)
+        val done = HashSet<View>()
+        val pile = ArrayList<View>()
+        for (note in LockIslands.notes) {
+            val key = note.key
+            if (g != null && key == g.other && g.follower != null) continue
+            val row = (if (g != null && key == g.other) keep else wholeRowFor(key, keep)) ?: continue
+            if (!done.add(row)) continue
+            if (!holding) {
+                if (row !in hiddenRows) hideRowUntilGone(row, key)
+                continue
+            }
+            hideRow(row)
+            val folds = g != null && key != g.other
+            val ta = if (folds) (hiddenRows[row] ?: 1f) * g!!.foldAlpha.value.coerceIn(0f, 1f) else 0f
+            if (kotlin.math.abs(row.transitionAlpha - ta) > 0.002f) row.transitionAlpha = ta
+            if (folds) pile += row
+        }
+        if (g != null && pile.isNotEmpty()) stackRows(g, pile)
+    }
+
+    /**
+     * The rows with no place in the row, piled as the stack piles its cards
+     * (NotificationStackingCalculator): the lowest stays in front and shrinks toward 0.934; each
+     * one above it slides down behind it, shrinking on through 0.85 to 0.8 the deeper it goes,
+     * its top showing notif_stacking_height_2 (12dp), then _1 more (32dp), over the front
+     * card. All of it [Group.foldK] of the way, and down by the finger's pull on top. Each is
+     * scaled about its own bottom, in the animation matrix over whatever the stack has put there.
+     */
+    private fun stackRows(g: Group, rows: List<View>) {
+        val k = g.foldK.value.coerceIn(0f, 1.2f)
+        val xy = IntArray(2)
+        // Where the stack has each, on screen, by its parent: the matrix here is not in it.
+        val tops = rows.associateWith { row ->
+            (row.parent as? View)?.getLocationOnScreen(xy)
+            xy[1] + row.top + row.translationY
+        }
+        val order = rows.sortedBy { tops[it] }
+        val frontTop = tops[order.last()] ?: return
+        val h1 = stackingHeight(1)
+        val h2 = stackingHeight(2)
+        for ((i, row) in order.withIndex()) {
+            val depth = order.size - 1 - i
+            val h = row.height.toFloat()
+            val scale: Float
+            var dy = g.foldDy.value
+            if (depth == 0) {
+                scale = firstStackedScale(k)
+            } else {
+                scale = otherStackedScale(k * (depth + 1))
+                val peek = h2 + if (depth >= 2) h1 else 0f
+                val top = tops[row] ?: continue
+                // Its top, drawn at its scale about its bottom, peeking over the front card.
+                val to = frontTop - peek - top - h * (1f - scale)
+                dy += to * k.coerceAtMost(1f)
+            }
+            val m = Matrix()
+            m.setScale(scale, scale, row.width / 2f, row.translationY + h)
+            m.postTranslate(0f, dy)
+            row.setAnimationMatrix(m)
+            g.folded[row] = true
+        }
+    }
+
+    private fun stackingHeight(which: Int): Float {
+        val res = context.resources
+        val id = res.getIdentifier("notif_stacking_height_" + which, "dimen", "com.android.systemui")
+        return if (id != 0) runCatching { res.getDimension(id) }.getOrNull() ?: 0f
+            else dp(if (which == 1) 32f else 12f).toFloat()
+    }
+
+    /** NotificationStackingCalculator.calculateScaleForFirstStackedCard. */
+    private fun firstStackedScale(p: Float): Float = when {
+        p < 1f -> lerp(1f, 0.934f, p)
+        p < 1.5f -> lerp(0.934f, 0.85f, ((p - 1f) / 0.5f).coerceIn(0f, 1f))
+        else -> lerp(0.85f, 0.8f, ((p - 1.5f) / 1.5f).coerceIn(0f, 1f))
+    }.coerceAtLeast(0.8f)
+
+    /** NotificationStackingCalculator.calculateScaleForOtherStackedCards. */
+    private fun otherStackedScale(p: Float): Float = when {
+        p < 1f -> lerp(1f, 0.934f, p)
+        p < 2f -> lerp(0.934f, 0.85f, p - 1f)
+        else -> lerp(0.85f, 0.8f, (p - 2f).coerceAtMost(1f))
+    }.coerceAtLeast(0.8f)
+
+    /**
+     * The rows with no place in the row, this frame, as the stack's fold moves them. Under the
+     * finger coming down they follow the card's pull with the stack's own friction, whole; let
+     * go, they spring back and go out on the fold's alpha spring if the card is headed for the
+     * row, stay if it goes back up. Going up they come in on that spring once the music is on
+     * its way into the card for good.
+     */
+    private fun foldRows(g: Group, lead: MiniCardMorph, now: Long) {
+        val dt = if (g.foldLast == 0L) 1f / 120f else ((now - g.foldLast) / 1000f).coerceIn(0f, 0.05f)
+        g.foldLast = now
+        val box = lead.containerBox()
+        if (g.down && g.cardTop.isNaN() && box != null) g.cardTop = box.y
+        if (lead.held) {
+            if (g.down && box != null) {
+                val range = dp(FOLD_PULL_RANGE_DP).toFloat()
+                val t = ((box.y - g.cardTop) / range).coerceIn(0f, 1f)
+                g.foldDy.value = (t * t * t / 3f - t * t + t) * range
+                g.foldDy.target = g.foldDy.value
+                g.foldDy.velocity = 0f
+                // The pile gathers with the pull, as far as the finger has taken it.
+                g.foldK.value = t
+                g.foldK.target = t
+                g.foldK.velocity = 0f
+            }
+            return
+        }
+        g.foldDy.target = 0f
+        g.foldAlpha.target = if (lead.toNative) 1f else 0f
+        g.foldK.target = if (lead.toNative) 0f else 1f
+        g.foldDy.step(dt)
+        g.foldAlpha.step(dt)
+        g.foldK.step(dt)
+    }
+
+    /** A finger has started pulling the music up ([small]: out of the small island). */
+    fun anticipateRows(small: Boolean) {
+        if (rowsAnticipated || group != null || !canDrag(fromNative = false, small = small)) return
+        if (LockIslands.notes.isEmpty()) return
+        rowsAnticipated = true
+        updateVisibility()
+    }
+
+    /** ...and let go without opening anything: the stack leaves the rows out again. */
+    fun stopAnticipating() {
+        if (!rowsAnticipated) return
+        rowsAnticipated = false
+        if (group != null) return
+        rowsHeldUntil = android.os.SystemClock.uptimeMillis() + ROW_GONE_MS
+        for (note in LockIslands.notes) findRow(note.key)?.let { hideRowUntilGone(it.second, note.key) }
+        updateVisibility()
     }
 
     // ---- the small island coming and going
@@ -2262,12 +2713,6 @@ private class MiniPlayerController(
     private val smallGrow = Jelly(SWAP_RESPONSE, SWAP_DAMPING)
     private var smallGrowing = false
     private var smallGrowLast = 0L
-
-    /**
-     * This coming or going is out from under the pill's end, or back in under it (soloRow),
-     * on APPEAR_EASE as the super island's HiddenToSmallIsland - not in its own place.
-     */
-    private var smallEmerge = false
 
     private val smallGrowFrame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -2281,7 +2726,6 @@ private class MiniPlayerController(
                 smallGrowing = false
                 if (smallGrow.target == 0f) smallIsland?.visibility = View.GONE
                 else restoreSmallIslandShape()
-                endSmallEmerge()
             } else Choreographer.getInstance().postFrameCallback(this)
         }
     }
@@ -2290,12 +2734,12 @@ private class MiniPlayerController(
      * The small island shown or not: coming up it grows out of nothing in its place, going it
      * shrinks away there - unless the row itself is going, when it just goes with it.
      */
-    private fun setSmallShown(shown: Boolean, animate: Boolean, emerge: Boolean = false) {
+    private fun setSmallShown(shown: Boolean, animate: Boolean) {
         val small = smallIsland ?: return
         val visible = small.visibility == View.VISIBLE
         if (visible != shown && traceFrames > 0 || flight != null && visible != shown) {
             trace("small ${if (shown) "show" else "hide"} animate=$animate key=${smallKey?.takeLast(6)} " +
-                "noteMorph=${noteMorphKey?.takeLast(6)} out=$flightOut landing=$flightLanding solo=$soloRow")
+                "noteMorph=${noteMorphKey?.takeLast(6)} out=$flightOut landing=$flightLanding group=${group != null}")
         }
         if (shown && visible && (!smallGrowing || smallGrow.target == 1f)) return
         if (!shown && (!visible || (smallGrowing && smallGrow.target == 0f))) return
@@ -2306,21 +2750,12 @@ private class MiniPlayerController(
             smallGrow.target = smallGrow.value
             small.visibility = if (shown) View.VISIBLE else View.GONE
             if (shown && landingBox == null) restoreSmallIslandShape()
-            endSmallEmerge()
             return
         }
         if (shown && !visible) {
             smallGrow.value = 0f
             smallGrow.velocity = 0f
             small.visibility = View.VISIBLE
-        }
-        // Turned round midway, it keeps to the path it is on.
-        if (!smallGrowing && emerge != smallEmerge) {
-            if (emerge) {
-                smallEmerge = true
-                smallGrow.response = APPEAR_RESPONSE
-                smallGrow.damping = APPEAR_DAMPING
-            } else endSmallEmerge()
         }
         smallGrow.target = if (shown) 1f else 0f
         if (!smallGrowing) {
@@ -2333,7 +2768,6 @@ private class MiniPlayerController(
 
     /** Another island in the small island's place: it comes up there from nothing. */
     private fun regrowSmall() {
-        endSmallEmerge()
         smallGrow.value = 0f
         smallGrow.velocity = 0f
         smallGrow.target = 1f
@@ -2349,33 +2783,10 @@ private class MiniPlayerController(
         val small = smallIsland ?: return
         val d = discDiameter().toFloat()
         val v = smallGrow.value
-        if (smallEmerge) {
-            // Under the pill's end at 0.6 of its size, sliding out to its place (SMALL_EMERGE).
-            val q = v.coerceAtLeast(0f)
-            val side = lerp(d * HIDDEN_SCALE, d, q).coerceAtLeast(1f).roundToInt()
-            small.setShape(side, side, 0)
-            small.setIconAlpha(MiniCardMorph.smooth(0.15f, 0.7f, q))
-            small.alpha = MiniCardMorph.smooth(0f, 0.12f, q)
-            smallDx = lerp(emergeDx(), 0f, v)
-            followShortcuts()
-            return
-        }
         val side = lerp(d * 0.4f, d, v).coerceAtLeast(1f).roundToInt()
         small.setShape(side, side, 0)
         small.setIconAlpha(MiniCardMorph.smooth(0.3f, 1f, v))
         small.alpha = MiniCardMorph.smooth(0f, 0.5f, v)
-    }
-
-    /** Back to coming and going in its own place, on CHANGE_EASE. */
-    private fun endSmallEmerge() {
-        if (!smallEmerge) return
-        smallEmerge = false
-        smallGrow.response = SWAP_RESPONSE
-        smallGrow.damping = SWAP_DAMPING
-        if (smallDx != 0f && swap == null) {
-            smallDx = 0f
-            followShortcuts()
-        }
     }
 
     // ---- the finger on a row of islands
@@ -2703,16 +3114,19 @@ private class MiniPlayerController(
         }
     }
 
+    /** Where an island's picture, title and text land on a notification's row, and its corners. */
+    private fun rowLanding(row: View) = MiniCardMorph.Landing(
+        findNamed(row, ICON_NAMES) { it is ImageView },
+        findNamed(row, TITLE_NAMES) { it is TextView },
+        findNamed(row, TEXT_NAMES) { it is TextView },
+        Main.notificationRowRadius(row),
+        dp(8f).toFloat(),
+    )
+
     private fun startNoteMorph(key: String, row: View, toRow: Boolean): Boolean {
         val useFlight = flight != null
         val view = (if (useFlight) flight else player) ?: return false
-        val landing = MiniCardMorph.Landing(
-            findNamed(row, ICON_NAMES) { it is ImageView },
-            findNamed(row, TITLE_NAMES) { it is TextView },
-            findNamed(row, TEXT_NAMES) { it is TextView },
-            Main.notificationRowRadius(row),
-            dp(8f).toFloat(),
-        )
+        val landing = rowLanding(row)
         // The flight's end, both ways: its home - the small island's circle, or the pill.
         val home = flightHome
         val restBox: (() -> CoverMorphMotion.Box?)? = when {
@@ -3076,17 +3490,52 @@ private class MiniPlayerController(
     }
 
     /** A notification's row in the stack, by its key. */
-    private fun rowFor(key: String): View? {
+    private fun rowFor(key: String): View? = findRow(key)?.first
+
+    /**
+     * [key]'s row, and the stack's own row it is in: itself, or the group it is a child of. The
+     * system groups an app's notifications by itself (高德's navigation came as two children of
+     * an Aggregate_SilentSection summary), and looked for among the stack's rows alone a child
+     * was never found: the media card's morph left its row standing, unfolded (2026-09-25).
+     */
+    private fun findRow(key: String): Pair<View, View>? {
         val stack = notificationStack() ?: return null
         for (i in 0 until stack.childCount) {
             val child = stack.getChildAt(i)
             if (!child.javaClass.name.contains("ExpandableNotificationRow")) continue
-            val sbn = runCatching {
-                Xp.getObjectField(Xp.callMethod(child, "getEntry"), "mSbn") as? android.service.notification.StatusBarNotification
-            }.getOrNull() ?: continue
-            if (sbn.key == key) return child
+            if (rowKey(child) == key) return child to child
+            for (sub in childRows(child)) if (rowKey(sub) == key) return sub to child
         }
         return null
+    }
+
+    private fun rowKey(row: View): String? = runCatching {
+        (Xp.getObjectField(Xp.callMethod(row, "getEntry"), "mSbn") as? android.service.notification.StatusBarNotification)?.key
+    }.getOrNull()
+
+    /** A group's rows for its children; none for a row that is not a group. */
+    private fun childRows(row: View): List<View> = runCatching {
+        (Xp.callMethod(row, "getAttachedChildren") as? List<*>)?.filterIsInstance<View>()
+    }.getOrNull().orEmpty()
+
+    /**
+     * What the stack shows of [key] as a whole: its group's row - the group goes with its last
+     * child - unless that group also holds [keep], the row an island is morphing with, which
+     * would go with it: then the child's row alone.
+     */
+    private fun wholeRowFor(key: String, keep: View?): View? {
+        val (row, top) = findRow(key) ?: return null
+        if (row === top) return row
+        return if (keep != null && isInside(keep, top)) row else top
+    }
+
+    private fun isInside(v: View, ancestor: View): Boolean {
+        var p: View? = v
+        while (p != null) {
+            if (p === ancestor) return true
+            p = p.parent as? View
+        }
+        return false
     }
 
     /** The first shown view under [root] with one of [names] as its id, breadth first. */
@@ -3129,7 +3578,8 @@ private class MiniPlayerController(
         hideRow(row)
         handler.postDelayed({
             // Released again meanwhile and waiting to be morphed: that morph gives it back.
-            if (rowWaitKey != key && !(noteMorphKey == key && morph != null)) showRow(row)
+            // Held for the media card's morph meanwhile: that morph's end gives it back.
+            if (rowWaitKey != key && !(noteMorphKey == key && morph != null) && !rowsHeld()) showRow(row)
         }, ROW_GONE_MS)
     }
 
@@ -3360,8 +3810,9 @@ private class MiniPlayerController(
             return CoverMorphMotion.Box(discRest[0] - d / 2f, discRest[1] - d / 2f, d, d)
         }
         val hostXY = IntArray(2).also(host::getLocationOnScreen)
-        // A flight's morph is the flight's: the row pressing on the discs is still the pill's.
-        val running = morph?.takeIf { flight == null }
+        // A flight's morph is the flight's, and the small island's view in a group is not the
+        // pill's: the row pressing on the discs is still the pill's.
+        val running = pillMorph()
         val view = player
         val pill: CoverMorphMotion.Box? = when {
             running != null -> running.containerBox()?.let {
@@ -3631,6 +4082,8 @@ private class MiniPlayerController(
 
         override fun artBridged() = artBridged
 
+        override fun onFrame(morph: MiniCardMorph, progress: Float) = groupFrame(morph)
+
         override fun onSettled(morph: MiniCardMorph, toNative: Boolean, completed: Boolean) {
             if (this@MiniPlayerController.morph !== morph) return
             this@MiniPlayerController.morph = null
@@ -3642,12 +4095,7 @@ private class MiniPlayerController(
             morphScene = false
             Xp.log("MCMini: container morph ${if (completed) "landed" else "cancelled"} " +
                 "at ${if (toNative) "native" else "mini"}")
-            if (soloRow) {
-                // At the card the row goes with the pill, still laid out alone; at the pill the
-                // small island comes out from under its end and the pill narrows for it.
-                updateVisibility()
-                endSoloRow()
-            }
+            endGroup(toNative)
             position()
             updateVisibility()
         }
@@ -3671,19 +4119,13 @@ private class MiniPlayerController(
         if (!view.isAttachedToWindow || !Main.miniPlayerMorphAllowed()) return false
         val native = transitionHeader() ?: return false
         // A switch still settling is finished where it was headed: the card morph has the pill.
-        endSwap()
-        beginSoloRow(fromPill = toNative && view.visibility == View.VISIBLE)
-        view.visibility = View.VISIBLE
-        updateNativeSuppression(false)
-        position()
-        val next = MiniCardMorph(view, native, toNative, morphListener, restBox = ::rowBoxOnScreen,
-            circle = false)
+        val next = prepareGroup(native, toNative) ?: return false
         morph = next
         morphScene = scene
         if (!next.start()) {
             morph = null
             morphScene = false
-            endSoloRow()
+            endGroup(!toNative)
             Xp.log("MCMini: no geometry for a morph; switching in place")
             updateVisibility()
             return false
@@ -3727,7 +4169,10 @@ private class MiniPlayerController(
 
     fun setArtBridged(bridged: Boolean) {
         artBridged = bridged
-        player?.setArtworkHidden(bridged)
+        // The music's artwork: the small island's view's while the music is the small island.
+        val small = group?.takeIf { it.musicSmall }?.smallView
+        small?.setArtworkHidden(bridged)
+        player?.setArtworkHidden(bridged && small == null)
     }
 
     private fun transitionHeader(): View? {
@@ -3747,10 +4192,10 @@ private class MiniPlayerController(
     fun density(): Float = context.resources.displayMetrics.density
 
     /** The dynamic switch can be pulled from this end right now. */
-    fun canDrag(fromNative: Boolean): Boolean {
+    fun canDrag(fromNative: Boolean, small: Boolean = false): Boolean {
         if (!config.getBoolean(MiniPlayerConfig.ENABLED) || morph != null) return false
-        // Only the music island has a card to open into.
-        if (!fromNative && !selectedIsMusic()) return false
+        // Only the music island has a card to open into - in the pill, or as the small island.
+        if (!fromNative && (if (small) smallKey != MUSIC_ISLAND else !selectedIsMusic())) return false
         val token = controller?.sessionToken ?: return false
         if (!Main.miniPlayerMorphAllowed()) return false
         return MiniPlayerRuntime.nativeRequested(token) == fromNative
@@ -3766,21 +4211,15 @@ private class MiniPlayerController(
     }
 
     fun beginDragMorph(fromNative: Boolean): Boolean {
-        val view = player ?: return false
+        if (player == null) return false
         val native = transitionHeader() ?: return false
-        endSwap()
-        beginSoloRow(fromPill = !fromNative && view.visibility == View.VISIBLE)
-        view.visibility = View.VISIBLE
-        updateNativeSuppression(false)
-        position()
         // Starts at the end it was pulled from; release() aims it once the lift decides.
-        val next = MiniCardMorph(view, native, !fromNative, morphListener, restBox = ::rowBoxOnScreen,
-            circle = false)
+        val next = prepareGroup(native, toNative = !fromNative) ?: return false
         morph = next
         morphScene = false
         if (!next.startDragging()) {
             morph = null
-            endSoloRow()
+            endGroup(toNative = fromNative)
             updateVisibility()
             return false
         }
@@ -3811,6 +4250,8 @@ private class MiniPlayerController(
             Main.miniPlayerEnterCover()
         }
     }
+
+    fun takesRows(): Boolean = config.getBoolean(MiniPlayerConfig.ENABLED) && LockIslands.notes.isNotEmpty()
 
     fun wantsCardSwipe(): Boolean {
         if (!config.getBoolean(MiniPlayerConfig.ENABLED)) return false
@@ -4253,7 +4694,7 @@ private class MiniPlayerController(
                 sceneVisible = sceneVisible,
                 nativeSceneOverride = keyguardOwned && Main.coverSceneActive(),
                 // A notification's morph is not the media card's: the card stays put away.
-                transitionActive = morph != null && noteMorphKey == null,
+                transitionActive = (morph != null || group != null) && noteMorphKey == null,
                 controlCenterOpen = controlCenterOpen,
             ),
         )
@@ -4261,7 +4702,8 @@ private class MiniPlayerController(
                 android.os.SystemClock.uptimeMillis() - sceneLandedAt > SCENE_WAIT_MS)) sceneLandedAt = 0L
         val shown = presentation.showMini && sceneLandedAt == 0L
         // The stack leaves the notifications out only while the row is there to show them.
-        LockIslands.setActive(shown && keyguardOwned)
+        // ...and not while the media card's morph has the rows turning into islands or back.
+        LockIslands.setActive(shown && keyguardOwned && !rowsHeld())
         if (!keyguardOwned) selectedIsland = null
         // While a flight is out and coming back, its end is the small island's place: the small
         // island is the flight, and whatever was there makes way. Once it is out for good the
@@ -4271,10 +4713,10 @@ private class MiniPlayerController(
         // Going out it waits for the morph, which takes it over in place.
         val held = flight != null && (morph != null || !flightFromSmall) && !flightOut &&
             smallKey == noteMorphKey && !flightLanding
-        setSmallShown(shown && smallKey != null && !held && !soloRow, animate = shown && !snapSmallOnce,
-            emerge = soloRow || soloEnded)
+        // Under the media card's morph the group has the small island (groupShowsSmall).
+        setSmallShown(shown && smallKey != null && !held && (groupShowsSmall() ?: true),
+            animate = shown && !snapSmallOnce && group == null)
         snapSmallOnce = false
-        soloEnded = false
         if (!keyguardOwned) preferredSmall = null
         if (!Main.keyguardLocked()) releasedFromPill.clear()
         if (view != null) {
@@ -4369,7 +4811,7 @@ private class MiniPlayerController(
         // the group kept clear of both discs: the camera's touch area is wider than its disc,
         // and a group reaching into it lost the small island's taps to the camera.
         val gap = dp(MiniPlayerGeometry.DISC_GAP_DP)
-        val small = smallKey != null && !soloRow
+        val small = smallKey != null
         val pillWidth = if (!small) width else MiniPlayerGeometry.pillBesideIslandPx(width,
             MiniPlayerGeometry.clearOfDiscsPx(
                 MiniPlayerGeometry.widthPx(host.width, host.width, centerX, dp(12f)),
@@ -4539,6 +4981,17 @@ private val TEXT_NAMES = setOf("text", "big_text", "notification_text")
 
 /** Below this progress, a flight coming home fades off the small island shown under it. */
 private const val FLIGHT_HANDOFF = 0.18f
+
+/**
+ * The stack's fold, for the rows with no island of their own: pulled, a row follows the finger
+ * with friction and goes at most a third of this; let go, it springs back on the stack's
+ * release spring (NotificationNumStateAreaAnimator.releaseEase, FolmeEase.spring(1.0, 0.38)).
+ */
+private const val FOLD_PULL_RANGE_DP = 150f
+private const val FOLD_BACK_RESPONSE = 0.38f
+
+/** A row that came after the media card's morph set out comes up to its progress over this long. */
+private const val GROUP_JOIN_MS = 160L
 
 /** The shortest a notification pull can be, island to row, in dp. */
 private const val NOTE_SPAN_MIN_DP = 160f

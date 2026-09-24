@@ -7484,7 +7484,10 @@ public class Main extends XposedModule {
                     // With notifications to fold, the pull is not cancelled out from under the
                     // stack, in the cover as out of it. Without any, it still is: there the
                     // stack's own answer to a pull down is to start opening the shade.
-                    sCardSwipeShared = keyguardCanFoldNotifications();
+                    // Nor when the row of islands takes them: their rows come down with the card,
+                    // each into its own island, and folded they had nothing to come out of.
+                    sCardSwipeShared = keyguardCanFoldNotifications()
+                            && !MiniPlayerRuntime.islandsTakeRows();
                     if (sCoverMode) {
                         // Out of the cover or the lyrics, landing on the pill: the scene exit
                         // shrinks the card into it.
