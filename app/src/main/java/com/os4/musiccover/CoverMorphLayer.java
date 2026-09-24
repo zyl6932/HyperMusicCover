@@ -31,6 +31,8 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
     private boolean awaitArtworkPush;
     private float fullAlpha;
     private boolean running;
+    /** The far end is the mini player's artwork slot, not the OEM card's thumbnail. */
+    private boolean mini;
 
     /**
      * One per window, kept attached and INVISIBLE between morphs. Added at the start of every
@@ -72,7 +74,7 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         }
         CoverMorphLayer old = sView;
         if (old != null && old.running) {
-            if (old.cardMode == Main.coverMorphCardMode()) {
+            if (!old.mini && old.cardMode == Main.coverMorphCardMode()) {
                 old.motion.aim(toCover);
                 old.revealAt = 0L;
                 old.startedAt = SystemClock.uptimeMillis();
@@ -88,6 +90,44 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         if (root == null || art == null || art.isRecycled() || thumb == null || cover == null) {
             return false;
         }
+        run(root, art, thumb, cover, toCover, false);
+        return true;
+    }
+
+    /**
+     * The artwork between the mini player and the cover card. The pill itself turns into the
+     * media card in MiniCardMorph; only the artwork leaves it, from - or back to - the pill's
+     * own artwork slot, which stays where the pill rests while the container moves away.
+     */
+    static boolean beginMiniScene(boolean toCover) {
+        if (Looper.myLooper() != Looper.getMainLooper() || !Main.coverMorphEligible()) return false;
+        if (!Main.coverMorphCardMode()) {
+            cancel();
+            return false;
+        }
+        CoverMorphLayer old = sView;
+        if (old != null && old.running) {
+            if (old.mini) {
+                old.motion.aim(toCover);
+                old.startedAt = SystemClock.uptimeMillis();
+                old.invalidate();
+                return true;
+            }
+            old.finish();
+        }
+        ViewGroup root = Main.coverMorphRoot();
+        Bitmap art = Main.coverMorphSource();
+        CoverMorphMotion.Box slot = MiniPlayerRuntime.artworkRestBox();
+        CoverMorphMotion.Box cover = art == null ? null : Main.coverMorphTarget(art);
+        if (root == null || art == null || art.isRecycled() || slot == null || cover == null) {
+            return false;
+        }
+        run(root, art, slot, cover, toCover, true);
+        return true;
+    }
+
+    private static void run(ViewGroup root, Bitmap art, CoverMorphMotion.Box thumb,
+                            CoverMorphMotion.Box cover, boolean toCover, boolean mini) {
         CoverMorphLayer v = sView;
         if (v == null || v.getParent() != root) {
             if (v != null && v.getParent() instanceof ViewGroup) {
@@ -101,6 +141,8 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         // bringToFront lays the parent out again too: only when something has come above it.
         if (root.getChildAt(root.getChildCount() - 1) != v) v.bringToFront();
         v.reset(art, Main.coverMorphCardMode(), thumb, cover, toCover);
+        v.mini = mini;
+        if (mini) MiniPlayerRuntime.setArtBridged(true);
         v.setVisibility(VISIBLE);
         v.running = true;
         v.startedAt = SystemClock.uptimeMillis();
@@ -108,7 +150,6 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         Main.refreshMediaCardForMorph();
         CoverCardLayer.refresh();
         Choreographer.getInstance().postFrameCallback(v);
-        return true;
     }
 
     static boolean active() { return sView != null && sView.running; }
@@ -149,6 +190,9 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
     static float thumbAlpha() {
         CoverMorphLayer v = sView;
         if (v == null || !v.running) return 1f;
+        // Towards the cover the card is up beside the flight, thumbnail and all: kept out of the
+        // way as on the card's own route. Back to the pill the thumbnail was never the source.
+        if (v.mini) return v.motion.target == 1f ? 0f : 1f;
         if (v.motion.target != 0f || v.revealAt == 0L) return 0f;
         float r = (SystemClock.uptimeMillis() - v.revealAt) / (float) THUMB_FADE_MS;
         return Math.max(0f, Math.min(1f, r));
@@ -175,7 +219,8 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
                 : Math.min(0.05f, Math.max(0f, (nowNs - lastFrame) / 1e9f));
         lastFrame = nowNs;
         motion.step(dt, Main.sClockResponse);
-        CoverMorphMotion.Box liveThumb = Main.coverMorphThumbnail();
+        CoverMorphMotion.Box liveThumb = mini
+                ? MiniPlayerRuntime.artworkRestBox() : Main.coverMorphThumbnail();
         // Both ends chase their live boxes rather than taking them: the target is placed between
         // a clock that is collapsing and a media card being re-laid out, and one of them stepped
         // mid-flight - filmed as the copy sliding sideways at a constant size for a frame.
@@ -205,7 +250,7 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
                 ? phase == ClockCollapse.Phase.ENTER
                 : phase == ClockCollapse.Phase.EXIT;
         // Back at the thumbnail, the layer stays until the thumbnail has fully faded in.
-        boolean handoffDone = motion.target == 0f ? thumbAlpha() >= 1f
+        boolean handoffDone = motion.target == 0f ? mini || thumbAlpha() >= 1f
                 : artworkReady && cardReady && (cardMode || fullAlpha < 0.01f);
         if (motion.atRest() && handoffDone && endsSettled && (!clockFlying
                 || SystemClock.uptimeMillis() - startedAt > 2200L)) {
@@ -224,7 +269,8 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         drawn.set(box.x - root[0], box.y - root[1],
                 box.x + box.w - root[0], box.y + box.h - root[1]);
         float p = Math.max(0f, Math.min(1f, motion.value));
-        float startRadius = Math.min(14f * density, Math.min(thumb.w, thumb.h) * 0.20f);
+        float startRadius = mini ? MiniPlayerRuntime.artworkRadius()
+                : Math.min(14f * density, Math.min(thumb.w, thumb.h) * 0.20f);
         CoverCardStyle style = Main.sCoverCardStyle;
         float endRadius = cardMode ? style.radius(Math.min(cover.w, cover.h)) : 0f;
         float radius = startRadius + (endRadius - startRadius) * p;
@@ -274,6 +320,10 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         // Kept for the next morph; see the constructor.
         if (getVisibility() != INVISIBLE) setVisibility(INVISIBLE);
         release();
+        if (mini) {
+            mini = false;
+            MiniPlayerRuntime.setArtBridged(false);
+        }
         Main.refreshMediaCardForMorph();
         CoverCardLayer.refresh();
     }

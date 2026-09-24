@@ -129,6 +129,7 @@ object ModuleBridge {
          * table in the UI; what it means is the module's business.
          */
         val shade: Map<String, Int> = emptyMap(),
+        val miniConfig: String = MiniPlayerConfig.defaultJson(),
         val geometry: Geometry = Geometry(),
     ) {
         /** "Artist - Title" out of the module's packageName|song|artist key. */
@@ -272,6 +273,9 @@ object ModuleBridge {
      * cannot drift. The key is matched and the value clamped inside ShadeLayer.configure, so the
      * settings page and an adb shell go through the same door.
      */
+    fun setMiniConfig(context: Context, json: String) =
+        send(context, "minicfg") { putExtra("json", MiniPlayerConfig.normalizedJson(json)) }
+
     fun setShade(context: Context, key: String, value: Int) =
         send(context, "shadecfg") {
             putExtra("key", key)
@@ -514,6 +518,7 @@ object ModuleBridge {
             shade = b.keySet()
                 .filter { it.startsWith("shade_") }
                 .associate { it.removePrefix("shade_") to b.getInt(it, 0) },
+            miniConfig = MiniPlayerConfig.normalizedJson(b.getString("minicfg")),
             geometry = Geometry(
                 screenW = b.getInt("sw", 0),
                 screenH = b.getInt("sh", 0),

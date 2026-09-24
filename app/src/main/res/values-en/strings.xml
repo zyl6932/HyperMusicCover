@@ -195,6 +195,8 @@
     <string name="features_cover_summary">Cover, clock, media card</string>
     <string name="features_shade_title">Shade and control centre (experimental)</string>
     <string name="features_shade_summary">Flowing light</string>
+    <string name="features_mini_title">Lock screen mini player</string>
+    <string name="features_mini_summary">Media controls, gestures, size and material</string>
 
     <string name="shade_enabled">Enable flowing light</string>
     <string name="shade_section_behaviour">Behaviour</string>

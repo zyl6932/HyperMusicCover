@@ -201,6 +201,8 @@
     <string name="features_cover_summary">封面、时钟、媒体卡片</string>
     <string name="features_shade_title">通控中心（实验性功能）</string>
     <string name="features_shade_summary">动态流光</string>
+    <string name="features_mini_title">锁屏迷你播放器</string>
+    <string name="features_mini_summary">媒体控制、手势、尺寸与材质</string>
 
     <string name="shade_enabled">启用流光效果</string>
     <string name="shade_section_behaviour">行为</string>

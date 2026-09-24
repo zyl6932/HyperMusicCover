@@ -1,0 +1,118 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 btm_m
+package com.os4.musiccover
+
+import java.util.WeakHashMap
+
+internal data class MiniPlayerPresentationInput(
+    val enabled: Boolean,
+    val sessionUsable: Boolean,
+    val mediaMode: Int,
+    val nativeRequested: Boolean,
+    val keyguardOwned: Boolean,
+    val sceneVisible: Boolean,
+    val nativeSceneOverride: Boolean = false,
+    val transitionActive: Boolean = false,
+    val controlCenterOpen: Boolean = false,
+)
+
+internal data class MiniPlayerPresentation(
+    val showMini: Boolean,
+    val suppressNative: Boolean,
+)
+
+/** Keeps scene visibility separate from the user's selected media presentation. */
+internal object MiniPlayerPresentationPolicy {
+    fun evaluate(input: MiniPlayerPresentationInput): MiniPlayerPresentation {
+        val available = input.enabled && input.sessionUsable
+        val miniSelected = input.mediaMode != 2 || !input.nativeRequested
+        val lockscreenSurfaceVisible = input.sceneVisible || input.controlCenterOpen
+        return MiniPlayerPresentation(
+            showMini = available &&
+                (input.transitionActive || miniSelected && lockscreenSurfaceVisible),
+            suppressNative = available && miniSelected && input.mediaMode != 0 &&
+                input.keyguardOwned && lockscreenSurfaceVisible &&
+                !input.nativeSceneOverride && !input.transitionActive,
+        )
+    }
+}
+
+/** Dynamic-mode choice scoped to one live MediaSession token. */
+internal class MiniPlayerSessionSelection {
+    private var sessionToken: Any? = null
+    private var nativeRequested = false
+
+    fun observe(token: Any): Boolean {
+        if (sessionToken == token) return false
+        sessionToken = token
+        nativeRequested = false
+        return true
+    }
+
+    fun requestNative(token: Any): Boolean {
+        val sessionChanged = observe(token)
+        if (nativeRequested) return sessionChanged
+        nativeRequested = true
+        return true
+    }
+
+    fun requestMini(token: Any): Boolean {
+        val sessionChanged = observe(token)
+        if (!nativeRequested) return sessionChanged
+        nativeRequested = false
+        return true
+    }
+
+    fun resetChoice(): Boolean {
+        if (!nativeRequested) return false
+        nativeRequested = false
+        return true
+    }
+
+    fun end(token: Any): Boolean {
+        if (sessionToken != token) return false
+        sessionToken = null
+        nativeRequested = false
+        return true
+    }
+
+    fun nativeRequestedFor(token: Any?): Boolean =
+        token != null && sessionToken == token && nativeRequested
+}
+
+internal data class ViewPresentationState(
+    val visibility: Int,
+    val alpha: Float,
+    val translationX: Float = 0f,
+    val translationY: Float = 0f,
+    val scaleX: Float = 1f,
+    val scaleY: Float = 1f,
+)
+
+/** Stores both properties because alpha alone can lose a frame to an OEM property animator. */
+internal class WeakViewOverrideRegistry<T : Any> {
+    private val originals = WeakHashMap<T, ViewPresentationState>()
+
+    val hasOverrides: Boolean
+        get() = originals.isNotEmpty()
+
+    fun suppress(target: T, visibility: Int, alpha: Float,
+                 translationX: Float = 0f, translationY: Float = 0f,
+                 scaleX: Float = 1f, scaleY: Float = 1f,
+                 apply: (ViewPresentationState) -> Unit) {
+        if (!originals.containsKey(target)) {
+            originals[target] = ViewPresentationState(
+                visibility, alpha, translationX, translationY, scaleX, scaleY,
+            )
+        }
+        apply(ViewPresentationState(
+            4, 0f, translationX, translationY, scaleX, scaleY,
+        ))
+    }
+
+    fun restore(apply: (T, ViewPresentationState) -> Unit) {
+        val snapshot = originals.entries.map { it.key to it.value }
+        originals.clear()
+        snapshot.forEach { (target, original) -> apply(target, original) }
+    }
+}

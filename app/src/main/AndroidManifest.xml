@@ -123,6 +123,12 @@
             android:label="@string/features_shade_title"
             android:theme="@style/Theme.HyperMusicCover" />
 
+        <activity
+            android:name=".MiniPlayerActivity"
+            android:exported="false"
+            android:label="@string/features_mini_title"
+            android:theme="@style/Theme.HyperMusicCover" />
+
         <!-- The theme settings, opened from the settings page's interface section. Declared like
              every other sub-screen above: an Activity, so the platform supplies the transition
              and the back handling - gesture, button and predictive back - rather than the

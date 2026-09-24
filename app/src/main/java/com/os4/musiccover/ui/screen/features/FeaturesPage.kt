@@ -32,6 +32,7 @@ import com.os4.musiccover.CoverActivity
 import com.os4.musiccover.ModuleBridge
 import com.os4.musiccover.R
 import com.os4.musiccover.ShadeActivity
+import com.os4.musiccover.MiniPlayerActivity
 import com.os4.musiccover.ui.util.PageScaffold
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -116,6 +117,15 @@ private fun FeatureList(
                         title = stringResource(R.string.features_shade_title),
                         summary = stringResource(R.string.features_shade_summary),
                         onClick = { onOpen(ShadeActivity::class.java) },
+                    )
+                }
+                Card(
+                    modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)
+                ) {
+                    ArrowPreference(
+                        title = stringResource(R.string.features_mini_title),
+                        summary = stringResource(R.string.features_mini_summary),
+                        onClick = { onOpen(MiniPlayerActivity::class.java) },
                     )
                 }
             }

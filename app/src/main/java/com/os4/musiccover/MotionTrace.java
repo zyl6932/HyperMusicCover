@@ -109,12 +109,14 @@ final class MotionTrace {
         }
         final View root = base.getRootView();
         final String[] leaves = {"mi_media_controls", "time_group", "keyguard_background_layer",
-                "keyguard_bottom_area", "keyguard_foreground_layer"};
+                "keyguard_bottom_area", "keyguard_foreground_layer", "torch"};
         final View[] from = new View[leaves.length];
-        for (int i = 0; i < leaves.length; i++) {
+        for (int i = 0; i < leaves.length - 1; i++) {
             int id = root.getResources().getIdentifier(leaves[i], "id", "com.android.systemui");
             from[i] = id == 0 ? null : Main.findLockScreenView(leaves[i]);
         }
+        // The shortcut buttons' ids are not SystemUI's own; the mini player already holds one.
+        from[leaves.length - 1] = MiniPlayerRuntime.shortcutView();
         final java.util.LinkedHashMap<View, float[]> mins = new java.util.LinkedHashMap<>();
         final long t0 = System.nanoTime();
         sSweep = "running";

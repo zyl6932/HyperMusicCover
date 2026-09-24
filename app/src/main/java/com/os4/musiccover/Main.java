@@ -853,6 +853,8 @@ public class Main extends XposedModule {
         // these have anything to do with the clock, and a build that renamed the container must
         // not cost them too.
         HyperTweaks.systemUi(cl);
+        // The mini player hangs off the shortcut row, not the clock container.
+        MiniPlayerRuntime.install(cl);
 
         try {
             sContainerCls = Xp.findClass(CLS_CONTAINER, cl);
@@ -1446,6 +1448,30 @@ public class Main extends XposedModule {
                     // The one case this hook does more than watch. Returning true without
                     // proceeding takes the gesture out of the dispatch entirely, which is the
                     // only way the artwork can mean something other than "open the player".
+                    // A gesture that starts on the mini player is the mini player's alone: its
+                    // swipe up would otherwise also be swipe-to-unlock.
+                    try {
+                        if (MiniPlayerRuntime.routeTouch(ev)) return Boolean.TRUE;
+                    } catch (Throwable ignored) {
+                    }
+                    // A downward swipe on the media card folds it back into the mini player. Seen
+                    // before the art tap, which it overrides; the moment it is recognised the
+                    // rest of the tree gets a CANCEL, so the shade does not also start opening.
+                    try {
+                        int swipe = cardSwipe(ev);
+                        if (swipe == SWIPE_FIRED) {
+                            MotionEvent cancel = MotionEvent.obtain(ev);
+                            cancel.setAction(MotionEvent.ACTION_CANCEL);
+                            try {
+                                chain.proceed(new Object[]{cancel});
+                            } finally {
+                                cancel.recycle();
+                            }
+                            return Boolean.TRUE;
+                        }
+                        if (swipe == SWIPE_HELD) return Boolean.TRUE;
+                    } catch (Throwable ignored) {
+                    }
                     try {
                         if (swallowArtTap(ev)) return Boolean.TRUE;
                     } catch (Throwable ignored) {
@@ -1743,6 +1769,9 @@ public class Main extends XposedModule {
                     // is not.
                     + "\nsawlyric=" + (LockLyrics.sSawSessionLyric ? 1 : 0)
                     + "\nfpavoid=" + sFpAvoid
+                    + "\nminicfg=" + android.util.Base64.encodeToString(
+                            MiniPlayerRuntime.configJson(sAppCtx).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                            android.util.Base64.NO_WRAP)
                     // Not a setting - a measurement. Kept so the app's preview is to scale from
                     // the first frame after a SystemUI restart, instead of only once the phone
                     // has been locked again.
@@ -1855,6 +1884,9 @@ public class Main extends XposedModule {
                             LockLyrics.sSawSessionLyric = "1".equals(v);
                         }
                         else if ("fpavoid".equals(k)) sFpAvoid = Integer.parseInt(v);
+                        else if ("minicfg".equals(k)) MiniPlayerRuntime.applyConfig(sAppCtx,
+                                new String(android.util.Base64.decode(v, android.util.Base64.DEFAULT),
+                                        java.nio.charset.StandardCharsets.UTF_8));
                         // The whole shade settings page, in one prefix - the keys and their
                         // meaning belong to ShadeLayer.configure.
                         else if (k.startsWith("shade_")) {
@@ -2505,6 +2537,9 @@ public class Main extends XposedModule {
                         // the same door.
                         ShadeLayer.configure(i.getStringExtra("key"), i.getIntExtra("v", 0));
                         saveState();
+                    } else if ("minicfg".equals(op)) {
+                        MiniPlayerRuntime.applyConfig(c, i.getStringExtra("json"));
+                        saveState();
                     } else if ("query".equals(op)) {
                         // Answered through the ordered broadcast's result extras: the app is a
                         // separate process and this is the only channel it already has. A reply
@@ -2512,6 +2547,7 @@ public class Main extends XposedModule {
                         android.os.Bundle out = new android.os.Bundle();
                         out.putBoolean("alive", true);
                         out.putBoolean("cover", sCoverMode);
+                        out.putString("minicfg", MiniPlayerRuntime.configJson(c));
                         out.putBoolean("auto", sAuto);
                         out.putFloat("bias", sBias);
                         out.putInt("coverstyle", sCoverCardStyle.mode);
@@ -2602,6 +2638,8 @@ public class Main extends XposedModule {
                         dumpGeom();
                     } else if ("ink".equals(op)) {
                         dumpInk();
+                    } else if ("mini".equals(op)) {
+                        setResultData(MiniPlayerRuntime.describe());
                     } else if ("alphasweep".equals(op)) {
                         // --ei ms N starts a sweep; without it, reads the last one back.
                         int ms = i.getIntExtra("ms", 0);
@@ -5927,6 +5965,7 @@ public class Main extends XposedModule {
      */
     private static void enterCoverMode(boolean animate) {
         sCoverMode = true;
+        MiniPlayerRuntime.refresh();
         CoverCardLayer.entering();
         armTransitionTrace("entering cover mode");
         // Whatever the user decided about the last song does not carry into this one.
@@ -5994,6 +6033,7 @@ public class Main extends XposedModule {
         // (CoverPush.dropVideoCover), not in front of it now.
         if (!(sVideoWallpaper && sCover != null)) setDepthHidden(false);
         ClockCollapse.exit(animate);
+        MiniPlayerRuntime.refresh();
         // No applyMediaCard() while the exit is flying: it would drop the card's guard, and the
         // guard is what draws every frame of the thumbnail coming back. onClockReleased() hands
         // the card back when the clock lands.
@@ -6008,6 +6048,129 @@ public class Main extends XposedModule {
         if (sCoverMode) return;
         sCardP = 0f;
         applyMediaCard();
+        MiniPlayerRuntime.refresh();
+    }
+
+    /** The mini player stays off screen until the cover exit has settled. */
+    static boolean coverSceneActive() {
+        return sCoverMode || ClockCollapse.phase() != ClockCollapse.Phase.OFF;
+    }
+
+    static MediaController miniPlayerSession() {
+        return sWatched;
+    }
+
+    /** The OEM header owns the media card's background and foreground rim. */
+    static View miniPlayerMediaHeader() {
+        View art = sCardArt;
+        View current = art != null && art.isAttachedToWindow() ? art : null;
+        while (current != null) {
+            if (current.getClass().getName().contains("MiuiMediaHeaderView")) return current;
+            android.view.ViewParent parent = current.getParent();
+            current = parent instanceof View ? (View) parent : null;
+        }
+        View card = findLockScreenView("mi_media_controls");
+        View root = cardShotRoot(card);
+        return root != card && root != null
+                && root.getClass().getName().contains("MiuiMediaHeaderView") ? root : null;
+    }
+
+    /** The card's artwork box, title and artist: where the mini player's own pieces land. */
+    static View miniPairArt() { return sCardArt; }
+    static View miniPairTitle() { return sCardTitle; }
+    static View miniPairArtist() { return sCardArtist; }
+
+    /** The card's background view, where its material is set. */
+    static View miniPlayerMediaBg(View header) {
+        return header == null ? null : findByName(header, "media_bg");
+    }
+
+    /** The corner the card itself draws: media_bg's outline, 24dp on this device. */
+    static float miniPlayerCardRadius(View header) {
+        View bg = header == null ? null : findByName(header, "media_bg");
+        float r = bg == null ? 0f : outlineRadius(bg);
+        return r > 0f ? r : 24f * density();
+    }
+
+    /** The same gate as the cover morph: a lock screen that is up, awake and not covered. */
+    static boolean miniPlayerMorphAllowed() {
+        return Looper.myLooper() == Looper.getMainLooper() && coverMorphEligible();
+    }
+
+    /**
+     * The lock screen's own media presentation holds: the card is up, no cover scene, the
+     * keyguard up. Awake or dozing, pad or no pad - those only stop the pill taking touches.
+     */
+    static boolean miniPlayerPresentable() {
+        return sCardShowing && !coverSceneActive() && keyguardShowing();
+    }
+
+    private static long sMiniBouncerCheckedAt;
+    private static boolean sMiniBouncerUp;
+
+    static boolean miniPlayerCanShow() {
+        return miniPlayerDisplayEligible() && !miniControlCenterUp();
+    }
+
+    static boolean miniPlayerControlCenterUp() { return miniControlCenterUp(); }
+
+    private static long sMiniCentreCheckedAt;
+    private static boolean sMiniCentreUp;
+
+    /**
+     * controlCenterUp() looks the container up by name across the whole shade window, and
+     * falls back to reading every view's resource name when it is not there. The mini player
+     * asked it twice on every frame the lock screen drew - through its drags, its morphs, a
+     * track change - which is where their dropped frames went. The same 100-odd ms the pad's
+     * answer is kept for.
+     */
+    private static boolean miniControlCenterUp() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - sMiniCentreCheckedAt > 150L) {
+            sMiniCentreCheckedAt = now;
+            sMiniCentreUp = controlCenterUp();
+        }
+        return sMiniCentreUp;
+    }
+
+    /** A translucent control center keeps the selected mini card visible but blocks its taps. */
+    static boolean miniPlayerDisplayEligible() {
+        if (!sCardShowing || coverSceneActive() || !screenOnCached() ||
+                !keyguardShowing() || !onKeyguardNow()) return false;
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - sMiniBouncerCheckedAt > 100L) {
+            sMiniBouncerCheckedAt = now;
+            sMiniBouncerUp = bouncerUp();
+        }
+        return !sMiniBouncerUp;
+    }
+
+    /** Enter through the same route as the OEM artwork, with MiniPlayerRuntime owning the bridge. */
+    static void miniPlayerEnterCover() {
+        if (!miniPlayerCanShow()) return;
+        if (!sAuto) {
+            CoverMorphLayer.cancel();
+            setCoverEnabled(true, true, false);
+        } else {
+            enterFromTap("mini player tapped");
+        }
+    }
+
+    /**
+     * A finger turned a scene's own morph round: back into the cover or the lyrics while the
+     * exit is still running, or out of them while the entry is. Not gated on the scene being
+     * off, as a tap on the pill is - it is still settling, and that is the point.
+     */
+    static void miniPlayerTurnScene(boolean enter) {
+        if (!keyguardShowing() || bouncerUp()) return;
+        if (enter) {
+            if (sCoverMode) return;
+            if (!sAuto) setCoverEnabled(true, true, false);
+            else enterFromTap("mini player pulled back up");
+        } else {
+            if (!sCoverMode) return;
+            exitFromTap("mini player pulled back down");
+        }
     }
 
     /** The wake reached the clock before the SCREEN_ON broadcast did. */
@@ -6106,6 +6269,21 @@ public class Main extends XposedModule {
                 art.getWidth(), art.getHeight());
     }
 
+    /** Reads the clipping that actually rounds the OEM artwork instead of assuming one radius. */
+    static float coverMorphThumbnailRadius() {
+        View art = sCardArt;
+        if (art == null || art.getWidth() <= 0 || art.getHeight() <= 0) {
+            return 14f * density();
+        }
+        float radius = art.getClipToOutline() ? outlineRadius(art) : 0f;
+        if (radius <= 0f && art.getParent() instanceof View) {
+            View box = (View) art.getParent();
+            if (box.getClipToOutline()) radius = outlineRadius(box);
+        }
+        if (radius > 0f) return radius;
+        return Math.min(14f * density(), Math.min(art.getWidth(), art.getHeight()) * 0.20f);
+    }
+
     static ViewGroup coverMorphRoot() {
         View root = sContainer == null ? null : sContainer.getRootView();
         return root instanceof ViewGroup ? (ViewGroup) root : null;
@@ -6163,6 +6341,12 @@ public class Main extends XposedModule {
         return r == null ? null : CoverMorphMotion.cardBox(xy[0] + r.x,
                 xy[1] + r.y, r.side, CoverCardLayer.renderedScale(layer),
                 CoverCardStyle.aspect(art.getWidth(), art.getHeight()));
+    }
+
+    /** Matches CoverCardLayer's live rule; a full wallpaper ends at the square screen edge. */
+    static float coverMorphTargetRadius(CoverMorphMotion.Box target) {
+        if (target == null || sCoverCardStyle.mode != CoverCardStyle.CARD) return 0f;
+        return sCoverCardStyle.radius(Math.min(target.w, target.h));
     }
 
     /** Keep the shared media card at its real state while the moving copy owns its pixels. */
@@ -7120,7 +7304,8 @@ public class Main extends XposedModule {
     private static boolean swallowArtTap(MotionEvent ev) {
         int action = ev.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
-            boolean onCard = wantsArtTap() && screenOn() && keyguardShowing() && onKeyguardNow()
+            boolean onCard = (wantsArtTap() || MiniPlayerRuntime.wantsNativeArtworkGesture())
+                    && screenOn() && keyguardShowing() && onKeyguardNow()
                     && !bouncerUp() && !sGestureOnCentre && !sGestureOnCharge;
             sArtSwallow = onCard && artRectContains(ev.getRawX(), ev.getRawY());
             if (sArtSwallow) {
@@ -7143,6 +7328,7 @@ public class Main extends XposedModule {
                 // during the gesture (the OEM can re-lay the card out at any point) would
                 // otherwise send the tap the wrong way.
                 if (sCoverMode) exitFromTap("artwork tapped");
+                else if (MiniPlayerRuntime.wantsNativeArtworkGesture()) miniPlayerEnterCover();
                 else enterFromTap("artwork tapped");
             }
         } else if (action == MotionEvent.ACTION_CANCEL) {
@@ -7209,6 +7395,80 @@ public class Main extends XposedModule {
      * Taking it from the card - which carries no transform of its own - plus the child's
      * getLeft()/getTop() sidesteps the artwork's matrix while still picking up every ancestor's.
      */
+    private static final int SWIPE_NONE = 0, SWIPE_FIRED = 1, SWIPE_HELD = 2;
+    private static boolean sCardSwipeArmed, sCardSwipeFired;
+    private static float sCardSwipeX, sCardSwipeY;
+
+    /**
+     * The media card's half of the dynamic switch: a drag that starts on the card and goes
+     * down, more down than sideways, past the touch slop. Horizontal drags (the progress bar)
+     * and taps (the buttons) never qualify, and are left alone from the DOWN on.
+     */
+    private static int cardSwipe(MotionEvent ev) {
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN: {
+                sCardSwipeFired = false;
+                sCardSwipeArmed = MiniPlayerRuntime.wantsNativeCardSwipe()
+                        && !sGestureOnCentre && !sGestureOnCharge
+                        && cardRectContains(ev.getRawX(), ev.getRawY());
+                sCardSwipeX = ev.getRawX();
+                sCardSwipeY = ev.getRawY();
+                return SWIPE_NONE;
+            }
+            case MotionEvent.ACTION_MOVE: {
+                if (sCardSwipeFired) {
+                    MiniPlayerRuntime.dragMove(ev);
+                    return SWIPE_HELD;
+                }
+                if (!sCardSwipeArmed) return SWIPE_NONE;
+                float dx = ev.getRawX() - sCardSwipeX, dy = ev.getRawY() - sCardSwipeY;
+                float slop = android.view.ViewConfiguration.get(sAppCtx).getScaledTouchSlop();
+                if (Math.abs(dx) > slop && Math.abs(dx) >= Math.abs(dy)) {
+                    sCardSwipeArmed = false;
+                    return SWIPE_NONE;
+                }
+                if (dy > slop && dy > Math.abs(dx) * 1.2f) {
+                    sCardSwipeArmed = false;
+                    sCardSwipeFired = true;
+                    sArtSwallow = false;
+                    if (sCoverMode) {
+                        // Out of the cover or the lyrics, landing on the pill: the scene exit
+                        // shrinks the card into it.
+                        MiniPlayerRuntime.preferMini();
+                        MiniPlayerRuntime.rememberScene();
+                        exitFromTap("media card swiped down");
+                    } else if (!MiniPlayerRuntime.beginDrag(true, ev)) {
+                        // No geometry to pull: the switch still happens, on its own spring.
+                        MiniPlayerRuntime.onNativeCardSwipeDown();
+                    }
+                    return SWIPE_FIRED;
+                }
+                return SWIPE_NONE;
+            }
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL: {
+                boolean held = sCardSwipeFired;
+                if (held) {
+                    MiniPlayerRuntime.dragEnd(ev,
+                            ev.getActionMasked() == MotionEvent.ACTION_CANCEL);
+                }
+                sCardSwipeArmed = sCardSwipeFired = false;
+                return held ? SWIPE_HELD : SWIPE_NONE;
+            }
+            default:
+                return sCardSwipeFired ? SWIPE_HELD : SWIPE_NONE;
+        }
+    }
+
+    private static boolean cardRectContains(float x, float y) {
+        View header = miniPlayerMediaHeader();
+        if (header == null || !header.isShown() || header.getWidth() <= 0) return false;
+        int[] loc = new int[2];
+        header.getLocationOnScreen(loc);
+        return x >= loc[0] && x < loc[0] + header.getWidth()
+                && y >= loc[1] && y < loc[1] + header.getHeight();
+    }
+
     private static boolean artRectContains(float x, float y) {
         View a = sCardArt;
         if (a == null || !a.isShown() || a.getWidth() <= 0 || a.getHeight() <= 0) return false;
@@ -7515,6 +7775,18 @@ public class Main extends XposedModule {
     }
 
     /**
+     * The mini player's pill is already turning into the card (MiniCardMorph); this is only its
+     * artwork. With the cover card at the far end it flies there. With lyrics it lands on the
+     * card's own thumbnail, which the container morph already carries - nothing to fly.
+     */
+    private static void beginMiniMorph(boolean toCover, boolean coverEndpoint) {
+        long t0 = System.nanoTime();
+        if (!CoverMorphLayer.active()) sMorphKey = sCardKey;
+        if (!coverEndpoint || !CoverMorphLayer.beginMiniScene(toCover)) CoverMorphLayer.cancel();
+        sMorphBeginNs += System.nanoTime() - t0;
+    }
+
+    /**
      * For `op cardstate`: main-thread milliseconds of the last few tap toggles, the whole handler
      * and the morph's own start inside it, newest first - where a hitch at the start comes from.
      */
@@ -7554,10 +7826,15 @@ public class Main extends XposedModule {
      * and the next thing the user plays then starts from the cover as it always did.
      */
     private static void exitFromTapNow(String why) {
-        if (CoverMorphRoute.shouldMorph(LockLyrics.wantsAttached()
-                ? CoverMorphRoute.LYRICS : CoverMorphRoute.COVER,
-                CoverMorphRoute.NORMAL)) beginMorph(false);
-        else CoverMorphLayer.cancel();
+        int from = LockLyrics.wantsAttached()
+                ? CoverMorphRoute.LYRICS : CoverMorphRoute.COVER;
+        if (MiniPlayerRuntime.prepareSceneExit()) {
+            beginMiniMorph(false, from == CoverMorphRoute.COVER);
+        } else if (CoverMorphRoute.shouldMorph(from, CoverMorphRoute.NORMAL)) {
+            beginMorph(false);
+        } else {
+            CoverMorphLayer.cancel();
+        }
         sTapSuppressed = true;
         Xp.log(TAG + why + ": leaving cover mode");
         MotionTrace.start("toggle-out");
@@ -7570,9 +7847,12 @@ public class Main extends XposedModule {
      */
     private static void enterFromTapNow(String why) {
         // Guarded on the two questions onMediaUpdate asks before it does anything.
-        if (sAuto && sCardShowing && CoverMorphRoute.shouldMorph(CoverMorphRoute.NORMAL,
-                LockLyrics.willAttachOnEntry()
-                        ? CoverMorphRoute.LYRICS : CoverMorphRoute.COVER)) {
+        int to = LockLyrics.willAttachOnEntry()
+                ? CoverMorphRoute.LYRICS : CoverMorphRoute.COVER;
+        if (sAuto && sCardShowing && MiniPlayerRuntime.prepareSceneEntry()) {
+            beginMiniMorph(true, to == CoverMorphRoute.COVER);
+        } else if (sAuto && sCardShowing
+                && CoverMorphRoute.shouldMorph(CoverMorphRoute.NORMAL, to)) {
             beginMorph(true);
         } else {
             CoverMorphLayer.cancel();
@@ -7841,10 +8121,12 @@ public class Main extends XposedModule {
         main().removeCallbacks(sCardGone);
         if (!sAuto) {
             sCardShowing = showing;
+            MiniPlayerRuntime.refresh();
             return;
         }
         if (showing) {
             sCardShowing = true;
+            MiniPlayerRuntime.refresh();
             applyCardState();
         } else {
             main().postDelayed(sCardGone, CARD_GONE_MS);
@@ -7856,6 +8138,7 @@ public class Main extends XposedModule {
         public void run() {
             sCardShowing = false;
             noteCard("gone stands, cover mode off");
+            MiniPlayerRuntime.refresh();
             applyCardState();
         }
     };
@@ -8170,6 +8453,7 @@ public class Main extends XposedModule {
                     public void onPlaybackStateChanged(PlaybackState state) {
                         LockLyrics.onPlaybackState(state);
                         updateCoverCardPlayback(state);
+                        MiniPlayerRuntime.refresh();
                     }
 
                     @Override
@@ -8188,6 +8472,7 @@ public class Main extends XposedModule {
             }
         }
         updateCoverCardPlayback(c == null ? null : c.getPlaybackState());
+        MiniPlayerRuntime.refresh();
         onMediaUpdate();
     }
 
@@ -8298,6 +8583,7 @@ public class Main extends XposedModule {
      * card on the lockscreen, and still music mode.
      */
     private static void onMediaUpdate() {
+        MiniPlayerRuntime.refresh();
         if (!sAuto || !sCardShowing) return;
         // The user tapped the cover away and the card is still up. The one case where "there is
         // a card" must not mean "put the cover back".

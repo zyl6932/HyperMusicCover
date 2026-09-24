@@ -52,6 +52,7 @@ object SettingsBackup {
     private const val KEY_FP_AVOID = "fingerprintAvoid"
     /** The whole notification-shade page, as one object keyed the way the module names them. */
     private const val KEY_SHADE = "shade"
+    private const val KEY_MINI = "lockscreenMiniPlayer"
 
     suspend fun export(context: Context): String {
         val json = JSONObject(AppSettings.load(context).toJson())
@@ -90,6 +91,7 @@ object SettingsBackup {
             if (module.shade.isNotEmpty()) {
                 json.put(KEY_SHADE, JSONObject(module.shade as Map<*, *>))
             }
+            json.put(KEY_MINI, JSONObject(module.miniConfig))
         }
         return json.toString(2)
     }
@@ -193,6 +195,9 @@ object SettingsBackup {
                 for (key in shade.keys()) {
                     ModuleBridge.setShade(context, key, shade.getInt(key))
                 }
+            }
+            if (obj.has(KEY_MINI)) {
+                ModuleBridge.setMiniConfig(context, obj.getJSONObject(KEY_MINI).toString())
             }
         } catch (_: Exception) {
             // The app half is already applied; a malformed module half is not worth losing it over.
