@@ -57,6 +57,7 @@ internal class MiniCardMorph(
     private class Piece(val view: View, val native: View?, val text: Boolean, val art: Boolean) {
         val baseTx = view.translationX
         val baseTy = view.translationY
+        val nativeTransitionAlpha = native?.transitionAlpha ?: 1f
         var paired = false
     }
 
@@ -281,33 +282,40 @@ internal class MiniCardMorph(
             // Where the anchor sits in the container, and at what scale, if it only followed it.
             var tx = (layoutX + piece.baseTx + ax) * m
             var ty = (layoutY + piece.baseTy + ay) * m
-            var k = m
+            var kx = m
+            var ky = m
             if (piece.paired) {
                 val n = piece.native!!
                 val nx = (offsetIn(n, header, true) + anchorX(n, piece.text)) * s
                 val ny = (offsetIn(n, header, false) + anchorY(n, piece.text)) * s
-                val nk = if (piece.text) (n as TextView).textSize * s / (v as TextView).textSize
+                val nky = if (piece.text) (n as TextView).textSize * s / (v as TextView).textSize
                     else n.width * s / max(1, v.width)
+                val nkx = if (piece.text) textWidthScale(v as TextView, n as TextView, s, nky)
+                    else nky
                 tx = lerp(tx, nx, mix)
                 ty = lerp(ty, ny, mix)
-                k = lerp(k, nk, mix)
+                kx = lerp(kx, nkx, mix)
+                ky = lerp(ky, nky, mix)
+                // The card's own line stays hidden until the pill's leaves it: the two faces
+                // differ in weight, and both drawn in full read as a doubled title.
+                if (piece.text) n.transitionAlpha = piece.nativeTransitionAlpha * (1f - pairedOut(c))
             }
             v.pivotX = 0f
             v.pivotY = 0f
-            v.scaleX = k
-            v.scaleY = k
-            v.translationX = tx - layoutX - ax * k
-            v.translationY = ty - layoutY - ay * k
+            v.scaleX = kx
+            v.scaleY = ky
+            v.translationX = tx - layoutX - ax * kx
+            v.translationY = ty - layoutY - ay * ky
             v.alpha = when {
                 piece.art && bridged -> 0f
                 piece.paired -> pairedOut(c)
                 else -> earlyOut(c)
             }
             if (piece.art) {
-                artDrawn = CoverMorphMotion.Box(box.x + tx - ax * k, box.y + ty - ay * k,
-                    v.width * k, v.height * k)
+                artDrawn = CoverMorphMotion.Box(box.x + tx - ax * kx, box.y + ty - ay * ky,
+                    v.width * kx, v.height * ky)
                 // Round in the card's own corner by the time it lies on the card's artwork.
-                val landed = if (piece.paired) nativeArtRadius * s / max(0.01f, k)
+                val landed = if (piece.paired) nativeArtRadius * s / max(0.01f, kx)
                     else mini.artworkRestRadius()
                 mini.setArtworkMorphRadius(lerp(mini.artworkRestRadius(), landed, mix))
             }
@@ -332,6 +340,7 @@ internal class MiniCardMorph(
             v.translationX = piece.baseTx
             v.translationY = piece.baseTy
             v.alpha = 1f
+            if (piece.paired && piece.text) piece.native?.transitionAlpha = piece.nativeTransitionAlpha
         }
         mini.endMorph()
         header.setAnimationMatrix(null)
@@ -428,6 +437,20 @@ internal class MiniCardMorph(
         if (!text || v !is TextView) return 0f
         val lineLeft = v.layout?.getLineLeft(0) ?: 0f
         return v.totalPaddingLeft + lineLeft - v.scrollX
+    }
+
+    /**
+     * The horizontal scale that makes the pill's line exactly as long as the card's. The two are
+     * set in different weights, so by text size alone the glyphs drift apart along the line - by
+     * the last digit, most of a stroke. The height stays on the text size ratio.
+     */
+    private fun textWidthScale(v: TextView, n: TextView, s: Float, bySize: Float): Float {
+        val text = v.text?.toString().orEmpty()
+        if (text.isEmpty() || text != n.text?.toString()) return bySize
+        val mine = v.paint.measureText(text)
+        val theirs = n.paint.measureText(text)
+        if (mine <= 0f || theirs <= 0f) return bySize
+        return (theirs * s / mine).coerceIn(bySize * 0.8f, bySize * 1.25f)
     }
 
     private fun anchorY(v: View, text: Boolean): Float =
