@@ -6109,6 +6109,20 @@ public class Main extends XposedModule {
         return sCardShowing && !coverSceneActive() && keyguardShowing();
     }
 
+    /**
+     * The same for a row with no music in it, only notifications: there is no media card to be
+     * up, only the lock screen, and no cover scene over it.
+     */
+    static boolean miniPlayerIslandsPresentable() {
+        return !coverSceneActive() && keyguardShowing();
+    }
+
+    /** A notification row's corner, for a morph onto it: its own outline, else the card's. */
+    static float notificationRowRadius(View row) {
+        float r = row == null ? 0f : outlineRadius(row);
+        return r > 0f ? r : 24f * density();
+    }
+
     private static long sMiniBouncerCheckedAt;
     private static boolean sMiniBouncerUp;
 
@@ -7406,6 +7420,8 @@ public class Main extends XposedModule {
      * notifications away under the same pull, as it did before there was a pill to go back to.
      */
     private static boolean sCardSwipeShared;
+    /** The swipe started on a notification's row that came out of the row of islands. */
+    private static String sCardSwipeRow;
     private static float sCardSwipeX, sCardSwipeY;
 
     /**
@@ -7418,9 +7434,14 @@ public class Main extends XposedModule {
             case MotionEvent.ACTION_DOWN: {
                 sCardSwipeFired = false;
                 sCardSwipeShared = false;
+                sCardSwipeRow = null;
                 sCardSwipeArmed = MiniPlayerRuntime.wantsNativeCardSwipe()
                         && !sGestureOnCentre && !sGestureOnCharge
                         && cardRectContains(ev.getRawX(), ev.getRawY());
+                if (!sCardSwipeArmed && !sGestureOnCentre && !sGestureOnCharge) {
+                    sCardSwipeRow = MiniPlayerRuntime.releasedRowAt(ev.getRawX(), ev.getRawY());
+                    sCardSwipeArmed = sCardSwipeRow != null;
+                }
                 sCardSwipeX = ev.getRawX();
                 sCardSwipeY = ev.getRawY();
                 return SWIPE_NONE;
@@ -7441,6 +7462,13 @@ public class Main extends XposedModule {
                     sCardSwipeArmed = false;
                     sCardSwipeFired = true;
                     sArtSwallow = false;
+                    if (sCardSwipeRow != null) {
+                        // A notification the row of islands let out goes back into it.
+                        String key = sCardSwipeRow;
+                        sCardSwipeRow = null;
+                        MiniPlayerRuntime.collapseRow(key);
+                        return SWIPE_FIRED;
+                    }
                     // With notifications to fold, the pull is not cancelled out from under the
                     // stack, in the cover as out of it. Without any, it still is: there the
                     // stack's own answer to a pull down is to start opening the shade.

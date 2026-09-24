@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FlashlightOn
@@ -127,8 +128,13 @@ private fun MiniPlayerPage(blur: Boolean, onBack: () -> Unit) {
                         .clip(RoundedCornerShape(24.dp)).background(Color.DarkGray)) {
                         Image(painterResource(R.drawable.sample_cover),
                             "锁屏背景", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        // The torch and camera where the lock screen has them, relative to the pill.
+                        // The torch and camera where the lock screen has them, relative to the pill,
+                        // each on a disc as tall as the pill.
                         val pillMid = PREVIEW_BOTTOM_DP + layout.pillHeight / 2f
+                        ShortcutDisc(layout.torch, layout.pillHeight, pillMid,
+                            Modifier.align(Alignment.BottomCenter))
+                        ShortcutDisc(layout.camera, layout.pillHeight, pillMid,
+                            Modifier.align(Alignment.BottomCenter))
                         ShortcutIcon(Icons.Rounded.FlashlightOn, "手电筒", layout.torch, pillMid,
                             Modifier.align(Alignment.BottomCenter))
                         ShortcutIcon(Icons.Rounded.PhotoCamera, "相机", layout.camera, pillMid,
@@ -143,7 +149,7 @@ private fun MiniPlayerPage(blur: Boolean, onBack: () -> Unit) {
                                     "preview",
                                     { material ->
                                         material.setImageDrawable(android.graphics.drawable.GradientDrawable().apply {
-                                            setColor(0x9E1F2324.toInt())
+                                            setColor(PREVIEW_MATERIAL.toInt())
                                             cornerRadius = 1000f
                                         })
                                     }, {}, {}, {}, {}, {})
@@ -190,21 +196,29 @@ private fun previewLayout(config: JSONObject, shortcuts: FloatArray?, density: F
     val height = MiniPlayerConfig.visibleHeightDp(config.toString())
     val requestedPx = (config.optDouble(MiniPlayerConfig.WIDTH, 240.0).toFloat() * density).roundToInt()
     val s = shortcuts
+    // The pill clears a disc as tall as itself on each button, as on the lock screen.
+    fun cleared(widthPx: Int, cx: Float, leftCx: Float, rightCx: Float) =
+        MiniPlayerGeometry.clearOfDiscsPx(widthPx, cx, leftCx, rightCx, height * density,
+            MiniPlayerGeometry.DISC_GAP_DP * density,
+            (MiniPlayerGeometry.MIN_PILL_DP * density).roundToInt())
     if (s == null) {
-        val width = min(requestedPx, (screenWidthPx * .64f).toInt()) / density
-        val dx = screenWidthPx * FALLBACK_ICON_OFFSET / density
-        return PreviewLayout(width, height, IconPlace(-dx, 0f, FALLBACK_ICON_DP),
+        val dxPx = screenWidthPx * FALLBACK_ICON_OFFSET
+        val cx = screenWidthPx / 2f
+        val widthPx = cleared(min(requestedPx, (screenWidthPx * .64f).toInt()), cx, cx - dxPx, cx + dxPx)
+        val dx = dxPx / density
+        return PreviewLayout(widthPx / density, height, IconPlace(-dx, 0f, FALLBACK_ICON_DP),
             IconPlace(dx, 0f, FALLBACK_ICON_DP))
     }
     val hostWidth = s[0].roundToInt()
     val cx = (s[1] + s[5]) / 2f
     val cy = (s[2] + s[6]) / 2f
-    val widthPx = MiniPlayerGeometry.widthPx(min(requestedPx, (hostWidth * .64f).toInt()),
-        hostWidth, cx, (12f * density).roundToInt())
+    val widthPx = cleared(MiniPlayerGeometry.widthPx(min(requestedPx, (hostWidth * .64f).toInt()),
+        hostWidth, cx, (12f * density).roundToInt()), cx, s[1], s[5])
+    // The module reports the OEM glyph's ink; a Material icon's glyph spans 20 of its 24 units.
     fun place(i: Int): IconPlace {
-        val size = max(s[i + 2], s[i + 3])
+        val ink = max(s[i + 2], s[i + 3])
         return IconPlace((s[i] - cx) / density, (s[i + 1] - cy) / density,
-            if (size > 0f) size / density else FALLBACK_ICON_DP)
+            if (ink > 0f) ink / density * 24f / 20f else FALLBACK_ICON_DP)
     }
     return PreviewLayout(widthPx / density, height, place(1), place(5))
 }
@@ -212,6 +226,19 @@ private fun previewLayout(config: JSONObject, shortcuts: FloatArray?, density: F
 /** The fallback's icon centres, either side of the pill's, as a share of the screen width. */
 private const val FALLBACK_ICON_OFFSET = 0.358f
 private const val FALLBACK_ICON_DP = 27f
+
+/** The disc behind a shortcut, in the preview's stand-in for the card's material. */
+@Composable
+private fun ShortcutDisc(place: IconPlace, diameter: Float, pillMid: Float, modifier: Modifier) {
+    Box(modifier
+        .offset(x = place.dx.dp, y = -(pillMid - place.dy - diameter / 2f).dp)
+        .size(diameter.dp)
+        .clip(CircleShape)
+        .background(Color(PREVIEW_MATERIAL)))
+}
+
+/** The preview's material: the pill's plain fill, as MiniPlayerView gets it here. */
+private const val PREVIEW_MATERIAL = 0x9E1F2324
 
 @Composable
 private fun ShortcutIcon(image: ImageVector, description: String, place: IconPlace,

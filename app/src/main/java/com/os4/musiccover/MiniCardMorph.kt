@@ -29,7 +29,24 @@ internal class MiniCardMorph(
     private val header: View,
     toNative: Boolean,
     private val listener: Listener,
+    /**
+     * Where the pill's artwork, title and artist land, and the corners they land in: the media
+     * card's by default. A notification island lands on its own row's icon, title and text.
+     */
+    landing: Landing = Landing.mediaCard(header),
+    /**
+     * The mini player's end on screen, when it is not the pill's own rest place: a small
+     * island's circle, for a notification opening straight out of it.
+     */
+    private val restBox: (() -> CoverMorphMotion.Box?)? = null,
 ) : Choreographer.FrameCallback {
+    class Landing(val art: View?, val title: View?, val text: View?, val radius: Float, val artRadius: Float) {
+        companion object {
+            fun mediaCard(header: View) = Landing(Main.miniPairArt(), Main.miniPairTitle(),
+                Main.miniPairArtist(), Main.miniPlayerCardRadius(header), Main.coverMorphThumbnailRadius())
+        }
+    }
+
     interface Listener {
         /** Whether the destination can be handed back yet; a scene exit waits for the clock. */
         fun canSettle(morph: MiniCardMorph, toNative: Boolean): Boolean
@@ -63,12 +80,12 @@ internal class MiniCardMorph(
 
     private val motion = CoverMorphMotion()
     private val saved = Saved(header)
-    private val nativeRadius = Main.miniPlayerCardRadius(header)
-    private val nativeArtRadius = Main.coverMorphThumbnailRadius()
+    private val nativeRadius = landing.radius
+    private val nativeArtRadius = landing.artRadius
     private val pieces = listOf(
-        Piece(mini.artworkView, Main.miniPairArt(), text = false, art = true),
-        Piece(mini.titleView, Main.miniPairTitle(), text = true, art = false),
-        Piece(mini.artistView, Main.miniPairArtist(), text = true, art = false),
+        Piece(mini.artworkView, landing.art, text = false, art = true),
+        Piece(mini.titleView, landing.title, text = true, art = false),
+        Piece(mini.artistView, landing.text, text = true, art = false),
         Piece(mini.toggleView, null, text = false, art = false),
     )
     private val xy = IntArray(2)
@@ -164,6 +181,9 @@ internal class MiniCardMorph(
 
     fun artworkBox(): CoverMorphMotion.Box? = if (running) artDrawn else null
 
+    /** The container as this frame drew it, on screen: what presses on the shortcut discs. */
+    fun containerBox(): CoverMorphMotion.Box? = if (running) boxDrawn else null
+
     /** Where it stood when a finger took it: the drag carries on from exactly here. */
     class Grab(val progress: Float, val nudge: Float, val nudgeX: Float)
 
@@ -241,7 +261,7 @@ internal class MiniCardMorph(
     }
 
     private fun apply(): Boolean {
-        val miniRest = mini.restBoxOnScreen() ?: return false
+        val miniRest = restBox?.invoke() ?: mini.restBoxOnScreen() ?: return false
         val nativeRest = headerRestBox() ?: return false
         if (miniRest.w <= 0f || nativeRest.w <= 0f) return false
         val c = motion.value.coerceIn(0f, 1f)

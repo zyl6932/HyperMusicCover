@@ -60,6 +60,9 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     private var onShowNative: (() -> Unit)? = null
     private var onOpenCover: (() -> Unit)? = null
     private var tracking = false
+    private var toggleShown = true
+    private var lastHeightRadiusDp = 36f
+    private var lastArtRadiusDp = 12f
 
     init {
         clipToOutline = true
@@ -196,7 +199,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean = false
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (morphing || !interactionsEnabled) return false
+        if (!acceptsTouch()) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> tracking = true
             MotionEvent.ACTION_UP -> {
@@ -347,7 +350,10 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         translationY = y + offsetY
     }
 
-    fun acceptsTouch(): Boolean = interactionsEnabled && !morphing
+    fun acceptsTouch(): Boolean = interactionsEnabled && (!morphing || layoutOnly)
+
+    /** For `op mini`: why it would not take a touch. */
+    fun touchState(): String = "interactive=$interactionsEnabled morphing=$morphing"
 
     fun setInteractionsEnabled(enabled: Boolean) {
         if (interactionsEnabled == enabled) return
@@ -363,8 +369,17 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         if (!morphing) artwork.alpha = if (hidden) 0f else 1f
     }
 
-    fun beginMorph() {
+    /**
+     * [layoutOnly]: the frame only moves and resizes within the row - a switch, the row's layout
+     * spring - and the pill keeps taking touches through it. Only a morph into a card or a row
+     * shuts them off. The layout spring runs every time a notification comes or goes, and with
+     * a busy group chat that shut the pill to touches most of the time (filmed 2026-09-25).
+     */
+    private var layoutOnly = false
+
+    fun beginMorph(layoutOnly: Boolean = false) {
         if (morphing) return
+        this.layoutOnly = layoutOnly
         // Over the media card for the morph - the card's layer is drawn after the pill's - and
         // back down among the lock screen when it ends. Z orders siblings without moving the
         // pill in its parent; the outline's shadow is switched off so the height casts none.
@@ -375,7 +390,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         morphW = restWidth()
         morphH = restHeight()
         morphRadius = morphH / 2f
-        toggle.isEnabled = false
+        toggle.isEnabled = layoutOnly && interactionsEnabled
         // A clipping parent clips each child to that child's own bounds: the text column is only
         // as tall as the pill, and the artist, moved onto the card's, was cut through by its
         // bottom edge - filmed as a hairline across the name. The pill's own outline still
@@ -418,6 +433,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     fun endMorph() {
         if (!morphing) return
         morphing = false
+        layoutOnly = false
         artworkMorphRadius = Float.NaN
         artwork.invalidateOutline()
         artwork.alpha = if (artworkHidden) 0f else 1f
@@ -447,7 +463,50 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         materialLayer.layout(0, 0, morphW, morphH)
     }
 
+    /**
+     * A notification island has no play button: its text runs on to the edge instead. The
+     * button still holds its place in the layout while it is hidden, so hiding it lays out.
+     */
+    fun setToggleShown(shown: Boolean) {
+        if (toggleShown == shown) return
+        toggleShown = shown
+        toggle.visibility = if (shown) View.VISIBLE else View.GONE
+        updateGeometry(lastHeightRadiusDp, lastArtRadiusDp)
+    }
+
+    /**
+     * Another island has taken the pill: its content comes in from the side the swipe sent it,
+     * the pill itself staying where it is.
+     */
+    fun slideContentIn(fromEnd: Boolean) {
+        if (morphing) return
+        val dx = dp(28).toFloat() * if (fromEnd) 1f else -1f
+        listOf<View>(artwork, textColumn, toggle).forEach { v ->
+            v.animate().cancel()
+            v.translationX = dx
+            v.alpha = 0f
+            v.animate().translationX(0f)
+                .alpha(if (v === artwork && artworkHidden) 0f else 1f)
+                .setDuration(280L)
+                .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.3f, 1f))
+                .start()
+        }
+    }
+
+    /**
+     * The pill's content - artwork, text, button - at one alpha, the glass left alone: an
+     * island switch brings the new island's content in over the frame as it grows.
+     */
+    fun setContentAlpha(alpha: Float) {
+        val a = alpha.coerceIn(0f, 1f)
+        artwork.alpha = if (artworkHidden) 0f else a
+        textColumn.alpha = a
+        toggle.alpha = a
+    }
+
     private fun updateGeometry(heightRadiusDp: Float, artworkRadiusDp: Float) {
+        lastHeightRadiusDp = heightRadiusDp
+        lastArtRadiusDp = artworkRadiusDp
         val height = dp(heightRadiusDp * 2f).coerceAtLeast(dp(48))
         val verticalPadding = max(dp(7), height / 9)
         val artworkSize = ((height - verticalPadding * 2) * .75f).toInt().coerceAtLeast(dp(24))
@@ -461,7 +520,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         }
         textColumn.layoutParams = LayoutParams(-1, -1, Gravity.CENTER_VERTICAL).apply {
             leftMargin = horizontalPadding + artworkSize + max(dp(10), height / 8)
-            rightMargin = toggleSize + max(dp(10), verticalPadding)
+            rightMargin = if (toggleShown) toggleSize + max(dp(10), verticalPadding) else horizontalPadding
         }
         val radius = dp(artworkRadiusDp).coerceIn(0, artworkSize / 2).toFloat()
         artworkRadiusPx = radius
