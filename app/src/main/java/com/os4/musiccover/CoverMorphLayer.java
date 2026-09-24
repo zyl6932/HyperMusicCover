@@ -46,6 +46,9 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         setFocusable(false);
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         setVisibility(INVISIBLE);
+        // Above the mini player, which a morph lifts over the media card: the artwork flying
+        // out of it has to come out on top.
+        setTranslationZ(MiniPlayerViewKt.MORPH_Z * 2f);
     }
 
     private void reset(Bitmap art, boolean cardMode, CoverMorphMotion.Box thumb,

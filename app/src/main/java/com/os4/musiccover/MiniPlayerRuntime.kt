@@ -1213,6 +1213,24 @@ private class MiniPlayerController(
         return view
     }
 
+    /**
+     * Right above the lock screen's own layer, not at the top of the window: the shade and the
+     * control centre are drawn after it, and their blur covers the pill as it covers the torch
+     * and camera. Added last, the pill sat above both, sharp - and was hidden for them instead.
+     * A morph lifts it over the card for as long as it runs (MiniPlayerView.beginMorph).
+     */
+    private fun lockScreenLayerIndex(): Int {
+        var v: View = left
+        while (true) {
+            val parent = v.parent as? View ?: return host.childCount
+            if (parent === host) {
+                val at = host.indexOfChild(v)
+                return if (at < 0) host.childCount else at + 1
+            }
+            v = parent
+        }
+    }
+
     /** The torch's right edge or the camera's left edge, where the pill's touch area stops. */
     private fun buttonEdge(button: View, inner: Boolean): Float? {
         if (!button.isShown || button.width <= 0) return null
@@ -1300,7 +1318,7 @@ private class MiniPlayerController(
         }
         val view = player ?: MiniPlayerView(context).also {
             player = it
-            host.addView(it, ViewGroup.LayoutParams(1, 1))
+            host.addView(it, lockScreenLayerIndex(), ViewGroup.LayoutParams(1, 1))
         }
         val cover = metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
@@ -1461,9 +1479,7 @@ private class MiniPlayerController(
                 controlCenterOpen = controlCenterOpen,
             ),
         )
-        // The control centre coming down over the lock screen takes the pill away with it; the
-        // card stays hidden underneath rather than taking its place.
-        val shown = presentation.showMini && !(controlCenterOpen && morph == null)
+        val shown = presentation.showMini
         if (view != null) {
             val target = if (shown) View.VISIBLE else View.GONE
             if (view.visibility != target) view.visibility = target

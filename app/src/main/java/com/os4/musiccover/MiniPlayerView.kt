@@ -63,6 +63,8 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
 
     init {
         clipToOutline = true
+        outlineAmbientShadowColor = Color.TRANSPARENT
+        outlineSpotShadowColor = Color.TRANSPARENT
         // A pill at rest; during a morph, the container's own corner. The material layer shares
         // it, so the glass is cut to the same shape as the frame it fills.
         outlineProvider = object : ViewOutlineProvider() {
@@ -363,6 +365,10 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
 
     fun beginMorph() {
         if (morphing) return
+        // Over the media card for the morph - the card's layer is drawn after the pill's - and
+        // back down among the lock screen when it ends. Z orders siblings without moving the
+        // pill in its parent; the outline's shadow is switched off so the height casts none.
+        translationZ = MORPH_Z
         artwork.animate().cancel()
         artwork.rotation = 0f
         morphing = true
@@ -418,6 +424,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         materialLayer.alpha = 1f
         textColumn.clipChildren = true
         clipChildren = true
+        translationZ = 0f
         toggle.isEnabled = interactionsEnabled
         translationX = baseX + offsetX
         translationY = baseY + offsetY
@@ -503,3 +510,6 @@ private const val ICON_PAUSE =
 
 /** Seconds per undamped cycle for the sideways spring home: quicker than the morph's. */
 private const val OFFSET_RESPONSE = 0.32f
+
+/** Above every sibling while a morph runs; CoverMorphLayer sits above this again. */
+internal const val MORPH_Z = 10000f
