@@ -3896,7 +3896,7 @@ public class Main extends XposedModule {
         for (int i = 0; i < g.getChildCount(); i++) describeClockTree(g.getChildAt(i), sb, depth + 1);
     }
 
-    private static String idOf(View v) {
+    static String idOf(View v) {
         try {
             return v.getResources().getResourceEntryName(v.getId());
         } catch (Throwable t) {

@@ -1335,16 +1335,12 @@ final class LyricView extends View {
         // Both edges as drawn, in this view's unzoomed frame: a swipe zooms the clock's and the
         // card's containers and not this layer. See ClockCollapse.contentBottomFor.
         float clock = ClockCollapse.contentBottomFor(this);
-        // The band's own lower edge, not the card view: the lock screen's media card can be hidden
-        // for a whole song - the music capsule hides it outright, see
-        // LockLyrics.bandBottomOnScreen() - and when it is, the band fills the block the card
-        // would have taken rather than stopping above a card nobody is drawing.
-        float floor = ClockCollapse.unzoomY(this, LockLyrics.bandBottomOnScreen());
         boolean ok = false;
         float top = bandTop, bottom = bandBottom;
         if (!Float.isNaN(clock) && isAttachedToWindow()) {
             getLocationOnScreen(loc);
             float me = loc[1];
+            float floor = bandFloor(me);
             if (LockLyrics.sStyle.writeBand(clock, floor, density, textPx, bandBounds)) {
                 top = bandBounds[0] - me;
                 bottom = bandBounds[1] - me;
@@ -1359,6 +1355,60 @@ final class LyricView extends View {
             bandBottom = bottom;
         }
         return changed;
+    }
+
+    /**
+     * The band's lower edge as the lit lock screen last had it, in this view's own pixels - which
+     * the doze's zoom carries like everything else, so it is the same place in both. NaN until a
+     * lit, unzoomed frame has measured one. Static: the view is re-created on a tap toggle and the
+     * doze still needs the lock screen's answer.
+     */
+    private static float sLitFloor = Float.NaN;
+    /** Whether the wake out of a doze is still on the kept edge, and since when; see bandFloor. */
+    private static boolean sWakeHold;
+    private static long sWakeHoldSince;
+    private static final long WAKE_HOLD_MS = 1200L;
+
+    /**
+     * The band's own lower edge, not the card view: the lock screen's media card can be hidden
+     * for a whole song - the music capsule hides it outright, see
+     * LockLyrics.bandBottomOnScreen() - and when it is, the band fills the block the card would
+     * have taken rather than stopping above a card nobody is drawing.
+     *
+     * In the held doze it is not measured again. The AOD swaps in a compact media card with a
+     * top of its own, and on a lock screen whose card was not found (the "space" route) that
+     * turned the band from "down to where the card ends" into "down to the compact card" on
+     * every sleep and back on every wake - the lyrics jumped each time (Xiaomi 17 log,
+     * 2026-09-24: `band anchored to the live card position` 80ms after every AOD entry). The doze
+     * is this lock screen dimmed, as the held clock is, so it keeps the lock screen's edge.
+     *
+     * @param me this view's drawn top on screen, this frame
+     */
+    private float bandFloor(float me) {
+        if (ClockCollapse.phase() == ClockCollapse.Phase.AOD) {
+            sWakeHold = !Float.isNaN(sLitFloor);
+            sWakeHoldSince = 0L;
+            if (sWakeHold) return me + sLitFloor;
+        }
+        float floor = ClockCollapse.unzoomY(this, LockLyrics.bandBottomOnScreen());
+        // Out of the doze the compact card takes its time going back - measured on the wake's
+        // first reading 1705, 1669, 1677 against 1652, back within 0.9s - so the kept edge stays
+        // until the live one has come back to it, or WAKE_HOLD_MS if it never does.
+        if (sWakeHold) {
+            long now = SystemClock.uptimeMillis();
+            if (sWakeHoldSince == 0L) sWakeHoldSince = now;
+            if (Math.abs(floor - me - sLitFloor) >= 1f && now - sWakeHoldSince < WAKE_HOLD_MS) {
+                return me + sLitFloor;
+            }
+            sWakeHold = false;
+        }
+        // Recorded only off a lit, unzoomed lock screen: the doze's 0.95 on its way in and a
+        // swipe's zoom are both on the way to somewhere else.
+        if (ClockCollapse.phase() != ClockCollapse.Phase.AOD && Main.screenOnCached()
+                && Math.abs(chainScaleY(this) - 1f) < 1e-3f && !Float.isNaN(floor)) {
+            sLitFloor = floor - me;
+        }
+        return floor;
     }
 
     /** Whether there is a block of rows to centre: a measured band, and a focus line inside it. */
@@ -2093,7 +2143,9 @@ final class LyricView extends View {
                 // The route the band's lower edge came by, so a band placed off the fallback can
                 // be told apart from one that was measured.
                 + " band=" + (bandOk ? Math.round(bandTop) + ".." + Math.round(bandBottom)
-                        + "(" + LockLyrics.bandSource() + ")" : "none")
+                        + "(" + (sWakeHold ? (ClockCollapse.phase() == ClockCollapse.Phase.AOD
+                                ? "held" : "wake") : LockLyrics.bandSource())
+                        + ")" : "none")
                 + " looping=" + looping + " parent=" + (getParent() instanceof ViewGroup);
     }
 }

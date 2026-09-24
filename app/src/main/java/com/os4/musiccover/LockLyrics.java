@@ -398,16 +398,22 @@ final class LockLyrics {
      */
     static float bandBottomOnScreen() {
         View c = card();
+        int y = Integer.MIN_VALUE;
         if (c != null && c.isShown() && c.isAttachedToWindow()) {
             int[] loc = new int[2];
             c.getLocationOnScreen(loc);
+            y = loc[1];
             // Below the clock, like the card. Anything higher is the shade's copy or an island,
             // and neither is what the band is measured against.
             if (loc[1] >= Main.screenHeight() / 3) {
+                if (sBandSrc != BAND_LIVE && sBandSrc != -1) noteBandMiss("back live y=" + y);
                 setBandSource(BAND_LIVE);
                 return loc[1];
             }
         }
+        // Only at the moment the live route is lost, so a card hidden for a whole song costs one
+        // entry rather than one a frame.
+        if (sBandSrc == BAND_LIVE) noteBandMiss(missReason(c, y));
         float recorded = Main.sampledCardBottom();
         if (!Float.isNaN(recorded)) {
             setBandSource(BAND_SPACE);
@@ -415,6 +421,47 @@ final class LockLyrics {
         }
         setBandSource(BAND_DEFAULT);
         return Main.screenHeight() * (CARD_TOP_FRACTION + CARD_HEIGHT_FRACTION);
+    }
+
+    /**
+     * PROBE: the last few times the band lost the live card, and why - no view, a hidden one (and
+     * which ancestor hides it), no height, or one found above the clock - with the phase and the
+     * screen at that moment. For `op lyricstate`'s bandMiss=; this phone keeps no log.
+     */
+    private static final String[] sBandMiss = new String[8];
+    private static int sBandMissN;
+
+    private static void noteBandMiss(String what) {
+        int n = ++sBandMissN;
+        sBandMiss[(n - 1) % sBandMiss.length] = "#" + n + "@"
+                + (SystemClock.uptimeMillis() / 100) / 10f + "s " + ClockCollapse.phase()
+                + (Main.screenOnCached() ? " lit " : " dark ") + what;
+    }
+
+    private static String missReason(View c, int y) {
+        if (c == null) return "no view";
+        String id = " view@" + Integer.toHexString(System.identityHashCode(c))
+                + " h=" + c.getHeight();
+        if (!c.isAttachedToWindow()) return "detached" + id;
+        if (!c.isShown()) {
+            String by = c.getVisibility() != View.VISIBLE ? "itself" : "?";
+            for (android.view.ViewParent p = c.getParent(); p instanceof View; p = p.getParent()) {
+                View v = (View) p;
+                if (v.getVisibility() != View.VISIBLE) {
+                    by = Main.idOf(v) + "=" + v.getVisibility();
+                    break;
+                }
+            }
+            return "hidden by " + by + id;
+        }
+        return "above the clock y=" + y + id;
+    }
+
+    private static String bandMisses() {
+        StringBuilder sb = new StringBuilder();
+        int n = sBandMissN, len = sBandMiss.length;
+        for (int i = Math.max(0, n - len); i < n; i++) sb.append(" | ").append(sBandMiss[i % len]);
+        return sb.toString();
     }
 
     /** Which route answered bandBottomOnScreen(), as something readable in a broadcast result. */
@@ -827,6 +874,7 @@ final class LockLyrics {
                 // default is the fractions. A hidden card is visible in this line as the route
                 // the lyrics are being placed on rather than as a missing reading.
                 + " bandSrc=" + bandSource()
+                + " bandMiss=[" + bandMisses() + " ]"
                 + " clockBottom=" + ClockCollapse.contentBottomOnScreen()
                 + " ink=" + ClockCollapse.inkBottomOnScreen()
                 + " shown=" + wantsShown() + " blurSettled=" + blurSettled()
