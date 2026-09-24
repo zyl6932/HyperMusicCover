@@ -2642,6 +2642,8 @@ public class Main extends XposedModule {
                         dumpInk();
                     } else if ("mini".equals(op)) {
                         setResultData(MiniPlayerRuntime.describe());
+                    } else if ("fold".equals(op)) {
+                        setResultData(describeFold());
                     } else if ("alphasweep".equals(op)) {
                         // --ei ms N starts a sweep; without it, reads the last one back.
                         int ms = i.getIntExtra("ms", 0);
@@ -7399,6 +7401,11 @@ public class Main extends XposedModule {
      */
     private static final int SWIPE_NONE = 0, SWIPE_FIRED = 1, SWIPE_HELD = 2;
     private static boolean sCardSwipeArmed, sCardSwipeFired;
+    /**
+     * The fired swipe is the keyguard's too: it goes on reaching the stack, which folds its
+     * notifications away under the same pull, as it did before there was a pill to go back to.
+     */
+    private static boolean sCardSwipeShared;
     private static float sCardSwipeX, sCardSwipeY;
 
     /**
@@ -7410,6 +7417,7 @@ public class Main extends XposedModule {
         switch (ev.getActionMasked()) {
             case MotionEvent.ACTION_DOWN: {
                 sCardSwipeFired = false;
+                sCardSwipeShared = false;
                 sCardSwipeArmed = MiniPlayerRuntime.wantsNativeCardSwipe()
                         && !sGestureOnCentre && !sGestureOnCharge
                         && cardRectContains(ev.getRawX(), ev.getRawY());
@@ -7420,7 +7428,7 @@ public class Main extends XposedModule {
             case MotionEvent.ACTION_MOVE: {
                 if (sCardSwipeFired) {
                     MiniPlayerRuntime.dragMove(ev);
-                    return SWIPE_HELD;
+                    return sCardSwipeShared ? SWIPE_NONE : SWIPE_HELD;
                 }
                 if (!sCardSwipeArmed) return SWIPE_NONE;
                 float dx = ev.getRawX() - sCardSwipeX, dy = ev.getRawY() - sCardSwipeY;
@@ -7433,6 +7441,10 @@ public class Main extends XposedModule {
                     sCardSwipeArmed = false;
                     sCardSwipeFired = true;
                     sArtSwallow = false;
+                    // With notifications to fold, the pull is not cancelled out from under the
+                    // stack, in the cover as out of it. Without any, it still is: there the
+                    // stack's own answer to a pull down is to start opening the shade.
+                    sCardSwipeShared = keyguardCanFoldNotifications();
                     if (sCoverMode) {
                         // Out of the cover or the lyrics, landing on the pill: the scene exit
                         // shrinks the card into it.
@@ -7443,22 +7455,85 @@ public class Main extends XposedModule {
                         // No geometry to pull: the switch still happens, on its own spring.
                         MiniPlayerRuntime.onNativeCardSwipeDown();
                     }
-                    return SWIPE_FIRED;
+                    Xp.log(TAG + "media card swiped down"
+                            + (sCardSwipeShared ? ", shared with the notification fold" : ""));
+                    return sCardSwipeShared ? SWIPE_NONE : SWIPE_FIRED;
                 }
                 return SWIPE_NONE;
             }
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
-                boolean held = sCardSwipeFired;
-                if (held) {
+                boolean held = sCardSwipeFired && !sCardSwipeShared;
+                if (sCardSwipeFired) {
                     MiniPlayerRuntime.dragEnd(ev,
                             ev.getActionMasked() == MotionEvent.ACTION_CANCEL);
                 }
-                sCardSwipeArmed = sCardSwipeFired = false;
+                sCardSwipeArmed = sCardSwipeFired = sCardSwipeShared = false;
                 return held ? SWIPE_HELD : SWIPE_NONE;
             }
             default:
-                return sCardSwipeFired ? SWIPE_HELD : SWIPE_NONE;
+                return sCardSwipeFired && !sCardSwipeShared ? SWIPE_HELD : SWIPE_NONE;
+        }
+    }
+
+    /**
+     * Whether a pull down on the keyguard's notifications would fold them into the count: some
+     * ordinary notifications are showing and they are not folded already. Read from the stack's
+     * own container model - NotificationStackScrollLayout -> controller -> injector ->
+     * NumStateTouchHelper - found from the media card, which is one of the stack's children.
+     * False on a build laid out any other way, which keeps the swipe the card's alone.
+     */
+    private static boolean keyguardCanFoldNotifications() {
+        StringBuilder why = new StringBuilder();
+        boolean can = readFoldState(why);
+        sFoldProbe = "at=" + android.os.SystemClock.uptimeMillis() + " shared=" + can + " " + why;
+        return can;
+    }
+
+    /** The last card swipe's fold decision, for `op fold`. */
+    private static volatile String sFoldProbe = "no card swipe yet";
+
+    /** For `op fold`: the last swipe's decision, then the same reading taken now. */
+    static String describeFold() {
+        StringBuilder now = new StringBuilder();
+        boolean can = readFoldState(now);
+        return "last: " + sFoldProbe + " || now: can=" + can + " " + now;
+    }
+
+    /** The fold reading, each step it got through written to [why]. */
+    private static boolean readFoldState(StringBuilder why) {
+        try {
+            View v = miniPlayerMediaHeader();
+            why.append("header=").append(v == null ? "null" : v.getClass().getSimpleName()
+                    + "/shown=" + v.isShown());
+            StringBuilder chain = new StringBuilder();
+            while (v != null && !v.getClass().getName().endsWith("NotificationStackScrollLayout")) {
+                android.view.ViewParent p = v.getParent();
+                v = p instanceof View ? (View) p : null;
+                if (v != null) chain.append('>').append(v.getClass().getSimpleName());
+            }
+            why.append(" up=").append(chain);
+            if (v == null) return false;
+            Object controller = Xp.getObjectField(v, "mController");
+            Object injector = Xp.getObjectField(controller, "mNsslControllerInjector");
+            Object helper = Xp.getObjectField(injector, "numStateTouchHelper");
+            Object model = Xp.callMethod(Xp.getObjectField(helper, "notifContainerViewModel"), "get");
+            Object folded = Xp.callMethod(Xp.callMethod(model, "isInNumState"), "getValue");
+            why.append(" numState=").append(folded);
+            try {
+                why.append(" stackState=").append(
+                        Xp.callMethod(Xp.callMethod(model, "getCurrentsStackState"), "getValue"));
+            } catch (Throwable ignored) {
+            }
+            if (Boolean.TRUE.equals(folded)) return false;
+            Object info = Xp.callMethod(Xp.callMethod(model, "getOnUpdateChildSampleStackInfo"),
+                    "getValue");
+            why.append(" info=").append(info);
+            return info != null && ((Number) Xp.getObjectField(info, "normalNotifCount")).intValue() > 0;
+        } catch (Throwable t) {
+            why.append(" failed: ").append(t);
+            Xp.log(TAG + "notification fold state unreadable: " + t);
+            return false;
         }
     }
 
