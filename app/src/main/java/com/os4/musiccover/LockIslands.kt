@@ -50,6 +50,11 @@ internal object LockIslands {
         val property: Int = 1,
         val priority: Int = 1,
         val order: Boolean = false,
+        /**
+         * When it became an island, wall clock: the entry's creation, as the super island's time
+         * is its view's making - and for one with islandOrder, its latest update (postTime).
+         */
+        val since: Long = 0L,
     )
 
     /** An island's standing for a place in the row, as the super island's compareState reads it. */
@@ -70,6 +75,8 @@ internal object LockIslands {
 
     /** Candidates of the pipeline run in progress, in the order the filter saw them. */
     private val pending = LinkedHashMap<String, Note>()
+    /** This run found the lock screen: its candidates are all there is, and the rest are gone. */
+    private var lockedRun = false
 
     /** Put back in the stack by a tap: an island no more until the lock screen goes. */
     private val released = HashSet<String>()
@@ -110,8 +117,8 @@ internal object LockIslands {
         "released=${released.size} notes=" + notes.joinToString(",") {
             (if (it.focus) "F:" else "") + (if (it.redacted) "R:" else "") + it.pkg +
                 "[${it.property}/${it.priority}${if (it.order) "/o" else ""} " +
-                "t=${(islandTimes[it.key] ?: 0L) % 100000}]"
-        }
+                "t=-${(System.currentTimeMillis() - it.since) / 1000}s]"
+        } + if (creationUnreadable) " creation=unreadable" else ""
 
     fun addListener(listener: () -> Unit) {
         listeners.addIfAbsent(listener)
@@ -224,6 +231,7 @@ internal object LockIslands {
             if (held) watchUnlock()
             return held
         }
+        lockedRun = true
         val note = read(entry, redacted(filterObject, entry)) ?: return false
         pending[note.key] = note
         return active && note.key !in released || cover && note.focus && note.key !in released
@@ -314,7 +322,8 @@ internal object LockIslands {
     private fun commit() {
         val all = pending.values.toList()
         pending.clear()
-        stamp(all)
+        stamp(all, lockedRun)
+        lockedRun = false
         // A group shows as its children; its summary only when it has none here.
         val grouped = all.filter { !it.summary && it.group != null }.mapNotNull { it.group }.toSet()
         val next = all.filter { !(it.summary && it.group in grouped) && it.key !in released }
@@ -325,30 +334,27 @@ internal object LockIslands {
     }
 
     /**
-     * When each island became one, as the super island times its islands: the moment its view
-     * was made (handleInitState), and again at every update of one whose param_island has
-     * islandOrder - a stopwatch, updated every second, is always the newest. The last reading
-     * of each tells an update from the same notification read again.
+     * Each island's last reading, released ones included, for [rankOf]. Its time is the note's
+     * own ([Note.since]): stamped here at first sight it was wiped by every unlock - the
+     * unlocked runs read nothing - and on the next lock screen every island had the same time,
+     * a tie compareState gives to whichever is asked about second (2026-09-25). A stopwatch is
+     * not reposted every second either: its timerInfo counts by itself, and only start, pause
+     * and lap update it. So the unlocked runs leave the readings be.
      */
-    private val islandTimes = HashMap<String, Long>()
     private val lastRead = HashMap<String, Note>()
 
-    private fun stamp(all: List<Note>) {
-        val now = System.currentTimeMillis()
-        for (note in all) {
-            val seen = islandTimes[note.key]
-            if (seen == null || note.order && lastRead[note.key] !== note) islandTimes[note.key] = now
-            lastRead[note.key] = note
+    private fun stamp(all: List<Note>, locked: Boolean) {
+        for (note in all) lastRead[note.key] = note
+        if (locked) {
+            val keys = all.mapTo(HashSet()) { it.key }
+            lastRead.keys.retainAll(keys)
         }
-        val keys = all.mapTo(HashSet()) { it.key }
-        islandTimes.keys.retainAll(keys)
-        lastRead.keys.retainAll(keys)
     }
 
     /** A notification island's standing, released or not; null for one this lock screen has not got. */
     fun rankOf(key: String): Rank? {
         val note = lastRead[key] ?: return null
-        return Rank(note.property, note.priority, islandTimes[key] ?: 0L)
+        return Rank(note.property, note.priority, note.since)
     }
 
     /**
@@ -383,13 +389,47 @@ internal object LockIslands {
         val n = sbn.notification ?: return null
         val stamp = (sbn.postTime * 31 + n.`when`) * 2 + if (redacted) 1 else 0
         readCache[sbn.key]?.let { (at, note) -> if (at == stamp) return note }
-        return readFresh(sbn, n, redacted)?.also {
+        return readFresh(sbn, n, redacted, createdAt(entry, sbn))?.also {
             if (readCache.size > 200) readCache.clear()
             readCache[sbn.key] = stamp to it
         }
     }
 
-    private fun readFresh(sbn: StatusBarNotification, n: Notification, redacted: Boolean): Note? {
+    /**
+     * The entry's creation as wall clock. This HyperOS build has no getCreationTime(); the
+     * field is looked up by name, creationTime or mCreationTime, and holds elapsedRealtime (read
+     * as uptime it was hours in the future, the time the phone slept). Without it the
+     * notification's latest post stands in.
+     */
+    private fun createdAt(entry: Any, sbn: StatusBarNotification): Long {
+        val field = creationField ?: if (creationUnreadable) null else findCreationField(entry.javaClass)
+        val elapsed = field?.let { runCatching { it.getLong(entry) }.getOrNull() }
+        if (elapsed == null || elapsed <= 0L) {
+            creationUnreadable = true
+            return sbn.postTime
+        }
+        return System.currentTimeMillis() - (android.os.SystemClock.elapsedRealtime() - elapsed)
+    }
+
+    private fun findCreationField(start: Class<*>): java.lang.reflect.Field? {
+        var c: Class<*>? = start
+        while (c != null && c != Any::class.java) {
+            c.declaredFields.firstOrNull {
+                it.type == Long::class.javaPrimitiveType &&
+                    (it.name == "creationTime" || it.name == "mCreationTime")
+            }?.let { it.isAccessible = true; creationField = it; return it }
+            c = c.superclass
+        }
+        creationUnreadable = true
+        Xp.log("MCIsland: no creation time on ${start.name}, islands rank by their latest post")
+        return null
+    }
+
+    private var creationField: java.lang.reflect.Field? = null
+    private var creationUnreadable = false
+
+    private fun readFresh(sbn: StatusBarNotification, n: Notification, redacted: Boolean,
+                          created: Long): Note? {
         if (n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) return null
         // Redacted, the row is built from the public version, or from nothing but the app.
         val shown = if (redacted) n.publicVersion else n
@@ -403,6 +443,7 @@ internal object LockIslands {
             ?: if (redacted) hiddenText() else ""
         val focus = runCatching { focusCheck?.invoke(null, n) as? Boolean }.getOrNull() == true
         val island = islandParams(n)
+        val order = island?.optBoolean("islandOrder", false) ?: false
         return Note(
             key = sbn.key,
             pkg = sbn.packageName,
@@ -417,7 +458,10 @@ internal object LockIslands {
             redacted = redacted,
             property = island?.optInt("islandProperty", 1) ?: 1,
             priority = island?.optInt("islandPriority", 1) ?: 1,
-            order = island?.optBoolean("islandOrder", false) ?: false,
+            order = order,
+            // A restart of SystemUI makes every entry anew at once, all with one creation time:
+            // one posted before it counts from its post.
+            since = if (order) maxOf(created, sbn.postTime) else minOf(created, sbn.postTime),
         )
     }
 

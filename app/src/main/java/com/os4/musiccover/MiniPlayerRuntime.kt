@@ -1143,6 +1143,7 @@ private class MiniPlayerController(
     private var config = JSONObject(MiniPlayerConfig.defaultJson())
     private var forceHeaderRefresh = true
     private var lastPresentationLog = ""
+    private var lastActive = false
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         configStale = true
         scheduleRefresh()
@@ -1810,6 +1811,8 @@ private class MiniPlayerController(
         var disc = false
         /** The stand-in goes into the small island's place (BigIslandToSmallIsland), on [small]. */
         var ghostSmall = false
+        /** The island the stand-in is: the one that left the pill for the small place. */
+        var ghostKey: String? = null
         var started = 0L
         var last = 0L
 
@@ -1863,12 +1866,29 @@ private class MiniPlayerController(
                            */
                           pillFrom: CoverMorphMotion.Box? = null, pillStays: Boolean = false) {
         val view = player ?: return
-        endSwap()
+        // A switch cut short goes on from what it was drawing, at its speed - the super island's
+        // folme.to from the current value and velocity. Restarted from rest, the pill lost its
+        // speed at every tap mid-switch, and an island shrinking into the small place (its
+        // stand-in) jumped to a still circle there, or the pill grew out of that circle.
+        val prev = swap
+        val prevPillVel = prev?.takeIf { !it.holdPill }?.let { velocityOf(it.pillFrom, it.pillTo, it.spring) }
+        val ghosting = prev?.takeIf { it.smallMode == SMALL_FROM_GHOST && it.ghostFrom != null &&
+            it.ghostKey != null && !it.small.atRest() }
+        val ghostNow = ghosting?.let(::ghostSmallBox)
+        val ghostVel = ghosting?.let { velocityOf(it.ghostFrom!!, smallBoxOnScreen(), it.small) }
+        // Still the small island's, it keeps its stand-in and its spring; decided below, once the
+        // new switch's own stand-ins are known - there is one of each.
+        val keepGhost = ghosting != null && smallKey == ghosting.ghostKey && !holdSmall &&
+            kind != SWAP_NEXT && !intoSmall && !(kind == SWAP_PREV && oldSmall != null && oldSmall != smallKey)
+        endSwap(keepGhosts = keepGhost)
         endRow()
         resetIslandDrag()
         clearSmallNudge()
         // A flight's morph is the flight's: the pill still switches under it.
-        if (view.visibility != View.VISIBLE || morph != null && flight == null) return
+        if (view.visibility != View.VISIBLE || morph != null && flight == null) {
+            if (keepGhost) endGhosts()
+            return
+        }
         // Where the old big island was, before position() lays the pill out for the new row.
         val oldRest = view.restBoxOnScreen()
         val oldSmallBox = smallBoxOnScreen()
@@ -1881,12 +1901,21 @@ private class MiniPlayerController(
         val rest = view.restBoxOnScreen() ?: return
         val d = discDiameter().toFloat()
         val fromSmall = oldSmall != null && selectedIsland == oldSmall
+        // The stand-in shrinking into the small place is the one growing into the pill now:
+        // it grows from where it has got to.
+        val fromGhost = fromSmall && ghostNow != null && selectedIsland == ghosting?.ghostKey
         val from = when {
             pillStays -> pillFrom ?: rest
             // Out of hiding, the super island's HiddenToBigIsland: out of the middle.
             kind == SWAP_PREV -> cutoutBox(rest)
+            fromGhost -> ghostNow!!
             fromSmall -> oldSmallBox
             else -> CoverMorphMotion.Box(rest.x, rest.y, d, rest.h)
+        }
+        val fromVel = when {
+            pillStays && pillFrom != null -> prevPillVel
+            fromGhost -> ghostVel
+            else -> null
         }
         // Growing out of the small island's own circle with nothing to take its place: the circle
         // is the pill from here, not something left behind to shrink away under it.
@@ -1898,6 +1927,7 @@ private class MiniPlayerController(
         // pill the moment the row was pulled and came back beside it (filmed 2026-09-25).
         val ghostToSmall = intoSmall && oldBig != null && smallKey == oldBig && oldRest != null
         val mode = when {
+            keepGhost -> SMALL_FROM_GHOST
             smallKey == null || holdSmall -> SMALL_KEPT
             ghostToSmall -> SMALL_FROM_GHOST
             smallKey == oldBig -> SMALL_FROM_PILL
@@ -1906,6 +1936,20 @@ private class MiniPlayerController(
         }
         val s = Swap(from, rest, mode, kind, holdPill)
         s.started = android.os.SystemClock.uptimeMillis()
+        fromVel?.let { s.spring.velocity = springVelocity(it, from, rest) }
+        if (keepGhost) {
+            val g = ghosting!!
+            s.ghostFrom = g.ghostFrom
+            s.ghostSmall = g.ghostSmall
+            s.ghostKey = g.ghostKey
+            s.small.value = g.small.value
+            s.small.velocity = g.small.velocity
+            if (g.disc) {
+                s.disc = true
+                s.ghostDisc.value = g.ghostDisc.value
+                s.ghostDisc.velocity = g.ghostDisc.velocity
+            }
+        }
         swap = s
         // The old big island into hiding (BigIslandToHidden): a stand-in of it, under the
         // row, shrinks into the middle while its content goes out of focus.
@@ -1916,6 +1960,7 @@ private class MiniPlayerController(
         if (ghostToSmall && startGhost(oldBig!!, oldRest!!)) {
             s.ghostFrom = oldRest
             s.ghostSmall = true
+            s.ghostKey = oldBig
         }
         // The old small island into hiding (SmallIslandToHidden): a stand-in of it, where it is.
         // Also when the island leaving the pill takes the small place from it: with three
@@ -1937,6 +1982,23 @@ private class MiniPlayerController(
         }
         applySwap(s)
         Choreographer.getInstance().postFrameCallback(swapFrame)
+    }
+
+    /** A box moving from [a] to [b] on [spring], in pixels a second: its centre's x and its width. */
+    private fun velocityOf(a: CoverMorphMotion.Box, b: CoverMorphMotion.Box, spring: Jelly): FloatArray =
+        floatArrayOf(spring.velocity * (b.cx() - a.cx()), spring.velocity * (b.w - a.w))
+
+    /**
+     * [v] (velocityOf) as a switch spring's own speed from [from] to [to]: read off whichever
+     * of the two moves further, and kept within what a tap mid-switch could have given it.
+     */
+    private fun springVelocity(v: FloatArray, from: CoverMorphMotion.Box, to: CoverMorphMotion.Box): Float {
+        val dx = to.cx() - from.cx()
+        val dw = to.w - from.w
+        val span = if (kotlin.math.abs(dw) >= kotlin.math.abs(dx)) dw else dx
+        if (kotlin.math.abs(span) < dp(4f)) return 0f
+        val px = if (span == dw) v[1] else v[0]
+        return (px / span).coerceIn(-SWAP_CARRY_MAX, SWAP_CARRY_MAX)
     }
 
     /** The camera cutout's stand-in: where an island hides, a small capsule mid-row. */
@@ -2020,7 +2082,11 @@ private class MiniPlayerController(
         }
     }
 
-    private fun endSwap() {
+    /**
+     * [keepGhosts]: a switch taking over this one's stand-ins where they are (startSwap), so
+     * they are not put away for the frame between.
+     */
+    private fun endSwap(keepGhosts: Boolean = false) {
         val s = swap ?: return
         swap = null
         Choreographer.getInstance().removeFrameCallback(swapFrame)
@@ -2033,7 +2099,7 @@ private class MiniPlayerController(
             it.setContentAlpha(1f)
             it.setContentBlur(0f)
         }
-        endGhosts()
+        if (!keepGhosts) endGhosts()
         if (smallDx != 0f) {
             smallDx = 0f
             followShortcuts()
@@ -5951,8 +6017,12 @@ private class MiniPlayerController(
         // and only stops taking touches.
         // With music, the lock screen's media card has to be up; a row of notifications alone
         // needs only the lock screen.
-        val presentable = if (islandKeys.firstOrNull() == MUSIC_ISLAND) Main.miniPlayerPresentable()
-            else Main.miniPlayerIslandsPresentable()
+        // The music on its flight out of the cover is not gated by the card either, as canShow():
+        // startSceneFlight puts it back first in the row a moment before its morph exists, and
+        // for that refresh the cover still up read as "not presentable" - the row went and came
+        // back within 2ms, a whole list rebuild each way, on every exit (probed 2026-09-25).
+        val presentable = if (islandKeys.firstOrNull() == MUSIC_ISLAND && noteMorphKey != MUSIC_ISLAND)
+            Main.miniPlayerPresentable() else Main.miniPlayerIslandsPresentable()
         val sceneVisible = keyguardOwned && presentable && !MiniPlayerScene.blocksMiniPlayer
         // Unlocking or a session ending mid-morph: straight to where it was going.
         if (!keyguardOwned) morph?.cancel()
@@ -5996,7 +6066,19 @@ private class MiniPlayerController(
         val shown = presentation.showMini && sceneLandedAt == 0L
         // The stack leaves the notifications out only while the row is there to show them.
         // ...and not while the media card's morph has the rows turning into islands or back.
-        LockIslands.setActive(shown && keyguardOwned && !rowsHeld())
+        val active = shown && keyguardOwned && !rowsHeld()
+        if (active != lastActive) {
+            // Which input turned the row off or on, and who asked: leaving the cover the row
+            // went and came back within 10ms, each a whole list rebuild (2026-09-25).
+            lastActive = active
+            val by = Throwable().stackTrace.getOrNull(1)?.let { "${it.methodName}:${it.lineNumber}" }
+            MiniPlayerRuntime.noteTouch("active=$active by=$by keys=${islandKeys.size} " +
+                "ko=$keyguardOwned pres=$presentable blk=${MiniPlayerScene.blocksMiniPlayer} " +
+                "nr=$nativeRequested ms=$musicSettled tr=${cardMoving || exchange != null} " +
+                "cc=$controlCenterOpen landed=${sceneLandedAt != 0L} morph=${morph != null} " +
+                "scene=${Main.coverSceneActive()}")
+        }
+        LockIslands.setActive(active)
         if (!keyguardOwned) selectedIsland = null
         // While a flight is out and coming back, its end is the small island's place: the small
         // island is the flight, and whatever was there makes way. Once it is out for good the
@@ -6214,6 +6296,8 @@ private const val SMALL_FROM_PILL = 1
 private const val SMALL_POP = 2
 private const val SMALL_EMERGE = 3
 private const val SMALL_FROM_GHOST = 4
+/** The fastest a switch cut short hands its speed on, in its progress a second. */
+private const val SWAP_CARRY_MAX = 8f
 
 /** From here on, a stand-in shrinking into the small island hands over to it. */
 private const val GHOST_HANDOFF = 0.85f
