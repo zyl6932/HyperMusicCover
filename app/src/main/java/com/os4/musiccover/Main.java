@@ -1553,6 +1553,7 @@ public class Main extends XposedModule {
                 if (!sSelfDriving) sLastSystemY = requested;
                 Float hold = sHoldY;
                 if (hold != null && requested != hold) args[0] = hold;
+                else if (hold == null) args[0] = roomForRows(requested);
                 return chain.proceed(args);
             });
         } catch (Throwable t) {
@@ -1642,6 +1643,7 @@ public class Main extends XposedModule {
                 if (!sSelfDriving) sLastSystemY = requested;
                 Float hold = sHoldY;
                 if (hold != null && requested != hold) args[0] = hold;
+                else if (hold == null && !sSelfDriving) args[0] = roomForRows(requested);
                 // The coerced Y has to reach the original, which is what proceed(args) is for:
                 // this is the one hook whose whole purpose is rewriting an argument.
                 // Nothing is placed from here: the OEM applies parts of this frame later (Folme),
@@ -5117,6 +5119,75 @@ public class Main extends XposedModule {
         }
         return out[0];
     }
+
+    /**
+     * The clock gives way to the notifications only as far as they really reach: the stack's
+     * own figure keeps room for one big notification whatever is there (NotificationStacking
+     * Interactor.calculateKeyguardNotifTop), so a single short row by the pill shrank a clock
+     * it never came near (filmed 2026-09-25). Never higher than the system asked: rows that do
+     * reach up still push it as they always did.
+     */
+    static float roomForRows(float requested) {
+        if (Float.isNaN(requested) || requested >= Float.MAX_VALUE / 2f) return requested;
+        float top;
+        try {
+            top = MiniPlayerRuntime.stackContentTop();
+        } catch (Throwable t) {
+            return requested;
+        }
+        float out = Float.isNaN(top) || top <= requested ? requested : top;
+        traceRoom(requested, top, out);
+        return out;
+    }
+
+    /** The last clock y's asked and given, for `op mini`. */
+    private static final java.util.ArrayDeque<String> sRoomTrace = new java.util.ArrayDeque<>();
+    private static String sRoomLast = "";
+
+    private static void traceRoom(float requested, float top, float out) {
+        String line = r1(requested) + ">" + r1(out) + "(top " + r1(top) + ")";
+        if (line.equals(sRoomLast)) return;
+        sRoomLast = line;
+        synchronized (sRoomTrace) {
+            sRoomTrace.addLast(android.os.SystemClock.uptimeMillis() % 100000 + " " + line);
+            while (sRoomTrace.size() > 16) sRoomTrace.removeFirst();
+        }
+    }
+
+    static String roomTrace() {
+        synchronized (sRoomTrace) {
+            return "hold=" + sHoldY + " last=" + r1(sLastSystemY) + " " + String.join(" ; ", sRoomTrace);
+        }
+    }
+
+    /**
+     * The stack's rows have moved since the clock was last told: the OEM's own notification-Y
+     * flow is sent its value again, nudged a hair so it is a change, and the clock animates to
+     * it the way it does to any other (KeyguardClockNotifInteractor._notificationYState ->
+     * notifStateChange -> setNotifY, where roomForRows has its say).
+     */
+    static void reassertClockRoom() {
+        if (sHoldY != null) return;
+        final View v = sContainer;
+        if (v == null) return;
+        try {
+            Object interactor = Xp.getObjectField(v, "keyguardClockNotifInteractor");
+            Object flow = interactor == null ? null : Xp.getObjectField(interactor, "_notificationYState");
+            if (flow == null) return;
+            Object triple = Xp.callMethod(flow, "getValue");
+            if (triple == null) return;
+            float y = ((Number) Xp.callMethod(triple, "getFirst")).floatValue();
+            if (!(y < Float.MAX_VALUE / 2f)) return;
+            sRoomNudge = -sRoomNudge;
+            Object next = triple.getClass().getConstructor(Object.class, Object.class, Object.class)
+                    .newInstance(y + sRoomNudge, Xp.callMethod(triple, "getSecond"), Xp.callMethod(triple, "getThird"));
+            Xp.callMethod(flow, "setValue", next);
+        } catch (Throwable t) {
+            traceRoom(Float.NaN, Float.NaN, Float.NaN);
+        }
+    }
+
+    private static float sRoomNudge = 0.01f;
 
     /** Prefer the pixels visible in the card; some OEM drawables expose no BitmapDrawable. */
     static Bitmap coverMorphSource() {

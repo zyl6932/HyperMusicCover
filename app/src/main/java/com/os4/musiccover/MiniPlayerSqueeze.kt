@@ -76,6 +76,9 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
      * The disc's shape this frame, in pixels: centred in the frame, or [dx] off centre - a
      * small island leaving the pill's place, still where the pill was.
      */
+    /** The width setShape last gave it: what it is drawn as, whatever its frame. */
+    val shapeWidth: Int get() = shapeW
+
     fun setShape(w: Int, h: Int, dx: Int = 0) {
         if (w == shapeW && h == shapeH && dx == shapeDx) return
         val first = shapeW <= 1 || shapeH <= 1
@@ -140,8 +143,20 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         }
         if (view.drawable !== drawable) view.setImageDrawable(drawable)
         view.visibility = if (drawable == null) View.GONE else View.VISIBLE
+        view.transitionAlpha = if (iconHidden) 0f else 1f
         placeElement()
     }
+
+    /**
+     * The picture out of sight whatever its alpha is doing: a copy of it is flying in from the
+     * cover to land here (MiniPlayerController.applyArtBridge).
+     */
+    fun setIconHidden(hidden: Boolean) {
+        iconHidden = hidden
+        icon?.transitionAlpha = if (hidden) 0f else 1f
+    }
+
+    private var iconHidden = false
 
     /** For `op mini`: the picture as it stands - shown, alpha, frame, drawable and its bounds. */
     fun iconState(): String = icon?.let { v ->

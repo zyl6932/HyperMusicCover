@@ -28,6 +28,9 @@ import java.util.concurrent.CopyOnWriteArrayList
  * the feature off - rather than vanishing.
  */
 internal object LockIslands {
+    /** The one island every notification but the focus ones shares (stackMembers). */
+    const val STACK_KEY = "mc:stack"
+
     /** One notification as an island. */
     class Note(
         val key: String,
@@ -160,6 +163,21 @@ internal object LockIslands {
     /** Put back in the stack by a tap: an island no more until the lock screen goes. */
     private val released = HashSet<String>()
 
+    /**
+     * Every notification that is not a focus one is one island, [STACK_KEY] (2026-09-25, the
+     * user's rule: QQ and WeChat made an island of every message). These are its notifications,
+     * the newest - the one it shows - first, whether it is in the row or out in the stack.
+     */
+    @Volatile var stackMembers: List<String> = emptyList()
+        private set
+
+    /** The stack island as the row shows it; null with no notification in it. */
+    private var stackNote: Note? = null
+    private var stackFrom: List<Note> = emptyList()
+
+    /** The stack island tapped open: all of its notifications back in the stack, new ones too. */
+    private var stackOut = false
+
     fun install(classLoader: ClassLoader) {
         focusCheck = runCatching {
             Xp.findClass("com.android.systemui.statusbar.notification.utils.FocusUtils", classLoader)
@@ -193,7 +211,7 @@ internal object LockIslands {
 
     /** For `op mini`: what the filter has, and whether the stack is leaving it out. */
     fun describe(): String = "islands active=$active cover=$cover filter=${filter?.get() != null} " +
-        "released=${released.size} notes=" + notes.joinToString(",") {
+        "released=${released.size} stack=${stackMembers.size}${if (stackOut) "/out" else ""} notes=" + notes.joinToString(",") {
             (if (it.focus) "F:" else "") + (if (it.redacted) "R:" else "") + it.pkg +
                 "[${it.property}/${it.priority}${if (it.order) "/o" else ""} " +
                 "t=-${(System.currentTimeMillis() - it.since) / 1000}s]" +
@@ -264,25 +282,43 @@ internal object LockIslands {
 
     /** A tapped island goes back into the stack, for the rest of this lock screen. */
     fun release(key: String) { android.os.Trace.beginSection("MC li.release"); try {
+        if (key == STACK_KEY) {
+            if (!stackOut) {
+                stackOut = true
+                invalidate("stack released")
+            }
+            return
+        }
         if (released.add(key)) invalidate("island $key released")
     } finally { android.os.Trace.endSection() } }
 
     /** A notification put back in the stack comes back into the row: collapsed into it. */
     fun recapture(key: String) { android.os.Trace.beginSection("MC li.recapture"); try {
+        if (key == STACK_KEY) {
+            if (stackOut) {
+                stackOut = false
+                invalidate("stack recaptured")
+            }
+            return
+        }
         if (released.remove(key)) invalidate("island $key recaptured")
     } finally { android.os.Trace.endSection() } }
 
-    fun isReleased(key: String): Boolean = key in released
+    fun isReleased(key: String): Boolean = if (key == STACK_KEY) stackOut else key in released
 
-    fun releasedKeys(): List<String> = released.toList()
+    fun releasedKeys(): List<String> = released.toList() + if (stackOut) listOf(STACK_KEY) else emptyList()
 
     /** A notification as last read, released or not: what a row collapsing back will show. */
-    fun noteFor(key: String): Note? = readCache[key]?.second
+    fun noteFor(key: String): Note? = if (key == STACK_KEY) stackNote else readCache[key]?.second
+
+    /** [key]'s notifications: the stack island's, or itself. */
+    fun membersOf(key: String): List<String> = if (key == STACK_KEY) stackMembers else listOf(key)
 
     /** The lock screen went away: every notification is an island again next time. */
     fun resetReleased() {
-        if (released.isEmpty()) return
+        if (released.isEmpty() && !stackOut) return
         released.clear()
+        stackOut = false
         invalidate("released cleared")
     }
 
@@ -295,14 +331,40 @@ internal object LockIslands {
         }
     }
 
+    /**
+     * The screen going off locks it: the pipeline is run then, so the islands are read by the
+     * time it wakes. Unlocked runs read nothing, and nothing ran again until the row showed and
+     * asked (setActive) - woken from the doze, the pill stood alone for four frames and then
+     * narrowed for the small island coming up beside it (filmed 2026-09-26).
+     */
+    private var screenWatch = false
+
+    private fun watchScreen() {
+        if (screenWatch) return
+        val ctx = Main.sAppCtx ?: return
+        screenWatch = true
+        runCatching {
+            ctx.registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(c: android.content.Context, i: android.content.Intent) {
+                    // The keyguard locks a moment after the screen goes: once then, once to be sure.
+                    for (delay in SCREEN_OFF_READS) main.postDelayed({ invalidate("screen off") }, delay)
+                }
+            }, android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF))
+        }.onFailure { screenWatch = false }
+    }
+
+    private val SCREEN_OFF_READS = longArrayOf(150L, 900L)
+
     /** One filter call: records the candidate, and filters it out if the row has it. */
     private fun consider(filterObject: Any, args: List<Any?>, hidden: Boolean): Boolean {
         if (filter?.get() !== filterObject) filter = WeakReference(filterObject)
+        watchScreen()
         if (hidden) return true
         val entry = args.firstOrNull() ?: return false
         if (!lockedOrLocking(filterObject)) {
             // Unlocked: what a tap put back is an island again on the next lock screen.
             released.clear()
+            stackOut = false
             // Unlocking, the keyguard is "not locked" from the first frame of its fade-out,
             // while the row is still drawn on it: letting the islands go then put every one
             // of them in the fading stack at once - a flash of rows on each unlock (filmed
@@ -310,14 +372,15 @@ internal object LockIslands {
             // turning off after that runs the pipeline again (setActive).
             if (!active || !Main.onKeyguardNow()) return false
             val key = (Xp.getObjectField(entry, "mSbn") as? StatusBarNotification)?.key
-            val held = key != null && notes.any { it.key == key }
+            val held = key != null && notes.any { it.key == key || it.key == STACK_KEY && key in stackMembers }
             if (held) watchUnlock()
             return held
         }
         lockedRun = true
         val note = read(entry, redacted(filterObject, entry)) ?: return false
         pending[note.key] = note
-        return active && note.key !in released || cover && note.focus && note.key !in released
+        val out = if (note.focus) note.key in released else stackOut
+        return active && !out || cover && note.focus && !out
     }
 
     /**
@@ -445,8 +508,13 @@ internal object LockIslands {
         lockedRun = false
         // A group shows as its children; its summary only when it has none here.
         val grouped = all.filter { !it.summary && it.group != null }.mapNotNull { it.group }.toSet()
-        val next = all.filter { !(it.summary && it.group in grouped) && it.key !in released }
-            .sortedWith(bigFirst)
+        val shown = all.filter { !(it.summary && it.group in grouped) }
+        // Every notification but the focus ones in one island, the newest in front.
+        val members = shown.filter { !it.focus }.sortedWith(bigFirst)
+        stackMembers = members.map { it.key }
+        stackNote = aggregate(members)
+        val next = (shown.filter { it.focus && it.key !in released } +
+            listOfNotNull(stackNote?.takeIf { !stackOut })).sortedWith(bigFirst)
         // Unchanged is the same reading (read() hands back the cached note): by key and time, a
         // stopwatch paused or resumed - its `when` the same - never reached the island.
         if (next.size == notes.size && next.indices.all { next[it] === notes[it] }) return
@@ -472,9 +540,32 @@ internal object LockIslands {
         }
     }
 
+    /**
+     * The stack island: its newest notification's picture, title and line, with how many there
+     * are when more than one. The same object while its notifications are the same readings, so
+     * an unchanged run changes nothing (commit).
+     */
+    private fun aggregate(members: List<Note>): Note? {
+        if (members.isEmpty()) {
+            stackFrom = emptyList()
+            return null
+        }
+        val cached = stackNote
+        if (cached != null && members.size == stackFrom.size && members.indices.all { members[it] === stackFrom[it] }) {
+            return cached
+        }
+        stackFrom = members
+        val lead = members.first()
+        val n = members.size
+        return Note(STACK_KEY, lead.pkg, lead.title,
+            if (n > 1) "$n 条通知 · ${lead.text}" else lead.text,
+            lead.icon, focus = false, time = lead.time, intent = lead.intent, group = null,
+            summary = false, redacted = lead.redacted, since = members.maxOf { it.since })
+    }
+
     /** A notification island's standing, released or not; null for one this lock screen has not got. */
     fun rankOf(key: String): Rank? {
-        val note = lastRead[key] ?: return null
+        val note = (if (key == STACK_KEY) stackNote else lastRead[key]) ?: return null
         return Rank(note.property, note.priority, note.since)
     }
 
