@@ -99,6 +99,8 @@ object MiniPlayerRuntime {
         }.onFailure { Xp.log("MCMini: shortcut hook unavailable, no mini player: $it") }
         MiniPlayerScene.install(classLoader)
         installCardMaterialHooks(classLoader)
+        runCatching { installAodDim(classLoader) }
+            .onFailure { Xp.log("MCMini: full-AOD dim unavailable: $it") }
         LockIslands.install(classLoader)
     }
 
@@ -342,6 +344,123 @@ object MiniPlayerRuntime {
             Xp.log("MCMini: card recipe read back from preferences (${list.size} calls)")
         }.onFailure { Xp.log("MCMini: kept recipe unusable: $it") }
     }
+
+    // ---- the full-screen AOD's dim, as the card takes it
+
+    /**
+     * Into the full-screen AOD the media card darkens - and the pill, the small island and the
+     * discs, dressed in the card's material, did not (2026-09-26). The dim is not an alpha and
+     * not an effect: NotifiFullAodController runs a "fullAod" fraction and hands every listener,
+     * each frame, blend colours and glass parameters eased between the keyguard's and the AOD's
+     * (notification_glass_params_on_keyguard -> _full_aod); the card's own listener
+     * (MiuiMediaViewControllerImpl.mediaFullAodListener) puts them on its media_bg with
+     * applyElementViewBlend and setMiGlassCompat. That happens outside any effect's apply, so
+     * the recipe recorder never sees it. A listener of our own takes the same frames and puts
+     * them on every view material() dressed, the way the card's does; once the wake's run is
+     * over, each is dressed from the recipe again.
+     */
+    private val dressedViews: MutableSet<ImageView> =
+        java.util.Collections.newSetFromMap(java.util.WeakHashMap())
+
+    /** The last frame's arguments while the AOD's colours are on the views; null otherwise. */
+    private var aodDimArgs: Array<Any?>? = null
+    private var aodDimFrames = 0
+    private var blendMethod: Method? = null
+    private var glassMethod: Method? = null
+    private var blurOpenedMethod: Method? = null
+    private val aodDimHandler by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+    private val aodDimSettle = Runnable { settleAodDim() }
+
+    private fun installAodDim(classLoader: ClassLoader) {
+        val controller = Xp.findClass(
+            "com.android.systemui.statusbar.notification.fullaod.NotifiFullAodController", classLoader)
+        val listener = Xp.findClass(
+            "com.android.systemui.statusbar.notification.fullaod.INotifiFullAodListener", classLoader)
+        blendMethod = Xp.findClass("com.android.systemui.statusbar.notification.utils.NotificationUtil",
+            classLoader).declaredMethods.first { it.name == "applyElementViewBlend" && it.parameterTypes.size == 5 }
+            .apply { isAccessible = true }
+        glassMethod = Xp.findClass("com.miui.systemui.util.MiGlassCompat", classLoader)
+            .getDeclaredMethod("setMiGlassCompat", View::class.java, FloatArray::class.java)
+            .apply { isAccessible = true }
+        blurOpenedMethod = runCatching {
+            Xp.findClass("com.miui.systemui.notification.MiuiBaseNotifUtil", classLoader)
+                .getDeclaredMethod("isBackgroundBlurOpened", Context::class.java).apply { isAccessible = true }
+        }.getOrNull()
+        val add = controller.getDeclaredMethod("addCallback", listener).apply { isAccessible = true }
+        val ours = java.lang.reflect.Proxy.newProxyInstance(classLoader, arrayOf(listener)) { self, m, args ->
+            when (m.name) {
+                "updateFullAodAnimState" -> { runCatching { onAodDim(args!!) }; null }
+                "completeFullAodAnim" -> { runCatching { settleAodDim() }; null }
+                "hashCode" -> System.identityHashCode(self)
+                "equals" -> self === args?.firstOrNull()
+                "toString" -> "MusicCover full-AOD dim"
+                else -> null
+            }
+        }
+        // The controller is SystemUI's own singleton; the first listener it takes brings us in.
+        var added = false
+        Xp.hookAll(controller, "addCallback") { chain ->
+            val result = chain.proceed()
+            if (!added) {
+                added = true
+                runCatching { add.invoke(chain.thisObject, ours) }
+                    .onFailure { Xp.log("MCMini: full-AOD listener not added: $it") }
+            }
+            result
+        }
+    }
+
+    private fun onAodDim(args: Array<Any?>) {
+        aodDimArgs = args
+        aodDimFrames++
+        for (view in dressedViews.toList()) dimView(view, args)
+        // The run ends in completeFullAodAnim; should it be cut short, the last frame settles it.
+        aodDimHandler.removeCallbacks(aodDimSettle)
+        aodDimHandler.postDelayed(aodDimSettle, AOD_DIM_SETTLE_MS)
+    }
+
+    /** One frame of the AOD's colours on one view, as the card's listener puts them on its media_bg. */
+    private fun dimView(view: ImageView, args: Array<Any?>) {
+        if (!view.isAttachedToWindow) return
+        val ctx = view.context
+        val blurOpened = blurOpenedMethod?.let { runCatching { it.invoke(null, ctx) as Boolean }.getOrNull() } ?: true
+        runCatching {
+            if (blurOpened) {
+                val colours = IntArray(6) { args[4 + it] as Int }
+                blendMethod?.invoke(null, ctx, view, false, colours, false)
+                val params = args[10] as? FloatArray
+                if (args[12] == true && params != null) glassMethod?.invoke(null, view, params)
+            } else {
+                val id = ctx.resources.getIdentifier("notification_media_fullaod_item_bg", "drawable",
+                    "com.android.systemui")
+                val bg = (if (id == 0) null else ctx.getDrawable(id)) as? GradientDrawable ?: return
+                bg.mutate()
+                bg.setColor(args[2] as Int)
+                view.background = bg
+            }
+        }
+    }
+
+    /** Out of the AOD for good: every view back to the card's recipe. In the AOD, left as it is. */
+    private fun settleAodDim() {
+        aodDimHandler.removeCallbacks(aodDimSettle)
+        if (aodDimArgs == null || MiniPlayerScene.aodActive) return
+        aodDimArgs = null
+        loader?.let { cl -> for (view in dressedViews.toList()) if (view.isAttachedToWindow) material(view, cl) }
+    }
+
+    /**
+     * The doze is over (MiniPlayerScene). The wake's run of the fraction brings the colours back
+     * and ends in settleAodDim; a wake with no run would leave the views dark on a lit screen.
+     */
+    fun aodEnded() {
+        if (aodDimArgs == null) return
+        aodDimHandler.removeCallbacks(aodDimSettle)
+        aodDimHandler.postDelayed(aodDimSettle, AOD_DIM_WAKE_MS)
+    }
+
+    /** For `op mini`. */
+    private fun describeAodDim(): String = "aodDim=${if (aodDimArgs != null) "on" else "off"}/$aodDimFrames"
 
     /** Which effect dressed the card last, for the log and `op mini`. */
     @Volatile private var cardEffect = "none"
@@ -941,7 +1060,7 @@ object MiniPlayerRuntime {
     /** For `op mini`: the pill, the card, and the torch button's chain as they are right now. */
     @JvmStatic fun describe(): String {
         val sb = StringBuilder("material=$cardEffect calls=${cardRecipe?.size} empty=$emptyEffect " +
-            "aod=${MiniPlayerScene.aodActive} || ${LockIslands.describe()} || clock: ${Main.roomTrace()} || touches: " +
+            "aod=${MiniPlayerScene.aodActive} ${describeAodDim()} || ${LockIslands.describe()} || clock: ${Main.roomTrace()} || touches: " +
             synchronized(touchLog) { touchLog.joinToString(" ; ") })
         synchronized(controllers) { controllers.values.toList() }.forEach { held ->
             sb.append(" || ").append(held.controller.describe())
@@ -1121,6 +1240,9 @@ object MiniPlayerRuntime {
                 args[call.viewAt] = view
                 call.method.invoke(null, *args)
             }
+            dressedViews.add(view)
+            // Dressed in the AOD - a small island coming up there: dimmed as the rest are.
+            aodDimArgs?.let { dimView(view, it) }
         }.onFailure { error ->
             val cause = (error as? java.lang.reflect.InvocationTargetException)?.targetException ?: error
             if (!materialFailed) {
@@ -7123,6 +7245,12 @@ private const val HOLD_MAX_MS = 2000L
 
 /** ...and once its own alpha has been back at full for this long. */
 private const val HOLD_SETTLE_MS = 300L
+
+/** The full-screen AOD's colour run quiet this long: over, whether or not it said so. */
+private const val AOD_DIM_SETTLE_MS = 600L
+
+/** Awake with no colour run at all: back to the recipe after this long. */
+private const val AOD_DIM_WAKE_MS = 1500L
 
 /** A disc's frame against its diameter: room for the widest swelling and squeeze. */
 private const val DISC_FRAME = 1.6f

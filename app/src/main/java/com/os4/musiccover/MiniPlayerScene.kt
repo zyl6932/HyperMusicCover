@@ -91,6 +91,7 @@ internal object MiniPlayerScene {
         if (keyguardExitReset) keyguardGoingAway = false
         if (aodActive == active && !keyguardExitReset) return
         aodActive = active
+        if (!active) MiniPlayerRuntime.aodEnded()
         MiniPlayerRuntime.refresh()
     }
 
