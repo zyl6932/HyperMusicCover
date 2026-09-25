@@ -466,7 +466,7 @@ final class CoverPush {
         releaseCoverGuard();
         sCoverGuard = new ViewTreeObserver.OnPreDrawListener() {
             @Override
-            public boolean onPreDraw() {
+            public boolean onPreDraw() { android.os.Trace.beginSection("MC coverGuard"); try {
                 counterAodShrink(cover);
                 if (Main.sUncoverProbe) {
                     // PROBE `uncover`: our view out of the way, MIUI's layers left hidden, so the
@@ -533,7 +533,7 @@ final class CoverPush {
                 if (!onKeyguard) return true;
                 hideVideoSurfaces();
                 return true;
-            }
+            } finally { android.os.Trace.endSection(); } }
         };
         cover.getViewTreeObserver().addOnPreDrawListener(sCoverGuard);
         sCoverGuarded = cover;

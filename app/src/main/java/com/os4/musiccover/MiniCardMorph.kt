@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.view.Choreographer
 import android.view.View
 import android.view.ViewOutlineProvider
+import android.view.ViewTreeObserver
 import android.widget.TextView
 import kotlin.math.max
 import kotlin.math.min
@@ -42,6 +43,12 @@ internal class MiniCardMorph(
     private val restBox: (() -> CoverMorphMotion.Box?)? = null,
     /** That end is a small island's circle, holding only its picture. */
     private val circle: Boolean = restBox != null,
+    /**
+     * Down the screen from where the stack has the card now to where it is settling it, in
+     * pixels: a row that has just come into the stack lands where it will be once the rows
+     * leaving it are gone, not above them for the stack to slide down after.
+     */
+    private val nativeDy: (() -> Float)? = null,
 ) : Choreographer.FrameCallback {
     class Landing(val art: View?, val title: View?, val text: View?, val radius: Float, val artRadius: Float) {
         companion object {
@@ -107,6 +114,32 @@ internal class MiniCardMorph(
         }
     }
     private var running = false
+
+    /**
+     * The card is put at its box again right before the frame is drawn, against the transform
+     * the stack has given it by then: the stack's animator writes translationY later in the same
+     * frame than this morph's callback, so a card the stack was still sliding - the one the last
+     * switch had just landed, taken by the next one straight away - was drawn off by that
+     * frame's step of the slide, and shook for as long as the slide ran.
+     */
+    private var placedBox: CoverMorphMotion.Box? = null
+    private var placedScale = 0f
+    private val placedOem = Matrix()
+    private var observed: View? = null
+    private val preDraw = ViewTreeObserver.OnPreDrawListener { android.os.Trace.beginSection("MC cardMorphPreDraw"); try {
+        val box = placedBox
+        if (running && box != null && header.matrix != placedOem) placeHeader(box, placedScale)
+        true
+    } finally { android.os.Trace.endSection() } }
+
+    private fun observe(on: Boolean) {
+        observed?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnPreDrawListener(preDraw)
+        observed = null
+        if (!on) return
+        header.viewTreeObserver.addOnPreDrawListener(preDraw)
+        observed = header
+    }
+
     /** The pill's artwork as this frame drew it, on screen. */
     private var artDrawn: CoverMorphMotion.Box? = null
     /** The container as this frame drew it, on screen: where a finger can take hold of it. */
@@ -147,6 +180,7 @@ internal class MiniCardMorph(
             running = false
             return false
         }
+        observe(true)
         Choreographer.getInstance().postFrameCallback(this)
         Xp.log("MCMini: container morph to=${if (toNative) "native" else "mini"} " +
             "paired=${pieces.count { it.paired }}")
@@ -179,16 +213,28 @@ internal class MiniCardMorph(
      * the same progress, the same overshoot - and differ only by their own two ends. A follower
      * whose row came late joins it over a few frames rather than jumping to it.
      */
-    fun follow(leader: MiniCardMorph, share: Float = 1f, from: Float = leader.motion.value) {
+    fun follow(leader: MiniCardMorph, share: Float = 1f, from: Float = leader.motion.value,
+               invert: Boolean = false) {
         if (!running) return
-        motion.value = lerp(from, leader.motion.value, share)
+        // [invert]: the other way on the same spring - one island going up into its card as
+        // another comes down out of its own, the super island's expanded switch.
+        val led = if (invert) 1f - leader.motion.value else leader.motion.value
+        motion.value = lerp(from, led, share)
         motion.velocity = 0f
-        nudge.value = leader.nudge.value * share
+        nudge.value = if (invert) 0f else leader.nudge.value * share
         nudge.velocity = 0f
-        nudgeX.value = leader.nudgeX.value * share
+        nudgeX.value = if (invert) 0f else leader.nudgeX.value * share
         nudgeX.velocity = 0f
+        ledAt = SystemClock.uptimeMillis()
         apply()
     }
+
+    /**
+     * When a leader last posed it (follow). Held by no finger but started as dragged, a follower
+     * was posed twice a frame - by the leader, and again by its own frame keeping the far end
+     * live - two full passes where one is drawn: 2.4ms of every switch frame (traced 2026-09-25).
+     */
+    private var ledAt = 0L
 
     /**
      * The finger lets go: both springs take over from where it left them, the progress with
@@ -244,7 +290,7 @@ internal class MiniCardMorph(
         finish(false)
     }
 
-    override fun doFrame(frameTimeNanos: Long) {
+    override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC cardMorph"); try {
         if (!running) return
         // Asleep, bouncer, control centre: the same test as the cover morph's, every frame.
         if (!Main.coverMorphStillEligible()) {
@@ -252,8 +298,10 @@ internal class MiniCardMorph(
             return
         }
         if (dragging) {
-            // The finger writes the progress; this only keeps the far end live under it.
-            if (!apply()) finish(false)
+            // The finger writes the progress; this only keeps the far end live under it. A
+            // leader posing it this frame has done that already.
+            if (SystemClock.uptimeMillis() - ledAt < LED_FRESH_MS) Choreographer.getInstance().postFrameCallback(this)
+            else if (!apply()) finish(false)
             else Choreographer.getInstance().postFrameCallback(this)
             return
         }
@@ -272,7 +320,7 @@ internal class MiniCardMorph(
         if (motion.atRest() && nudge.atRest() && nudgeX.atRest()
             && (late || listener.canSettle(this, toNative))) finish(true)
         else Choreographer.getInstance().postFrameCallback(this)
-    }
+    } finally { android.os.Trace.endSection() } }
 
     /**
      * Which pieces have a counterpart to land on, decided once: a card element hidden now (the
@@ -290,8 +338,8 @@ internal class MiniCardMorph(
     }
 
     private fun apply(): Boolean {
-        val miniRest = restBox?.invoke() ?: mini.restBoxOnScreen() ?: return false
-        val nativeRest = headerRestBox() ?: return false
+        val miniRest = traced("MC m.rest") { restBox?.invoke() ?: mini.restBoxOnScreen() } ?: return false
+        val nativeRest = traced("MC m.native") { headerRestBox() } ?: return false
         if (miniRest.w <= 0f || nativeRest.w <= 0f) return false
         val c = motion.value.coerceIn(0f, 1f)
         val framed = containerFrame(miniRest, nativeRest, motion.value)
@@ -305,7 +353,7 @@ internal class MiniCardMorph(
         // pixels, before the stack's transform.
         val s = box.w / header.width
         if (header.visibility != View.VISIBLE) header.visibility = View.VISIBLE
-        placeHeader(box, s)
+        traced("MC m.place") { placeHeader(box, s) }
         clipW = header.width.toFloat()
         clipH = min(header.height.toFloat(), box.h / s)
         clipR = radius / s
@@ -316,7 +364,7 @@ internal class MiniCardMorph(
 
         // The mini player's frame is the container itself; its material fades last.
         boxDrawn = box
-        mini.setMorphFrame(box, radius, materialOut(c))
+        traced("MC m.frame") { mini.setMorphFrame(box, radius, materialOut(c)) }
 
         // Its content: first scaled with the container, then onto the card's own elements. From
         // a small island's circle, the pill's layout is not what is at rest there: the circle
@@ -327,6 +375,7 @@ internal class MiniCardMorph(
         val m = if (circle) box.w / laidW else box.w / miniRest.w
         val mix = pieceMix(c)
         val bridged = listener.artBridged()
+        android.os.Trace.beginSection("MC m.pieces")
         pieces.forEach { piece ->
             val v = piece.view
             val layoutX = offsetX(v)
@@ -388,7 +437,8 @@ internal class MiniCardMorph(
                 mini.setArtworkMorphRadius(lerp(home, landed, mix))
             }
         }
-        listener.onFrame(this, c)
+        android.os.Trace.endSection()
+        traced("MC m.onFrame") { listener.onFrame(this, c) }
         return true
     }
 
@@ -396,6 +446,8 @@ internal class MiniCardMorph(
         if (!running) return
         running = false
         Choreographer.getInstance().removeFrameCallback(this)
+        observe(false)
+        placedBox = null
         restore()
         listener.onSettled(this, toNative, completed)
     }
@@ -436,7 +488,8 @@ internal class MiniCardMorph(
         corner[1] = 0f
         oemMatrix.mapPoints(corner)
         val w = corner[0] - x0
-        return CoverMorphMotion.Box(origin[0] + x0, origin[1] + y0,
+        val dy = nativeDy?.invoke() ?: 0f
+        return CoverMorphMotion.Box(origin[0] + x0, origin[1] + y0 + dy,
             w, header.height * (w / header.width))
     }
 
@@ -457,6 +510,9 @@ internal class MiniCardMorph(
     private fun placeHeader(box: CoverMorphMotion.Box, s: Float) {
         val origin = headerOrigin() ?: return
         oemMatrix.set(header.matrix)
+        placedBox = box
+        placedScale = s
+        placedOem.set(oemMatrix)
         morphMatrix.setScale(s, s)
         morphMatrix.postTranslate(box.x - origin[0], box.y - origin[1])
         if (!oemMatrix.isIdentity) {
@@ -514,13 +570,37 @@ internal class MiniCardMorph(
      * the last digit, most of a stroke. The height stays on the text size ratio.
      */
     private fun textWidthScale(v: TextView, n: TextView, s: Float, bySize: Float): Float {
-        val text = v.text?.toString().orEmpty()
-        if (text.isEmpty() || text != n.text?.toString()) return bySize
-        val mine = v.paint.measureText(text)
-        val theirs = n.paint.measureText(text)
-        if (mine <= 0f || theirs <= 0f) return bySize
-        return (theirs * s / mine).coerceIn(bySize * 0.8f, bySize * 1.25f)
+        val ratio = widthRatio(v, n)
+        if (ratio.isNaN()) return bySize
+        return (ratio * s).coerceIn(bySize * 0.8f, bySize * 1.25f)
     }
+
+    /**
+     * The card's line over the pill's, measured once per text and paint size: two measureText
+     * calls per line every frame, and a string made for each, for a number that does not change
+     * while the morph runs. NaN when the two do not hold the same text.
+     */
+    private fun widthRatio(v: TextView, n: TextView): Float {
+        val a = v.text
+        val b = n.text
+        val cached = widthCache[v]
+        if (cached != null && cached.mine === a && cached.theirs === b &&
+            cached.mineSize == v.textSize && cached.theirSize == n.textSize) return cached.ratio
+        val text = a?.toString().orEmpty()
+        var ratio = Float.NaN
+        if (text.isNotEmpty() && text == b?.toString()) {
+            val mine = v.paint.measureText(text)
+            val theirs = n.paint.measureText(text)
+            if (mine > 0f && theirs > 0f) ratio = theirs / mine
+        }
+        widthCache[v] = WidthRatio(a, b, v.textSize, n.textSize, ratio)
+        return ratio
+    }
+
+    private class WidthRatio(val mine: CharSequence?, val theirs: CharSequence?,
+                             val mineSize: Float, val theirSize: Float, val ratio: Float)
+
+    private val widthCache = HashMap<View, WidthRatio>()
 
     private fun anchorY(v: View, text: Boolean): Float =
         if (text && v is TextView && v.baseline > 0) v.baseline.toFloat() else 0f
@@ -531,6 +611,9 @@ internal class MiniCardMorph(
 
         /** Past this the destination is handed back even if the scene is still moving. */
         private const val SETTLE_LIMIT_MS = 2200L
+
+        /** A leader's pose this recent stands for the frame's (follow). */
+        private const val LED_FRESH_MS = 12L
 
         /** The nudge spring runs in hundreds of pixels, the scale its thresholds were made for. */
         private const val NUDGE_UNIT = 100f

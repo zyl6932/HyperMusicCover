@@ -209,7 +209,7 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         else Main.main().post(new Runnable() { @Override public void run() { v.finish(); } });
     }
 
-    @Override public void doFrame(long nowNs) {
+    @Override public void doFrame(long nowNs) { android.os.Trace.beginSection("MC coverMorphFrame"); try {
         if (!running) return;
         if (!isAttachedToWindow() || !Main.coverMorphStillEligible()
                 || getParent() != Main.coverMorphRoot()) {
@@ -261,10 +261,11 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         } else {
             Choreographer.getInstance().postFrameCallback(this);
         }
-    }
+    } finally { android.os.Trace.endSection(); } }
 
     @Override protected void onDraw(Canvas canvas) {
         if (!running || art == null || art.isRecycled()) return;
+        if (Main.perfOff("flight")) return;
         float density = getResources().getDisplayMetrics().density;
         CoverMorphMotion.Box box = CoverMorphMotion.frame(thumb, cover, motion.value, density);
         int[] root = tmpLoc;

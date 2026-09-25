@@ -198,7 +198,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
      */
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean = false
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
+    override fun onTouchEvent(event: MotionEvent): Boolean { android.os.Trace.beginSection("MC pillTouch"); try {
         if (!acceptsTouch()) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> tracking = true
@@ -209,7 +209,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
             MotionEvent.ACTION_CANCEL -> tracking = false
         }
         return true
-    }
+    } finally { android.os.Trace.endSection() } }
 
     /**
      * A skip turns the artwork once round, the way the swipe went - left for the next track,
@@ -243,7 +243,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     private val springY = CoverMorphMotion()
     private var springLast = 0L
     private val springFrame = object : Choreographer.FrameCallback {
-        override fun doFrame(frameTimeNanos: Long) {
+        override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC viewSpring"); try {
             val dt = if (springLast == 0L) 1f / 120f
                 else ((frameTimeNanos - springLast) / 1e9f).coerceIn(0f, 0.05f)
             springLast = frameTimeNanos
@@ -255,7 +255,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
             }
             applyOffset(springX.value * 100f, springY.value * 100f)
             Choreographer.getInstance().postFrameCallback(this)
-        }
+        } finally { android.os.Trace.endSection() } }
     }
 
     val nudgeX: Float get() = offsetX
@@ -428,12 +428,21 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     fun setMorphFrame(box: CoverMorphMotion.Box, radius: Float, materialAlpha: Float) {
         if (!morphing) return
         val host = parent as? View ?: return
-        val xy = IntArray(2).also(host::getLocationOnScreen)
-        morphW = max(1, box.w.roundToInt())
-        morphH = max(1, box.h.roundToInt())
-        morphRadius = radius.coerceIn(0f, min(morphW, morphH) / 2f)
-        setLeftTopRightBottom(left, top, left + morphW, top + morphH)
-        materialLayer.setLeftTopRightBottom(0, 0, morphW, morphH)
+        val xy = traced("MC f.loc") { IntArray(2).also(host::getLocationOnScreen) }
+        val w = max(1, box.w.roundToInt())
+        val h = max(1, box.h.roundToInt())
+        val r = radius.coerceIn(0f, min(w, h) / 2f)
+        // A frame that only moves keeps its bounds and its outline: both were set again every
+        // frame, the outline twice over - a resize rebuilds it by itself (View.sizeChange).
+        val resized = w != width || h != height || materialLayer.width != w || materialLayer.height != h
+        val rounded = r != morphRadius
+        morphW = w
+        morphH = h
+        morphRadius = r
+        if (resized) {
+            traced("MC f.bounds") { setLeftTopRightBottom(left, top, left + morphW, top + morphH) }
+            traced("MC f.matBounds") { materialLayer.setLeftTopRightBottom(0, 0, morphW, morphH) }
+        }
         translationX = box.x - xy[0] - left
         translationY = box.y - xy[1] - top
         materialLayer.alpha = materialAlpha.coerceIn(0f, 1f)
@@ -444,8 +453,11 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
             val dx = (morphW - restWidth()).toFloat()
             if (toggle.translationX != dx) toggle.translationX = dx
         }
-        invalidateOutline()
-        materialLayer.invalidateOutline()
+        // Only the corner changed: the outline is not rebuilt by a resize this frame.
+        if (rounded && !resized) traced("MC f.outline") {
+            invalidateOutline()
+            materialLayer.invalidateOutline()
+        }
     }
 
     /** The artwork's corner in its own pixels while it is scaled onto the card's. */

@@ -91,7 +91,7 @@ internal object LockIslands {
     }
 
     /** For `op mini`: what the filter has, and whether the stack is leaving it out. */
-    fun describe(): String = "islands active=$active filter=${filter?.get() != null} " +
+    fun describe(): String = "islands active=$active cover=$cover filter=${filter?.get() != null} " +
         "released=${released.size} notes=" + notes.joinToString(",") {
             (if (it.focus) "F:" else "") + (if (it.redacted) "R:" else "") + it.pkg
         }
@@ -111,18 +111,54 @@ internal object LockIslands {
     fun setActive(value: Boolean) {
         if (active == value) return
         active = value
+        // The row has the islands again: the cover's hold on the focus ones is over.
+        if (value && cover) {
+            main.removeCallbacks(coverOff)
+            cover = false
+        }
         invalidate("row ${if (value) "showing" else "gone"}")
     }
 
-    /** A tapped island goes back into the stack, for the rest of this lock screen. */
-    fun release(key: String) {
-        if (released.add(key)) invalidate("island $key released")
+    /**
+     * The music's cover is up: the lock screen is the media card's alone, and the focus
+     * notifications (a timer, navigation) stay out of its stack as they stay out of it when the
+     * row shows them - the user asked for the card alone in the cover (2026-09-25). Leaving the
+     * cover, they stay out until the row has them again (setActive) or a moment has passed:
+     * let back in at once, their rows stood in the stack for the frames before the row took them.
+     */
+    private var cover = false
+
+    fun setCoverMode(value: Boolean) {
+        if (value) {
+            main.removeCallbacks(coverOff)
+            if (!cover) {
+                cover = true
+                invalidate("cover up")
+            }
+        } else if (cover) {
+            main.removeCallbacks(coverOff)
+            main.postDelayed(coverOff, COVER_RELEASE_MS)
+        }
     }
 
-    /** A notification put back in the stack comes back into the row: collapsed into it. */
-    fun recapture(key: String) {
-        if (released.remove(key)) invalidate("island $key recaptured")
+    private val coverOff = Runnable {
+        if (cover) {
+            cover = false
+            invalidate("cover gone")
+        }
     }
+
+    private const val COVER_RELEASE_MS = 1500L
+
+    /** A tapped island goes back into the stack, for the rest of this lock screen. */
+    fun release(key: String) { android.os.Trace.beginSection("MC li.release"); try {
+        if (released.add(key)) invalidate("island $key released")
+    } finally { android.os.Trace.endSection() } }
+
+    /** A notification put back in the stack comes back into the row: collapsed into it. */
+    fun recapture(key: String) { android.os.Trace.beginSection("MC li.recapture"); try {
+        if (released.remove(key)) invalidate("island $key recaptured")
+    } finally { android.os.Trace.endSection() } }
 
     fun isReleased(key: String): Boolean = key in released
 
@@ -140,7 +176,11 @@ internal object LockIslands {
 
     private fun invalidate(reason: String) {
         val f = filter?.get() ?: return
-        runCatching { Xp.callMethod(f, "invalidateList", "MusicCover: $reason") }
+        // Each is a rebuild of the whole notification list on the next frame (3-8ms on the lock
+        // screen); named in a system trace, so the ones landing mid-animation can be told apart.
+        traced("MC li.invalidate $reason") {
+            runCatching { Xp.callMethod(f, "invalidateList", "MusicCover: $reason") }
+        }
     }
 
     /** One filter call: records the candidate, and filters it out if the row has it. */
@@ -164,7 +204,7 @@ internal object LockIslands {
         }
         val note = read(entry, redacted(filterObject, entry)) ?: return false
         pending[note.key] = note
-        return active && note.key !in released
+        return active && note.key !in released || cover && note.focus && note.key !in released
     }
 
     /**

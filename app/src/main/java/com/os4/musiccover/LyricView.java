@@ -360,11 +360,11 @@ final class LyricView extends View {
     private final ViewTreeObserver.OnPreDrawListener preDraw =
             new ViewTreeObserver.OnPreDrawListener() {
                 @Override
-                public boolean onPreDraw() {
+                public boolean onPreDraw() { android.os.Trace.beginSection("MC lyricPreDraw"); try {
                     if (step()) invalidate();
                     if (!looping && needsFrames()) kick();
                     return true;
-                }
+                } finally { android.os.Trace.endSection(); } }
             };
 
     LyricView(Context ctx) {

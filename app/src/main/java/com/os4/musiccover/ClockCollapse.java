@@ -161,6 +161,9 @@ final class ClockCollapse {
     }
     /** Card progress (0 = OEM's look, 1 = cover look) at the two ends. */
     private static float sCardFrom, sCardTo;
+
+    /** How far into the entry the card's material waits before it sets off (see frame()). */
+    private static final float CARD_LAG = 0.3f;
     /**
      * The glass morph's progress, separately from the card's: on a wake the card has been in its
      * cover look all along while the clock arrives from the AOD's full size, and the glass belongs
@@ -1286,7 +1289,7 @@ final class ClockCollapse {
         final int[] frames = {0};
         sFrame = new Choreographer.FrameCallback() {
             @Override
-            public void doFrame(long now) {
+            public void doFrame(long now) { android.os.Trace.beginSection("MC clockFrame"); try {
                 if (sFrame != this) return;
                 if (last[0] == 0L) last[0] = now;
                 float dt = (now - last[0]) / 1e9f;
@@ -1379,7 +1382,7 @@ final class ClockCollapse {
                 }
                 sFrame = null;
                 land();
-            }
+            } finally { android.os.Trace.endSection(); } }
         };
         Choreographer.getInstance().postFrameCallback(sFrame);
         invalidate();
@@ -1499,7 +1502,7 @@ final class ClockCollapse {
     private static final ViewTreeObserver.OnPreDrawListener PRE_DRAW =
             new ViewTreeObserver.OnPreDrawListener() {
         @Override
-        public boolean onPreDraw() {
+        public boolean onPreDraw() { android.os.Trace.beginSection("MC clockPreDraw"); try {
             long t0 = System.nanoTime();
             try {
                 frame();
@@ -1512,7 +1515,7 @@ final class ClockCollapse {
                 if (d > sPerfPreMax) sPerfPreMax = d;
             }
             return true;
-        }
+        } finally { android.os.Trace.endSection(); } }
     };
 
     /**
@@ -1732,7 +1735,10 @@ final class ClockCollapse {
         Phase phase = sPhase;
         if (phase == Phase.OFF) return;
         Live m = LIVE;
-        if (!measure(m)) return;
+        boolean measured;
+        android.os.Trace.beginSection("MC c.measure");
+        try { measured = measure(m); } finally { android.os.Trace.endSection(); }
+        if (!measured) return;
 
         if (phase == Phase.AOD) {
             if (sWaking && Main.coverModeOn()) {
@@ -1808,7 +1814,7 @@ final class ClockCollapse {
             }
         }
 
-        Main.convertLegacyHeight(m.box);
+        android.os.Trace.beginSection("MC c.legacy"); try { Main.convertLegacyHeight(m.box); } finally { android.os.Trace.endSection(); }
         if (phase == Phase.ON && Float.isNaN(sFloor)) {
             // Settled before the floor could be read - a restore at startup, before the keyguard
             // existed. The OEM has laid out by now, so read it and hold there.
@@ -1826,7 +1832,9 @@ final class ClockCollapse {
 
         // The cover pose, live.
         float d = Main.density();
-        float full = fullUnitFor(phase, m);
+        float full;
+        android.os.Trace.beginSection("MC c.full");
+        try { full = fullUnitFor(phase, m); } finally { android.os.Trace.endSection(); }
         float size = Main.sClockSize;
         float coverUnit = Float.isNaN(size) ? Main.sClockHeightDp * d : size * full;
         if (coverUnit > full) coverUnit = full;
@@ -1845,7 +1853,9 @@ final class ClockCollapse {
         // Notifications. The OEM squeezes its full clock out of their way - down to its minimum
         // height, then up - and ours gets the same rule, off the same number: the notifY the OEM
         // keeps reporting while we hold it is the screen y the stack starts at.
-        float room = roomBelow();
+        float room;
+        android.os.Trace.beginSection("MC c.room");
+        try { room = roomBelow(); } finally { android.os.Trace.endSection(); }
         if (!Float.isNaN(room)) {
             float ratio = m.box.height() / m.unit;
             float bottom = coverTop + coverUnit * ratio;
@@ -1906,12 +1916,22 @@ final class ClockCollapse {
             unit = sFromUnit + (toUnit - sFromUnit) * t;
             date = Float.isNaN(sFromDate) ? toDate : sFromDate + (toDate - sFromDate) * t;
             float tc = Math.max(0f, Math.min(1f, t));
-            card = sCardFrom + (sCardTo - sCardFrom) * tc;
+            // Into the cover, the card's material sets off after the artwork has: the entry's
+            // first frames are the GPU's worst - the artwork's texture going up, the new effects
+            // set up, three frames queued behind them (traced 2026-09-25, 7-34ms waits) - and the
+            // card's crossfade was one more full-card redraw on each of them. It catches up on a
+            // smooth curve and lands with the clock.
+            float tCard = tc;
+            if (in && !Main.perfOff("lag")) {
+                float u = Math.max(0f, Math.min(1f, (tc - CARD_LAG) / (1f - CARD_LAG)));
+                tCard = u * u * (3f - 2f * u);
+            }
+            card = sCardFrom + (sCardTo - sCardFrom) * tCard;
             glass = sGlassFrom + (sGlassTo - sGlassFrom) * tc;
         }
 
-        writePose(m, top, unit, date, phase == Phase.ENTER && sGlyphTail);
-        if (phase == Phase.ON) notePose(m, top, unit, date, full, room);
+        android.os.Trace.beginSection("MC c.write"); try { writePose(m, top, unit, date, phase == Phase.ENTER && sGlyphTail); } finally { android.os.Trace.endSection(); }
+        if (phase == Phase.ON) { android.os.Trace.beginSection("MC c.note"); try { notePose(m, top, unit, date, full, room); } finally { android.os.Trace.endSection(); } }
         // Once per drawn frame: onGlyphDrawn re-places from inside the draw, so this runs
         // three times a frame on this style and a trace that kept them all covered a third of
         // one transition. See sRedoing.
@@ -1926,11 +1946,11 @@ final class ClockCollapse {
             View gt = firstTarget();
             noteFall(m.unit, sLastToUnit, unit, gt == null ? 1f : aboveScaleY(gt));
         }
-        Main.setCardProgressFrom(card);
+        android.os.Trace.beginSection("MC c.card"); try { Main.setCardProgressFrom(card); } finally { android.os.Trace.endSection(); }
         sGlassP = glass;
-        Main.applyGlassMorph(glass);
+        android.os.Trace.beginSection("MC c.glass"); try { Main.applyGlassMorph(glass); } finally { android.os.Trace.endSection(); }
         // The colour band describes the lock screen; the AOD's layout is not that.
-        if (!(phase == Phase.EXIT && sExitToAod)) Main.updateColorBand();
+        if (!(phase == Phase.EXIT && sExitToAod)) { android.os.Trace.beginSection("MC c.band"); try { Main.updateColorBand(); } finally { android.os.Trace.endSection(); } }
     }
 
     /**

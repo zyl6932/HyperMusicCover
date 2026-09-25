@@ -1425,6 +1425,8 @@ public class Main extends XposedModule {
                 } catch (Throwable ignored) {
                 }
                 if (ev != null) {
+                    // A touch on the lit lock screen counts as the user being there.
+                    touchKeepsAwake();
                     // Whether this gesture began on the control centre, decided at the DOWN and
                     // nowhere else.
                     //
@@ -1470,7 +1472,8 @@ public class Main extends XposedModule {
                             return Boolean.TRUE;
                         }
                         if (swipe == SWIPE_HELD) return Boolean.TRUE;
-                    } catch (Throwable ignored) {
+                    } catch (Throwable t) {
+                        MiniPlayerRuntime.noteTouch("card swipe failed: " + t);
                     }
                     try {
                         if (swallowArtTap(ev)) return Boolean.TRUE;
@@ -2644,6 +2647,15 @@ public class Main extends XposedModule {
                         setResultData(MiniPlayerRuntime.describe());
                     } else if ("fold".equals(op)) {
                         setResultData(describeFold());
+                    } else if ("keepawake".equals(op)) {
+                        // --ez on true|false: the lock screen held lit for a test run.
+                        setResultData(keepAwake(i.getBooleanExtra("on", true)));
+                    } else if ("perfoff".equals(op)) {
+                        // --es off glass,card,flight: those cover-entry effects skipped, to
+                        // weigh each one's GPU cost against gfxinfo. Empty puts them all back.
+                        String off = i.getStringExtra("off");
+                        if (off != null) sPerfOff = off;
+                        setResultData("perfoff=" + sPerfOff);
                     } else if ("alphasweep".equals(op)) {
                         // --ei ms N starts a sweep; without it, reads the last one back.
                         int ms = i.getIntExtra("ms", 0);
@@ -2739,6 +2751,8 @@ public class Main extends XposedModule {
                 } else if (Intent.ACTION_SCREEN_OFF.equals(a)) {
                     sScreenOn = false;
                     sAodGrey = Float.NaN;
+                    // Held into a doze, the screen wake lock would pull the phone back out of it.
+                    if (sKeepAwakeView != null) keepAwake(false);
                     // A tap still waiting out its double tap window was aimed at a screen that
                     // is gone; whatever was going to cancel it cannot arrive now.
                     cancelPendingTap("screen off");
@@ -5700,14 +5714,14 @@ public class Main extends XposedModule {
     private static final android.view.Choreographer.FrameCallback sBlurSyncFrame =
             new android.view.Choreographer.FrameCallback() {
                 @Override
-                public void doFrame(long frameTimeNanos) {
+                public void doFrame(long frameTimeNanos) { android.os.Trace.beginSection("MC blurSync"); try {
                     sBlurSyncPumping = false;
                     if (android.os.SystemClock.uptimeMillis() >= sBlurSyncUntil) return;
                     View root = sContainer == null ? null : sContainer.getRootView();
                     if (root != null) root.invalidate();
                     sBlurSyncPumping = true;
                     android.view.Choreographer.getInstance().postFrameCallback(this);
-                }
+                } finally { android.os.Trace.endSection(); } }
             };
 
     private static void startBlurSync(String why) {
@@ -5969,6 +5983,8 @@ public class Main extends XposedModule {
      */
     private static void enterCoverMode(boolean animate) {
         sCoverMode = true;
+        // The cover is the media card's alone: the focus notifications stay out of the stack.
+        LockIslands.INSTANCE.setCoverMode(true);
         MiniPlayerRuntime.refresh();
         CoverCardLayer.entering();
         armTransitionTrace("entering cover mode");
@@ -6021,6 +6037,7 @@ public class Main extends XposedModule {
     private static void exitCoverMode(boolean animate) {
         CoverCardLayer.leaving();
         sCoverMode = false;
+        LockIslands.INSTANCE.setCoverMode(false);
         CoverCardLayer.refresh();
         // The cover is on its way out, so the reading that coloured the clock describes the
         // wallpaper coming back even less than it described the old one. Dropped at the start:
@@ -6114,7 +6131,8 @@ public class Main extends XposedModule {
      * up, only the lock screen, and no cover scene over it.
      */
     static boolean miniPlayerIslandsPresentable() {
-        return !coverSceneActive() && keyguardShowing();
+        // In the cover too: the cover is the music's card, and the other islands stay in the row.
+        return keyguardShowing();
     }
 
     /** A notification row's corner, for a morph onto it: its own outline, else the card's. */
@@ -6135,7 +6153,7 @@ public class Main extends XposedModule {
      * Asked through miniPlayerCanShow, a row with no card never took a touch at all.
      */
     static boolean miniPlayerIslandsCanShow() {
-        return islandsDisplayEligible() && !miniControlCenterUp();
+        return islandsDisplayEligible(true) && !miniControlCenterUp();
     }
 
     static boolean miniPlayerControlCenterUp() { return miniControlCenterUp(); }
@@ -6161,11 +6179,11 @@ public class Main extends XposedModule {
 
     /** A translucent control center keeps the selected mini card visible but blocks its taps. */
     static boolean miniPlayerDisplayEligible() {
-        return sCardShowing && islandsDisplayEligible();
+        return sCardShowing && islandsDisplayEligible(false);
     }
 
-    private static boolean islandsDisplayEligible() {
-        if (coverSceneActive() || !screenOnCached() ||
+    private static boolean islandsDisplayEligible(boolean inCover) {
+        if (!inCover && coverSceneActive() || !screenOnCached() ||
                 !keyguardShowing() || !onKeyguardNow()) return false;
         long now = android.os.SystemClock.uptimeMillis();
         if (now - sMiniBouncerCheckedAt > 100L) {
@@ -6184,6 +6202,12 @@ public class Main extends XposedModule {
         } else {
             enterFromTap("mini player tapped");
         }
+    }
+
+    /** An island opened from the cover: the cover goes, its card coming down into the row. */
+    static void miniPlayerLeaveCover() {
+        if (!sCoverMode) return;
+        exitFromTap("island opened from the cover");
     }
 
     /**
@@ -6276,7 +6300,10 @@ public class Main extends XposedModule {
         if (card != null && card.isShown() && card.getHeight() > 0) {
             int[] xy = new int[2];
             card.getLocationOnScreen(xy);
-            if (xy[1] > sScreenH / 3 && xy[1] <= sScreenH) return xy[1];
+            // Where the lock islands hold the card while the stack catches up, not where the
+            // stack has it this frame: the cover's artwork is laid out above it.
+            float top = xy[1] + MiniPlayerRuntime.cardHeldDy(card);
+            if (top > sScreenH / 3 && top <= sScreenH) return top;
         }
         // The OEM card may not have been laid out after wake. An old measurement belongs to
         // another lock session, so wait for this one's measured boundary.
@@ -6745,7 +6772,7 @@ public class Main extends XposedModule {
         releaseDepthGuard();
         sDepthGuard = new ViewTreeObserver.OnPreDrawListener() {
             @Override
-            public boolean onPreDraw() {
+            public boolean onPreDraw() { android.os.Trace.beginSection("MC depthGuard"); try {
                 if (sDepthHidden && d.getVisibility() == View.VISIBLE) {
                     // VISIBLE -> INVISIBLE only invalidates, it does not request a layout, so
                     // this cannot start a traversal loop.
@@ -6760,7 +6787,7 @@ public class Main extends XposedModule {
                 // on screen, which is a lock-screen question this guard cannot answer - and two
                 // guards writing one property just take turns undoing each other.
                 return true;
-            }
+            } finally { android.os.Trace.endSection(); } }
         };
         d.getViewTreeObserver().addOnPreDrawListener(sDepthGuard);
         sDepthGuarded = d;
@@ -7288,9 +7315,82 @@ public class Main extends XposedModule {
 
 
 
+    /**
+     * `op keepawake`: the lock screen kept lit through a test run, by the mechanism the lyrics'
+     * "屏幕常亮" uses (LockLyrics.holdScreen): keepScreenOn on a view in the shade window, whose
+     * FLAG_KEEP_SCREEN_ON the window manager holds a screen wake lock for - which outranks the
+     * 10s userActivityTimeout the shade window sets on the lock screen. Let go on screen off
+     * and after KEEP_AWAKE_MS whatever happens, so a forgotten one cannot keep the phone lit.
+     */
+    private static View sKeepAwakeView;
+    private static final long KEEP_AWAKE_MS = 15 * 60 * 1000L;
+    private static final Runnable KEEP_AWAKE_OFF = new Runnable() {
+        @Override public void run() { keepAwake(false); }
+    };
+
+    static String keepAwake(boolean on) {
+        View old = sKeepAwakeView;
+        if (old != null) {
+            old.setKeepScreenOn(false);
+            sKeepAwakeView = null;
+        }
+        main().removeCallbacks(KEEP_AWAKE_OFF);
+        if (!on) return "keepawake=off";
+        View c = sContainer;
+        if (c == null || !c.isAttachedToWindow()) return "keepawake=no view";
+        // Asked for in a doze, it would light the screen at full brightness.
+        if (!sScreenOn) return "keepawake=screen off";
+        c.setKeepScreenOn(true);
+        sKeepAwakeView = c;
+        main().postDelayed(KEEP_AWAKE_OFF, KEEP_AWAKE_MS);
+        return "keepawake=on (" + c.getClass().getSimpleName() + "), off on screen off or in 15 min";
+    }
+
+    /**
+     * A touch on the lit lock screen puts the sleep off, as a touch anywhere else does. The shade
+     * window turns input into user activity off (INPUT_FEATURE_DISABLE_USER_ACTIVITY) and sets its
+     * own 10s userActivityTimeout, so on the lock screen the screen went to the AOD 10s after it
+     * woke however much it was being touched; the user asked for it to stay lit while in use
+     * (2026-09-25). The real touch is reported - PowerManager.userActivity, which SystemUI holds
+     * DEVICE_POWER for - and the ordinary timeout, dimming first, runs from the last one. At most
+     * once a second: a drag is one binder call, not one a frame. Never in a doze, where a touch
+     * is not a wake.
+     */
+    private static long sLastUserActivity;
+    private static java.lang.reflect.Method sUserActivityMethod;
+
+    private static void touchKeepsAwake() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - sLastUserActivity < USER_ACTIVITY_EVERY_MS) return;
+        if (!sScreenOn || !keyguardShowing()) return;
+        sLastUserActivity = now;
+        try {
+            PowerManager pm = sAppCtx.getSystemService(PowerManager.class);
+            if (sUserActivityMethod == null) {
+                sUserActivityMethod = PowerManager.class.getMethod("userActivity",
+                        long.class, int.class, int.class);
+            }
+            // PowerManager.USER_ACTIVITY_EVENT_TOUCH
+            sUserActivityMethod.invoke(pm, now, 2, 0);
+        } catch (Throwable t) {
+            Xp.log(TAG + "user activity: " + t);
+        }
+    }
+
+    private static final long USER_ACTIVITY_EVERY_MS = 1000L;
+
+    /** Cover-entry effects switched off for a GPU measurement (`op perfoff`); empty in use. */
+    static volatile String sPerfOff = "";
+
+    static boolean perfOff(String effect) {
+        String off = sPerfOff;
+        return !off.isEmpty() && off.contains(effect);
+    }
+
     private static void setCardProgress(float p) {
         if (p < 0f) p = 0f;
         if (p > 1f) p = 1f;
+        if (perfOff("card")) p = p < 0.5f ? 0f : 1f;
         if (sCardP == p) return;
         sCardP = p;
         CoverCardLayer.refresh();
@@ -7441,7 +7541,7 @@ public class Main extends XposedModule {
      * down, more down than sideways, past the touch slop. Horizontal drags (the progress bar)
      * and taps (the buttons) never qualify, and are left alone from the DOWN on.
      */
-    private static int cardSwipe(MotionEvent ev) {
+    private static int cardSwipe(MotionEvent ev) { android.os.Trace.beginSection("MC t.cardSwipe"); try {
         switch (ev.getActionMasked()) {
             case MotionEvent.ACTION_DOWN: {
                 sCardSwipeFired = false;
@@ -7456,6 +7556,14 @@ public class Main extends XposedModule {
                 }
                 sCardSwipeX = ev.getRawX();
                 sCardSwipeY = ev.getRawY();
+                // For `op mini`: why a pull on the card did or did not take. A pull down in the
+                // cover once did nothing until the player was restarted (2026-09-25), and nothing
+                // said which of these it was.
+                MiniPlayerRuntime.noteTouch("card down armed=" + sCardSwipeArmed
+                        + " want=" + MiniPlayerRuntime.wantsNativeCardSwipe()
+                        + " centre=" + sGestureOnCentre + " charge=" + sGestureOnCharge
+                        + " cover=" + sCoverMode + " card=" + describeCardRect()
+                        + " row=" + sCardSwipeRow);
                 return SWIPE_NONE;
             }
             case MotionEvent.ACTION_MOVE: {
@@ -7488,6 +7596,8 @@ public class Main extends XposedModule {
                     // each into its own island, and folded they had nothing to come out of.
                     sCardSwipeShared = keyguardCanFoldNotifications()
                             && !MiniPlayerRuntime.islandsTakeRows();
+                    MiniPlayerRuntime.noteTouch("card swipe fired cover=" + sCoverMode
+                            + " shared=" + sCardSwipeShared);
                     if (sCoverMode) {
                         // Out of the cover or the lyrics, landing on the pill: the scene exit
                         // shrinks the card into it.
@@ -7517,7 +7627,7 @@ public class Main extends XposedModule {
             default:
                 return sCardSwipeFired && !sCardSwipeShared ? SWIPE_HELD : SWIPE_NONE;
         }
-    }
+    } finally { android.os.Trace.endSection(); } }
 
     /**
      * Whether a pull down on the keyguard's notifications would fold them into the count: some
@@ -7578,6 +7688,16 @@ public class Main extends XposedModule {
             Xp.log(TAG + "notification fold state unreadable: " + t);
             return false;
         }
+    }
+
+    /** The rect cardRectContains tests, and whether the card is up at all, for the touch log. */
+    private static String describeCardRect() {
+        View header = miniPlayerMediaHeader();
+        if (header == null) return "none";
+        int[] loc = new int[2];
+        header.getLocationOnScreen(loc);
+        return (header.isShown() ? "" : "hidden:") + loc[0] + "," + loc[1] + "+" + header.getWidth()
+                + "x" + header.getHeight();
     }
 
     private static boolean cardRectContains(float x, float y) {
@@ -7989,10 +8109,10 @@ public class Main extends XposedModule {
         releaseCardGuard();
         sCardGuard = new ViewTreeObserver.OnPreDrawListener() {
             @Override
-            public boolean onPreDraw() {
+            public boolean onPreDraw() { android.os.Trace.beginSection("MC cardGuard"); try {
                 assertMediaCard(card);
                 return true;
-            }
+            } finally { android.os.Trace.endSection(); } }
         };
         card.getViewTreeObserver().addOnPreDrawListener(sCardGuard);
         sCardGuarded = card;
@@ -10209,6 +10329,7 @@ public class Main extends XposedModule {
     /** Rides the same progress as the scale, so one OEM spring drives size and look together. */
     static void applyGlassMorph(float p) {
         if (Float.isNaN(sGlassV0)) return;
+        if (perfOff("glass")) return;
         // Not while the screen is off, and this is the one that matters for the AOD. The clock
         // keeps its hold through doze - the re-asserts below put the placement back on the doze
         // layout - but they drove this on the way, and cover mode's glass value is not the one

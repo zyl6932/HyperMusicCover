@@ -438,7 +438,7 @@ internal class MiniSqueeze(private val gapPx: Float, private val onFrame: () -> 
         Choreographer.getInstance().postFrameCallback(this)
     }
 
-    override fun doFrame(frameTimeNanos: Long) {
+    override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC squeeze"); try {
         posted = false
         val dt = if (lastFrame == 0L) 1f / 120f
             else ((frameTimeNanos - lastFrame) / 1e9f).coerceIn(0f, 0.05f)
@@ -454,7 +454,7 @@ internal class MiniSqueeze(private val gapPx: Float, private val onFrame: () -> 
             posted = true
             Choreographer.getInstance().postFrameCallback(this)
         }
-    }
+    } finally { android.os.Trace.endSection() } }
 
     companion object {
         /** Pressed, the pill sinks to this scale and a disc to this (IslandGestureAnimator). */

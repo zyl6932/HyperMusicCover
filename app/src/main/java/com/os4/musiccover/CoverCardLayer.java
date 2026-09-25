@@ -168,7 +168,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         unwatchGeometry();
         geometryObserver = layer.getViewTreeObserver();
         geometryListener = new ViewTreeObserver.OnPreDrawListener() {
-            @Override public boolean onPreDraw() {
+            @Override public boolean onPreDraw() { android.os.Trace.beginSection("MC coverGeom"); try {
                 // This parent is also drawn behind the unlocked notification shade. The card's
                 // animation stops when it settles, and ACTION_USER_PRESENT is not guaranteed to
                 // arrive before the shade uses this layer. Enforce the lock-screen condition on
@@ -212,7 +212,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
                     start();
                 }
                 return true;
-            }
+            } finally { android.os.Trace.endSection(); } }
         };
         geometryObserver.addOnPreDrawListener(geometryListener);
     }
@@ -756,7 +756,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         goalSide = goal.side;
     }
 
-    @Override public void doFrame(long nowNs) {
+    @Override public void doFrame(long nowNs) { android.os.Trace.beginSection("MC coverCardFrame"); try {
         if (!ticking || !isAttachedToWindow()) { stop(); return; }
         float dt = lastFrame == 0L ? 1f / 60f
                 : Math.min(0.05f, Math.max(0f, (nowNs - lastFrame) / 1e9f));
@@ -855,7 +855,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         } else {
             stop();
         }
-    }
+    } finally { android.os.Trace.endSection(); } }
 
     @Override protected void onDraw(Canvas canvas) {
         // Last line of defence if SystemUI replaced the parent's observer during a transition.
