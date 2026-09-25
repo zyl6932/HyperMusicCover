@@ -5145,12 +5145,18 @@ public class Main extends XposedModule {
     private static String sRoomLast = "";
 
     private static void traceRoom(float requested, float top, float out) {
-        String line = r1(requested) + ">" + r1(out) + "(top " + r1(top) + ")";
+        String src;
+        try {
+            src = MiniPlayerRuntime.stackContentSource();
+        } catch (Throwable t) {
+            src = "?";
+        }
+        String line = r1(requested) + ">" + r1(out) + "(top " + r1(top) + " " + src + ")";
         if (line.equals(sRoomLast)) return;
         sRoomLast = line;
         synchronized (sRoomTrace) {
             sRoomTrace.addLast(android.os.SystemClock.uptimeMillis() % 100000 + " " + line);
-            while (sRoomTrace.size() > 16) sRoomTrace.removeFirst();
+            while (sRoomTrace.size() > 120) sRoomTrace.removeFirst();
         }
     }
 

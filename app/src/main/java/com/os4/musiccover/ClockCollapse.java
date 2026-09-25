@@ -447,7 +447,7 @@ final class ClockCollapse {
         sGlassFrom = sGlassP;
         sGlassTo = 0f;
         sYFrom = currentY(natural);
-        sYTo = natural;
+        sYTo = exitY(natural);
         sExitToAod = false;
         // The entry's glyph tail, mirrored. Not by sizing for the full clock first: the glyphs
         // are still squeezed and relatively far wider, and at full height they ran off both
@@ -822,6 +822,19 @@ final class ClockCollapse {
     private static float naturalY() {
         return Main.sLastSystemY;
     }
+
+    /**
+     * Where the clock goes out of the cover: the OEM's y, given the room the rows really leave
+     * (Main.roomForRows). The OEM's own figure keeps room for one big notification whatever is
+     * there, so the exit landed on a squeezed clock and it grew again once let go - out of the
+     * music card into a focus notification, the clock shrank and came back (2026-09-26).
+     */
+    private static float exitY(float natural) {
+        return Float.isNaN(natural) ? natural : Main.roomForRows(natural);
+    }
+
+    /** The share of the way to a moved exit end taken each frame. */
+    private static final float EXIT_FOLLOW = 0.25f;
 
     private static float currentY(float natural) {
         Float held = Main.sHoldY;
@@ -1357,6 +1370,13 @@ final class ClockCollapse {
                 if (sPerfLastAt != 0L) sPerfGapMax = Math.max(sPerfGapMax, now - sPerfLastAt);
                 sPerfLastAt = now;
                 sPerfN++;
+                // Out of the cover, the rows settle under the clock while it goes: the card
+                // behind the pill goes out of sight and the row let out drops to the stack's
+                // bottom. The end is followed there, eased so a row landing is not a jump.
+                if (sPhase == Phase.EXIT && !sExitToAod && !done && !Float.isNaN(sYTo)) {
+                    float want = exitY(naturalY());
+                    if (!Float.isNaN(want)) sYTo += (want - sYTo) * EXIT_FOLLOW;
+                }
                 if (!Float.isNaN(sYFrom) && !Float.isNaN(sYTo)) {
                     long y0 = System.nanoTime();
                     float y = done ? sYTo : sYFrom + (sYTo - sYFrom) * shape;
@@ -1444,7 +1464,9 @@ final class ClockCollapse {
         clearTransforms();
         Float held = Main.sHoldY;
         Main.sHoldY = null;
-        float natural = naturalY();
+        // Given the rows' room too: applyY is our own write, which the notifY hooks let past
+        // roomForRows, and the raw figure squeezed the clock the exit had just landed full.
+        float natural = exitY(naturalY());
         if (held != null && !Float.isNaN(natural)) Main.applyY(natural);
         Main.restoreGlass();
         Main.onClockReleased();

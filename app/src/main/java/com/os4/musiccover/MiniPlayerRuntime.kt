@@ -1130,6 +1130,9 @@ object MiniPlayerRuntime {
     @JvmStatic fun stackContentTop(): Float =
         live().firstNotNullOfOrNull { it.stackContentTop().takeUnless(Float::isNaN) } ?: Float.NaN
 
+    /** Which row the last stackContentTop came from, and how many hidden rows it passed over, for `op mini`. */
+    @JvmStatic fun stackContentSource(): String = live().firstOrNull()?.contentTopFrom ?: "-"
+
     /** Where a flight from the cover lands, and the corner it lands in. */
     @JvmStatic @JvmName("artworkRestBox") internal fun artworkRestBox(): CoverMorphMotion.Box? =
         live().firstNotNullOfOrNull { it.artworkRestBox() }
@@ -3758,7 +3761,15 @@ private class MiniPlayerController(
     private var contentTopAt = 0L
     private var contentTop = Float.NaN
 
-    /** See the static stackContentTop: every row and card in the stack, at the stack's own target. */
+    /**
+     * See the static stackContentTop: every row and card in the stack, at the stack's own target -
+     * but not the rows this controller has hidden. A notification gone into an island keeps its
+     * row in the stack, invisible, and the stack lays out from the bottom up: with the stopwatch
+     * let out under it, the hidden QQ row stood 258px above the stopwatch's card and the clock
+     * shrank for a row nobody could see (filmed 2026-09-26). settleDy skips them the same way.
+     * Nor any child not drawn at all - the media card behind the pill is the other one.
+     * With every row hidden, the content starts at the stack's bottom: nothing there to give way to.
+     */
     fun stackContentTop(): Float {
         if (!config.getBoolean(MiniPlayerConfig.ENABLED)) return Float.NaN
         // Asked on every frame of the clock's own animation: read once a frame at most.
@@ -3768,18 +3779,57 @@ private class MiniPlayerController(
         val stack = notificationStack()
         contentTop = if (stack == null || !stack.isAttachedToWindow) Float.NaN else {
             var top = Float.POSITIVE_INFINITY
+            var from: View? = null
+            var skipped = 0
+            val stackY = IntArray(2).also(stack::getLocationOnScreen)[1]
+            // Every child weighed, for `op mini`: name:target-on-screen/translation and why skipped.
+            val seen = StringBuilder()
+            // A card a switch is taking home to its island is the morph's, drawn on its way to the
+            // row, not where the stack still has it. The media card going back to the pill for a
+            // focus notification was pushed up the stack by the row let out under it, 1700 -> 1425,
+            // and the clock shrank for it until it went (probe, 2026-09-26).
+            val leaving = exchange?.movers?.values?.filter { it.headedHome }?.map { it.native }.orEmpty() +
+                // The same for the music's own morph into the pill: pulled down out of the cover,
+                // the exit aimed at the card and then jumped to full size as it went (2026-09-26).
+                listOfNotNull(transitionHeader()?.takeIf {
+                    morph?.toNative == false && (noteMorphKey == null || noteMorphKey == MUSIC_ISLAND)
+                })
             for (i in 0 until stack.childCount) {
                 val c = stack.getChildAt(i)
                 if (c.visibility == View.GONE || c.height <= 0) continue
                 val name = c.javaClass.name
                 if (!name.contains("ExpandableNotificationRow") && !name.contains("MediaHeader")) continue
-                top = minOf(top, stackTargetY(c) + c.top)
+                val t = stackTargetY(c) + c.top
+                seen.append(' ').append(shortName(c)).append(':').append((stackY + t).toInt())
+                    .append('/').append((stackY + c.top + c.translationY).toInt())
+                if (c in hiddenRows) seen.append('H')
+                if (c.visibility != View.VISIBLE) seen.append('I')
+                if (c.alpha <= 0.01f) seen.append('A')
+                if (pinned?.get() === c) seen.append('P')
+                val home = leaving.any { isInside(it, c) }
+                if (home) seen.append('L')
+                // The media card the pill stands in for is kept INVISIBLE, still laid out (see
+                // the setVisibility hook in install): the clock gave way to it too (2026-09-26).
+                if (home || c in hiddenRows || c.visibility != View.VISIBLE || c.alpha <= 0.01f) { skipped++; continue }
+                if (t < top) { top = t; from = c }
             }
-            if (top == Float.POSITIVE_INFINITY) Float.NaN
-            else IntArray(2).also(stack::getLocationOnScreen)[1] + top
+            contentTopFrom = (from?.let(::shortName) ?: "-") + " skip=$skipped" +
+                (if (exchange != null) " X" else "") + (if (morph != null) " M" else "") + " [" + seen.toString().trim() + "]"
+            when {
+                from != null -> stackY + top
+                skipped > 0 -> (stackY + stack.height).toFloat()
+                else -> Float.NaN
+            }
         }
         return contentTop
     }
+
+    /** See stackContentSource. */
+    var contentTopFrom = "-"
+        private set
+
+    private fun shortName(v: View): String =
+        rowKey(v)?.substringAfter('|')?.substringBefore('|')?.substringAfterLast('.') ?: v.javaClass.simpleName
 
     private fun stackTargetHeight(v: View): Float = runCatching {
         (Xp.getObjectField(Xp.callMethod(v, "getViewState")!!, "height") as Number).toFloat()
@@ -5905,7 +5955,14 @@ private class MiniPlayerController(
     fun visibleHeightDp(): Float = configuredHeightDp
 
     fun transitionActive(): Boolean = morph != null
-    fun hardSuppressionActive(): Boolean = nativeSuppressionRequested && morph == null
+    /**
+     * Only the media card's own morph lets the OEM show it. [morph] is a notification's too: while
+     * one opened or went home, the stack's setVisibility(VISIBLE) on the header went through, and
+     * with notifications coming one after another the card flashed up (the user, 2026-09-26).
+     * Whose morph it is, is told the same way as cardMoving in updateVisibility.
+     */
+    fun hardSuppressionActive(): Boolean = nativeSuppressionRequested &&
+        (morph == null || noteMorphKey != null && noteMorphKey != MUSIC_ISLAND)
 
     /** A morph into the cover or the lyrics landed on the card at this uptime, the scene not up yet. */
     private var sceneLandedAt = 0L
