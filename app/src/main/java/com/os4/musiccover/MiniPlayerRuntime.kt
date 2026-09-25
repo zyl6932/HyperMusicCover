@@ -1615,6 +1615,58 @@ private class MiniPlayerController(
      */
     private var landingBox: CoverMorphMotion.Box? = null
 
+    /**
+     * The small island's pulse, the super island's smallIslandScaleAnimation: when the island out
+     * as its card goes back into hiding - no place in the row for it - the small island swells to
+     * 1.1 and back, to say the row still holds something (triggerScaleAnimationAfterExpandedHidden,
+     * the phone's; a tablet pulses the big island). Each way sinInOut 200ms after 100ms, as
+     * FolmeEase.sinInOut(200) with the 100ms delay the plugin gives both halves. Stopped when
+     * the small place changes hands.
+     */
+    private var pulseKey: String? = null
+    private var pulseAt = 0L
+
+    private val pulseFrame = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC pulse"); try {
+            if (pulseKey == null) return
+            smallPulse()
+            followShortcuts()
+            if (pulseKey != null) Choreographer.getInstance().postFrameCallback(this)
+        } finally { android.os.Trace.endSection() } }
+    }
+
+    private fun startSmallPulse(key: String?) {
+        if (key == null) return
+        pulseKey = key
+        pulseAt = android.os.SystemClock.uptimeMillis()
+        Choreographer.getInstance().removeFrameCallback(pulseFrame)
+        Choreographer.getInstance().postFrameCallback(pulseFrame)
+        MiniPlayerRuntime.noteTouch("pulse small=${key.takeLast(6)}")
+    }
+
+    /** The pulse's scale now; 1 with none, and ends it once over or once the small place is another's. */
+    private fun smallPulse(): Float {
+        val key = pulseKey ?: return 1f
+        if (smallKey != key) {
+            pulseKey = null
+            return 1f
+        }
+        val t = (android.os.SystemClock.uptimeMillis() - pulseAt).toFloat()
+        fun sinInOut(x: Float) = (1f - kotlin.math.cos(Math.PI.toFloat() * x.coerceIn(0f, 1f))) / 2f
+        val up = PULSE_DELAY_MS + PULSE_MS
+        val hold = up + PULSE_DELAY_MS
+        return when {
+            t < PULSE_DELAY_MS -> 1f
+            t < up -> 1f + (PULSE_SCALE - 1f) * sinInOut((t - PULSE_DELAY_MS) / PULSE_MS)
+            t < hold -> PULSE_SCALE
+            t < hold + PULSE_MS -> PULSE_SCALE - (PULSE_SCALE - 1f) * sinInOut((t - hold) / PULSE_MS)
+            else -> {
+                pulseKey = null
+                1f
+            }
+        }
+    }
+
     /** The small island on its rest place, carried by the row's motion as the pill is. */
     private fun placeSmallIsland(follow: Matrix?, fade: Float) {
         val v = smallIsland ?: return
@@ -1654,8 +1706,9 @@ private class MiniPlayerController(
             v.setShape((d * squeeze.smallShapeX()).roundToInt().coerceAtLeast(1),
                 (d * squeeze.smallShapeY()).roundToInt().coerceAtLeast(1), 0)
         }
-        // A finger on it sinks it about its centre, which is its frame's centre.
-        val swell = squeeze.smallSwell()
+        // A finger on it sinks it about its centre, which is its frame's centre; the pulse
+        // swells it the same way.
+        val swell = squeeze.smallSwell() * smallPulse()
         if (kotlin.math.abs(v.scaleX - swell) > 0.0005f) {
             v.scaleX = swell
             v.scaleY = swell
@@ -3807,6 +3860,8 @@ private class MiniPlayerController(
         }
         // The one out: turned round on its way up, or down out of its card, to its new place.
         val outPlace = placeOf(out, seats)
+        // Into hiding, with no place in the row: the small island pulses (ExpandedToHidden).
+        if (outPlace == LAND_HIDDEN) startSmallPulse(seats.small)
         val down = x.movers[out]
         if (down != null) {
             down.morph?.aim(false)
@@ -6296,6 +6351,10 @@ private const val SMALL_FROM_PILL = 1
 private const val SMALL_POP = 2
 private const val SMALL_EMERGE = 3
 private const val SMALL_FROM_GHOST = 4
+/** The small island's pulse (smallIslandScaleAnimation): 1.1, sinInOut 200ms each way after 100ms. */
+private const val PULSE_SCALE = 1.1f
+private const val PULSE_MS = 200f
+private const val PULSE_DELAY_MS = 100f
 /** The fastest a switch cut short hands its speed on, in its progress a second. */
 private const val SWAP_CARRY_MAX = 8f
 

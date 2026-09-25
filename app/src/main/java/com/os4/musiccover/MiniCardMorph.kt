@@ -95,6 +95,30 @@ internal class MiniCardMorph(
         val baseTy = view.translationY
         val nativeTransitionAlpha = native?.transitionAlpha ?: 1f
         var paired = false
+        /** The blur last put on it and on its card element, in their own pixels across and up. */
+        val blur = FloatArray(2)
+        val nativeBlur = FloatArray(2)
+    }
+
+    /**
+     * The super island's content blur as its layers cross (IslandPropertyUpdater: 40px at full,
+     * the leaving layer at once, the arriving one 50ms late): here each piece is out of focus by
+     * as much as it has faded, and the card's own line comes into focus a little after it
+     * comes in. In dp, 40px at this phone's 3x.
+     */
+    private val blurPx = mini.resources.displayMetrics.density * BLUR_DP
+
+    /** [r] across and up in [v]'s own pixels, [last] what it has now; unchanged within half a pixel. */
+    private fun blurTo(v: View, rx: Float, ry: Float, last: FloatArray) {
+        val x = if (rx < 0.5f) 0f else min(rx, BLUR_MAX_PX)
+        val y = if (ry < 0.5f) 0f else min(ry, BLUR_MAX_PX)
+        if ((x == 0f && y == 0f) == (last[0] == 0f && last[1] == 0f) &&
+            kotlin.math.abs(x - last[0]) < 0.5f && kotlin.math.abs(y - last[1]) < 0.5f) return
+        last[0] = x
+        last[1] = y
+        v.setRenderEffect(if (x == 0f && y == 0f) null
+            else android.graphics.RenderEffect.createBlurEffect(max(x, 0.01f), max(y, 0.01f),
+                android.graphics.Shader.TileMode.DECAL))
     }
 
     private val motion = CoverMorphMotion()
@@ -417,7 +441,15 @@ internal class MiniCardMorph(
                 ky = lerp(ky, nky, mix)
                 // The card's own line stays hidden until the pill's leaves it: the two faces
                 // differ in weight, and both drawn in full read as a doubled title.
-                if (piece.text) n.transitionAlpha = piece.nativeTransitionAlpha * (1f - pairedOut(c))
+                if (piece.text) {
+                    val shown = 1f - pairedOut(c)
+                    n.transitionAlpha = piece.nativeTransitionAlpha * shown
+                    // ...and comes into focus just after, as the super island's arriving layer.
+                    if (shown > 0f) {
+                        val r = blurPx * (1f - nativeFocus(c)) / max(s, 0.05f)
+                        blurTo(n, r, r, piece.nativeBlur)
+                    }
+                }
             }
             v.pivotX = 0f
             v.pivotY = 0f
@@ -426,12 +458,18 @@ internal class MiniCardMorph(
             v.translationX = tx - layoutX - ax * kx
             v.translationY = ty - layoutY - ay * ky
             val asPill = if (piece.paired) pairedOut(c) else earlyOut(c)
-            v.alpha = when {
+            val a = when {
                 piece.art && bridged -> 0f
                 piece.art -> asPill
                 // Out of a circle, only the picture is there at first; the lines join it once
                 // the shape has room for them.
                 else -> lerp(asPill, if (piece.paired) circleIn(c) * pairedOut(c) else 0f, round)
+            }
+            v.alpha = a
+            // Out of focus as far as it has faded; the cover's own flight has the bridged artwork.
+            if (a > 0f || piece.blur[0] == 0f) {
+                val r = if (piece.art && bridged) 0f else blurPx * (1f - a)
+                blurTo(v, r / max(kx, 0.05f), r / max(ky, 0.05f), piece.blur)
             }
             if (piece.art) {
                 artDrawn = CoverMorphMotion.Box(box.x + tx - ax * kx, box.y + ty - ay * ky,
@@ -468,7 +506,11 @@ internal class MiniCardMorph(
             v.translationX = piece.baseTx
             v.translationY = piece.baseTy
             v.alpha = 1f
-            if (piece.paired && piece.text) piece.native?.transitionAlpha = piece.nativeTransitionAlpha
+            blurTo(v, 0f, 0f, piece.blur)
+            if (piece.paired && piece.text) piece.native?.let {
+                it.transitionAlpha = piece.nativeTransitionAlpha
+                blurTo(it, 0f, 0f, piece.nativeBlur)
+            }
         }
         mini.endMorph()
         header.setAnimationMatrix(null)
@@ -661,6 +703,15 @@ internal class MiniCardMorph(
          * back as the glass cleared.
          */
         fun pairedOut(p: Float) = 1f - smooth(0.85f, 0.93f, p)
+
+        /** The card's own line in focus: as it comes in (pairedOut), a little later. */
+        fun nativeFocus(p: Float) = smooth(0.87f, 0.97f, p)
+
+        /** The super island's 40px content blur, at this phone's 3x. */
+        const val BLUR_DP = 40f / 3f
+
+        /** A piece scaled far down still gets no more than this, in its own pixels. */
+        const val BLUR_MAX_PX = 200f
 
         /** The card comes in under the mini player's material, which still covers it. */
         fun nativeIn(p: Float) = smooth(0.1f, 0.5f, p)
