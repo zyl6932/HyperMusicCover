@@ -49,6 +49,12 @@ internal class MiniCardMorph(
      * leaving it are gone, not above them for the stack to slide down after.
      */
     private val nativeDy: (() -> Float)? = null,
+    /**
+     * How much of a circle the mini end is, 0 (a pill) to 1 (a small island's circle), when it
+     * changes on the way: a card headed for the small place that the row gives the big one
+     * instead. Read every frame; [circle] when there is none.
+     */
+    private val roundness: (() -> Float)? = null,
 ) : Choreographer.FrameCallback {
     class Landing(val art: View?, val title: View?, val text: View?, val radius: Float, val artRadius: Float) {
         companion object {
@@ -372,7 +378,8 @@ internal class MiniCardMorph(
         // out as a whole pill in a circle, the flight drew its title and text out over the
         // camera for its last frames home, then snapped to the circle (filmed 2026-09-25).
         val laidW = max(1, mini.layoutParams?.width ?: mini.width).toFloat()
-        val m = if (circle) box.w / laidW else box.w / miniRest.w
+        val round = roundness?.invoke()?.coerceIn(0f, 1f) ?: if (circle) 1f else 0f
+        val m = lerp(box.w / miniRest.w, box.w / laidW, round)
         val mix = pieceMix(c)
         val bridged = listener.artBridged()
         android.os.Trace.beginSection("MC m.pieces")
@@ -387,14 +394,14 @@ internal class MiniCardMorph(
             var ty = (layoutY + piece.baseTy + ay) * m
             var kx = m
             var ky = m
-            if (circle && piece.art) {
+            if (round > 0f && piece.art) {
                 // The small island's picture: its share of the circle, in the middle of it -
                 // growing with the container's height as the circle becomes the row.
                 val side = box.h * CIRCLE_ICON_SHARE
-                kx = side / max(1, v.width)
-                ky = side / max(1, v.height)
-                tx = (min(box.w, box.h) - side) / 2f
-                ty = (box.h - side) / 2f
+                kx = lerp(kx, side / max(1, v.width), round)
+                ky = lerp(ky, side / max(1, v.height), round)
+                tx = lerp(tx, (min(box.w, box.h) - side) / 2f, round)
+                ty = lerp(ty, (box.h - side) / 2f, round)
             }
             if (piece.paired) {
                 val n = piece.native!!
@@ -418,13 +425,13 @@ internal class MiniCardMorph(
             v.scaleY = ky
             v.translationX = tx - layoutX - ax * kx
             v.translationY = ty - layoutY - ay * ky
+            val asPill = if (piece.paired) pairedOut(c) else earlyOut(c)
             v.alpha = when {
                 piece.art && bridged -> 0f
+                piece.art -> asPill
                 // Out of a circle, only the picture is there at first; the lines join it once
                 // the shape has room for them.
-                circle && !piece.art -> if (piece.paired) circleIn(c) * pairedOut(c) else 0f
-                piece.paired -> pairedOut(c)
-                else -> earlyOut(c)
+                else -> lerp(asPill, if (piece.paired) circleIn(c) * pairedOut(c) else 0f, round)
             }
             if (piece.art) {
                 artDrawn = CoverMorphMotion.Box(box.x + tx - ax * kx, box.y + ty - ay * ky,
@@ -433,7 +440,7 @@ internal class MiniCardMorph(
                 val landed = if (piece.paired) nativeArtRadius * s / max(0.01f, kx)
                     else mini.artworkRestRadius()
                 // A small island's picture is round.
-                val home = if (circle) min(v.width, v.height) / 2f else mini.artworkRestRadius()
+                val home = lerp(mini.artworkRestRadius(), min(v.width, v.height) / 2f, round)
                 mini.setArtworkMorphRadius(lerp(home, landed, mix))
             }
         }

@@ -41,9 +41,24 @@ internal object LockIslands {
         val summary: Boolean,
         /** Shown as the lock screen shows it: the public version. */
         val redacted: Boolean = false,
+        /**
+         * The super island's own ranking of it, from the focus notification's param_island:
+         * islandProperty, islandPriority (1 and 1 without one, as FocusNotifUtils fills in), and
+         * islandOrder - whether each update makes it the newest again (DynamicIslandWindowView
+         * .updateTime).
+         */
+        val property: Int = 1,
+        val priority: Int = 1,
+        val order: Boolean = false,
     )
 
-    /** This lock screen's islands, focus notifications first, then newest first. */
+    /** An island's standing for a place in the row, as the super island's compareState reads it. */
+    class Rank(val property: Int, val priority: Int, val time: Long)
+
+    /**
+     * This lock screen's islands in the super island's order: the one it would put in the big
+     * island first (see [rankOf]).
+     */
     @Volatile var notes: List<Note> = emptyList()
         private set
 
@@ -93,7 +108,9 @@ internal object LockIslands {
     /** For `op mini`: what the filter has, and whether the stack is leaving it out. */
     fun describe(): String = "islands active=$active cover=$cover filter=${filter?.get() != null} " +
         "released=${released.size} notes=" + notes.joinToString(",") {
-            (if (it.focus) "F:" else "") + (if (it.redacted) "R:" else "") + it.pkg
+            (if (it.focus) "F:" else "") + (if (it.redacted) "R:" else "") + it.pkg +
+                "[${it.property}/${it.priority}${if (it.order) "/o" else ""} " +
+                "t=${(islandTimes[it.key] ?: 0L) % 100000}]"
         }
 
     fun addListener(listener: () -> Unit) {
@@ -125,6 +142,11 @@ internal object LockIslands {
      * row shows them - the user asked for the card alone in the cover (2026-09-25). Leaving the
      * cover, they stay out until the row has them again (setActive) or a moment has passed:
      * let back in at once, their rows stood in the stack for the frames before the row took them.
+     *
+     * With the row showing, [active] already keeps every one of them out, so the cover changes
+     * nothing the filter decides and the pipeline is not run for it: that run was a whole list
+     * rebuild on the first frame of every entry, and a dropped frame each time (traced
+     * 2026-09-25, 22 entries out of 22). [setActive] runs it if the row goes while the cover is up.
      */
     private var cover = false
 
@@ -133,7 +155,7 @@ internal object LockIslands {
             main.removeCallbacks(coverOff)
             if (!cover) {
                 cover = true
-                invalidate("cover up")
+                if (!active) invalidate("cover up")
             }
         } else if (cover) {
             main.removeCallbacks(coverOff)
@@ -144,7 +166,7 @@ internal object LockIslands {
     private val coverOff = Runnable {
         if (cover) {
             cover = false
-            invalidate("cover gone")
+            if (!active) invalidate("cover gone")
         }
     }
 
@@ -292,13 +314,67 @@ internal object LockIslands {
     private fun commit() {
         val all = pending.values.toList()
         pending.clear()
+        stamp(all)
         // A group shows as its children; its summary only when it has none here.
         val grouped = all.filter { !it.summary && it.group != null }.mapNotNull { it.group }.toSet()
         val next = all.filter { !(it.summary && it.group in grouped) && it.key !in released }
-            .sortedWith(compareByDescending<Note> { it.focus }.thenByDescending { it.time })
+            .sortedWith(bigFirst)
         if (next.map { it.key to it.time } == notes.map { it.key to it.time }) return
         notes = next
         main.post { listeners.forEach { runCatching { it() } } }
+    }
+
+    /**
+     * When each island became one, as the super island times its islands: the moment its view
+     * was made (handleInitState), and again at every update of one whose param_island has
+     * islandOrder - a stopwatch, updated every second, is always the newest. The last reading
+     * of each tells an update from the same notification read again.
+     */
+    private val islandTimes = HashMap<String, Long>()
+    private val lastRead = HashMap<String, Note>()
+
+    private fun stamp(all: List<Note>) {
+        val now = System.currentTimeMillis()
+        for (note in all) {
+            val seen = islandTimes[note.key]
+            if (seen == null || note.order && lastRead[note.key] !== note) islandTimes[note.key] = now
+            lastRead[note.key] = note
+        }
+        val keys = all.mapTo(HashSet()) { it.key }
+        islandTimes.keys.retainAll(keys)
+        lastRead.keys.retainAll(keys)
+    }
+
+    /** A notification island's standing, released or not; null for one this lock screen has not got. */
+    fun rankOf(key: String): Rank? {
+        val note = lastRead[key] ?: return null
+        return Rank(note.property, note.priority, islandTimes[key] ?: 0L)
+    }
+
+    /**
+     * The super island's compareState (StateHandler): whether [origin] takes the place [cur]
+     * holds - the big island's when [big], the small one's when not. Read from the plugin's own
+     * code (2026-09-25): islandProperty first, the big place going to 1 over 2 and the small one
+     * to 2 over 1; then the lower islandPriority; then the newer island.
+     */
+    fun takesPlace(cur: Rank, origin: Rank, big: Boolean): Boolean {
+        if (cur.property != origin.property) {
+            return if (big) origin.property == 1 && cur.property == 2
+            else cur.property == 1 && origin.property == 2
+        }
+        if (cur.priority != origin.priority) return cur.priority > origin.priority
+        return cur.time <= origin.time
+    }
+
+    /** The big place's order: the island that would take it from every other first. */
+    private val bigFirst = Comparator<Note> { a, b ->
+        val ra = rankOf(a.key) ?: return@Comparator 1
+        val rb = rankOf(b.key) ?: return@Comparator -1
+        when {
+            ra.property != rb.property -> if (ra.property == 1) -1 else if (rb.property == 1) 1 else 0
+            ra.priority != rb.priority -> ra.priority.compareTo(rb.priority)
+            else -> rb.time.compareTo(ra.time)
+        }
     }
 
     /** A notification as an island, or null for one that is not: the media card's own. */
@@ -326,6 +402,7 @@ internal object LockIslands {
             ?: (if (redacted) null else extras?.getCharSequence(Notification.EXTRA_BIG_TEXT))
             ?: if (redacted) hiddenText() else ""
         val focus = runCatching { focusCheck?.invoke(null, n) as? Boolean }.getOrNull() == true
+        val island = islandParams(n)
         return Note(
             key = sbn.key,
             pkg = sbn.packageName,
@@ -338,8 +415,27 @@ internal object LockIslands {
             group = if (sbn.isGroup) sbn.groupKey else null,
             summary = n.flags and Notification.FLAG_GROUP_SUMMARY != 0,
             redacted = redacted,
+            property = island?.optInt("islandProperty", 1) ?: 1,
+            priority = island?.optInt("islandPriority", 1) ?: 1,
+            order = island?.optBoolean("islandOrder", false) ?: false,
         )
     }
+
+    /**
+     * The focus notification's param_island, where the plugin looks for it (FocusNotifUtils):
+     * in miui.focus.param's param_v2 (a stopwatch's), at its top level, or in
+     * miui.focus.param.custom. Null for a notification with none, which ranks as 1 and 1.
+     */
+    private fun islandParams(n: Notification): org.json.JSONObject? = runCatching {
+        n.extras.getString("miui.focus.param")?.let { raw ->
+            val root = org.json.JSONObject(raw)
+            root.optJSONObject("param_v2")?.optJSONObject("param_island")?.let { return@runCatching it }
+            root.optJSONObject("param_island")?.let { return@runCatching it }
+        }
+        n.extras.getString("miui.focus.param.custom")?.let {
+            org.json.JSONObject(it).optJSONObject("param_island")
+        }
+    }.getOrNull()
 
     /** A messaging notification's newest line, which its plain text often is not. */
     private fun lastMessage(extras: android.os.Bundle): CharSequence? {
