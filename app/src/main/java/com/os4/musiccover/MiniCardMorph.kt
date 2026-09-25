@@ -130,6 +130,7 @@ internal class MiniCardMorph(
         Piece(mini.titleView, landing.title, text = true, art = false),
         Piece(mini.artistView, landing.text, text = true, art = false),
         Piece(mini.toggleView, null, text = false, art = false),
+        Piece(mini.secondToggleView, null, text = false, art = false),
     )
     private val xy = IntArray(2)
     private val corner = FloatArray(2)

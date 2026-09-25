@@ -38,10 +38,28 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     private val artist = TextView(context)
     private val textColumn = LinearLayout(context)
     private val toggle = ImageButton(context)
+
+    /**
+     * A focus notification's second button, left of the first: shown while the pill is the big
+     * island, the row's only one; gone as the small island comes in beside it (setSecondShown).
+     */
+    private val toggle2 = ImageButton(context)
     private val density = resources.displayMetrics.density
     private var lastAppearance: String? = null
     private var lastMaterial: String? = null
     private var lastArtwork: Bitmap? = null
+
+    /**
+     * The picture as it is, no corner cut and no plate under it: a focus template's picture,
+     * which its row draws bare - cut to the artwork's rounded square, parts of it went missing.
+     */
+    private var artworkBare = false
+
+    /** The play button's picture and meaning taken by a notification's own action. */
+    private var toggleOverride: android.graphics.drawable.Drawable? = null
+
+    /** A picture that moves (a focus template's Lottie), shown over whatever bitmap is bound. */
+    private var artworkOverride: android.graphics.drawable.Drawable? = null
     private var lastPlaying: Boolean? = null
     private var artworkRadiusPx = dp(12).toFloat()
     private var interactionsEnabled = true
@@ -126,8 +144,14 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         toggle.setPadding(dp(8), dp(8), dp(8), dp(8))
         toggle.background = null
         toggle.contentDescription = "播放或暂停"
-        toggle.setOnClickListener { onToggle?.invoke() }
+        toggle.setOnClickListener { (toggleFaceClick ?: onToggle)?.invoke() }
         addView(toggle)
+        toggle2.scaleType = ImageView.ScaleType.FIT_CENTER
+        toggle2.setPadding(dp(6), dp(6), dp(6), dp(6))
+        toggle2.background = null
+        toggle2.visibility = View.GONE
+        toggle2.setOnClickListener { secondFaceClick?.invoke() }
+        addView(toggle2)
         contentDescription = "迷你音乐播放器"
     }
 
@@ -176,11 +200,11 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         if (artist.text.toString() != trackArtist) artist.text = trackArtist
         if (lastArtwork !== cover) {
             lastArtwork = cover
-            artwork.setImageBitmap(cover)
+            if (artworkOverride == null) artwork.setImageBitmap(cover)
         }
         if (lastPlaying != playing) {
             lastPlaying = playing
-            toggle.setImageDrawable(MiniPlayerPathDrawable(
+            if (toggleOverride == null) toggle.setImageDrawable(MiniPlayerPathDrawable(
                 if (playing) ICON_PAUSE else ICON_PLAY, Color.WHITE))
         }
         onToggle = togglePlayback
@@ -216,14 +240,182 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
      * anticlockwise - slowing to a stop. The new artwork lands whenever the player sends it,
      * under the spin rather than as a cut.
      */
+    /**
+     * [drawable] in the artwork's place until [clearArtworkDrawable]: it runs itself (a Lottie
+     * drawable animates and invalidates the artwork, which hands it its visibility - paused
+     * while the pill is gone). The bound bitmap is kept for when it goes.
+     */
+    fun showArtworkDrawable(drawable: android.graphics.drawable.Drawable) {
+        if (artworkOverride === drawable && artwork.drawable === drawable) return
+        artworkOverride = drawable
+        artwork.setImageDrawable(drawable)
+    }
+
+    fun setArtworkBare(bare: Boolean) {
+        if (artworkBare == bare) return
+        artworkBare = bare
+        if (lastHeightRadiusDp > 0f) updateGeometry(lastHeightRadiusDp, lastArtRadiusDp)
+        artwork.clipToOutline = !bare
+        artwork.background = if (bare) null else rounded(Color.rgb(55, 55, 55), artworkRadiusPx)
+        artwork.scaleType = if (bare) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
+    }
+
+    /** The button's face a focus notification gave it, by key: rebuilt only when it changes. */
+    private var toggleFaceKey: String? = null
+    private var toggleFaceClick: (() -> Unit)? = null
+    private var secondFaceKey: String? = null
+    private var secondFaceClick: (() -> Unit)? = null
+
+    /**
+     * A focus notification's button in the play button's place - a stopwatch's pause or go on,
+     * a recording's done - on its own plate; null gives the button back to play and pause.
+     */
+    fun setToggleFace(face: ActionFace?) {
+        if (face == null) {
+            toggleFaceClick = null
+            if (toggleFaceKey == null) return
+            toggleFaceKey = null
+            toggleOverride = null
+            setToggleWide(0)
+            toggle.background = null
+            toggle.scaleType = ImageView.ScaleType.CENTER
+            toggle.setPadding(dp(8), dp(8), dp(8), dp(8))
+            toggle.contentDescription = "播放或暂停"
+            lastPlaying?.let { playing ->
+                toggle.setImageDrawable(MiniPlayerPathDrawable(if (playing) ICON_PAUSE else ICON_PLAY, Color.WHITE))
+            }
+            return
+        }
+        toggleFaceClick = face.onClick
+        if (toggleFaceKey == face.key) return
+        toggleFaceKey = face.key
+        val icon = face.icon()
+        toggleOverride = icon ?: android.graphics.drawable.ColorDrawable(0)
+        toggle.setImageDrawable(icon)
+        toggle.background = face.background()
+        toggle.scaleType = if (face.wide) ImageView.ScaleType.CENTER else ImageView.ScaleType.FIT_CENTER
+        // The plugin's pictures bring their own round shell: little room round them.
+        val pad = if (face.wide) dp(6) else dp(FACE_PAD_DP)
+        toggle.setPadding(pad, pad, pad, pad)
+        toggle.contentDescription = face.label ?: ""
+        setToggleWide(if (face.wide) (icon?.intrinsicWidth ?: 0) + dp(24) else 0)
+    }
+
+    /** A text button's width past the round button's, in pixels; 0 for a round one. */
+    private var toggleWidePx = 0
+    private var toggle2WidePx = 0
+
+    private fun setToggleWide(px: Int) {
+        if (toggleWidePx == px) return
+        toggleWidePx = px
+        updateGeometry(lastHeightRadiusDp, lastArtRadiusDp)
+    }
+
+    private fun setToggle2Wide(px: Int) {
+        if (toggle2WidePx == px) return
+        toggle2WidePx = px
+        updateGeometry(lastHeightRadiusDp, lastArtRadiusDp)
+    }
+
+    fun setSecondFace(face: ActionFace?) {
+        secondFaceClick = face?.onClick
+        if (face == null) {
+            if (secondFaceKey == null) return
+            secondFaceKey = null
+            toggle2.setImageDrawable(null)
+            toggle2.background = null
+            setSecondShown(false, animate = false)
+            setToggle2Wide(0)
+            return
+        }
+        if (secondFaceKey == face.key) return
+        secondFaceKey = face.key
+        val icon = face.icon()
+        toggle2.setImageDrawable(icon)
+        toggle2.background = face.background()
+        toggle2.scaleType = if (face.wide) ImageView.ScaleType.CENTER else ImageView.ScaleType.FIT_CENTER
+        val pad = if (face.wide) dp(6) else dp(FACE_PAD_DP)
+        toggle2.setPadding(pad, pad, pad, pad)
+        toggle2.contentDescription = face.label ?: ""
+        setToggle2Wide(if (face.wide) (icon?.intrinsicWidth ?: 0) + dp(24) else 0)
+    }
+
+    /** How far the second button is in, 0 to 1: its alpha and size, and the text's room. */
+    private var secondShown = 0f
+    private var secondWanted = false
+    private var secondAnimator: android.animation.ValueAnimator? = null
+    private var toggleSizePx = 0
+    private var toggleGapPx = 0
+    private var textRightBase = 0
+
+    /**
+     * Two buttons in the big island, one - its main one - in the middle island: the second comes
+     * in or goes as the pill widens or narrows for the small island, on the switch's own curve,
+     * the text giving it room as it does.
+     */
+    fun setSecondShown(shown: Boolean, animate: Boolean) {
+        val want = shown && secondFaceKey != null
+        val to = if (want) 1f else 0f
+        if (want == secondWanted && (secondAnimator != null || secondShown == to)) return
+        secondWanted = want
+        secondAnimator?.cancel()
+        secondAnimator = null
+        if (!animate || !isShown) {
+            applySecond(to)
+            return
+        }
+        secondAnimator = android.animation.ValueAnimator.ofFloat(secondShown, to).apply {
+            duration = SECOND_MS
+            interpolator = android.view.animation.PathInterpolator(0.2f, 0.9f, 0.3f, 1f)
+            addUpdateListener { applySecond(it.animatedValue as Float) }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (secondAnimator === animation) secondAnimator = null
+                }
+            })
+            start()
+        }
+    }
+
+    private fun applySecond(v: Float) {
+        secondShown = v
+        val vis = if (v > 0.001f) View.VISIBLE else View.GONE
+        if (toggle2.visibility != vis) toggle2.visibility = vis
+        toggle2.alpha = v * contentAlpha
+        val k = 0.6f + 0.4f * v
+        toggle2.scaleX = k
+        toggle2.scaleY = k
+        val lp = textColumn.layoutParams as? LayoutParams ?: return
+        val margin = textRightBase + ((toggleSizePx + toggleGapPx) * v).toInt()
+        if (lp.rightMargin != margin) {
+            lp.rightMargin = margin
+            textColumn.layoutParams = lp
+        }
+    }
+
+    val secondToggleView: View get() = toggle2
+
+    fun clearArtworkDrawable() {
+        if (artworkOverride == null) return
+        artworkOverride = null
+        artwork.setImageBitmap(lastArtwork)
+    }
+
     /** The artwork alone, for a scaled copy that arrives between refreshes. */
     fun showArtwork(bitmap: Bitmap?) {
         if (bitmap == null || lastArtwork === bitmap) return
         lastArtwork = bitmap
-        artwork.setImageBitmap(bitmap)
+        if (artworkOverride == null) artwork.setImageBitmap(bitmap)
     }
 
+    /**
+     * The pill holds the music, whose sideways swipe skips a track and turns the artwork once
+     * round. A notification island has no track to skip: its picture stays still (2026-09-25).
+     */
+    var skippable = true
+
     fun performSkip(next: Boolean) {
+        if (!skippable) return
         if (next) onNext?.invoke() else onPrevious?.invoke()
         if (morphing) return
         artwork.animate().cancel()
@@ -370,6 +562,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         if (interactionsEnabled == enabled) return
         interactionsEnabled = enabled
         toggle.isEnabled = enabled && !morphing
+        toggle2.isEnabled = toggle.isEnabled
         if (!enabled) finish()
     }
 
@@ -409,6 +602,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         morphH = restHeight()
         morphRadius = morphH / 2f
         toggle.isEnabled = layoutOnly && interactionsEnabled
+        toggle2.isEnabled = toggle.isEnabled
         // A clipping parent clips each child to that child's own bounds: the text column is only
         // as tall as the pill, and the artist, moved onto the card's, was cut through by its
         // bottom edge - filmed as a hairline across the name. The pill's own outline still
@@ -452,6 +646,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         if (layoutOnly) {
             val dx = (morphW - restWidth()).toFloat()
             if (toggle.translationX != dx) toggle.translationX = dx
+            if (toggle2.translationX != dx) toggle2.translationX = dx
         }
         // Only the corner changed: the outline is not rebuilt by a resize this frame.
         if (rounded && !resized) traced("MC f.outline") {
@@ -471,7 +666,10 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         if (!morphing) return
         morphing = false
         // The play button back in its own place, where a row move had carried it (setMorphFrame).
-        if (layoutOnly) toggle.translationX = 0f
+        if (layoutOnly) {
+            toggle.translationX = 0f
+            toggle2.translationX = 0f
+        }
         layoutOnly = false
         artworkMorphRadius = Float.NaN
         artwork.invalidateOutline()
@@ -481,6 +679,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         clipChildren = true
         translationZ = 0f
         toggle.isEnabled = interactionsEnabled
+        toggle2.isEnabled = toggle.isEnabled
         translationX = baseX + offsetX
         translationY = baseY + offsetY
         requestLayout()
@@ -548,6 +747,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         artwork.alpha = if (artworkHidden) 0f else a
         textColumn.alpha = a
         toggle.alpha = a
+        toggle2.alpha = a * secondShown
     }
 
     /** The text and the button alone: an island shrinking to its circle keeps its picture. */
@@ -555,6 +755,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         val a = alpha.coerceIn(0f, 1f)
         textColumn.alpha = a
         toggle.alpha = a
+        toggle2.alpha = a * secondShown
     }
 
     private var contentBlur = 0f
@@ -573,6 +774,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         artwork.setRenderEffect(effect)
         textColumn.setRenderEffect(effect)
         toggle.setRenderEffect(effect)
+        toggle2.setRenderEffect(effect)
     }
 
     private fun updateGeometry(heightRadiusDp: Float, artworkRadiusDp: Float) {
@@ -582,20 +784,33 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         val verticalPadding = max(dp(7), height / 9)
         val artworkSize = ((height - verticalPadding * 2) * .75f).toInt().coerceAtLeast(dp(24))
         val horizontalPadding = max(dp(10), height / 7)
-        artwork.layoutParams = LayoutParams(artworkSize, artworkSize, Gravity.CENTER_VERTICAL).apply {
-            leftMargin = horizontalPadding
+        // A bare picture is the small island's size, its share of the height, on the same centre:
+        // the same picture in both islands was two sizes (2026-09-25).
+        val side = if (artworkBare) (height * ShortcutDisc.ICON_SHARE).toInt() else artworkSize
+        artwork.layoutParams = LayoutParams(side, side, Gravity.CENTER_VERTICAL).apply {
+            leftMargin = horizontalPadding + (artworkSize - side) / 2
         }
         val toggleSize = dp(40).coerceAtMost((height - verticalPadding * 2).coerceAtLeast(dp(34)))
-        toggle.layoutParams = LayoutParams(toggleSize, toggleSize, Gravity.CENTER_VERTICAL or Gravity.END).apply {
+        val toggleW = max(toggleSize, toggleWidePx)
+        val toggle2W = max(toggleSize, toggle2WidePx)
+        toggle.layoutParams = LayoutParams(toggleW, toggleSize, Gravity.CENTER_VERTICAL or Gravity.END).apply {
             rightMargin = max(dp(8), verticalPadding)
         }
+        // The second button's own width: what the text gives up for it as it comes in.
+        toggleSizePx = toggle2W
+        // Two shells side by side, as the row sets them (2026-09-25: 6dp read as too far apart).
+        toggleGapPx = dp(FACE_GAP_DP)
+        toggle2.layoutParams = LayoutParams(toggle2W, toggleSize, Gravity.CENTER_VERTICAL or Gravity.END).apply {
+            rightMargin = max(dp(8), verticalPadding) + toggleW + toggleGapPx
+        }
+        textRightBase = if (toggleShown) toggleW + max(dp(10), verticalPadding) else horizontalPadding
         textColumn.layoutParams = LayoutParams(-1, -1, Gravity.CENTER_VERTICAL).apply {
             leftMargin = horizontalPadding + artworkSize + max(dp(10), height / 8)
-            rightMargin = if (toggleShown) toggleSize + max(dp(10), verticalPadding) else horizontalPadding
+            rightMargin = textRightBase + ((toggle2W + toggleGapPx) * secondShown).toInt()
         }
         val radius = dp(artworkRadiusDp).coerceIn(0, artworkSize / 2).toFloat()
         artworkRadiusPx = radius
-        artwork.background = rounded(Color.rgb(55, 55, 55), radius)
+        artwork.background = if (artworkBare) null else rounded(Color.rgb(55, 55, 55), radius)
         artwork.outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
                 outline.setRoundRect(0, 0, view.width, view.height,
@@ -612,6 +827,26 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     private fun dp(value: Int) = (value * density + .5f).toInt()
     private fun dp(value: Float) = (value * density + .5f).toInt()
 }
+
+/**
+ * A focus notification's button as a pill draws it: its picture and its plate, made when first
+ * shown (by [key]: the same button is not made again), and what a tap does.
+ */
+internal class ActionFace(
+    val key: String,
+    val icon: () -> android.graphics.drawable.Drawable?,
+    val background: () -> android.graphics.drawable.Drawable?,
+    val label: CharSequence?,
+    val onClick: () -> Unit,
+    /** Words, not a picture (a text button): the button as wide as they are, on its plate. */
+    val wide: Boolean = false,
+)
+
+private const val SECOND_MS = 320L
+
+/** Room round a focus button's picture, and between two of them. */
+private const val FACE_PAD_DP = 4
+private const val FACE_GAP_DP = 2
 
 private class MiniPlayerPathDrawable(pathData: String, color: Int) : Drawable() {
     private val path = PathParser.createPathFromPathData(pathData)

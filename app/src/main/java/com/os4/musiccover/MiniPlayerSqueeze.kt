@@ -115,11 +115,25 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
 
     private var icon: ImageView? = null
 
+    /**
+     * The picture as it is, whole and uncut: a focus template's, which the super island draws
+     * inside its small island rather than filling the circle with.
+     */
+    fun setIconBare(bare: Boolean) {
+        iconBare = bare
+        icon?.let { v ->
+            v.clipToOutline = !bare
+            v.scaleType = if (bare) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
+        }
+    }
+
+    private var iconBare = false
+
     /** What a small island shows on its glass: the island's picture, or nothing. */
     fun setIcon(drawable: Drawable?) {
         val view = icon ?: ImageView(context).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            clipToOutline = true
+            scaleType = if (iconBare) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
+            clipToOutline = !iconBare
             outlineProvider = elementShape
             icon = this
             addView(this, LayoutParams(0, 0))
@@ -155,8 +169,8 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
 
     override fun onTouchEvent(event: MotionEvent): Boolean = false
 
-    private companion object {
-        /** A small island's picture against its glass. */
+    companion object {
+        /** A small island's picture against its glass; a pill's bare picture against its height. */
         const val ICON_SHARE = 0.62f
     }
 }

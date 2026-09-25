@@ -2645,6 +2645,9 @@ public class Main extends XposedModule {
                         dumpInk();
                     } else if ("mini".equals(op)) {
                         setResultData(MiniPlayerRuntime.describe());
+                    } else if ("rowtree".equals(op)) {
+                        String key = i.getStringExtra("key");
+                        setResultData(MiniPlayerRuntime.rowTree(key == null ? "" : key));
                     } else if ("fold".equals(op)) {
                         setResultData(describeFold());
                     } else if ("keepawake".equals(op)) {

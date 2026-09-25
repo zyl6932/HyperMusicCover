@@ -930,6 +930,14 @@ object MiniPlayerRuntime {
         }
     }
 
+    /**
+     * For `op rowtree --es key <part>`: every stack row whose key has [match] in it (all of them
+     * for an empty one), laid out as the stack draws it - what a focus notification's row shows on
+     * the lock screen, next to what its island does.
+     */
+    @JvmStatic fun rowTree(match: String): String =
+        live().firstOrNull()?.rowTree(match) ?: "no controller"
+
     /** For `op mini`: the pill, the card, and the torch button's chain as they are right now. */
     @JvmStatic fun describe(): String {
         val sb = StringBuilder("material=$cardEffect calls=${cardRecipe?.size} empty=$emptyEffect " +
@@ -1560,8 +1568,16 @@ private class MiniPlayerController(
         // flight's picture once the flight is landing on it (flightLanding).
         if (key == held && !flightLanding) return
         val showing = view.visibility == View.VISIBLE && !(smallGrowing && smallGrow.target == 0f)
-        val picture: Any? = if (key == MUSIC_ISLAND) (thumbShown ?: cachedCover)
-            else notes.firstOrNull { it.key == key }?.icon ?: LockIslands.noteFor(key)?.icon
+        val note = if (key == MUSIC_ISLAND) null
+            else notes.firstOrNull { it.key == key } ?: LockIslands.noteFor(key)
+        // A focus template's own picture for the small island, moving if it moves; bare as the
+        // super island draws it.
+        view.setIconBare(note != null && note.focus && !note.redacted)
+        // The pill's own Lottie, not the plugin's smaller one for its small island: the two
+        // files draw at different sizes on their canvases, and in the same box the small island's
+        // stopwatch came out smaller than the pill's (2026-09-25).
+        val moving = focusLottie(view, note?.anim)
+        val picture: Any? = if (key == MUSIC_ISLAND) (thumbShown ?: cachedCover) else moving ?: note?.icon
         // Another island in a small island that is showing, nothing else moving it (a switch
         // animates its own): it comes up anew in the place rather than just changing its picture.
         if (previous != null && previous != key && showing && swap == null && !islandDragging &&
@@ -4826,6 +4842,55 @@ private class MiniPlayerController(
     /** A notification's row in the stack, by its key. */
     private fun rowFor(key: String): View? = findRow(key)?.first
 
+    fun rowTree(match: String): String {
+        val stack = notificationStack() ?: return "no stack"
+        val sb = StringBuilder()
+        fun rows(v: View): List<View> = listOf(v) + childRows(v)
+        for (i in 0 until stack.childCount) {
+            val child = stack.getChildAt(i)
+            if (!child.javaClass.name.contains("ExpandableNotificationRow")) continue
+            for (row in rows(child)) {
+                val key = rowKey(row) ?: continue
+                if (match.isNotEmpty() && !key.contains(match)) continue
+                val pub = runCatching { Xp.callMethod(row, "isShowingPublic") }.getOrNull()
+                val sens = runCatching { Xp.callMethod(row, "getSensitive") }.getOrNull()
+                sb.append("ROW ").append(key).append(" public=").append(pub).append(" sensitive=")
+                    .append(sens).append(" top=").append(row.translationY.toInt()).appendLine()
+                dumpTree(row, 1, sb)
+                if (sb.length > 60000) return sb.append("...cut").toString()
+            }
+        }
+        return if (sb.isEmpty()) "no row matches '$match'" else sb.toString()
+    }
+
+    private fun dumpTree(v: View, depth: Int, sb: StringBuilder) {
+        if (depth > 22) return
+        sb.append(" ".repeat(depth)).append(v.javaClass.simpleName)
+        val id = runCatching { if (v.id > 0) v.resources.getResourceEntryName(v.id) else null }.getOrNull()
+        if (id != null) sb.append(" #").append(id)
+        sb.append(when (v.visibility) { View.VISIBLE -> ""; View.INVISIBLE -> " INV"; else -> " GONE" })
+        if (v.alpha < 1f) sb.append(" a=").append("%.2f".format(v.alpha))
+        if (v.transitionAlpha < 1f) sb.append(" ta=").append("%.2f".format(v.transitionAlpha))
+        sb.append(' ').append(v.width).append('x').append(v.height)
+            .append('@').append(v.left).append(',').append(v.top)
+        when (v) {
+            is android.widget.Chronometer -> sb.append(" CHRONO base=").append(v.base)
+                .append(" down=").append(v.isCountDown).append(" text='").append(v.text).append("'")
+            is android.widget.TextView -> sb.append(" '").append(v.text?.toString()?.take(60))
+                .append("' sz=").append("%.0f".format(v.textSize)).append(" col=#")
+                .append(Integer.toHexString(v.currentTextColor))
+            is android.widget.ImageView -> v.drawable.let { d ->
+                sb.append(" img=").append(d?.javaClass?.simpleName)
+                    .append(' ').append(d?.intrinsicWidth).append('x').append(d?.intrinsicHeight)
+            }
+            is android.widget.ProgressBar -> sb.append(" progress=").append(v.progress).append('/').append(v.max)
+            else -> {}
+        }
+        if (v.contentDescription != null) sb.append(" cd='").append(v.contentDescription.toString().take(40)).append("'")
+        sb.appendLine()
+        if (v is ViewGroup) for (i in 0 until v.childCount) dumpTree(v.getChildAt(i), depth + 1, sb)
+    }
+
     /**
      * [key]'s row, and the stack's own row it is in: itself, or the group it is a child of. The
      * system groups an app's notifications by itself (高德's navigation came as two children of
@@ -5398,7 +5463,20 @@ private class MiniPlayerController(
             "small=${smallKey?.takeLast(24)} smallShown=${smallIsland?.visibility == View.VISIBLE} "
         val v = player ?: return islands + "no pill"
         val xy = IntArray(2).also(v::getLocationOnScreen)
-        val icons = "pillArt=[${v.artworkState()}] smallIcon=[${smallIsland?.iconState()}] "
+        val icons = "pillArt=[${v.artworkState()}] smallIcon=[${smallIsland?.iconState()}] " +
+            focusLotties.entries.joinToString(" ") { (owner, held) ->
+                val d = held.second.drawable
+                val shownIn = when (owner) {
+                    is MiniPlayerView -> (owner.artworkView as? ImageView)?.drawable.let { it === d || it === lottieWatches[d] }
+                    else -> d?.callback != null
+                }
+                "lottie[${if (owner === v) "pill" else owner.javaClass.simpleName} ${held.first} " +
+                    "anim=${runCatching { Xp.callMethod(held.second, "isAnimating") }.getOrNull()} " +
+                    "p=${runCatching { Xp.callMethod(held.second, "getProgress") }.getOrNull()} " +
+                    "vis=${d?.isVisible} cb=${d?.callback?.javaClass?.simpleName} " +
+                    "shown=$shownIn]"
+            } + " lottieWhy=[$focusLottieWhy] failed=$focusLottieFailed lottieLog=[" +
+            synchronized(lottieLog) { lottieLog.joinToString(" ; ") } + "] "
         val h = header?.get()
         return islands + icons + "pill v=${v.visibility} a=${v.alpha} ta=${v.transitionAlpha} at=${xy[0]},${xy[1]} " +
             "${v.width}x${v.height} morph=${morph != null} header=" +
@@ -5889,6 +5967,12 @@ private class MiniPlayerController(
     }
 
     private fun bindMusic(view: MiniPlayerView, current: MediaController, config: JSONObject) {
+        view.setArtworkBare(false)
+        view.setToggleFace(null)
+        view.setSecondFace(null)
+        view.skippable = true
+        showTimer(view, null)
+        showFocusAnim(view, null)
         val metadata = metadataOf(current)
         val shown = thumbnailFor(musicCover(metadata), view)
         view.setToggleShown(true)
@@ -5919,9 +6003,21 @@ private class MiniPlayerController(
      * come.
      */
     private fun bindNote(view: MiniPlayerView, note: LockIslands.Note, config: JSONObject) {
-        view.setToggleShown(false)
+        // A focus notification shown in full is its template: its picture bare, as its row has
+        // it, and its main button where the music's play button is.
+        val template = note.focus && !note.redacted
+        view.setArtworkBare(template)
+        view.skippable = false
+        // Its buttons as its row has them: the last - its main one - in the play button's place,
+        // the one before it beside it while the pill is the big island (setSecondShown).
+        val buttons = if (template) note.buttons else emptyList()
+        val primary = buttons.lastOrNull()
+        val second = buttons.getOrNull(buttons.size - 2)
+        view.setToggleShown(primary != null)
+        view.setToggleFace(primary?.let { buttonFace(it, note.timer) })
+        view.setSecondFace(second?.let { buttonFace(it, note.timer) })
         view.bind(
-            note.title.toString().ifBlank { appLabel(note.pkg) },
+            note.timer?.text() ?: note.title.toString().ifBlank { appLabel(note.pkg) },
             note.text.toString(),
             noteBitmap(note),
             false,
@@ -5934,9 +6030,400 @@ private class MiniPlayerController(
             {},
             { expandNote(note.key) },
         )
+        showTimer(view, note.timer)
+        showFocusAnim(view, note.anim)
+    }
+
+    /**
+     * Each pill's own player of a focus template's Lottie, and which picture it plays. The row's
+     * Lottie is the plugin's own copy of the library, obfuscated, its composition out of reach:
+     * the same file is loaded again with SystemUI's copy - the plugin names it
+     * (LottieResUtils.getLottieRes) and its resources hold it - into a LottieAnimationView of
+     * SystemUI's that is never attached, whose drawable the pill's artwork shows and runs.
+     */
+    private val focusLotties = java.util.WeakHashMap<Any, Pair<String, android.widget.ImageView>>()
+
+    private fun showFocusAnim(view: MiniPlayerView, anim: LockIslands.Anim?) {
+        val d = focusLottie(view, anim)
+        if (d == null) view.clearArtworkDrawable() else view.showArtworkDrawable(d)
+    }
+
+    /**
+     * [owner]'s player of [anim] - a pill, or the small island - its drawable to show, playing
+     * or held as the template says; null, and [owner]'s player stopped, for none.
+     */
+    private fun focusLottie(owner: Any, anim: LockIslands.Anim?): android.graphics.drawable.Drawable? {
+        if (anim == null) {
+            focusLotties.remove(owner)?.let { (_, lottie) -> runCatching { Xp.callMethod(lottie, "pauseAnimation") } }
+            return null
+        }
+        val id = "${anim.src}#${anim.number}"
+        var held = focusLotties[owner]
+        if (held?.first != id) {
+            val lottie = loadFocusLottie(anim) ?: return focusLottie(owner, null)
+            held = id to lottie
+            focusLotties[owner] = held
+        }
+        val lottie = held.second
+        runCatching {
+            Xp.callMethod(lottie, "setRepeatCount", anim.repeat)
+            Xp.callMethod(lottie, "setRepeatMode", 1)
+            if (anim.autoplay) {
+                if (Xp.callMethod(lottie, "isAnimating") != true) {
+                    lottieNote("asked to resume vis=${lottie.drawable?.isVisible}", lottie)
+                    Xp.callMethod(lottie, "resumeAnimation")
+                }
+            } else Xp.callMethod(lottie, "pauseAnimation")
+        }
+        return lottie.drawable?.let { d -> lottieWatches.getOrPut(d) { LottieWatch(d, lottie) } }
+    }
+
+    /**
+     * Compositions by the plugin's raw resource, shared by every pill that plays one; the
+     * pictures that would not load, not tried again on every refresh (a failure was retried
+     * twenty times in a minute, 2026-09-25).
+     */
+    private val focusCompositions = HashMap<Int, Any>()
+    private val focusLottieFailed = HashSet<String>()
+
+    private fun loadFocusLottie(anim: LockIslands.Anim): android.widget.ImageView? {
+        if (anim.src in focusLottieFailed) return null
+        return runCatching { makeFocusLottie(anim) }.onFailure {
+            // Thrown: this build has no way to it, not worth trying on every refresh.
+            focusLottieFailed += anim.src
+            focusLottieWhy = "failed ${anim.src}: ${(it as? java.lang.reflect.InvocationTargetException)?.targetException ?: it}"
+            lottieNote(focusLottieWhy, null)
+        }.getOrNull()
+    }
+
+    /** Why the last try gave nothing, said once until it changes. */
+    private var focusLottieWhy = ""
+
+    private fun lottieMiss(why: String): android.widget.ImageView? {
+        if (why != focusLottieWhy) {
+            focusLottieWhy = why
+            lottieNote("none: $why", null)
+        }
+        return null
+    }
+
+    /**
+     * The plugin as a package of its own, code and resources: its raw Lottie files are its
+     * resources, not SystemUI's, and a view of its in the row may carry SystemUI's.
+     */
+    private val pluginContext: android.content.Context? by lazy {
+        runCatching {
+            context.createPackageContext("miui.systemui.plugin",
+                android.content.Context.CONTEXT_INCLUDE_CODE or android.content.Context.CONTEXT_IGNORE_SECURITY)
+        }.onFailure { MiniPlayerRuntime.noteTouch("focus lottie: no plugin package: $it") }.getOrNull()
+    }
+
+    /** The last load's own exception, when it gave no composition. */
+    private var lottieLoadError: Any? = null
+
+    /**
+     * The plugin's raw Lottie [res] as SystemUI's copy of the library reads it: its
+     * fromRawResSync(Context, String cacheKey, int), arguments reordered by R8 and matched by
+     * type; its LottieResult's getters gone, its public fields read. One per file, shared.
+     */
+    private fun compositionFor(res: Int, plugin: android.content.Context): Any? {
+        focusCompositions[res]?.let { return it }
+        val systemui = host.javaClass.classLoader ?: return null
+        val factory = systemui.loadClass("com.airbnb.lottie.LottieCompositionFactory")
+        val load = factory.methods.first { m ->
+            m.name == "fromRawResSync" && m.parameterTypes.any { it == Int::class.javaPrimitiveType } &&
+                m.parameterTypes.any { it == android.content.Context::class.java }
+        }
+        val args = load.parameterTypes.map { t ->
+            when (t) {
+                android.content.Context::class.java -> plugin
+                Int::class.javaPrimitiveType -> res
+                String::class.java -> "musiccover_focus_$res"
+                else -> null
+            }
+        }.toTypedArray()
+        val result = load.invoke(null, *args)
+        lottieLoadError = runCatching { Xp.getObjectField(result, "exception") }.getOrNull()
+        return Xp.getObjectField(result, "value")?.also { focusCompositions[res] = it }
+    }
+
+    /** A LottieAnimationView of SystemUI's, never attached, holding [composition]. */
+    private fun newLottie(composition: Any, plugin: android.content.Context, systemui: ClassLoader): android.widget.ImageView {
+        val view = systemui.loadClass("com.airbnb.lottie.LottieAnimationView")
+            .getConstructor(android.content.Context::class.java).newInstance(plugin) as android.widget.ImageView
+        Xp.callMethod(view, "setComposition", composition)
+        return view
+    }
+
+    private fun lottieView(res: Int, plugin: android.content.Context): android.widget.ImageView? {
+        val composition = compositionFor(res, plugin) ?: return null
+        return newLottie(composition, plugin, host.javaClass.classLoader ?: return null)
+    }
+
+    private fun makeFocusLottie(anim: LockIslands.Anim): android.widget.ImageView? {
+        // The plugin as the row has it - its view's context and classes, which loaded the file
+        // (2026-09-25) - else the plugin's package; its package context alone never did.
+        val source = anim.row.get()?.let { LockIslands.focusIconView(it) }
+        val plugin = source?.context ?: pluginContext ?: return lottieMiss("no plugin context")
+        val loader = source?.javaClass?.classLoader ?: plugin.classLoader
+        val utils = loader.loadClass("miui.systemui.util.LottieResUtils")
+        val instance = runCatching { utils.getField("INSTANCE").get(null) }.getOrNull()
+        val res = utils.methods.first { it.name == "getLottieRes" && it.parameterTypes.size == 2 }
+            .invoke(instance, anim.src, anim.number) as Int
+        if (res == 0) return lottieMiss("no res for ${anim.src}")
+        val systemui = host.javaClass.classLoader ?: return lottieMiss("no systemui loader")
+        val composition = compositionFor(res, plugin)
+            ?: return lottieMiss("load ${anim.src}: $lottieLoadError")
+        val view = newLottie(composition, plugin, systemui)
+        runCatching { utils.getField("IMAGE_ASSETS_FOLDER").get(null) as? String }.getOrNull()
+            ?.let { Xp.callMethod(view, "setImageAssetsFolder", it) }
+        runCatching {
+            Xp.callMethod(view, "addAnimatorListener", object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationStart(a: android.animation.Animator) = lottieNote("start", view)
+                override fun onAnimationEnd(a: android.animation.Animator) = lottieNote("end", view)
+                override fun onAnimationCancel(a: android.animation.Animator) = lottieNote("cancel", view)
+                override fun onAnimationPause(a: android.animation.Animator) = lottieNote("pause", view)
+                override fun onAnimationResume(a: android.animation.Animator) = lottieNote("resume", view)
+            })
+        }
+        focusLottieWhy = ""
+        lottieNote("loaded ${anim.src} res=$res", view)
+        return view
     }
 
     private val noteBitmaps = HashMap<String, Pair<Long, Bitmap?>>()
+
+    /** For `op mini`: what the focus Lotties did, and who hid them - kept apart from the touches. */
+    private val lottieLog = ArrayDeque<String>()
+
+    private fun lottieNote(what: String, lottie: android.widget.ImageView?) {
+        val p = lottie?.let { runCatching { Xp.callMethod(it, "getProgress") }.getOrNull() }
+        synchronized(lottieLog) {
+            lottieLog.addLast("${android.os.SystemClock.uptimeMillis() % 100000} $what p=$p")
+            while (lottieLog.size > 24) lottieLog.removeFirst()
+        }
+    }
+
+    /**
+     * The Lottie drawable as the pill's artwork shows it: passed straight through, but its
+     * visibility changes - the only thing that pauses a Lottie drawable on its own - are noted.
+     */
+    private inner class LottieWatch(inner: android.graphics.drawable.Drawable, val lottie: android.widget.ImageView) :
+        android.graphics.drawable.DrawableWrapper(inner) {
+        override fun setVisible(visible: Boolean, restart: Boolean): Boolean {
+            if (visible != isVisible) lottieNote("visible=$visible", lottie)
+            return super.setVisible(visible, restart)
+        }
+    }
+
+    private val lottieWatches = java.util.WeakHashMap<android.graphics.drawable.Drawable, LottieWatch>()
+
+    /**
+     * A focus button as the pill draws it, by the plugin's own rule (ModuleButtonViewHolder
+     * .setActionNormalData / setActionTextData), the same for every app: its picture the
+     * plugin's own for its name when it has one (ACTIONS_RESOURCE_MAP), or its Lottie held at
+     * its first frame (LOTTIE_RES_MAP_NEXT, updateAndPauseAnimation), else the app's picture;
+     * its plate the plugin's focus_button_background_n in its colour, a pressed one under it.
+     */
+    private fun buttonFace(b: LockIslands.Button, timer: LockIslands.Timer?) = ActionFace(
+        key = "${b.type}|${b.iconName}|${b.bg}|${b.press}|${b.label}|${b.titleColor}|" +
+            "${b.progress?.let { "${it.value}/${it.auto}/${it.ccw}/${it.color}/${it.colorEnd}" }}",
+        icon = {
+            when (b.type) {
+                // setActionTextData: its title, in its title colour, on its plate.
+                2 -> TextFaceDrawable(b.label?.toString().orEmpty(), b.titleColor ?: android.graphics.Color.WHITE,
+                    13f * context.resources.displayMetrics.scaledDensity)
+                // setActionProgressData: its picture inside its ring.
+                1 -> progressFace(b, timer)
+                else -> buttonIcon(b)
+            }
+        },
+        // A plate only under words: the plugin's pictures carry their own round shell, and
+        // only setActionTextData gives its button a background - one under a picture drew a
+        // second shell round it (2026-09-25).
+        background = { if (b.type == 2) buttonPlate(b) else null },
+        label = b.label,
+        onClick = { pressButton(b) },
+        wide = b.type == 2,
+    )
+
+    /**
+     * A progress button: its picture inset in its ring - the ring at its value, or at its
+     * timer's share of the timer's total for an auto one (NotificationTimeKeeper.getProgresses),
+     * redrawn on each tick of the timer.
+     */
+    private fun progressFace(b: LockIslands.Button, timer: LockIslands.Timer?): android.graphics.drawable.Drawable {
+        val spec = b.progress
+        val auto = spec?.auto == true && timer != null && timer.totalMs > 0L
+        val ring = ProgressRingDrawable(
+            stroke = dp(2.5f).toFloat(),
+            color = spec?.color ?: android.graphics.Color.WHITE,
+            colorEnd = spec?.colorEnd,
+            ccw = spec?.ccw == true,
+            progress = if (auto) ({ timer!!.progress() }) else ({ (spec?.value ?: 0).toFloat() }),
+        )
+        if (auto) autoRings[ring] = true
+        val icon = buttonIcon(b)
+        val layers = listOfNotNull(icon?.let { android.graphics.drawable.InsetDrawable(it, 0.24f) }, ring)
+        return android.graphics.drawable.LayerDrawable(layers.toTypedArray())
+    }
+
+    /** The plugin's context and classes as the row has them, else its package's. */
+    private fun pluginOf(row: View?): Pair<android.content.Context, ClassLoader>? {
+        val source = row?.let(LockIslands::focusIconView)
+        val ctx = source?.context ?: pluginContext ?: return null
+        return ctx to (source?.javaClass?.classLoader ?: ctx.classLoader)
+    }
+
+    /** The plugin's name-to-picture maps for its buttons: its stills and its Lotties. */
+    private var buttonMapsCache: Pair<Map<*, *>, Map<*, *>>? = null
+
+    private fun buttonMaps(loader: ClassLoader): Pair<Map<*, *>, Map<*, *>>? = buttonMapsCache ?: runCatching {
+        val holder = loader.loadClass("miui.systemui.notification.focus.moduleV3.ModuleButtonViewHolder")
+        fun map(name: String) = holder.getDeclaredField(name).apply { isAccessible = true }.get(null) as Map<*, *>
+        (map("ACTIONS_RESOURCE_MAP") to map("LOTTIE_RES_MAP_NEXT")).also { buttonMapsCache = it }
+    }.onFailure { lottieNote("button maps: $it", null) }.getOrNull()
+
+    private fun buttonIcon(b: LockIslands.Button): android.graphics.drawable.Drawable? {
+        val name = b.iconName
+        val plugin = pluginOf(b.row.get())
+        if (name != null && plugin != null) {
+            val maps = buttonMaps(plugin.second)
+            (maps?.first?.get(name) as? Int)?.takeIf { it != 0 }?.let { res ->
+                runCatching { plugin.first.getDrawable(res) }.getOrNull()?.let { return it }
+            }
+            (maps?.second?.get(name) as? Int)?.takeIf { it > 0 }?.let { res ->
+                runCatching { lottieView(res, plugin.first) }.getOrNull()?.let { lottie ->
+                    runCatching { Xp.callMethod(lottie, "setProgress", 0f) }
+                    lottie.drawable?.let { return it }
+                }
+            }
+        }
+        return runCatching { (b.picture ?: b.action?.getIcon())?.loadDrawable(context) }.getOrNull()
+    }
+
+    private fun buttonPlate(b: LockIslands.Button): android.graphics.drawable.Drawable {
+        val ctx = pluginOf(b.row.get())?.first
+        fun plate(name: String, fallback: Int): android.graphics.drawable.Drawable {
+            val id = ctx?.resources?.getIdentifier(name, "drawable", "miui.systemui.plugin") ?: 0
+            return (if (id != 0) runCatching { ctx!!.getDrawable(id)?.mutate() }.getOrNull() else null)
+                ?: android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(fallback)
+                }
+        }
+        val normal = plate("focus_button_background_n", 0x33FFFFFF)
+        val pressed = plate("focus_button_background_p", 0x55FFFFFF)
+        b.bg?.let { (normal as? android.graphics.drawable.GradientDrawable)?.setColor(it) }
+        // Pressed: its own colour, else its plate's a little lighter, as the dark template's.
+        (b.press ?: b.bg?.let { androidx.core.graphics.ColorUtils.blendARGB(it, android.graphics.Color.WHITE, 0.15f) })
+            ?.let { (pressed as? android.graphics.drawable.GradientDrawable)?.setColor(it) }
+        return android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), pressed)
+            addState(IntArray(0), normal)
+        }
+    }
+
+    /**
+     * A tap: the row's own button is pressed - the plugin then does what it does for every app,
+     * the keyguard asked to go for an activity, the state flipped, the notification collapsed
+     * when asked. With no row to press, its intent is sent as the plugin would build it.
+     */
+    private fun pressButton(b: LockIslands.Button) {
+        MiniPlayerRuntime.noteTouch("focus button ${b.index} '${b.label}' ${b.iconName}")
+        val target = b.row.get()?.let { rowButton(it, b.index, b.type) }
+        if (target != null && target.hasOnClickListeners()) {
+            target.performClick()
+            return
+        }
+        runCatching {
+            val intent = b.action?.actionIntent ?: b.intentUri?.let { uri ->
+                val i = android.content.Intent.parseUri(uri, android.content.Intent.URI_INTENT_SCHEME)
+                val flags = android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                when (b.intentType) {
+                    2 -> android.app.PendingIntent.getBroadcast(context, b.postTime.toInt(), i, flags)
+                    3 -> android.app.PendingIntent.getService(context, b.postTime.toInt(), i, flags)
+                    else -> android.app.PendingIntent.getActivity(context, b.postTime.toInt(), i, flags)
+                }
+            }
+            intent?.send()
+        }.onFailure { MiniPlayerRuntime.noteTouch("focus button failed: $it") }
+    }
+
+    /**
+     * The row's own button: focus_button_icon1, 2, 3 for a picture, focus_button_progress1, 2, 3
+     * for one in a ring, focus_button_container_action for the text one (ModuleButtonViewHolder).
+     */
+    private fun rowButton(row: View, index: Int, type: Int): View? {
+        val names = when (type) {
+            1 -> setOf("focus_button_progress${index + 1}")
+            2 -> setOf("focus_button_container_action")
+            else -> setOf("focus_button_icon${index + 1}")
+        }
+        val queue = ArrayDeque<View>()
+        queue.add(row)
+        while (queue.isNotEmpty()) {
+            val v = queue.removeFirst()
+            if (v.id != View.NO_ID && v.visibility == View.VISIBLE) {
+                val name = runCatching { v.resources.getResourceEntryName(v.id) }.getOrNull()
+                if (name in names) return v
+            }
+            if (v is ViewGroup) for (i in 0 until v.childCount) queue.add(v.getChildAt(i))
+        }
+        return null
+    }
+
+    /**
+     * Islands whose title is a focus template's timer - a stopwatch, a countdown - and the timer
+     * each shows: the row's chronometer ticks, so the island's line does too, on the second as
+     * the chronometer turns it, in tabular figures as HyperChronometer draws them ("tnum").
+     */
+    private val timerViews = java.util.WeakHashMap<MiniPlayerView, LockIslands.Timer>()
+
+    private fun showTimer(view: MiniPlayerView, timer: LockIslands.Timer?) {
+        if (timer == null) {
+            rollers.remove(view)?.clear()
+            if (timerViews.remove(view) != null) view.titleView.fontFeatureSettings = null
+            return
+        }
+        timerViews[view] = timer
+        if (view.titleView.fontFeatureSettings != "tnum") view.titleView.fontFeatureSettings = "tnum"
+        timerText(view, timer, timer.text())
+        handler.removeCallbacks(timerTick)
+        timerTick.run()
+    }
+
+    /** The pills whose timer line turns its digits: a running countdown's (timerType -1). */
+    private val rollers = java.util.WeakHashMap<MiniPlayerView, RollingDigits>()
+
+    private fun timerText(view: MiniPlayerView, timer: LockIslands.Timer, text: String) {
+        if (timer.type == -1) {
+            rollers.getOrPut(view) { RollingDigits(view.titleView) }.set(text)
+        } else {
+            rollers.remove(view)?.clear()
+            if (view.titleView.text?.toString() != text) view.titleView.text = text
+        }
+    }
+
+    /** Progress buttons run by their template's timer: redrawn on every tick. */
+    private val autoRings = java.util.WeakHashMap<ProgressRingDrawable, Boolean>()
+
+    private val timerTick = object : Runnable {
+        override fun run() {
+            val now = System.currentTimeMillis()
+            var next = Long.MAX_VALUE
+            for ((view, timer) in timerViews.entries.toList()) {
+                if (!view.isAttachedToWindow || !timer.running) continue
+                timerText(view, timer, timer.text(now))
+                // To the chronometer's next second: up from its start, down to its end.
+                val ms = timer.elapsedMs(now)
+                val wait = if (timer.type > 0) 1000L - ms % 1000L else (ms % 1000L).takeIf { it > 0L } ?: 1000L
+                next = minOf(next, wait)
+            }
+            autoRings.keys.toList().forEach { it.invalidateSelf() }
+            if (next != Long.MAX_VALUE) handler.postDelayed(this, next + 5L)
+        }
+    }
 
     /** A note's picture as the pill's artwork wants it: a bitmap, drawn once per update. */
     private fun noteBitmap(note: LockIslands.Note): Bitmap? {
@@ -6169,6 +6656,8 @@ private class MiniPlayerController(
             lastPresentationLog = log
             Xp.log("MCMini: presentation $log")
         }
+        // A focus notification's second button while the pill is the only island: the big one.
+        view?.setSecondShown(shown && smallKey == null, animate = true)
     } finally { android.os.Trace.endSection() } }
 
     private fun updateNativeSuppression(suppress: Boolean) {
@@ -6420,9 +6909,12 @@ private const val ROW_GONE_MS = 1200L
 private const val ROW_WAIT_MS = 800L
 
 /** A row's picture, title and text, by the ids the notification templates give them. */
-private val ICON_NAMES = setOf("right_icon", "icon", "app_icon", "notification_icon", "left_icon")
-private val TITLE_NAMES = setOf("title", "notification_title")
-private val TEXT_NAMES = setOf("text", "big_text", "notification_text")
+// A focus notification's row is the plugin's template: its picture (a Lottie view or a still),
+// its chronometer or title, and its content line.
+private val ICON_NAMES = setOf("right_icon", "icon", "app_icon", "notification_icon", "left_icon",
+    "focus_animation", "focus_animation_static", "focus_icon")
+private val TITLE_NAMES = setOf("title", "notification_title", "chronometer", "focus_title")
+private val TEXT_NAMES = setOf("text", "big_text", "notification_text", "focus_content")
 
 /** Below this progress, a flight coming home fades off the small island shown under it. */
 private const val FLIGHT_HANDOFF = 0.18f
