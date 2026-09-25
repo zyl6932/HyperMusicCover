@@ -356,7 +356,11 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     fun setSecondShown(shown: Boolean, animate: Boolean) {
         val want = shown && secondFaceKey != null
         val to = if (want) 1f else 0f
-        if (want == secondWanted && (secondAnimator != null || secondShown == to)) return
+        // Asked for at once, it is there at once, even over a grow already on its way there: a
+        // flight landing on the pill found the refresh's grow started a frame before, and the
+        // left button grew in beside a right one that was simply there (filmed 2026-09-26).
+        if (want == secondWanted && (if (animate) secondAnimator != null || secondShown == to
+                else secondAnimator == null && secondShown == to)) return
         secondWanted = want
         secondAnimator?.cancel()
         secondAnimator = null
@@ -740,6 +744,23 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
 
     /** For `op mini`: the content's alpha as drawn (the text column's). */
     fun contentAlphaNow(): Float = textColumn.alpha
+
+    /**
+     * Held out of sight under a flight (transitionAlpha 0), it draws nothing at all. At an alpha
+     * of 0 its content stayed in the tree, and the flight's glass over it took it in: pulled up,
+     * the buttons came through blurred as the flight's own faded, and the time as a blurred
+     * double beside the flight's (filmed 2026-09-26).
+     */
+    override fun setTransitionAlpha(alpha: Float) {
+        val wasHidden = transitionAlpha <= 0f
+        super.setTransitionAlpha(alpha)
+        if (wasHidden != (alpha <= 0f)) invalidate()
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        if (transitionAlpha <= 0f) return
+        super.dispatchDraw(canvas)
+    }
 
     fun setContentAlpha(alpha: Float) {
         val a = alpha.coerceIn(0f, 1f)

@@ -2894,6 +2894,10 @@ private class MiniPlayerController(
                 View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
             view.layout(0, 0, w, h)
         }
+        // Its second button as the pill has it: a pooled view kept whatever its last switch left,
+        // and one flying home to the pill came down without its left button and grew it in
+        // after landing - gone for every tap of a run of them (filmed 2026-09-26).
+        view.setSecondShown(smallKey == null, animate = false)
         view.visibility = View.VISIBLE
         view.alpha = 1f
         return view
@@ -7085,7 +7089,9 @@ private class MiniPlayerController(
             Xp.log("MCMini: presentation $log")
         }
         // A focus notification's second button while the pill is the only island: the big one.
-        view?.setSecondShown(shown && smallKey == null, animate = true)
+        // Out of sight under a switch or a flight, it is set, not grown: it grew in only once the
+        // pill was given back, a beat after everything else had landed.
+        view?.setSecondShown(shown && smallKey == null, animate = !pillHeld() && !exchangeHoldsPill())
     } finally { android.os.Trace.endSection() } }
 
     private fun updateNativeSuppression(suppress: Boolean) {

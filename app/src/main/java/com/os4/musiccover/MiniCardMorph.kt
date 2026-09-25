@@ -95,30 +95,10 @@ internal class MiniCardMorph(
         val baseTy = view.translationY
         val nativeTransitionAlpha = native?.transitionAlpha ?: 1f
         var paired = false
-        /** The blur last put on it and on its card element, in their own pixels across and up. */
-        val blur = FloatArray(2)
-        val nativeBlur = FloatArray(2)
-    }
-
-    /**
-     * The super island's content blur as its layers cross (IslandPropertyUpdater: 40px at full,
-     * the leaving layer at once, the arriving one 50ms late): here each piece is out of focus by
-     * as much as it has faded, and the card's own line comes into focus a little after it
-     * comes in. In dp, 40px at this phone's 3x.
-     */
-    private val blurPx = mini.resources.displayMetrics.density * BLUR_DP
-
-    /** [r] across and up in [v]'s own pixels, [last] what it has now; unchanged within half a pixel. */
-    private fun blurTo(v: View, rx: Float, ry: Float, last: FloatArray) {
-        val x = if (rx < 0.5f) 0f else min(rx, BLUR_MAX_PX)
-        val y = if (ry < 0.5f) 0f else min(ry, BLUR_MAX_PX)
-        if ((x == 0f && y == 0f) == (last[0] == 0f && last[1] == 0f) &&
-            kotlin.math.abs(x - last[0]) < 0.5f && kotlin.math.abs(y - last[1]) < 0.5f) return
-        last[0] = x
-        last[1] = y
-        v.setRenderEffect(if (x == 0f && y == 0f) null
-            else android.graphics.RenderEffect.createBlurEffect(max(x, 0.01f), max(y, 0.01f),
-                android.graphics.Shader.TileMode.DECAL))
+        /** A line's own colour and words, given back when the morph ends. */
+        val ownColor = (view as? TextView)?.currentTextColor ?: 0
+        val ownText: CharSequence? = (view as? TextView)?.text
+        var tookText = false
     }
 
     private val motion = CoverMorphMotion()
@@ -443,12 +423,20 @@ internal class MiniCardMorph(
                 // The card's own line stays hidden until the pill's leaves it: the two faces
                 // differ in weight, and both drawn in full read as a doubled title.
                 if (piece.text) {
-                    val shown = 1f - pairedOut(c)
-                    n.transitionAlpha = piece.nativeTransitionAlpha * shown
-                    // ...and comes into focus just after, as the super island's arriving layer.
-                    if (shown > 0f) {
-                        val r = blurPx * (1f - nativeFocus(c)) / max(s, 0.05f)
-                        blurTo(n, r, r, piece.nativeBlur)
+                    // Under the pill's line fading off it, the card's is whole well before the
+                    // pill's is gone: two equal lines at a and 1 - a composite to 1 - a + a*a,
+                    // and the time dipped to three quarters on every crossing (2026-09-26).
+                    n.transitionAlpha = piece.nativeTransitionAlpha * min(1f, NATIVE_TEXT_LEAD * (1f - pairedOut(c)))
+                    // The card's colour and words by the time the two lines meet: a focus row's
+                    // grey under the pill's white, and a timer's two clocks a second apart,
+                    // crossed over on every open and close - a flash each time (2026-09-26).
+                    val tv = v as TextView
+                    val nt = n as TextView
+                    val colour = androidx.core.graphics.ColorUtils.blendARGB(piece.ownColor, nt.currentTextColor, mix)
+                    if (tv.currentTextColor != colour) tv.setTextColor(colour)
+                    if (mix >= 0.5f && !android.text.TextUtils.equals(tv.text, nt.text)) {
+                        tv.text = nt.text
+                        piece.tookText = true
                     }
                 }
             }
@@ -459,18 +447,14 @@ internal class MiniCardMorph(
             v.translationX = tx - layoutX - ax * kx
             v.translationY = ty - layoutY - ay * ky
             val asPill = if (piece.paired) pairedOut(c) else earlyOut(c)
-            val a = when {
+            // No blur on the way (2026-09-26): the super island's 40px content blur across the
+            // crossing was tried (2d269db) and the user did not want it.
+            v.alpha = when {
                 piece.art && bridged -> 0f
                 piece.art -> asPill
                 // Out of a circle, only the picture is there at first; the lines join it once
                 // the shape has room for them.
                 else -> lerp(asPill, if (piece.paired) circleIn(c) * pairedOut(c) else 0f, round)
-            }
-            v.alpha = a
-            // Out of focus as far as it has faded; the cover's own flight has the bridged artwork.
-            if (a > 0f || piece.blur[0] == 0f) {
-                val r = if (piece.art && bridged) 0f else blurPx * (1f - a)
-                blurTo(v, r / max(kx, 0.05f), r / max(ky, 0.05f), piece.blur)
             }
             if (piece.art) {
                 artDrawn = CoverMorphMotion.Box(box.x + tx - ax * kx, box.y + ty - ay * ky,
@@ -507,10 +491,10 @@ internal class MiniCardMorph(
             v.translationX = piece.baseTx
             v.translationY = piece.baseTy
             v.alpha = 1f
-            blurTo(v, 0f, 0f, piece.blur)
-            if (piece.paired && piece.text) piece.native?.let {
-                it.transitionAlpha = piece.nativeTransitionAlpha
-                blurTo(it, 0f, 0f, piece.nativeBlur)
+            if (piece.paired && piece.text) piece.native?.transitionAlpha = piece.nativeTransitionAlpha
+            (v as? TextView)?.let { tv ->
+                if (tv.currentTextColor != piece.ownColor) tv.setTextColor(piece.ownColor)
+                if (piece.tookText) tv.text = piece.ownText
             }
         }
         mini.endMorph()
@@ -610,8 +594,20 @@ internal class MiniCardMorph(
     /** Text lines up by where its first glyph starts and by its baseline; anything else by its corner. */
     private fun anchorX(v: View, text: Boolean): Float {
         if (!text || v !is TextView) return 0f
-        val lineLeft = v.layout?.getLineLeft(0) ?: 0f
-        return v.totalPaddingLeft + lineLeft - v.scrollX
+        val layout = v.layout ?: return anchors[v]?.get(0)?.takeIf { !it.isNaN() } ?: v.totalPaddingLeft.toFloat()
+        return (v.totalPaddingLeft + layout.getLineLeft(0) - v.scrollX).also { keepAnchor(v, 0, it) }
+    }
+
+    /**
+     * Each line's anchor as last read with a layout. A line whose text has just changed has none
+     * until the next layout pass - baseline -1, no line left - and read as 0 the line jumped by
+     * its baseline for that frame: a timer's time, once a second, on the pill's side or the
+     * card's (filmed 2026-09-26).
+     */
+    private val anchors = java.util.WeakHashMap<View, FloatArray>()
+
+    private fun keepAnchor(v: View, at: Int, value: Float) {
+        anchors.getOrPut(v) { floatArrayOf(Float.NaN, Float.NaN) }[at] = value
     }
 
     /**
@@ -652,8 +648,12 @@ internal class MiniCardMorph(
 
     private val widthCache = HashMap<View, WidthRatio>()
 
-    private fun anchorY(v: View, text: Boolean): Float =
-        if (text && v is TextView && v.baseline > 0) v.baseline.toFloat() else 0f
+    private fun anchorY(v: View, text: Boolean): Float {
+        if (!text || v !is TextView) return 0f
+        val baseline = if (v.layout != null) v.baseline else -1
+        if (baseline > 0) return baseline.toFloat().also { keepAnchor(v, 1, it) }
+        return anchors[v]?.get(1)?.takeIf { !it.isNaN() } ?: 0f
+    }
 
     companion object {
         /** The most progress per second a let-go hands the spring. */
@@ -705,14 +705,8 @@ internal class MiniCardMorph(
          */
         fun pairedOut(p: Float) = 1f - smooth(0.85f, 0.93f, p)
 
-        /** The card's own line in focus: as it comes in (pairedOut), a little later. */
-        fun nativeFocus(p: Float) = smooth(0.87f, 0.97f, p)
-
-        /** The super island's 40px content blur, at this phone's 3x. */
-        const val BLUR_DP = 40f / 3f
-
-        /** A piece scaled far down still gets no more than this, in its own pixels. */
-        const val BLUR_MAX_PX = 200f
+        /** How much faster the card's line comes in than the pill's leaves it. */
+        const val NATIVE_TEXT_LEAD = 3f
 
         /** The card comes in under the mini player's material, which still covers it. */
         fun nativeIn(p: Float) = smooth(0.1f, 0.5f, p)
