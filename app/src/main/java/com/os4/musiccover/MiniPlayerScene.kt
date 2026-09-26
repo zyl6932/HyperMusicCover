@@ -15,6 +15,14 @@ internal object MiniPlayerScene {
         private set
     @Volatile var aodActive = false
         private set
+    @Volatile private var fullScreenAod = false
+
+    /** The ordinary/custom AOD owns the screen; only the full-screen AOD keeps this row. */
+    val customAodActive: Boolean
+        get() = aodActive && !fullScreenAod
+
+    val fullScreenAodActive: Boolean
+        get() = aodActive && fullScreenAod
 
     val hasBlockingOverlay: Boolean
         get() = editorActive || chargingActive || controlCenterActive
@@ -88,9 +96,12 @@ internal object MiniPlayerScene {
 
     private fun setAodActive(active: Boolean) {
         val keyguardExitReset = active && keyguardGoingAway
+        val fullScreen = active && Main.fullAodOn()
         if (keyguardExitReset) keyguardGoingAway = false
-        if (aodActive == active && !keyguardExitReset) return
+        if (aodActive == active && fullScreenAod == fullScreen && !keyguardExitReset) return
+        fullScreenAod = fullScreen
         aodActive = active
+        Xp.log("MCMini: AOD active=$active fullScreen=$fullScreen")
         if (!active) MiniPlayerRuntime.aodEnded()
         MiniPlayerRuntime.refresh()
     }

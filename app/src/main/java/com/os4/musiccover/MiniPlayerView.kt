@@ -102,7 +102,9 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
             }
         }
         materialLayer.scaleType = ImageView.ScaleType.FIT_XY
-        materialLayer.clipToOutline = true
+        // The frame clips the finished glass once. Clipping the element too leaves a stepped
+        // rim where Xiaomi's glass shader meets the same rounded outline a second time.
+        materialLayer.clipToOutline = false
         materialLayer.outlineProvider = outlineProvider
         addView(materialLayer, LayoutParams(-1, -1))
         artwork.scaleType = ImageView.ScaleType.CENTER_CROP
@@ -186,7 +188,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
                 removeView(materialLayer)
                 materialLayer = ImageView(context).apply {
                     scaleType = ImageView.ScaleType.FIT_XY
-                    clipToOutline = true
+                    clipToOutline = false
                     outlineProvider = this@MiniPlayerView.outlineProvider
                 }
                 addView(materialLayer, 0, LayoutParams(-1, -1))
@@ -194,14 +196,10 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
             lastMaterial = material
             materialAgain = {
                 applyMaterial(materialLayer)
-                materialLayer.outlineProvider = outlineProvider
-                materialLayer.clipToOutline = true
+                restoreMaterialOutline(materialLayer)
             }
             applyMaterial(materialLayer)
-            // The card's recipe gives the layer its own 24dp outline; the pill's shape - and the
-            // morph's changing corner - is ours.
-            materialLayer.outlineProvider = outlineProvider
-            materialLayer.clipToOutline = true
+            restoreMaterialOutline(materialLayer)
             updateGeometry(config.getDouble(MiniPlayerConfig.HEIGHT_RADIUS).toFloat(),
                 config.getDouble(MiniPlayerConfig.ART_RADIUS).toFloat())
         }
@@ -555,6 +553,14 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     /** Re-applies the material now; for a first show that came before the pill had a size. */
     private var materialAgain: (() -> Unit)? = null
 
+    /** Also called when AOD settling replays the card recipe without going through bind(). */
+    internal fun restoreMaterialOutline(view: ImageView) {
+        if (view !== materialLayer) return
+        view.outlineProvider = outlineProvider
+        view.clipToOutline = false
+        view.invalidateOutline()
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (!morphing && w > 1 && h > 1 && (oldw <= 1 || oldh <= 1)) materialAgain?.invoke()
@@ -681,8 +687,9 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
 
     /**
      * The container, in screen pixels. The frame itself is resized - never scaled - so the
-     * material fills it at its own resolution and keeps its outline clip. custom.8 stretched it
-     * with that clip switched off, and the recording shows it black for the whole flight.
+     * material fills it at its own resolution and the container keeps the single outline clip.
+     * custom.8 stretched it with that clip switched off, and the recording shows it black for
+     * the whole flight.
      * setLeftTopRightBottom moves the frame without a layout pass;
      * onLayout() below keeps a pass that happens anyway from putting the rest size back.
      */
@@ -703,6 +710,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         if (resized) {
             traced("MC f.bounds") { setLeftTopRightBottom(left, top, left + morphW, top + morphH) }
             traced("MC f.matBounds") { materialLayer.setLeftTopRightBottom(0, 0, morphW, morphH) }
+            MiniGlassOutline.geometry(materialLayer)
         }
         translationX = box.x - xy[0] - left
         translationY = box.y - xy[1] - top
@@ -757,6 +765,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         if (!morphing) {
             super.onLayout(changed, left, top, right, bottom)
+            MiniGlassOutline.geometry(materialLayer)
             return
         }
         // A layout pass mid-morph has just put the rest frame back (layout() is final): the
@@ -766,6 +775,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         super.onLayout(changed, left, top, left + restWidth(), top + restHeight())
         setLeftTopRightBottom(left, top, left + morphW, top + morphH)
         materialLayer.layout(0, 0, morphW, morphH)
+        MiniGlassOutline.geometry(materialLayer)
     }
 
     /**

@@ -11,12 +11,16 @@ object MiniPlayerConfig {
     const val WIDTH = "widthDp"
     const val HEIGHT_RADIUS = "heightRadiusDp"
     const val ART_RADIUS = "artRadiusDp"
+    const val ISLAND_MATERIAL = "islandMaterial"
+    const val SHORTCUT_FOLLOW_ISLAND = "shortcutFollowIsland"
+    const val SHORTCUT_MATERIAL = "shortcutMaterial"
 
     private val defaults = linkedMapOf<String, Any>(
         ENABLED to false,
         WIDTH to 221f,
         HEIGHT_RADIUS to 27f,
         ART_RADIUS to 12f,
+        SHORTCUT_FOLLOW_ISLAND to true,
     )
 
     @JvmStatic fun defaultJson(): String = normalizedJson(null)
@@ -42,6 +46,8 @@ object MiniPlayerConfig {
         decimal(WIDTH, 160f, 360f)
         decimal(HEIGHT_RADIUS, 24f, 60f)
         decimal(ART_RADIUS, 0f, 60f)
+        out.put(ISLAND_MATERIAL, MiniMaterialStyle.normalizedJson(input.optJSONObject(ISLAND_MATERIAL), false))
+        out.put(SHORTCUT_MATERIAL, MiniMaterialStyle.normalizedJson(input.optJSONObject(SHORTCUT_MATERIAL), true))
         return out.toString()
     }
 
