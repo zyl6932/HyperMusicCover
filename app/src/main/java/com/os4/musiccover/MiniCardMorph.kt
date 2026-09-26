@@ -29,7 +29,7 @@ internal class MiniCardMorph(
     private val mini: MiniPlayerView,
     private val header: View,
     toNative: Boolean,
-    private val listener: Listener,
+    private var listener: Listener,
     /**
      * Where the pill's artwork, title and artist land, and the corners they land in: the media
      * card's by default. A notification island lands on its own row's icon, title and text.
@@ -40,7 +40,7 @@ internal class MiniCardMorph(
      * island's circle, for a notification opening straight out of it; the row's own spring,
      * for a pill still widening or narrowing as the small island goes or comes.
      */
-    private val restBox: (() -> CoverMorphMotion.Box?)? = null,
+    private var restBox: (() -> CoverMorphMotion.Box?)? = null,
     /** That end is a small island's circle, holding only its picture. */
     private val circle: Boolean = restBox != null,
     /**
@@ -48,13 +48,13 @@ internal class MiniCardMorph(
      * pixels: a row that has just come into the stack lands where it will be once the rows
      * leaving it are gone, not above them for the stack to slide down after.
      */
-    private val nativeDy: (() -> Float)? = null,
+    private var nativeDy: (() -> Float)? = null,
     /**
      * How much of a circle the mini end is, 0 (a pill) to 1 (a small island's circle), when it
      * changes on the way: a card headed for the small place that the row gives the big one
      * instead. Read every frame; [circle] when there is none.
      */
-    private val roundness: (() -> Float)? = null,
+    private var roundness: (() -> Float)? = null,
 ) : Choreographer.FrameCallback {
     class Landing(val art: View?, val title: View?, val text: View?, val radius: Float, val artRadius: Float) {
         companion object {
@@ -157,6 +157,13 @@ internal class MiniCardMorph(
     private var boxDrawn: CoverMorphMotion.Box? = null
     private var lastFrame = 0L
     private var startedAt = 0L
+
+    /** Why it was last cut short, for `op mini`: the lock screen's guard, or no geometry. */
+    var lastCancel = ""
+        private set
+
+    private fun geometryWhy(): String = "geometry card=${header.javaClass.simpleName} att=${header.isAttachedToWindow} " +
+        "${header.width}x${header.height} mini=${mini.isAttachedToWindow} ${mini.width}x${mini.height}"
 
     /** While a finger holds it: progress is set, not sprung, and nothing lands. */
     private var dragging = false
@@ -270,6 +277,15 @@ internal class MiniCardMorph(
     /** The container as this frame drew it, on screen: what presses on the shortcut discs. */
     fun containerBox(): CoverMorphMotion.Box? = if (running) boxDrawn else null
 
+    /**
+     * The island's end as this frame read it, on screen: the pill's place, a narrower pill beside
+     * a small island, or the small island's circle - wherever the island this morph leaves or
+     * comes home to is. What the rows that go with it come out from under.
+     */
+    fun miniEndBox(): CoverMorphMotion.Box? = if (running) miniEndDrawn else null
+
+    private var miniEndDrawn: CoverMorphMotion.Box? = null
+
     /** Where it stood when a finger took it: the drag carries on from exactly here. */
     class Grab(val progress: Float, val nudge: Float, val nudgeX: Float)
 
@@ -288,6 +304,24 @@ internal class MiniCardMorph(
         return Grab(motion.value, nudge.value * NUDGE_UNIT, nudgeX.value * NUDGE_UNIT)
     }
 
+    /** The card it morphs into: the media card, or a notification's row. */
+    val card: View get() = header
+
+    /**
+     * Carries on as someone else's: the same spring at the same speed, the same pose, only who
+     * hears of its frames and how its two ends are read change. A notification opening out of a
+     * flight, taken into a switch when the music is tapped on its way (the super island turns
+     * every island from where it is, IslandTransitionExecutor), is not remade - remade, it would
+     * start over from one end.
+     */
+    fun handTo(listener: Listener, restBox: (() -> CoverMorphMotion.Box?)?, nativeDy: (() -> Float)?,
+               roundness: (() -> Float)?) {
+        this.listener = listener
+        this.restBox = restBox
+        this.nativeDy = nativeDy
+        this.roundness = roundness
+    }
+
     /** Turns the same container round; the spring keeps its velocity. */
     fun aim(toNative: Boolean) {
         if (!running) return
@@ -303,8 +337,10 @@ internal class MiniCardMorph(
 
     override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC cardMorph"); try {
         if (!running) return
-        // Asleep, bouncer, control centre: the same test as the cover morph's, every frame.
-        if (!Main.coverMorphStillEligible()) {
+        // Asleep, the lock screen gone: every frame. Its own lock screen's, not the clock
+        // container's the cover morph asks after (Main.islandMorphStillEligible).
+        if (!Main.islandMorphStillEligible(mini)) {
+            lastCancel = Main.morphGateWhy(mini)
             finish(false)
             return
         }
@@ -312,7 +348,10 @@ internal class MiniCardMorph(
             // The finger writes the progress; this only keeps the far end live under it. A
             // leader posing it this frame has done that already.
             if (SystemClock.uptimeMillis() - ledAt < LED_FRESH_MS) Choreographer.getInstance().postFrameCallback(this)
-            else if (!apply()) finish(false)
+            else if (!apply()) {
+                lastCancel = geometryWhy()
+                finish(false)
+            }
             else Choreographer.getInstance().postFrameCallback(this)
             return
         }
@@ -324,6 +363,7 @@ internal class MiniCardMorph(
         nudge.step(dt, Main.sClockResponse)
         nudgeX.step(dt, Main.sClockResponse)
         if (!apply()) {
+            lastCancel = geometryWhy()
             finish(false)
             return
         }
@@ -350,6 +390,7 @@ internal class MiniCardMorph(
 
     private fun apply(): Boolean {
         val miniRest = traced("MC m.rest") { restBox?.invoke() ?: mini.restBoxOnScreen() } ?: return false
+        miniEndDrawn = miniRest
         val nativeRest = traced("MC m.native") { headerRestBox() } ?: return false
         if (miniRest.w <= 0f || nativeRest.w <= 0f) return false
         val c = motion.value.coerceIn(0f, 1f)
@@ -366,7 +407,7 @@ internal class MiniCardMorph(
         if (header.visibility != View.VISIBLE) header.visibility = View.VISIBLE
         traced("MC m.place") { placeHeader(box, s) }
         clipW = header.width.toFloat()
-        clipH = min(header.height.toFloat(), box.h / s)
+        clipH = min(drawnHeight(), box.h / s)
         clipR = radius / s
         if (header.outlineProvider !== clipOutline) header.outlineProvider = clipOutline
         if (!header.clipToOutline) header.clipToOutline = true
@@ -524,8 +565,18 @@ internal class MiniCardMorph(
         val w = corner[0] - x0
         val dy = nativeDy?.invoke() ?: 0f
         return CoverMorphMotion.Box(origin[0] + x0, origin[1] + y0 + dy,
-            w, header.height * (w / header.width))
+            w, drawnHeight() * (w / header.width))
     }
+
+    /**
+     * The card's height as the stack draws it. A notification row is laid out at its full
+     * height and clipped by the stack to its actual height: a folded group of QQ messages was
+     * laid out 3265px tall, children and all, and the morph flew to a card taller than the
+     * screen (2026-09-26). Anything else - the media card - is its own height.
+     */
+    private fun drawnHeight(): Float = runCatching {
+        (Xp.callMethod(header, "getActualHeight") as Number).toFloat()
+    }.getOrNull()?.takeIf { it > 0f && it <= header.height } ?: header.height.toFloat()
 
     /** The card's slot on screen: its parent's origin, less any scroll, plus left and top. */
     private fun headerOrigin(): FloatArray? {

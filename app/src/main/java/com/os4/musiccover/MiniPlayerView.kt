@@ -381,6 +381,19 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         }
     }
 
+    /**
+     * The second button [v] of the way in, set from outside frame by frame: a stand-in leaving
+     * the big island for the small place takes it away as it shrinks. Nothing without a face.
+     */
+    fun setSecondProgress(v: Float) {
+        if (secondFaceKey == null) return
+        secondAnimator?.cancel()
+        secondAnimator = null
+        secondWanted = v >= 0.5f
+        val to = v.coerceIn(0f, 1f)
+        if (to != secondShown) applySecond(to)
+    }
+
     private fun applySecond(v: Float) {
         secondShown = v
         val vis = if (v > 0.001f) View.VISIBLE else View.GONE
@@ -398,6 +411,10 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     }
 
     val secondToggleView: View get() = toggle2
+
+    /** For `op mini`: how far the second button is in, + if it is wanted, and its face. */
+    fun secondState(): String = "%.2f".format(secondShown) + (if (secondWanted) "+" else "-") +
+        (if (secondFaceKey == null) "nf" else "") + (if (secondAnimator != null) "A" else "")
 
     fun clearArtworkDrawable() {
         if (artworkOverride == null) return

@@ -830,7 +830,8 @@ final class ClockCollapse {
      * music card into a focus notification, the clock shrank and came back (2026-09-26).
      */
     private static float exitY(float natural) {
-        return Float.isNaN(natural) ? natural : Main.roomForRows(natural);
+        // At once: the exit eases toward it on its own (0.25 of the way a frame).
+        return Float.isNaN(natural) ? natural : Main.roomForRowsNow(natural);
     }
 
     /** The share of the way to a moved exit end taken each frame. */

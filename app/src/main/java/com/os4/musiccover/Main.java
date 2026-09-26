@@ -5128,6 +5128,11 @@ public class Main extends XposedModule {
      * reach up still push it as they always did.
      */
     static float roomForRows(float requested) {
+        return easeRoom(roomForRowsNow(requested));
+    }
+
+    /** roomForRows at once, for a caller that eases its own way there (ClockCollapse.exitY). */
+    static float roomForRowsNow(float requested) {
         if (Float.isNaN(requested) || requested >= Float.MAX_VALUE / 2f) return requested;
         float top;
         try {
@@ -5139,6 +5144,73 @@ public class Main extends XposedModule {
         traceRoom(requested, top, out);
         return out;
     }
+
+    /**
+     * The room given to the clock, eased when it jumps. What is given replaces whatever the
+     * clock's own animation was carrying (setNotifY is where it lands), so the OEM's easing
+     * never reached our changes: a card switched in or out cut the clock from one size to the
+     * other in a frame (2026-09-26). A jump - the rows changing under it, not the OEM's own
+     * animation stepping, which moves it a little a frame - is followed over ~300ms instead,
+     * the clock asked again every frame meanwhile (reassertClockRoom) until it is there.
+     */
+    private static float easeRoom(float raw) {
+        if (Float.isNaN(raw) || raw >= Float.MAX_VALUE / 2f || !sScreenOn) {
+            sRoomShown = raw;
+            sRoomRaw = raw;
+            sRoomEasing = false;
+            return raw;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        if (Float.isNaN(sRoomShown) || Float.isNaN(sRoomRaw)) {
+            sRoomShown = raw;
+            sRoomRaw = raw;
+            return raw;
+        }
+        boolean jump = Math.abs(raw - sRoomRaw) > ROOM_JUMP_PX;
+        sRoomRaw = raw;
+        if (!sRoomEasing) {
+            if (!jump) {
+                sRoomShown = raw;
+                return raw;
+            }
+            sRoomEasing = true;
+            sRoomAt = now;
+            android.view.Choreographer.getInstance().removeFrameCallback(ROOM_FRAME);
+            android.view.Choreographer.getInstance().postFrameCallback(ROOM_FRAME);
+            return sRoomShown;
+        }
+        float dt = Math.min(50f, now - sRoomAt);
+        sRoomAt = now;
+        sRoomShown += (raw - sRoomShown) * (1f - (float) Math.exp(-dt / ROOM_TAU_MS));
+        if (Math.abs(raw - sRoomShown) < 1f) {
+            sRoomShown = raw;
+            sRoomEasing = false;
+        }
+        return sRoomShown;
+    }
+
+    private static float sRoomShown = Float.NaN, sRoomRaw = Float.NaN;
+    private static long sRoomAt;
+    private static boolean sRoomEasing;
+    /** A change of room bigger than this in one go is a jump, eased (easeRoom). */
+    private static final float ROOM_JUMP_PX = 24f;
+    /** The ease's time constant: nine tenths of the way in ~160ms, there by ~300ms. */
+    private static final float ROOM_TAU_MS = 70f;
+
+    /** Every frame of an ease: the clock asked again, which brings it the next step. */
+    private static final android.view.Choreographer.FrameCallback ROOM_FRAME =
+            new android.view.Choreographer.FrameCallback() {
+        @Override
+        public void doFrame(long frameTimeNanos) {
+            if (!sRoomEasing) return;
+            if (sHoldY != null || !sScreenOn) {
+                sRoomEasing = false;
+                return;
+            }
+            reassertClockRoom();
+            android.view.Choreographer.getInstance().postFrameCallback(this);
+        }
+    };
 
     /** The last clock y's asked and given, for `op mini`. */
     private static final java.util.ArrayDeque<String> sRoomTrace = new java.util.ArrayDeque<>();
@@ -5185,8 +5257,13 @@ public class Main extends XposedModule {
             float y = ((Number) Xp.callMethod(triple, "getFirst")).floatValue();
             if (!(y < Float.MAX_VALUE / 2f)) return;
             sRoomNudge = -sRoomNudge;
+            // Its second is whether the clock jumps (ClockBaseAnimation.notifStateChange: true
+            // -> Folme setTo, false -> doNotifyHeightChangeAnimation). Copied from the system's
+            // last, which follows the stack's list scroll frame by frame and so says jump, the
+            // clock cut from one size to the other on every switch between the stack island's
+            // list and a card (2026-09-26). Ours is always a change of rows: animated.
             Object next = triple.getClass().getConstructor(Object.class, Object.class, Object.class)
-                    .newInstance(y + sRoomNudge, Xp.callMethod(triple, "getSecond"), Xp.callMethod(triple, "getThird"));
+                    .newInstance(y + sRoomNudge, Boolean.FALSE, Xp.callMethod(triple, "getThird"));
             Xp.callMethod(flow, "setValue", next);
         } catch (Throwable t) {
             traceRoom(Float.NaN, Float.NaN, Float.NaN);
@@ -6428,6 +6505,28 @@ public class Main extends XposedModule {
 
     static boolean coverMorphEligible() {
         return coverMorphStillEligible() && !bouncerUp() && !controlCenterUp();
+    }
+
+    /**
+     * The per-frame guard for an island's morph ([v] the view it moves): the lock screen [v] is
+     * drawn in is still up, the screen on. Not the clock container's: the stack's list presses
+     * the clock down, and every morph of a switch was cancelled in the same frame, 50ms in, the
+     * stopwatch's card left half way up (2026-09-26).
+     */
+    static boolean islandMorphStillEligible(View v) {
+        if (v == null || !v.isAttachedToWindow() || !sScreenOn || !keyguardShowing()) return false;
+        android.view.ViewParent p = v.getParent();
+        return p instanceof View && ((View) p).isShown();
+    }
+
+    /** For `op mini`: each part of both guards, when a morph was cut short by one. */
+    static String morphGateWhy(View v) {
+        View c = sContainer;
+        android.view.ViewParent p = v == null ? null : v.getParent();
+        return "clock[" + (c == null ? "null" : "att=" + c.isAttachedToWindow() + " shown=" + c.isShown()
+                + " vis=" + c.getVisibility() + " id=" + Integer.toHexString(System.identityHashCode(c)))
+                + "] screen=" + sScreenOn + " kg=" + keyguardShowing()
+                + " host=" + (p instanceof View ? ((View) p).isShown() : "none");
     }
 
     /** Cheap per-frame guard; the expensive overlay lookups are only needed at gesture start. */
