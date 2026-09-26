@@ -1615,7 +1615,7 @@ private class MiniPlayerController(
      * buttons themselves: its centre on the midpoint of where the two are drawn, its scale the
      * ratio of their drawn spacing to their resting spacing.
      *
-     * In the doze the buttons are put away while the pill stays; there it takes only
+     * In the full-screen doze the buttons are put away while the pill stays; there it takes only
      * keyguard_root_view's own zoom and fade, and it goes back to the buttons once they have
      * faded all the way back in after the wake - switching earlier, it dropped with their fade
      * and came back: a flash.
@@ -1652,7 +1652,7 @@ private class MiniPlayerController(
         // each frame, and rowFade is whatever was last written - the wake's 0.04, or the 1 the
         // hold wrote a frame ago. Waking, the pill let go on one and took the other: the row
         // dropped to nothing and faded in beside buttons that stayed (filmed 2026-09-26).
-        if (MiniPlayerScene.aodActive || holdButtons) rowHeldOff = true
+        if (MiniPlayerScene.fullScreenAodActive || holdButtons) rowHeldOff = true
         else if (rowHeldOff && rowFade >= 0.99f) rowHeldOff = false
         followRowFade = rowFade
         // The lock screen's editor button, up after a long press on the clock, is where the row
@@ -6514,7 +6514,8 @@ private class MiniPlayerController(
         val placed = followHost.invert(hostInverse)
         for (side in 0..1) {
             val button = button(side)
-            val shown = placed && discsWanted && button.isShown && button.width > 0 && button.height > 0
+            val shown = !MiniPlayerScene.customAodActive && placed && discsWanted &&
+                button.isShown && button.width > 0 && button.height > 0
             var disc = discs[side]
             if (!shown) {
                 if (disc != null && disc.visibility != View.GONE) disc.visibility = View.GONE
@@ -6558,7 +6559,7 @@ private class MiniPlayerController(
     // ---- the torch and the camera through the doze
 
     /**
-     * The doze does not put the torch and the camera away: it leaves them shown and fades
+     * The full-screen doze does not put the torch and the camera away: it leaves them shown and fades
      * their chain out to a hundredth (`op mini` discs trace, 2026-09-25). The row keeps them:
      * every frame of the doze, before it is drawn, each view from a button's image up to the
      * keyguard's root is put back to full alpha over whatever the doze's animation wrote there
@@ -6577,7 +6578,12 @@ private class MiniPlayerController(
     private fun holdButtonsThroughDoze() {
         val root = followRoot?.get()
         val now = android.os.SystemClock.uptimeMillis()
-        if (MiniPlayerScene.aodActive && discsWanted && root != null) {
+        if (MiniPlayerScene.customAodActive) {
+            holdButtons = false
+            backSince = 0L
+            return
+        }
+        if (MiniPlayerScene.fullScreenAodActive && discsWanted && root != null) {
             holdButtons = true
             holdSince = now
         }
@@ -8122,8 +8128,9 @@ private class MiniPlayerController(
         // The discs stay while any island is out as its row: the last notification pulled out
         // of a row with no music left the row empty, and the torch and camera lost their glass
         // with it (2026-09-25) - where the music, out as its card, still counts as an island.
-        discsWanted = keyguardOwned || enabled && !MiniPlayerScene.keyguardGoingAway &&
-            Main.keyguardLocked() && LockIslands.releasedKeys().isNotEmpty()
+        discsWanted = !MiniPlayerScene.customAodActive && (keyguardOwned ||
+            enabled && !MiniPlayerScene.keyguardGoingAway && Main.keyguardLocked() &&
+            LockIslands.releasedKeys().isNotEmpty())
         val controlCenterOpen = keyguardOwned &&
             (MiniPlayerScene.controlCenterIsActive || Main.miniPlayerControlCenterUp())
         val nativeRequested = MiniPlayerRuntime.nativeRequested(current?.sessionToken)
@@ -8146,6 +8153,7 @@ private class MiniPlayerController(
                 nativeSceneOverride = keyguardOwned && Main.coverSceneActive(),
                 transitionActive = transition,
                 controlCenterOpen = controlCenterOpen,
+                hideForCustomAod = MiniPlayerScene.customAodActive,
             ),
         )
         // An exchange keeps the row up - out of the cover, the row went for its frames and every

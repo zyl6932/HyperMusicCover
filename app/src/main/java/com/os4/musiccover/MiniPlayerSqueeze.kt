@@ -214,9 +214,10 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
 
     private fun applyDress() {
         dressWith?.invoke(element)
-        // The recipe gives the element the card's own corner; the disc's is its own.
+        // Keep the element's outline for Xiaomi's glass shader. The frame alone clips the
+        // composed disc, so the shader and the View do not cut the same edge twice.
         element.outlineProvider = elementShape
-        element.clipToOutline = true
+        element.clipToOutline = false
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean = false
