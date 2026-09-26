@@ -1444,6 +1444,11 @@ object MiniPlayerRuntime {
             view.setImageDrawable(GradientDrawable().apply { setColor(0x9E1F2324.toInt()) })
         }
     }
+
+    internal fun material(view: ImageView, classLoader: ClassLoader, style: MiniMaterialStyle) {
+        if (style.mode == MiniMaterialStyle.SYSTEM) material(view, classLoader)
+        else MiniMaterialRenderer.apply(view, style, classLoader)
+    }
 }
 
 private class MiniPlayerController(
@@ -1473,6 +1478,18 @@ private class MiniPlayerController(
     private var positionPosted = false
     private var configuredHeightDp = 72f
     private var config = JSONObject(MiniPlayerConfig.defaultJson())
+    private var islandMaterial = MiniMaterialStyle.defaults(false)
+    private var shortcutMaterial = islandMaterial
+    private var materialKeyGeneration = Int.MIN_VALUE
+    private var islandMaterialKey = ""
+    private var shortcutMaterialKey = ""
+    private fun updateMaterialKeys() {
+        val generation = MiniPlayerRuntime.materialGeneration
+        if (materialKeyGeneration == generation) return
+        materialKeyGeneration = generation
+        islandMaterialKey = islandMaterial.key(generation)
+        shortcutMaterialKey = shortcutMaterial.key(generation)
+    }
     private var forceHeaderRefresh = true
     private var lastPresentationLog = ""
     private var lastActive = false
@@ -1991,7 +2008,11 @@ private class MiniPlayerController(
         if (!smallWide && (view.layoutParams.width != frame || view.layoutParams.height != frame)) {
             view.layoutParams = view.layoutParams.apply { width = frame; height = frame }
         }
-        view.dress(MiniPlayerRuntime.materialGeneration) { MiniPlayerRuntime.material(it, loader) }
+        updateMaterialKeys()
+        val style = islandMaterial
+        view.dress(islandMaterialKey) {
+            MiniPlayerRuntime.material(it, loader, style)
+        }
         if (swap == null && !islandDragging && !smallGrowing && landingBox == null) view.setShape(d, d)
         // The one showing, going for a flight coming in, goes as itself: it keeps its picture
         // while it shrinks away. It used to take the incoming one's at once - and, asked only
@@ -2769,7 +2790,11 @@ private class MiniPlayerController(
         if (disc.layoutParams.width != frame || disc.layoutParams.height != frame) {
             disc.layoutParams = disc.layoutParams.apply { width = frame; height = frame }
         }
-        disc.dress(MiniPlayerRuntime.materialGeneration) { MiniPlayerRuntime.material(it, loader) }
+        updateMaterialKeys()
+        val style = islandMaterial
+        disc.dress(islandMaterialKey) {
+            MiniPlayerRuntime.material(it, loader, style)
+        }
         val picture: Any? = if (key == MUSIC_ISLAND) (thumbShown ?: cachedCover)
             else LockIslands.notes.firstOrNull { it.key == key }?.icon ?: LockIslands.noteFor(key)?.icon
         disc.setIconBare(key != MUSIC_ISLAND)
@@ -6504,7 +6529,11 @@ private class MiniPlayerController(
             if (disc.layoutParams.width != frame || disc.layoutParams.height != frame) {
                 disc.layoutParams = disc.layoutParams.apply { width = frame; height = frame }
             }
-            disc.dress(MiniPlayerRuntime.materialGeneration) { MiniPlayerRuntime.material(it, loader) }
+            updateMaterialKeys()
+            val style = shortcutMaterial
+            disc.dress(shortcutMaterialKey) {
+                MiniPlayerRuntime.material(it, loader, style)
+            }
             if (disc.visibility != View.VISIBLE) disc.visibility = View.VISIBLE
         }
         // The squeeze from this frame's row, then the discs from the squeeze - in that order, or
@@ -7242,7 +7271,13 @@ private class MiniPlayerController(
             configStale = false
             config = JSONObject(MiniPlayerConfig.fromPreferences(prefs))
             configuredHeightDp = MiniPlayerConfig.visibleHeightDp(config.toString())
+            islandMaterial = MiniMaterialStyle.fromJson(config.optJSONObject(MiniPlayerConfig.ISLAND_MATERIAL))
+            shortcutMaterial = if (config.optBoolean(MiniPlayerConfig.SHORTCUT_FOLLOW_ISLAND, true))
+                islandMaterial else MiniMaterialStyle.fromJson(
+                    config.optJSONObject(MiniPlayerConfig.SHORTCUT_MATERIAL), true)
+            materialKeyGeneration = Int.MIN_VALUE
         }
+        updateMaterialKeys()
         val config = this.config
         forceHeaderRefresh = true
         val enabled = config.getBoolean(MiniPlayerConfig.ENABLED)
@@ -7406,8 +7441,8 @@ private class MiniPlayerController(
             shown,
             stateOf(current)?.state == PlaybackState.STATE_PLAYING,
             config,
-            "#${MiniPlayerRuntime.materialGeneration}",
-            { target -> MiniPlayerRuntime.material(target, loader) },
+            islandMaterialKey,
+            { target -> MiniPlayerRuntime.material(target, loader, islandMaterial) },
             ::togglePlayback,
             { skip(next = false) },
             { skip(next = true) },
@@ -7448,8 +7483,8 @@ private class MiniPlayerController(
             noteBitmap(note),
             false,
             config,
-            "#${MiniPlayerRuntime.materialGeneration}",
-            { target -> MiniPlayerRuntime.material(target, loader) },
+            islandMaterialKey,
+            { target -> MiniPlayerRuntime.material(target, loader, islandMaterial) },
             {},
             {},
             {},
