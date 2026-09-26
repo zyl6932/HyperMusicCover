@@ -71,6 +71,11 @@ fun CreditsPageContent(
             "https://www.coolapk.com/u/37608778",
         ),
         Credit(
+            "@Leaf-lsgtky",
+            stringResource(R.string.credits_leaf),
+            "https://github.com/Leaf-lsgtky",
+        ),
+        Credit(
             "HyperChanger",
             stringResource(R.string.credits_hyperchanger),
             "https://github.com/ColdP/HyperChanger",
