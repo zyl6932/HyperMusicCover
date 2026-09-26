@@ -87,7 +87,7 @@
     <string name="credits_liquid_glass">The lens, the inner shadow and the vibrancy behind the liquid glass</string>
     <string name="credits_markdown_css">How the release notes are typeset</string>
     <string name="credits_cialloum">The square cover card, the morph between the thumbnail and the cover, and the lock screen lyric position, size and weight settings</string>
-    <string name="credits_hyperchanger">The lock screen mini player (ported by btm_m), and lifting the depth, saved-lock-screen, clock colon and global-theme glass restrictions</string>
+    <string name="credits_hyperchanger">The lock screen super island (ported by btm_m), and lifting the depth, saved-lock-screen, clock colon and global-theme glass restrictions</string>
     <string name="credits_leaf">Video and depth video wallpaper support</string>
     <string name="credits_hypertweak">Hiding the lock screen\'s fingerprint print and its animation</string>
     <string name="credits_amll">How the lock screen lyrics move</string>
@@ -196,7 +196,7 @@
     <string name="features_cover_summary">Cover, clock, media card</string>
     <string name="features_shade_title">Shade and control centre (experimental)</string>
     <string name="features_shade_summary">Flowing light</string>
-    <string name="features_mini_title">Lock screen mini player</string>
+    <string name="features_mini_title">Lock screen super island</string>
     <string name="features_mini_summary">Media controls, gestures, size and material</string>
 
     <string name="shade_enabled">Enable flowing light</string>

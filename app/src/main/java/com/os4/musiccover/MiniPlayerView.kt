@@ -161,7 +161,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         toggle2.visibility = View.GONE
         toggle2.setOnClickListener { secondFaceClick?.invoke() }
         addView(toggle2)
-        contentDescription = "迷你音乐播放器"
+        contentDescription = "锁屏超级岛"
     }
 
     fun bind(

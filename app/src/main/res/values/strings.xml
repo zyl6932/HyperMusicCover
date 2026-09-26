@@ -87,7 +87,7 @@
     <string name="credits_liquid_glass">液态玻璃的透镜、内阴影和鲜艳度</string>
     <string name="credits_markdown_css">更新日志的排版样式</string>
     <string name="credits_cialloum">方形封面卡片、小封面与大封面之间的形变动画，以及锁屏歌词的位置、字号和字重设置</string>
-    <string name="credits_hyperchanger">锁屏迷你播放器（由 btm_m 移植），以及解除景深限制、锁屏搭配数量上限、时钟冒号、全局主题下的柔光玻璃</string>
+    <string name="credits_hyperchanger">锁屏超级岛（由 btm_m 移植），以及解除景深限制、锁屏搭配数量上限、时钟冒号、全局主题下的柔光玻璃</string>
     <string name="credits_leaf">视频壁纸和景深视频壁纸的支持</string>
     <string name="credits_hypertweak">隐藏锁屏指纹图案和指纹动画的做法</string>
     <string name="credits_amll">锁屏歌词的动画手感</string>
@@ -202,7 +202,7 @@
     <string name="features_cover_summary">封面、时钟、媒体卡片</string>
     <string name="features_shade_title">通控中心（实验性功能）</string>
     <string name="features_shade_summary">动态流光</string>
-    <string name="features_mini_title">锁屏迷你播放器</string>
+    <string name="features_mini_title">锁屏超级岛</string>
     <string name="features_mini_summary">媒体控制、手势、尺寸与材质</string>
 
     <string name="shade_enabled">启用流光效果</string>
