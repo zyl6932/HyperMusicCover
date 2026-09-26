@@ -1444,6 +1444,11 @@ object MiniPlayerRuntime {
             view.setImageDrawable(GradientDrawable().apply { setColor(0x9E1F2324.toInt()) })
         }
     }
+
+    internal fun material(view: ImageView, classLoader: ClassLoader, style: MiniMaterialStyle) {
+        if (style.mode == MiniMaterialStyle.SYSTEM) material(view, classLoader)
+        else MiniMaterialRenderer.apply(view, style, classLoader)
+    }
 }
 
 private class MiniPlayerController(
@@ -1473,6 +1478,18 @@ private class MiniPlayerController(
     private var positionPosted = false
     private var configuredHeightDp = 72f
     private var config = JSONObject(MiniPlayerConfig.defaultJson())
+    private var islandMaterial = MiniMaterialStyle.defaults(false)
+    private var shortcutMaterial = islandMaterial
+    private var materialKeyGeneration = Int.MIN_VALUE
+    private var islandMaterialKey = ""
+    private var shortcutMaterialKey = ""
+    private fun updateMaterialKeys() {
+        val generation = MiniPlayerRuntime.materialGeneration
+        if (materialKeyGeneration == generation) return
+        materialKeyGeneration = generation
+        islandMaterialKey = islandMaterial.key(generation)
+        shortcutMaterialKey = shortcutMaterial.key(generation)
+    }
     private var forceHeaderRefresh = true
     private var lastPresentationLog = ""
     private var lastActive = false
@@ -1598,7 +1615,7 @@ private class MiniPlayerController(
      * buttons themselves: its centre on the midpoint of where the two are drawn, its scale the
      * ratio of their drawn spacing to their resting spacing.
      *
-     * In the doze the buttons are put away while the pill stays; there it takes only
+     * In the full-screen doze the buttons are put away while the pill stays; there it takes only
      * keyguard_root_view's own zoom and fade, and it goes back to the buttons once they have
      * faded all the way back in after the wake - switching earlier, it dropped with their fade
      * and came back: a flash.
@@ -1635,7 +1652,7 @@ private class MiniPlayerController(
         // each frame, and rowFade is whatever was last written - the wake's 0.04, or the 1 the
         // hold wrote a frame ago. Waking, the pill let go on one and took the other: the row
         // dropped to nothing and faded in beside buttons that stayed (filmed 2026-09-26).
-        if (MiniPlayerScene.aodActive || holdButtons) rowHeldOff = true
+        if (MiniPlayerScene.fullScreenAodActive || holdButtons) rowHeldOff = true
         else if (rowHeldOff && rowFade >= 0.99f) rowHeldOff = false
         followRowFade = rowFade
         // The lock screen's editor button, up after a long press on the clock, is where the row
@@ -1991,7 +2008,11 @@ private class MiniPlayerController(
         if (!smallWide && (view.layoutParams.width != frame || view.layoutParams.height != frame)) {
             view.layoutParams = view.layoutParams.apply { width = frame; height = frame }
         }
-        view.dress(MiniPlayerRuntime.materialGeneration) { MiniPlayerRuntime.material(it, loader) }
+        updateMaterialKeys()
+        val style = islandMaterial
+        view.dress(islandMaterialKey) {
+            MiniPlayerRuntime.material(it, loader, style)
+        }
         if (swap == null && !islandDragging && !smallGrowing && landingBox == null) view.setShape(d, d)
         // The one showing, going for a flight coming in, goes as itself: it keeps its picture
         // while it shrinks away. It used to take the incoming one's at once - and, asked only
@@ -2769,7 +2790,11 @@ private class MiniPlayerController(
         if (disc.layoutParams.width != frame || disc.layoutParams.height != frame) {
             disc.layoutParams = disc.layoutParams.apply { width = frame; height = frame }
         }
-        disc.dress(MiniPlayerRuntime.materialGeneration) { MiniPlayerRuntime.material(it, loader) }
+        updateMaterialKeys()
+        val style = islandMaterial
+        disc.dress(islandMaterialKey) {
+            MiniPlayerRuntime.material(it, loader, style)
+        }
         val picture: Any? = if (key == MUSIC_ISLAND) (thumbShown ?: cachedCover)
             else LockIslands.notes.firstOrNull { it.key == key }?.icon ?: LockIslands.noteFor(key)?.icon
         disc.setIconBare(key != MUSIC_ISLAND)
@@ -6489,7 +6514,8 @@ private class MiniPlayerController(
         val placed = followHost.invert(hostInverse)
         for (side in 0..1) {
             val button = button(side)
-            val shown = placed && discsWanted && button.isShown && button.width > 0 && button.height > 0
+            val shown = !MiniPlayerScene.customAodActive && placed && discsWanted &&
+                button.isShown && button.width > 0 && button.height > 0
             var disc = discs[side]
             if (!shown) {
                 if (disc != null && disc.visibility != View.GONE) disc.visibility = View.GONE
@@ -6504,7 +6530,11 @@ private class MiniPlayerController(
             if (disc.layoutParams.width != frame || disc.layoutParams.height != frame) {
                 disc.layoutParams = disc.layoutParams.apply { width = frame; height = frame }
             }
-            disc.dress(MiniPlayerRuntime.materialGeneration) { MiniPlayerRuntime.material(it, loader) }
+            updateMaterialKeys()
+            val style = shortcutMaterial
+            disc.dress(shortcutMaterialKey) {
+                MiniPlayerRuntime.material(it, loader, style)
+            }
             if (disc.visibility != View.VISIBLE) disc.visibility = View.VISIBLE
         }
         // The squeeze from this frame's row, then the discs from the squeeze - in that order, or
@@ -6529,7 +6559,7 @@ private class MiniPlayerController(
     // ---- the torch and the camera through the doze
 
     /**
-     * The doze does not put the torch and the camera away: it leaves them shown and fades
+     * The full-screen doze does not put the torch and the camera away: it leaves them shown and fades
      * their chain out to a hundredth (`op mini` discs trace, 2026-09-25). The row keeps them:
      * every frame of the doze, before it is drawn, each view from a button's image up to the
      * keyguard's root is put back to full alpha over whatever the doze's animation wrote there
@@ -6548,7 +6578,12 @@ private class MiniPlayerController(
     private fun holdButtonsThroughDoze() {
         val root = followRoot?.get()
         val now = android.os.SystemClock.uptimeMillis()
-        if (MiniPlayerScene.aodActive && discsWanted && root != null) {
+        if (MiniPlayerScene.customAodActive) {
+            holdButtons = false
+            backSince = 0L
+            return
+        }
+        if (MiniPlayerScene.fullScreenAodActive && discsWanted && root != null) {
             holdButtons = true
             holdSince = now
         }
@@ -7242,7 +7277,13 @@ private class MiniPlayerController(
             configStale = false
             config = JSONObject(MiniPlayerConfig.fromPreferences(prefs))
             configuredHeightDp = MiniPlayerConfig.visibleHeightDp(config.toString())
+            islandMaterial = MiniMaterialStyle.fromJson(config.optJSONObject(MiniPlayerConfig.ISLAND_MATERIAL))
+            shortcutMaterial = if (config.optBoolean(MiniPlayerConfig.SHORTCUT_FOLLOW_ISLAND, true))
+                islandMaterial else MiniMaterialStyle.fromJson(
+                    config.optJSONObject(MiniPlayerConfig.SHORTCUT_MATERIAL), true)
+            materialKeyGeneration = Int.MIN_VALUE
         }
+        updateMaterialKeys()
         val config = this.config
         forceHeaderRefresh = true
         val enabled = config.getBoolean(MiniPlayerConfig.ENABLED)
@@ -7406,8 +7447,8 @@ private class MiniPlayerController(
             shown,
             stateOf(current)?.state == PlaybackState.STATE_PLAYING,
             config,
-            "#${MiniPlayerRuntime.materialGeneration}",
-            { target -> MiniPlayerRuntime.material(target, loader) },
+            islandMaterialKey,
+            { target -> MiniPlayerRuntime.material(target, loader, islandMaterial) },
             ::togglePlayback,
             { skip(next = false) },
             { skip(next = true) },
@@ -7448,8 +7489,8 @@ private class MiniPlayerController(
             noteBitmap(note),
             false,
             config,
-            "#${MiniPlayerRuntime.materialGeneration}",
-            { target -> MiniPlayerRuntime.material(target, loader) },
+            islandMaterialKey,
+            { target -> MiniPlayerRuntime.material(target, loader, islandMaterial) },
             {},
             {},
             {},
@@ -8087,8 +8128,9 @@ private class MiniPlayerController(
         // The discs stay while any island is out as its row: the last notification pulled out
         // of a row with no music left the row empty, and the torch and camera lost their glass
         // with it (2026-09-25) - where the music, out as its card, still counts as an island.
-        discsWanted = keyguardOwned || enabled && !MiniPlayerScene.keyguardGoingAway &&
-            Main.keyguardLocked() && LockIslands.releasedKeys().isNotEmpty()
+        discsWanted = !MiniPlayerScene.customAodActive && (keyguardOwned ||
+            enabled && !MiniPlayerScene.keyguardGoingAway && Main.keyguardLocked() &&
+            LockIslands.releasedKeys().isNotEmpty())
         val controlCenterOpen = keyguardOwned &&
             (MiniPlayerScene.controlCenterIsActive || Main.miniPlayerControlCenterUp())
         val nativeRequested = MiniPlayerRuntime.nativeRequested(current?.sessionToken)
@@ -8111,6 +8153,7 @@ private class MiniPlayerController(
                 nativeSceneOverride = keyguardOwned && Main.coverSceneActive(),
                 transitionActive = transition,
                 controlCenterOpen = controlCenterOpen,
+                hideForCustomAod = MiniPlayerScene.customAodActive,
             ),
         )
         // An exchange keeps the row up - out of the cover, the row went for its frames and every

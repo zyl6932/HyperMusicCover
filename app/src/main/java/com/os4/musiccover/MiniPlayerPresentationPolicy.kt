@@ -13,6 +13,7 @@ internal data class MiniPlayerPresentationInput(
     val nativeSceneOverride: Boolean = false,
     val transitionActive: Boolean = false,
     val controlCenterOpen: Boolean = false,
+    val hideForCustomAod: Boolean = false,
 )
 
 internal data class MiniPlayerPresentation(
@@ -27,7 +28,7 @@ internal object MiniPlayerPresentationPolicy {
         val miniSelected = !input.nativeRequested
         val lockscreenSurfaceVisible = input.sceneVisible || input.controlCenterOpen
         return MiniPlayerPresentation(
-            showMini = available &&
+            showMini = available && !input.hideForCustomAod &&
                 (input.transitionActive || miniSelected && lockscreenSurfaceVisible),
             suppressNative = available && miniSelected && input.keyguardOwned && lockscreenSurfaceVisible &&
                 !input.nativeSceneOverride && !input.transitionActive,

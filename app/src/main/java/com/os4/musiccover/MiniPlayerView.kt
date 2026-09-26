@@ -102,7 +102,9 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
             }
         }
         materialLayer.scaleType = ImageView.ScaleType.FIT_XY
-        materialLayer.clipToOutline = true
+        // The frame clips the finished glass once. Clipping the element too leaves a stepped
+        // rim where Xiaomi's glass shader meets the same rounded outline a second time.
+        materialLayer.clipToOutline = false
         materialLayer.outlineProvider = outlineProvider
         addView(materialLayer, LayoutParams(-1, -1))
         artwork.scaleType = ImageView.ScaleType.CENTER_CROP
@@ -186,7 +188,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
                 removeView(materialLayer)
                 materialLayer = ImageView(context).apply {
                     scaleType = ImageView.ScaleType.FIT_XY
-                    clipToOutline = true
+                    clipToOutline = false
                     outlineProvider = this@MiniPlayerView.outlineProvider
                 }
                 addView(materialLayer, 0, LayoutParams(-1, -1))
@@ -195,13 +197,13 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
             materialAgain = {
                 applyMaterial(materialLayer)
                 materialLayer.outlineProvider = outlineProvider
-                materialLayer.clipToOutline = true
+                materialLayer.clipToOutline = false
             }
             applyMaterial(materialLayer)
             // The card's recipe gives the layer its own 24dp outline; the pill's shape - and the
             // morph's changing corner - is ours.
             materialLayer.outlineProvider = outlineProvider
-            materialLayer.clipToOutline = true
+            materialLayer.clipToOutline = false
             updateGeometry(config.getDouble(MiniPlayerConfig.HEIGHT_RADIUS).toFloat(),
                 config.getDouble(MiniPlayerConfig.ART_RADIUS).toFloat())
         }
@@ -681,8 +683,9 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
 
     /**
      * The container, in screen pixels. The frame itself is resized - never scaled - so the
-     * material fills it at its own resolution and keeps its outline clip. custom.8 stretched it
-     * with that clip switched off, and the recording shows it black for the whole flight.
+     * material fills it at its own resolution and the container keeps the single outline clip.
+     * custom.8 stretched it with that clip switched off, and the recording shows it black for
+     * the whole flight.
      * setLeftTopRightBottom moves the frame without a layout pass;
      * onLayout() below keeps a pass that happens anyway from putting the rest size back.
      */

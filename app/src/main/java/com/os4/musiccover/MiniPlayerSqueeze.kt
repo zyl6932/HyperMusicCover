@@ -26,9 +26,9 @@ import kotlin.math.sqrt
  * recorded calls. It never takes a touch - the button above it keeps its own.
  */
 internal class ShortcutDisc(context: Context) : FrameLayout(context) {
-    private val element = ImageView(context)
+    private var element = ImageView(context)
     private var dressWith: ((ImageView) -> Unit)? = null
-    private var dressedAs = -1
+    private var dressedAs: String? = null
     private var shapeW = 0
     private var shapeH = 0
     private var shapeDx = 0
@@ -65,9 +65,17 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     }
 
     /** The card's material, applied again only when the card has been dressed anew. */
-    fun dress(generation: Int, apply: (ImageView) -> Unit) {
+    fun dress(generation: String, apply: (ImageView) -> Unit) {
         dressWith = apply
         if (generation == dressedAs) return
+        // Xiaomi material APIs retain native state on the view. A fresh element keeps a former
+        // glass or blur recipe from leaking into a newly selected solid/system recipe.
+        if (dressedAs != null) {
+            removeView(element)
+            element = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_XY }
+            addView(element, 0, LayoutParams(0, 0))
+            placeElement()
+        }
         dressedAs = generation
         if (shapeW > 1 && shapeH > 1) applyDress()
     }
@@ -206,9 +214,10 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
 
     private fun applyDress() {
         dressWith?.invoke(element)
-        // The recipe gives the element the card's own corner; the disc's is its own.
+        // Keep the element's outline for Xiaomi's glass shader. The frame alone clips the
+        // composed disc, so the shader and the View do not cut the same edge twice.
         element.outlineProvider = elementShape
-        element.clipToOutline = true
+        element.clipToOutline = false
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean = false
