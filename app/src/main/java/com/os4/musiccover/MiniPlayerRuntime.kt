@@ -425,6 +425,14 @@ object MiniPlayerRuntime {
 
     /** The last frame's arguments while the AOD's colours are on the views; null otherwise. */
     private var aodDimArgs: Array<Any?>? = null
+
+    /**
+     * The last frame as the views take it: the card's own blend and glass eased toward the AOD's
+     * by the frame's depth ([dimDepth]). Null to put the frame's own values on as they come.
+     */
+    private var aodDimLook: Pair<IntArray, FloatArray?>? = null
+    private var aodDimDepth = -1f
+    private var aodController: WeakReference<Any>? = null
     private var aodDimFrames = 0
     private var blendMethod: Method? = null
     private var glassMethod: Method? = null
@@ -451,7 +459,8 @@ object MiniPlayerRuntime {
         val ours = java.lang.reflect.Proxy.newProxyInstance(classLoader, arrayOf(listener)) { self, m, args ->
             when (m.name) {
                 "updateFullAodAnimState" -> { runCatching { onAodDim(args!!) }; null }
-                "completeFullAodAnim" -> { runCatching { settleAodDim() }; null }
+                "completeFullAodAnim" -> { dimNote("complete"); runCatching { settleAodDim() }; null }
+                "onFullAodChange" -> { dimNote("change dark=${args?.getOrNull(0)} glass=${args?.getOrNull(1)}"); null }
                 "hashCode" -> System.identityHashCode(self)
                 "equals" -> self === args?.firstOrNull()
                 "toString" -> "MusicCover full-AOD dim"
@@ -462,6 +471,7 @@ object MiniPlayerRuntime {
         var added = false
         Xp.hookAll(controller, "addCallback") { chain ->
             val result = chain.proceed()
+            aodController = WeakReference(chain.thisObject)
             if (!added) {
                 added = true
                 runCatching { add.invoke(chain.thisObject, ours) }
@@ -474,7 +484,12 @@ object MiniPlayerRuntime {
     private fun onAodDim(args: Array<Any?>) {
         aodDimArgs = args
         aodDimFrames++
+        val depth = runCatching { dimDepth(args) }.getOrNull()
+        aodDimDepth = depth ?: -1f
+        aodDimLook = depth?.let { d -> runCatching { dimLook(d) }.getOrNull() }
         for (view in dressedViews.toList()) dimView(view, args)
+        dimNote("frame ${Integer.toHexString(args[4] as Int)} ta=${"%.2f".format(args[13] as Float)} " +
+            "d=${depth?.let { "%.2f".format(it) } ?: "?"}${if (aodDimLook == null) " raw" else ""}")
         // The run ends in completeFullAodAnim; should it be cut short, the last frame settles it.
         aodDimHandler.removeCallbacks(aodDimSettle)
         aodDimHandler.postDelayed(aodDimSettle, AOD_DIM_SETTLE_MS)
@@ -487,9 +502,10 @@ object MiniPlayerRuntime {
         val blurOpened = blurOpenedMethod?.let { runCatching { it.invoke(null, ctx) as Boolean }.getOrNull() } ?: true
         runCatching {
             if (blurOpened) {
-                val colours = IntArray(6) { args[4 + it] as Int }
+                val look = aodDimLook
+                val colours = look?.first ?: IntArray(6) { args[4 + it] as Int }
                 blendMethod?.invoke(null, ctx, view, false, colours, false)
-                val params = args[10] as? FloatArray
+                val params = if (look != null) look.second ?: args[10] as? FloatArray else args[10] as? FloatArray
                 if (args[12] == true && params != null) glassMethod?.invoke(null, view, params)
             } else {
                 val id = ctx.resources.getIdentifier("notification_media_fullaod_item_bg", "drawable",
@@ -502,12 +518,98 @@ object MiniPlayerRuntime {
         }
     }
 
+    /**
+     * How far into the AOD's look a frame is, 0 the lock screen's and 1 the AOD's: where its
+     * glass parameters stand between the controller's two sets (mGlassParamsOnKeyguard ->
+     * mGlassParamsFullAod), whichever way the run goes and for a reset's single frame alike.
+     *
+     * The frames' own colours end the wake on the focus rows' keyguard blend (ffa0a0a0), not the
+     * card's (ff7a7a7a): the pill eased out of the AOD toward one and was dressed back to the
+     * other on complete - undimmed, then a second change (2026-09-26, `dimlog`). The depth puts
+     * the pill's own material at 0, so neither end of a run jumps.
+     */
+    private fun dimDepth(args: Array<Any?>): Float? {
+        val c = aodController?.get() ?: return null
+        val k = Xp.getObjectField(c, "mGlassParamsOnKeyguard") as? FloatArray ?: return null
+        val a = Xp.getObjectField(c, "mGlassParamsFullAod") as? FloatArray ?: return null
+        val p = args[10] as? FloatArray ?: return null
+        if (k.size != a.size || p.size != k.size) return null
+        var num = 0.0
+        var den = 0.0
+        for (i in k.indices) {
+            val span = (a[i] - k[i]).toDouble()
+            num += (p[i] - k[i]) * span
+            den += span * span
+        }
+        if (den < 1e-9) return null
+        return (num / den).toFloat().coerceIn(0f, 1f)
+    }
+
+    /**
+     * The card's recorded blend and glass eased toward the AOD's by [depth]. The AOD's colours
+     * are the controller's focus list's AOD side (mFocusNotifiColorList: origin, target pairs;
+     * the target is the AOD's on the way in, the origin on the way out), the ones the card's
+     * listener puts on; the blend modes stay the card's.
+     */
+    private fun dimLook(depth: Float): Pair<IntArray, FloatArray?>? {
+        val recipe = cardRecipe ?: return null
+        val blend = recipe.firstOrNull { it.method.name == "applyElementViewBlend" }
+            ?.args?.firstOrNull { it is IntArray } as? IntArray ?: return null
+        if (blend.size != 6) return null
+        val c = aodController?.get() ?: return null
+        val list = Xp.getObjectField(c, "mFocusNotifiColorList") as? IntArray ?: return null
+        if (list.size != 6) return null
+        val into = c.javaClass.getField("mEnableFullAod").getBoolean(null)
+        val evaluator = android.animation.ArgbEvaluator()
+        val colours = blend.copyOf()
+        for (j in 0 until 3) {
+            val aod = list[2 * j + if (into) 1 else 0]
+            colours[2 * j] = evaluator.evaluate(depth, blend[2 * j], aod) as Int
+        }
+        val cardGlass = recipe.lastOrNull { it.method.name == "setMiGlassCompat" }
+            ?.args?.firstOrNull { it is FloatArray } as? FloatArray
+        val aodGlass = Xp.getObjectField(c, "mGlassParamsFullAod") as? FloatArray
+        val glass = if (cardGlass != null && aodGlass != null && cardGlass.size == aodGlass.size)
+            FloatArray(cardGlass.size) { cardGlass[it] + (aodGlass[it] - cardGlass[it]) * depth }
+        else null
+        return colours to glass
+    }
+
     /** Out of the AOD for good: every view back to the card's recipe. In the AOD, left as it is. */
     private fun settleAodDim() {
         aodDimHandler.removeCallbacks(aodDimSettle)
-        if (aodDimArgs == null || MiniPlayerScene.aodActive) return
+        if (aodDimArgs == null || MiniPlayerScene.aodActive) {
+            dimNote("settle skipped: ${if (aodDimArgs == null) "not dim" else "in AOD"}")
+            return
+        }
         aodDimArgs = null
-        loader?.let { cl -> for (view in dressedViews.toList()) if (view.isAttachedToWindow) material(view, cl) }
+        // Eased all the way back to the card's own material: already dressed as it, and a
+        // dressing again only risks a change on a pill that should not change.
+        // The views out of their window missed the frames: those are dressed when they return.
+        val home = aodDimLook != null && aodDimDepth in 0f..0.01f
+        aodDimLook = null
+        val cl = loader ?: return
+        var later = 0
+        for (view in dressedViews.toList()) {
+            if (view.isAttachedToWindow) {
+                if (!home) material(view, cl)
+            } else {
+                // Out of its window now, dimmed while it was in: dressed again when it comes
+                // back, or it came back dark on a lit screen with nothing left to undo it.
+                later++
+                view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(v: View) {
+                        v.removeOnAttachStateChangeListener(this)
+                        if (aodDimArgs == null) {
+                            material(view, cl)
+                            dimNote("redressed on attach")
+                        }
+                    }
+                    override fun onViewDetachedFromWindow(v: View) {}
+                })
+            }
+        }
+        dimNote("settle: ${if (home) "at the card's own look" else "redressed"}, $later out of window")
     }
 
     /**
@@ -515,13 +617,38 @@ object MiniPlayerRuntime {
      * and ends in settleAodDim; a wake with no run would leave the views dark on a lit screen.
      */
     fun aodEnded() {
+        dimNote("aod ended, ${if (aodDimArgs == null) "not dim" else "dim"}")
         if (aodDimArgs == null) return
         aodDimHandler.removeCallbacks(aodDimSettle)
         aodDimHandler.postDelayed(aodDimSettle, AOD_DIM_WAKE_MS)
     }
 
     /** For `op mini`. */
-    private fun describeAodDim(): String = "aodDim=${if (aodDimArgs != null) "on" else "off"}/$aodDimFrames"
+    private fun describeAodDim(): String = "aodDim=${if (aodDimArgs != null) "on" else "off"}/$aodDimFrames" +
+        " dimlog=[${synchronized(dimLog) { dimLog.joinToString(" ; ") }}]"
+
+    /**
+     * The dim's events for `op mini`, uptime ms: the listener's frames (the blend's first colour,
+     * the rows' transitionAlpha), complete, the OEM's style change, the doze's end, the settle -
+     * each with how the widest dressed view (the pill) is seen: its alpha down from the root.
+     */
+    private val dimLog = ArrayDeque<String>()
+
+    private fun dimNote(what: String) {
+        val pill = dressedViews.toList().filter { it.isAttachedToWindow }.maxByOrNull { it.width }
+        var seen = 1f
+        var v: View? = pill
+        while (v != null) {
+            seen *= v.alpha * v.transitionAlpha
+            v = v.parent as? View
+        }
+        val line = "${android.os.SystemClock.uptimeMillis() % 100000} $what aod=${MiniPlayerScene.aodActive} " +
+            "seen=${if (pill == null) "-" else "%.2f".format(seen)}"
+        synchronized(dimLog) {
+            dimLog.addLast(line)
+            while (dimLog.size > 120) dimLog.removeFirst()
+        }
+    }
 
     /** Which effect dressed the card last, for the log and `op mini`. */
     @Volatile private var cardEffect = "none"
@@ -1849,7 +1976,8 @@ private class MiniPlayerController(
             else notes.firstOrNull { it.key == key } ?: LockIslands.noteFor(key)
         // A focus template's own picture for the small island, moving if it moves; bare as the
         // super island draws it.
-        view.setIconBare(note != null && note.focus && !note.redacted)
+        // Every notification's picture comes cut or whole already (LockIslands.roundIcon).
+        view.setIconBare(note != null)
         // The pill's own Lottie, not the plugin's smaller one for its small island: the two
         // files draw at different sizes on their canvases, and in the same box the small island's
         // stopwatch came out smaller than the pill's (2026-09-25).
@@ -2617,6 +2745,7 @@ private class MiniPlayerController(
         disc.dress(MiniPlayerRuntime.materialGeneration) { MiniPlayerRuntime.material(it, loader) }
         val picture: Any? = if (key == MUSIC_ISLAND) (thumbShown ?: cachedCover)
             else LockIslands.notes.firstOrNull { it.key == key }?.icon ?: LockIslands.noteFor(key)?.icon
+        disc.setIconBare(key != MUSIC_ISLAND)
         disc.setIcon(when (picture) {
             is Bitmap -> android.graphics.drawable.BitmapDrawable(context.resources, picture)
             is android.graphics.drawable.Drawable -> picture
@@ -7272,7 +7401,10 @@ private class MiniPlayerController(
         // A focus notification shown in full is its template: its picture bare, as its row has
         // it, and its main button where the music's play button is.
         val template = note.focus && !note.redacted
-        view.setArtworkBare(template)
+        // Every notification's picture at the small island's size, cut to its circle or whole
+        // as LockIslands.roundIcon left it (2026-09-26): a plain one was the cover's rounded
+        // square, bigger, on a grey plate.
+        view.setArtworkBare(true)
         view.skippable = false
         // Its buttons as its row has them: the last - its main one - in the play button's place,
         // the one before it beside it while the pill is the big island (setSecondShown).
@@ -7772,8 +7904,20 @@ private class MiniPlayerController(
             runCatching {
                 Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888).also { b ->
                     val canvas = android.graphics.Canvas(b)
-                    it.setBounds(0, 0, side, side)
+                    // Fitted, not stretched: a picture left whole may not be square.
+                    val w = it.intrinsicWidth
+                    val h = it.intrinsicHeight
+                    val old = it.copyBounds()
+                    if (w > 0 && h > 0 && w != h) {
+                        val k = side.toFloat() / maxOf(w, h)
+                        val dw = (w * k).toInt()
+                        val dh = (h * k).toInt()
+                        it.setBounds((side - dw) / 2, (side - dh) / 2, (side + dw) / 2, (side + dh) / 2)
+                    } else {
+                        it.setBounds(0, 0, side, side)
+                    }
                     it.draw(canvas)
+                    it.bounds = old
                 }
             }.getOrNull()
         }

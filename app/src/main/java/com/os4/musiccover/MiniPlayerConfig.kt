@@ -14,8 +14,8 @@ object MiniPlayerConfig {
 
     private val defaults = linkedMapOf<String, Any>(
         ENABLED to false,
-        WIDTH to 240f,
-        HEIGHT_RADIUS to 36f,
+        WIDTH to 221f,
+        HEIGHT_RADIUS to 27f,
         ART_RADIUS to 12f,
     )
 

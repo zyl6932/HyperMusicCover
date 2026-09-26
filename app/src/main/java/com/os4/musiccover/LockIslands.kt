@@ -666,13 +666,16 @@ internal object LockIslands {
         // the island shows what the row does, so the landing is one and the same.
         val template = if (focus && !redacted) focusTemplate(n) ?: rowTemplate(entry) else null
         val picture = template?.let { focusPicture(n, sbn, entry, it.pics + islandPics(island)) }
+        val icon = picture?.icon ?: iconOf(sbn, shown ?: n, redacted)
+        val iconFrom = picture?.from ?: lastIconFrom
+        val round = roundIcon(icon)
         return Note(
             key = sbn.key,
             pkg = sbn.packageName,
             title = template?.title?.takeIf { it.isNotEmpty() || template.timer != null } ?: title,
             text = template?.text ?: text,
-            icon = picture?.icon ?: iconOf(sbn, shown ?: n, redacted),
-            iconFrom = picture?.from ?: lastIconFrom,
+            icon = round ?: icon,
+            iconFrom = if (round != null) "$iconFrom/round" else iconFrom,
             timer = template?.timer,
             buttons = if (template != null) focusButtons(n, sbn, entry) else emptyList(),
             anim = picture?.anim,
@@ -691,6 +694,52 @@ internal object LockIslands {
             since = if (order) maxOf(created, sbn.postTime) else minOf(created, sbn.postTime),
         )
     }
+
+    /**
+     * [d] cut to the small island's circle when it is a picture that fills its box - an app's
+     * adaptive icon (this build's icon mask is a square: the pickup-code notification's came
+     * out a rectangle beside QQ's round one, 2026-09-26), a photo, an avatar; null for one
+     * left whole, as the super island leaves it - a glyph (the stopwatch, an arrow), a picture
+     * already round, anything the circle would cut into its see-through edges. Filled is read
+     * off the picture: the middles of its four edges opaque. A picture not square is cut from
+     * its middle.
+     */
+    private fun roundIcon(d: Drawable?): Drawable? = runCatching {
+        if (d == null) return null
+        val res = (Main.sAppCtx ?: return null).resources
+        val side = (48 * res.displayMetrics.density).toInt()
+        val src = android.graphics.Bitmap.createBitmap(side, side, android.graphics.Bitmap.Config.ARGB_8888)
+        val w = d.intrinsicWidth
+        val h = d.intrinsicHeight
+        // Its bounds put back: the drawable may be one SystemUI draws elsewhere too.
+        val old = d.copyBounds()
+        if (w > 0 && h > 0 && w != h) {
+            val k = side.toFloat() / minOf(w, h)
+            val dw = (w * k).toInt()
+            val dh = (h * k).toInt()
+            d.setBounds((side - dw) / 2, (side - dh) / 2, (side + dw) / 2, (side + dh) / 2)
+        } else {
+            d.setBounds(0, 0, side, side)
+        }
+        d.draw(android.graphics.Canvas(src))
+        d.bounds = old
+        val m = side / 2
+        val e = (side * 0.04f).toInt().coerceAtLeast(1)
+        val filled = listOf(m to e, m to side - 1 - e, e to m, side - 1 - e to m)
+            .all { (x, y) -> android.graphics.Color.alpha(src.getPixel(x, y)) >= 200 }
+        if (!filled) {
+            src.recycle()
+            return null
+        }
+        val out = android.graphics.Bitmap.createBitmap(side, side, android.graphics.Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(out).drawCircle(m.toFloat(), m.toFloat(), m.toFloat(),
+            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                shader = android.graphics.BitmapShader(src, android.graphics.Shader.TileMode.CLAMP,
+                    android.graphics.Shader.TileMode.CLAMP)
+            })
+        src.recycle()
+        android.graphics.drawable.BitmapDrawable(res, out)
+    }.getOrNull()
 
     /** [pics]: the pictures its first area names, in the order the plugin would try them. */
     private class Template(val title: String, val text: String, val timer: Timer?, val pics: List<Pic>)
@@ -740,10 +789,11 @@ internal object LockIslands {
      * TemplateFactoryV3.chooseModule picks it: animTextInfo, else coverInfo, iconTextInfo,
      * baseInfo, highlightInfo, chatInfo. Each has a title and content; a timerInfo takes the
      * title's line (the animation text module's chronometer, focus_title gone). Null for a
-     * notification with no param_v2.
+     * notification with no param_v2. One that draws its own row (miui.focus.rv) is read from
+     * miui.focus.param.custom ([customTemplate]).
      */
     private fun focusTemplate(n: Notification): Template? = runCatching {
-        val raw = n.extras.getString("miui.focus.param") ?: return null
+        val raw = n.extras.getString("miui.focus.param") ?: return customTemplate(n)
         val root = org.json.JSONObject(raw)
         fun str(o: org.json.JSONObject, k: String) = if (o.isNull(k)) "" else o.optString(k, "")
         fun timerOf(t: org.json.JSONObject?): Timer? = t?.let {
@@ -793,6 +843,42 @@ internal object LockIslands {
         }.filter { it.name.isNotEmpty() }
         Template(str(info, "title"), str(info, "content").ifEmpty { str(info, "subContent") }, timer,
             pics + ticker(v2))
+    }.getOrNull()
+
+    /**
+     * A focus notification that draws its own row (miui.focus.rv, the assistant's train and
+     * flight cards): its layout is the app's, but what it gives its super island
+     * (miui.focus.param.custom's param_island) is the same card said in a pill's words - the
+     * train number, then its state ("检票中", "检票口 A5"). Its texts in the big island's
+     * order, left, middle, right, the first the title; else what it gives the AOD (aodTitle).
+     * Its picture the island's, then the AOD's. Null with neither, and the row is read.
+     */
+    private fun customTemplate(n: Notification): Template? = runCatching {
+        val root = org.json.JSONObject(n.extras.getString("miui.focus.param.custom") ?: return null)
+        fun str(o: org.json.JSONObject?, k: String) = if (o == null || o.isNull(k)) "" else o.optString(k, "")
+        val island = root.optJSONObject("param_island")
+        val big = island?.optJSONObject("bigIslandArea")
+        val lines = ArrayList<String>()
+        fun text(t: org.json.JSONObject?) {
+            if (t == null) return
+            lines += listOf(str(t, "frontTitle"), str(t, "title")).filter { it.isNotEmpty() }.joinToString(" ")
+            lines += str(t, "content")
+        }
+        // IslandTextViewHolder and the digit modules: frontTitle and title on one line, content after.
+        text(big?.optJSONObject("imageTextInfoLeft")?.optJSONObject("textInfo"))
+        text(big?.optJSONObject("textInfo"))
+        text(big?.optJSONObject("progressTextInfo")?.optJSONObject("textInfo"))
+        for (k in listOf("sameWidthDigitInfo", "fixedWidthDigitInfo")) big?.optJSONObject(k)?.let {
+            lines += str(it, "digit")
+            lines += str(it, "content")
+        }
+        text(big?.optJSONObject("imageTextInfoRight")?.optJSONObject("textInfo"))
+        lines.removeAll { it.isBlank() }
+        if (lines.isEmpty()) str(root, "aodTitle").takeIf { it.isNotEmpty() }?.let { lines += it }
+        if (lines.isEmpty()) return null
+        val pics = listOf("tickerPicDark", "tickerPic", "aodPic").map { str(root, it) }
+            .filter { it.isNotEmpty() }.map { Pic(Pic.BUNDLE, it) }
+        Template(lines[0], lines.drop(1).joinToString(" "), null, islandPics(island) + pics)
     }.getOrNull()
 
     /**

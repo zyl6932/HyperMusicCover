@@ -86,7 +86,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     private var onOpenCover: (() -> Unit)? = null
     private var tracking = false
     private var toggleShown = true
-    private var lastHeightRadiusDp = 36f
+    private var lastHeightRadiusDp = 27f
     private var lastArtRadiusDp = 12f
 
     init {

@@ -194,7 +194,7 @@ private class PreviewLayout(val pillWidth: Float, val pillHeight: Float,
 private fun previewLayout(config: JSONObject, shortcuts: FloatArray?, density: Float,
                           screenWidthPx: Float): PreviewLayout {
     val height = MiniPlayerConfig.visibleHeightDp(config.toString())
-    val requestedPx = (config.optDouble(MiniPlayerConfig.WIDTH, 240.0).toFloat() * density).roundToInt()
+    val requestedPx = (config.optDouble(MiniPlayerConfig.WIDTH, 221.0).toFloat() * density).roundToInt()
     val s = shortcuts
     // The pill clears a disc as tall as itself on each button, as on the lock screen.
     fun cleared(widthPx: Int, cx: Float, leftCx: Float, rightCx: Float) =
