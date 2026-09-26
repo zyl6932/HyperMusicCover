@@ -1638,6 +1638,11 @@ private class MiniPlayerController(
         if (MiniPlayerScene.aodActive || holdButtons) rowHeldOff = true
         else if (rowHeldOff && rowFade >= 0.99f) rowHeldOff = false
         followRowFade = rowFade
+        // The lock screen's editor button, up after a long press on the clock, is where the row
+        // is and under it: the row goes as it comes, on its own fade, and comes back as it goes.
+        val editShown = editButtonShown(row)
+        fade *= 1f - editShown
+        view.yieldTouches = editShown > 0.01f
         val matrix = followRelative
         if (!rowHeldOff && left.isShown && right.isShown) {
             fade *= rowFade
@@ -1698,6 +1703,28 @@ private class MiniPlayerController(
         followPillFade = pillFade
         if (kotlin.math.abs(view.transitionAlpha - pillFade) > 0.002f) view.transitionAlpha = pillFade
     }
+
+    /**
+     * How much of the lock screen's editor entry is up, 0 to 1: its button in the bottom area
+     * (custom_lockscreen_button, KeyguardBottomAreaInjector.showCustomLockscreenButton, a long
+     * press on the clock), its alpha as it fades in and out. It sits where the row is, and the
+     * row, drawn over it, hid it (2026-09-26).
+     */
+    private fun editButtonShown(row: View): Float {
+        val button = editButton?.get()?.takeIf { it.isAttachedToWindow } ?: run {
+            val id = row.resources.getIdentifier("custom_lockscreen_button", "id", "com.android.systemui")
+            if (id == 0) return 0f
+            row.findViewById<View>(id)?.also { editButton = WeakReference(it) } ?: return 0f
+        }
+        if (!button.isShown) return 0f
+        return (button.alpha * button.transitionAlpha).coerceIn(0f, 1f)
+    }
+
+    private var editButton: WeakReference<View>? = null
+
+    /** The editor's button is up over the row: its touches are its own. */
+    private fun editButtonUp(): Boolean =
+        shortcutRow?.get()?.let { editButtonShown(it) > 0.01f } == true
 
     /** What followShortcuts read and gave the pill last, for the doze trace. */
     private var followRowFade = 1f
@@ -7125,6 +7152,7 @@ private class MiniPlayerController(
      */
     fun touchTarget(x: Float, y: Float): MiniPlayerView? {
         val view = player ?: return null
+        if (editButtonUp()) return null
         val d = density()
         val xy = IntArray(2).also(view::getLocationOnScreen)
         // From just above the pill to the bottom of the screen - a thumb starts a swipe low -

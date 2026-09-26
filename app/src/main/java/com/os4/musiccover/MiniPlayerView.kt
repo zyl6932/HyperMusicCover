@@ -231,6 +231,18 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
      */
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean = false
 
+    /**
+     * Touches go past the pill and its buttons to what is under it: the lock screen's editor
+     * button, up in the pill's place (MiniPlayerController.editButtonShown). Faded out, the pill
+     * still took them - its buttons too, disabled or not - and the editor button could not be
+     * pressed (2026-09-26).
+     */
+    var yieldTouches = false
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean =
+        if (yieldTouches && event.actionMasked == MotionEvent.ACTION_DOWN) false
+        else super.dispatchTouchEvent(event)
+
     override fun onTouchEvent(event: MotionEvent): Boolean { android.os.Trace.beginSection("MC pillTouch"); try {
         if (!acceptsTouch()) return false
         when (event.actionMasked) {
