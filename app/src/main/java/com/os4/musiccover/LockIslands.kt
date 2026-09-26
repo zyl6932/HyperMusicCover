@@ -63,8 +63,12 @@ internal object LockIslands {
         val timer: Timer? = null,
         /** The focus template's moving picture, the row's Lottie; null for a still one. */
         val anim: Anim? = null,
+        /** The focus template's picture when it is a view of the plugin's, shown over [icon]. */
+        val live: Live? = null,
         /** The focus template's buttons, in the row's order: the last is its main one. */
         val buttons: List<Button> = emptyList(),
+        /** For `op mini`: where [icon] came from (focusPicture), "app" for the app's own. */
+        val iconFrom: String = "",
     )
 
     /**
@@ -213,11 +217,13 @@ internal object LockIslands {
     fun describe(): String = "islands active=$active cover=$cover filter=${filter?.get() != null} " +
         "released=${released.size} stack=${stackMembers.size}${if (stackOut) "/out" else ""} notes=" + notes.joinToString(",") {
             (if (it.focus) "F:" else "") + (if (it.redacted) "R:" else "") + it.pkg +
+                (if (!it.focus || it.redacted) "<${it.iconFrom}>" else "") +
                 "[${it.property}/${it.priority}${if (it.order) "/o" else ""} " +
                 "t=-${(System.currentTimeMillis() - it.since) / 1000}s]" +
                 (if (it.focus && !it.redacted) "{${it.timer?.let { t -> "timer ${t.type} ${t.text()} " } ?: ""}" +
-                    "'${it.title.take(20)}'/'${it.text.take(20)}' icon=${it.icon?.javaClass?.simpleName} " +
+                    "'${it.title.take(20)}'/'${it.text.take(20)}' icon=${it.icon?.javaClass?.simpleName}<${it.iconFrom}> " +
                     "anim=${it.anim?.let { a -> "${a.src}/${a.autoplay}/row=${a.row.get() != null}" }} " +
+                    (it.live?.let { l -> "live=${l.id} " } ?: "") +
                     "btn=${it.buttons.joinToString("/") { b -> "${b.index}:t${b.type}:${b.iconName}" }}}" else "")
         } + if (creationUnreadable) " creation=unreadable" else ""
 
@@ -560,7 +566,7 @@ internal object LockIslands {
         return Note(STACK_KEY, lead.pkg, lead.title,
             if (n > 1) "$n 条通知 · ${lead.text}" else lead.text,
             lead.icon, focus = false, time = lead.time, intent = lead.intent, group = null,
-            summary = false, redacted = lead.redacted, since = members.maxOf { it.since })
+            summary = false, redacted = lead.redacted, since = members.maxOf { it.since }, iconFrom = lead.iconFrom)
     }
 
     /** A notification island's standing, released or not; null for one this lock screen has not got. */
@@ -659,20 +665,18 @@ internal object LockIslands {
         // Shown in full, a focus notification's row is its template, not its title and text:
         // the island shows what the row does, so the landing is one and the same.
         val template = if (focus && !redacted) focusTemplate(n) ?: rowTemplate(entry) else null
+        val picture = template?.let { focusPicture(n, sbn, entry, it.pics + islandPics(island)) }
         return Note(
             key = sbn.key,
             pkg = sbn.packageName,
             title = template?.title?.takeIf { it.isNotEmpty() || template.timer != null } ?: title,
             text = template?.text ?: text,
-            icon = template?.let { focusIcon(n, it.pic, entry) } ?: iconOf(sbn, shown ?: n, redacted),
+            icon = picture?.icon ?: iconOf(sbn, shown ?: n, redacted),
+            iconFrom = picture?.from ?: lastIconFrom,
             timer = template?.timer,
             buttons = if (template != null) focusButtons(n, sbn, entry) else emptyList(),
-            anim = template?.animIcon?.let { a ->
-                val src = if (a.isNull("src")) "" else a.optString("src", "")
-                val row = runCatching { Xp.getObjectField(entry, "row") as? View }.getOrNull()
-                if (src.isEmpty() || row == null) null
-                else Anim(src, a.optInt("number", 0), a.optBoolean("autoplay", false), WeakReference(row))
-            },
+            anim = picture?.anim,
+            live = picture?.live,
             focus = focus,
             time = if (n.`when` > 0) n.`when` else sbn.postTime,
             intent = n.contentIntent,
@@ -688,8 +692,48 @@ internal object LockIslands {
         )
     }
 
-    private class Template(val title: String, val text: String, val timer: Timer?, val pic: String?,
-                           val animIcon: org.json.JSONObject?)
+    /** [pics]: the pictures its first area names, in the order the plugin would try them. */
+    private class Template(val title: String, val text: String, val timer: Timer?, val pics: List<Pic>)
+
+    /**
+     * A picture a focus notification names, and how the plugin draws a name of its [kind]:
+     * [BUNDLE] one of the notification's own (miui.focus.pics, else FocusIconCache); [LOTTIE]
+     * one of the plugin's Lottie files (LottieResUtils), its still (StaticResUtils) when it does
+     * not move; [SHADER] the island's shader icon (IslandIconViewHolder.showShaderIcon), a
+     * plugin drawable for the names it knows, else one of the notification's own; [VIDEO] and
+     * [FLASH] no picture but a view of the plugin's (a [Live]).
+     */
+    private class Pic(val kind: Int, val name: String, val number: Int = 0, val autoplay: Boolean = false,
+                      val loop: Boolean = true) {
+        override fun toString() = "${KINDS[kind]}:$name"
+
+        companion object {
+            const val BUNDLE = 0
+            const val LOTTIE = 1
+            const val SHADER = 2
+            const val VIDEO = 3
+            const val FLASH = 4
+            val KINDS = arrayOf("pic", "lottie", "shader", "video", "flash")
+        }
+    }
+
+    /**
+     * A picture that is one of the plugin's own views, running itself once it is in a window:
+     * [FLASH] the torch's light (FlashLightView, a RuntimeShader), [VIDEO] a clip by its name
+     * (TextureVideoView, VideoResUtils), looped when [loop]. Each place that shows it makes its
+     * own (MiniPlayerRuntime.liveArt): a view has one parent.
+     */
+    class Live(val kind: String, val src: String, val loop: Boolean, val row: WeakReference<View?>) {
+        val id get() = "$kind#$src#$loop"
+
+        companion object {
+            const val FLASH = "flash"
+            const val VIDEO = "video"
+        }
+    }
+
+    /** What the pill shows for a focus notification, and where it came from (for `op mini`). */
+    private class Picture(val icon: Drawable?, val anim: Anim?, val live: Live?, val from: String)
 
     /**
      * What a focus notification's row shows in its first area, read as the plugin's
@@ -709,26 +753,187 @@ internal object LockIslands {
                 it.optLong("timerSystemCurrent", System.currentTimeMillis()),
                 it.optLong("timerTotal", 0L))
         }
+        // The notification's own pictures by these names, dark first as the lock screen draws.
+        fun named(o: org.json.JSONObject, vararg keys: String) =
+            keys.map { str(o, it) }.filter { it.isNotEmpty() }.map { Pic(Pic.BUNDLE, it) }
+        // What it gives the status bar and the AOD: a last resort before the row's picture.
+        fun ticker(o: org.json.JSONObject) = named(o, "tickerPicDark", "tickerPic", "aodPic")
         // The flat template, the first protocol's and a param_v2 with no first-area module
         // (a navigation's "直行98米 / 高德导航中"): its title, content and timer at the top, its
-        // picture the one it gives the status bar, dark first as the lock screen draws it.
+        // picture the one it gives the status bar.
         fun flat(o: org.json.JSONObject): Template? {
             val title = str(o, "title")
             val content = str(o, "content")
             val timer = timerOf(o)
             if (title.isEmpty() && content.isEmpty() && timer == null) return null
-            val pic = listOf("tickerPicDark", "tickerPic", "picFunction", "aodPic").map { str(o, it) }
-                .firstOrNull { it.isNotEmpty() }
-            return Template(title, content, timer, pic, null)
+            return Template(title, content, timer, ticker(o) + named(o, "picFunction"))
         }
         val v2 = root.optJSONObject("param_v2") ?: return flat(root)
-        val info = FOCUS_AREA_A.firstNotNullOfOrNull { v2.optJSONObject(it) } ?: return flat(v2) ?: flat(root)
+        val area = FOCUS_AREA_A.firstOrNull { v2.optJSONObject(it) != null } ?: return flat(v2) ?: flat(root)
+        val info = v2.getJSONObject(area)
         val timer = timerOf(info.optJSONObject("timerInfo"))
-        val pic = info.optJSONObject("animIconInfo")?.let { str(it, "src") }?.ifEmpty { null }
-            ?: listOf("picFunction", "picCover", "picProfile").map { str(info, it) }.firstOrNull { it.isNotEmpty() }
-        Template(str(info, "title"), str(info, "content").ifEmpty { str(info, "subContent") }, timer, pic,
-            info.optJSONObject("animIconInfo"))
+        // Each first-area module's own picture, as its view holder (moduleV3) reads it.
+        val icon = info.optJSONObject("animIconInfo")
+        val pics = when (area) {
+            // ModuleAnimationTextViewHolder: a plugin Lottie by src, its still when it has none.
+            "animTextInfo" -> icon?.let { listOf(Pic(Pic.LOTTIE, str(it, "src"), it.optInt("number", 0),
+                it.optBoolean("autoplay", false))) }.orEmpty()
+            "coverInfo" -> named(info, "picCover")
+            // ModuleNewImageTextViewHolder.showEffects: type 1 plays a looped video by src, type 2
+            // is the torch's light (FlashLightView); else one of its own pictures.
+            "iconTextInfo" -> when (icon?.optInt("type", 0)) {
+                null -> emptyList()
+                1 -> listOf(Pic(Pic.VIDEO, str(icon, "src")))
+                2 -> listOf(Pic(Pic.FLASH, "light"))
+                else -> named(icon, "srcDark", "src")
+            }
+            "highlightInfo" -> named(info, "picFunctionDark", "picFunction")
+            "chatInfo" -> named(info, "picProfileDark", "picProfile")
+            else -> named(info, "picFunction")
+        }.filter { it.name.isNotEmpty() }
+        Template(str(info, "title"), str(info, "content").ifEmpty { str(info, "subContent") }, timer,
+            pics + ticker(v2))
     }.getOrNull()
+
+    /**
+     * The pictures a focus notification gives its super island (param_island), as
+     * IslandIconViewHolder.bind reads a picInfo's type: 1, 4 and 5 one of its own, 2 and 7 a
+     * plugin Lottie, 3 a shader icon, 6 a video (setMP4Icon). The big island's left picture first,
+     * the one beside its text as the pill's is, then its only picture, the small island's, and
+     * its right one.
+     */
+    private fun islandPics(island: org.json.JSONObject?): List<Pic> {
+        if (island == null) return emptyList()
+        val big = island.optJSONObject("bigIslandArea")
+        return listOfNotNull(
+            big?.optJSONObject("imageTextInfoLeft")?.optJSONObject("picInfo"),
+            big?.optJSONObject("picInfo"),
+            island.optJSONObject("smallIslandArea")?.optJSONObject("picInfo"),
+            big?.optJSONObject("imageTextInfoRight")?.optJSONObject("picInfo"),
+        ).mapNotNull { p ->
+            val name = if (p.isNull("pic")) "" else p.optString("pic", "")
+            if (name.isEmpty()) return@mapNotNull null
+            when (p.optInt("type", 0)) {
+                1, 4, 5 -> Pic(Pic.BUNDLE, name)
+                // Played unless it says autoplay false (IslandIconViewHolder.playAnimation).
+                2, 7 -> Pic(Pic.LOTTIE, name, p.optInt("number", -1), p.optBoolean("autoplay", true))
+                3 -> Pic(Pic.SHADER, name)
+                6 -> Pic(Pic.VIDEO, name, loop = p.optBoolean("loop", false))
+                else -> null
+            }
+        }
+    }
+
+    /**
+     * The picture for the pill: the first of [pics] that draws, and on the way the first that
+     * lives - a plugin view, else a Lottie - which is shown in its place, the still kept for
+     * whatever needs a picture (a flight's copy, the thumbnail). Past them, the picture the row
+     * draws. Null with none, and the app's icon stands in.
+     */
+    private fun focusPicture(n: Notification, sbn: StatusBarNotification, entry: Any, pics: List<Pic>): Picture? {
+        val row = runCatching { Xp.getObjectField(entry, "row") as? View }.getOrNull()
+        val plugin = pluginOf(row)
+        var anim: Anim? = null
+        var live: Live? = null
+        val from = ArrayList<String>()
+        for (p in pics) {
+            when (p.kind) {
+                Pic.VIDEO -> if (live == null && anim == null && p.name.isNotEmpty()) {
+                    live = Live(Live.VIDEO, p.name, p.loop, WeakReference(row))
+                    from += p.toString()
+                }
+                Pic.FLASH -> if (live == null && anim == null) {
+                    live = Live(Live.FLASH, p.name, true, WeakReference(row))
+                    from += p.toString()
+                }
+                Pic.LOTTIE -> if (live == null && anim == null && row != null && plugin != null &&
+                    runCatching { plugin.call(LOTTIE_RES, "getLottieRes", p.name, p.number) as Int }.getOrDefault(-1) > 0) {
+                    anim = Anim(p.name, p.number, p.autoplay, WeakReference(row))
+                    from += p.toString()
+                }
+            }
+            val still = runCatching { still(p, n, sbn, plugin) }.getOrNull() ?: continue
+            if (from.lastOrNull() != p.toString()) from += p.toString()
+            return Picture(still, anim, live, from.joinToString("+"))
+        }
+        runCatching { rowIcon(entry) }.getOrNull()?.let { return Picture(it, anim, live, (from + "row").joinToString("+")) }
+        return if (anim != null || live != null) Picture(null, anim, live, from.joinToString("+")) else null
+    }
+
+    /** [p] as a still, or null when it does not draw here. */
+    private fun still(p: Pic, n: Notification, sbn: StatusBarNotification, plugin: Plugin?): Drawable? = when (p.kind) {
+        Pic.LOTTIE -> plugin?.let { pl ->
+            (pl.call(STATIC_RES, "getStaticRes", p.name) as Int).takeIf { it > 0 }?.let { pl.ctx.getDrawable(it) }
+        }
+        Pic.VIDEO, Pic.FLASH -> null
+        Pic.SHADER -> SHADER_PICTURES[p.name]?.let { plugin?.drawable(it) } ?: ownPicture(n, sbn, p.name, plugin)
+        else -> ownPicture(n, sbn, p.name, plugin)
+    }
+
+    /**
+     * One of the notification's own pictures by name: in its miui.focus.pics, else where the
+     * plugin keeps those an update left out (ModuleViewHolder.getIcon, FocusIconCache).
+     */
+    private fun ownPicture(n: Notification, sbn: StatusBarNotification, name: String, plugin: Plugin?): Drawable? {
+        val ctx: Context = Main.sAppCtx ?: return null
+        @Suppress("DEPRECATION")
+        val icon = n.extras.getBundle("miui.focus.pics")?.get(name) as? android.graphics.drawable.Icon
+            ?: plugin?.let { runCatching { it.call(ICON_CACHE, "get", sbn.key, name) }.getOrNull() }
+                as? android.graphics.drawable.Icon
+            ?: return null
+        return runCatching { icon.loadDrawable(ctx) }.getOrNull()
+    }
+
+    /** The shader icons' pictures, by the name the island gives them (showShaderIcon). */
+    private val SHADER_PICTURES = mapOf("flash_light_icon" to "flash_light_icon", "call" to "call_icon")
+    private const val LOTTIE_RES = "miui.systemui.util.LottieResUtils"
+    private const val STATIC_RES = "miui.systemui.util.StaticResUtils"
+    private const val ICON_CACHE = "miui.systemui.notification.focus.FocusIconCache"
+
+    /** The plugin's context (its resources) and classes. */
+    class Plugin(val ctx: Context, val loader: ClassLoader) {
+        /** One of its Kotlin objects' methods, found by name and argument count. */
+        fun call(cls: String, method: String, vararg args: Any?): Any? {
+            val c = loader.loadClass(cls)
+            val instance = runCatching { c.getField("INSTANCE").get(null) }.getOrNull()
+            return c.methods.first { it.name == method && it.parameterTypes.size == args.size }.invoke(instance, *args)
+        }
+
+        fun drawable(name: String): Drawable? {
+            val id = ctx.resources.getIdentifier(name, "drawable", PLUGIN)
+            return if (id == 0) null else runCatching { ctx.getDrawable(id) }.getOrNull()
+        }
+    }
+
+    private const val PLUGIN = "miui.systemui.plugin"
+
+    /**
+     * The plugin as [row] has it - a view of the plugin's in it, whose context and classes are
+     * the running plugin's, its FocusIconCache the one it fills - else the plugin's package.
+     */
+    fun pluginOf(row: View?): Plugin? {
+        // Not SystemUI's, not the framework's, not ours: the plugin's.
+        val others = setOf(row?.javaClass?.classLoader, View::class.java.classLoader, LockIslands::class.java.classLoader)
+        if (row != null) {
+            val queue = ArrayDeque<View>()
+            queue.add(row)
+            while (queue.isNotEmpty()) {
+                val v = queue.removeFirst()
+                val loader = v.javaClass.classLoader
+                if (loader != null && others.none { it === loader }) {
+                    return Plugin(v.context, loader)
+                }
+                if (v is android.view.ViewGroup) for (i in 0 until v.childCount) queue.add(v.getChildAt(i))
+            }
+        }
+        return pluginPackage?.let { Plugin(it, it.classLoader) }
+    }
+
+    private val pluginPackage: Context? by lazy {
+        runCatching {
+            Main.sAppCtx!!.createPackageContext(PLUGIN, Context.CONTEXT_INCLUDE_CODE or Context.CONTEXT_IGNORE_SECURITY)
+        }.getOrNull()
+    }
 
     private fun focusButtons(n: Notification, sbn: StatusBarNotification, entry: Any): List<Button> = runCatching {
         val root = org.json.JSONObject(n.extras.getString("miui.focus.param") ?: return emptyList())
@@ -777,21 +982,6 @@ internal object LockIslands {
 
     private val FOCUS_AREA_A = listOf("animTextInfo", "coverInfo", "iconTextInfo", "baseInfo",
         "highlightInfo", "chatInfo")
-
-    /**
-     * The template's picture: from the notification's own miui.focus.pics when it is there,
-     * else as the row draws it - a plugin built-in (a stopwatch's Lottie) is only in the row -
-     * else null, and the app's icon stands in.
-     */
-    private fun focusIcon(n: Notification, pic: String?, entry: Any): Drawable? {
-        val ctx: Context = Main.sAppCtx ?: return null
-        if (pic != null) runCatching {
-            @Suppress("DEPRECATION")
-            (n.extras.getBundle("miui.focus.pics")?.get(pic) as? android.graphics.drawable.Icon)
-                ?.loadDrawable(ctx)
-        }.getOrNull()?.let { return it }
-        return runCatching { rowIcon(entry) }.getOrNull()
-    }
 
     /**
      * The row's focus template picture view: a Lottie view or a still. Found by its name, not by
@@ -847,7 +1037,7 @@ internal object LockIslands {
             }
             if (v is android.view.ViewGroup) for (i in 0 until v.childCount) queue.add(v.getChildAt(i))
         }
-        if (lines.isEmpty()) null else Template(lines[0], lines.getOrElse(1) { "" }, null, null, null)
+        if (lines.isEmpty()) null else Template(lines[0], lines.getOrElse(1) { "" }, null, emptyList())
     }.getOrNull()
 
     /** Past the named ones, any picture the template shows: not a button's, not its backdrop. */
@@ -895,10 +1085,40 @@ internal object LockIslands {
     private fun iconOf(sbn: StatusBarNotification, n: Notification, redacted: Boolean): Drawable? {
         val ctx: Context = Main.sAppCtx ?: return null
         n.getLargeIcon()?.takeIf { !redacted || n !== sbn.notification }?.let { icon ->
-            runCatching { icon.loadDrawable(ctx) }.getOrNull()?.let { return it }
+            runCatching { icon.loadDrawable(ctx) }.getOrNull()?.let { lastIconFrom = "large"; return it }
         }
+        rowAppIcon(sbn, ctx)?.let { lastIconFrom = "row-app"; return it }
+        lastIconFrom = "app"
         return runCatching { ctx.packageManager.getApplicationIcon(sbn.packageName) }.getOrNull()
     }
+
+    /** Where the last [iconOf] found its picture, for `op mini`. */
+    private var lastIconFrom = "app"
+
+    /**
+     * The app icon the notification's own row shows, by SystemUI's own hand
+     * (NotifImageUtil.applyAppIconAllowCustom, what every Miui row wrapper binds its app_icon
+     * with), drawn into a view of ours: a system sender's own picture (miui.appIcon, for the
+     * senders on SystemUI's config_canCustomNotificationAppIcon - the hotspot's, where "android"
+     * as an app is a blank robot), the entry's app icon, a dual app's badge, the small icon last.
+     */
+    private fun rowAppIcon(sbn: StatusBarNotification, ctx: Context): Drawable? = runCatching {
+        val util = appIconUtil ?: sbn.javaClass.classLoader!!.loadClass(NOTIF_IMAGE_UTIL)
+            .methods.first { it.name == "applyAppIconAllowCustom" && it.parameterTypes.size == 4 }
+            .also { appIconUtil = it }
+        val view = android.widget.ImageView(ctx)
+        util.invoke(null, ctx, sbn, view, true)
+        view.drawable
+    }.onFailure {
+        if (!appIconUnreadable) {
+            appIconUnreadable = true
+            Xp.log("MCIsland: row app icon unreadable: $it")
+        }
+    }.getOrNull()
+
+    private var appIconUtil: java.lang.reflect.Method? = null
+    private var appIconUnreadable = false
+    private const val NOTIF_IMAGE_UTIL = "com.android.systemui.statusbar.notification.utils.NotifImageUtil"
 
     private fun appLabel(pkg: String): CharSequence = runCatching {
         val pm = Main.sAppCtx!!.packageManager

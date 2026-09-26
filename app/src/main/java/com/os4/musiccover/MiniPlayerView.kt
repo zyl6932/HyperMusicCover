@@ -34,8 +34,15 @@ import org.json.JSONObject
 internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     private var materialLayer = ImageView(context)
     private val artwork = ImageView(context)
-    private val title = TextView(context)
-    private val artist = TextView(context)
+
+    /**
+     * The artwork's place: [artwork], or a live view over it (showArtworkView). Everything that
+     * moves, fades, turns or rounds the artwork does it to this, so a view in it goes along.
+     */
+    private val slot = FrameLayout(context)
+    private var liveArt: View? = null
+    private val title = EdgeBlurText(context)
+    private val artist = EdgeBlurText(context)
     private val textColumn = LinearLayout(context)
     private val toggle = ImageButton(context)
 
@@ -99,9 +106,11 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         materialLayer.outlineProvider = outlineProvider
         addView(materialLayer, LayoutParams(-1, -1))
         artwork.scaleType = ImageView.ScaleType.CENTER_CROP
-        artwork.clipToOutline = true
-        artwork.background = rounded(Color.rgb(55, 55, 55), dp(12).toFloat())
-        addView(artwork)
+        slot.clipToOutline = true
+        slot.background = rounded(Color.rgb(55, 55, 55), dp(12).toFloat())
+        slot.clipChildren = false
+        slot.addView(artwork, LayoutParams(-1, -1))
+        addView(slot)
         title.apply {
             setTextColor(Color.WHITE)
             textSize = 12.8f
@@ -251,12 +260,33 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         artwork.setImageDrawable(drawable)
     }
 
+    /**
+     * [view] in the artwork's place - one of the plugin's own, running itself once in a window
+     * (the torch's light, a clip) - over the bound picture, which is kept for when it goes.
+     * Null takes it out.
+     */
+    fun showArtworkView(view: View?) {
+        if (liveArt === view) return
+        liveArt?.let { slot.removeView(it) }
+        liveArt = view
+        if (view != null) {
+            (view.parent as? android.view.ViewGroup)?.removeView(view)
+            slot.addView(view, LayoutParams(-1, -1))
+        }
+        artwork.visibility = if (view == null) View.VISIBLE else View.INVISIBLE
+        // A live picture draws past its own box - the torch's glow is taller than its square,
+        // and its row lets it (clipChildren false up the row): at rest the pill clipped each
+        // child to its bounds, and the light came out cut to a square (2026-09-26). The pill's
+        // own outline still bounds it.
+        if (!morphing) clipChildren = view == null
+    }
+
     fun setArtworkBare(bare: Boolean) {
         if (artworkBare == bare) return
         artworkBare = bare
         if (lastHeightRadiusDp > 0f) updateGeometry(lastHeightRadiusDp, lastArtRadiusDp)
-        artwork.clipToOutline = !bare
-        artwork.background = if (bare) null else rounded(Color.rgb(55, 55, 55), artworkRadiusPx)
+        slot.clipToOutline = !bare
+        slot.background = if (bare) null else rounded(Color.rgb(55, 55, 55), artworkRadiusPx)
         artwork.scaleType = if (bare) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
     }
 
@@ -439,13 +469,13 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         if (!skippable) return
         if (next) onNext?.invoke() else onPrevious?.invoke()
         if (morphing) return
-        artwork.animate().cancel()
-        artwork.rotation = 0f
-        artwork.animate()
+        slot.animate().cancel()
+        slot.rotation = 0f
+        slot.animate()
             .rotationBy(if (next) -360f else 360f)
             .setDuration(560L)
             .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.3f, 1f))
-            .withEndAction { artwork.rotation = 0f }
+            .withEndAction { slot.rotation = 0f }
             .start()
     }
 
@@ -527,13 +557,17 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         super.onDetachedFromWindow()
     }
 
-    val artworkView: View get() = artwork
+    /** The artwork's place, which everything that moves the artwork moves. */
+    val artworkView: View get() = slot
+
+    /** The picture the artwork shows now, under a live view if one is over it. */
+    val artworkDrawable: android.graphics.drawable.Drawable? get() = artwork.drawable
 
     /** For `op mini`: the artwork as it stands - shown, alpha, frame, bitmap. */
     fun artworkState(): String {
         val b = (artwork.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
-        return "v=${artwork.visibility} a=${"%.2f".format(artwork.alpha)} ${artwork.left},${artwork.top} " +
-            "${artwork.width}x${artwork.height} bmp=${b?.let { "${it.width}x${it.height}${if (it.isRecycled) " RECYCLED" else ""}" }} " +
+        return "v=${slot.visibility} a=${"%.2f".format(slot.alpha)} ${slot.left},${slot.top} " +
+            "${slot.width}x${slot.height} bmp=${b?.let { "${it.width}x${it.height}${if (it.isRecycled) " RECYCLED" else ""}" }} " +
             "hidden=$artworkHidden text=${"%.2f".format(textColumn.alpha)}"
     }
     val titleView: TextView get() = title
@@ -556,9 +590,9 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     /** The artwork's rest slot on screen: where a flight from the cover has to land. */
     fun artworkRestBoxOnScreen(): CoverMorphMotion.Box? {
         val rest = restBoxOnScreen() ?: return null
-        if (artwork.width <= 0 || artwork.height <= 0) return null
-        return CoverMorphMotion.Box(rest.x + artwork.left, rest.y + artwork.top,
-            artwork.width.toFloat(), artwork.height.toFloat())
+        if (slot.width <= 0 || slot.height <= 0) return null
+        return CoverMorphMotion.Box(rest.x + slot.left, rest.y + slot.top,
+            slot.width.toFloat(), slot.height.toFloat())
     }
 
     fun artworkRestRadius(): Float = artworkRadiusPx
@@ -597,8 +631,8 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     fun setArtworkHidden(hidden: Boolean) {
         if (artworkHidden == hidden) return
         artworkHidden = hidden
-        if (!morphing) artwork.alpha = if (hidden) 0f else 1f
-        else if (layoutOnly) artwork.alpha = if (hidden) 0f else contentAlpha
+        if (!morphing) slot.alpha = if (hidden) 0f else 1f
+        else if (layoutOnly) slot.alpha = if (hidden) 0f else contentAlpha
     }
 
     /**
@@ -616,8 +650,8 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         // back down among the lock screen when it ends. Z orders siblings without moving the
         // pill in its parent; the outline's shadow is switched off so the height casts none.
         translationZ = MORPH_Z
-        artwork.animate().cancel()
-        artwork.rotation = 0f
+        slot.animate().cancel()
+        slot.rotation = 0f
         morphing = true
         morphW = restWidth()
         morphH = restHeight()
@@ -680,7 +714,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     fun setArtworkMorphRadius(radius: Float) {
         if (artworkMorphRadius == radius) return
         artworkMorphRadius = radius
-        artwork.invalidateOutline()
+        slot.invalidateOutline()
     }
 
     fun endMorph() {
@@ -693,11 +727,11 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         }
         layoutOnly = false
         artworkMorphRadius = Float.NaN
-        artwork.invalidateOutline()
-        artwork.alpha = if (artworkHidden) 0f else 1f
+        slot.invalidateOutline()
+        slot.alpha = if (artworkHidden) 0f else 1f
         materialLayer.alpha = 1f
         textColumn.clipChildren = true
-        clipChildren = true
+        clipChildren = liveArt == null
         translationZ = 0f
         toggle.isEnabled = interactionsEnabled
         toggle2.isEnabled = toggle.isEnabled
@@ -740,12 +774,12 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     fun slideContentIn(fromEnd: Boolean) {
         if (morphing) return
         val dx = dp(28).toFloat() * if (fromEnd) 1f else -1f
-        listOf<View>(artwork, textColumn, toggle).forEach { v ->
+        listOf<View>(slot, textColumn, toggle).forEach { v ->
             v.animate().cancel()
             v.translationX = dx
             v.alpha = 0f
             v.animate().translationX(0f)
-                .alpha(if (v === artwork && artworkHidden) 0f else 1f)
+                .alpha(if (v === slot && artworkHidden) 0f else 1f)
                 .setDuration(280L)
                 .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.3f, 1f))
                 .start()
@@ -782,7 +816,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     fun setContentAlpha(alpha: Float) {
         val a = alpha.coerceIn(0f, 1f)
         contentAlpha = a
-        artwork.alpha = if (artworkHidden) 0f else a
+        slot.alpha = if (artworkHidden) 0f else a
         textColumn.alpha = a
         toggle.alpha = a
         toggle2.alpha = a * secondShown
@@ -809,7 +843,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         contentBlur = r
         val effect = if (r == 0f) null
             else android.graphics.RenderEffect.createBlurEffect(r, r, android.graphics.Shader.TileMode.DECAL)
-        artwork.setRenderEffect(effect)
+        slot.setRenderEffect(effect)
         textColumn.setRenderEffect(effect)
         toggle.setRenderEffect(effect)
         toggle2.setRenderEffect(effect)
@@ -825,7 +859,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         // A bare picture is the small island's size, its share of the height, on the same centre:
         // the same picture in both islands was two sizes (2026-09-25).
         val side = if (artworkBare) (height * ShortcutDisc.ICON_SHARE).toInt() else artworkSize
-        artwork.layoutParams = LayoutParams(side, side, Gravity.CENTER_VERTICAL).apply {
+        slot.layoutParams = LayoutParams(side, side, Gravity.CENTER_VERTICAL).apply {
             leftMargin = horizontalPadding + (artworkSize - side) / 2
         }
         val toggleSize = dp(40).coerceAtMost((height - verticalPadding * 2).coerceAtLeast(dp(34)))
@@ -848,14 +882,14 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         }
         val radius = dp(artworkRadiusDp).coerceIn(0, artworkSize / 2).toFloat()
         artworkRadiusPx = radius
-        artwork.background = if (artworkBare) null else rounded(Color.rgb(55, 55, 55), radius)
-        artwork.outlineProvider = object : ViewOutlineProvider() {
+        slot.background = if (artworkBare) null else rounded(Color.rgb(55, 55, 55), radius)
+        slot.outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
                 outline.setRoundRect(0, 0, view.width, view.height,
                     if (artworkMorphRadius.isNaN()) radius else artworkMorphRadius)
             }
         }
-        artwork.invalidateOutline()
+        slot.invalidateOutline()
     }
 
     private fun rounded(color: Int, radius: Float) = GradientDrawable().apply {
@@ -916,3 +950,123 @@ private const val OFFSET_RESPONSE = 0.32f
 
 /** Above every sibling while a morph runs; CoverMorphLayer sits above this again. */
 internal const val MORPH_Z = 10000f
+
+/**
+ * A plugin view at the size the row's layout gives it, scaled into whatever box it is shown in:
+ * its pictures and glow are pixels for that size (FlashLightView's textures are its own bitmaps,
+ * its inner view as tall as the glow), and laid out at another size they were cut or misplaced.
+ * [nativePx] 0 lays the view out at the box's own size.
+ */
+internal class LiveArtHost(context: Context, private val child: View, private val nativePx: Int) : FrameLayout(context) {
+    init {
+        clipChildren = false
+        clipToPadding = false
+        addView(child, LayoutParams(-1, -1))
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val h = MeasureSpec.getSize(heightMeasureSpec)
+        setMeasuredDimension(w, h)
+        val cw = if (nativePx > 0) nativePx else w
+        val ch = if (nativePx > 0) nativePx else h
+        child.measure(MeasureSpec.makeMeasureSpec(cw, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(ch, MeasureSpec.EXACTLY))
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        val w = right - left
+        val h = bottom - top
+        val cw = child.measuredWidth
+        val ch = child.measuredHeight
+        val l = (w - cw) / 2
+        val t = (h - ch) / 2
+        child.layout(l, t, l + cw, t + ch)
+        val k = if (nativePx > 0) min(w, h).toFloat() / nativePx else 1f
+        child.pivotX = cw / 2f
+        child.pivotY = ch / 2f
+        child.scaleX = k
+        child.scaleY = k
+    }
+}
+
+/**
+ * A line whose ends, where a scrolling line is cut by its box, blur and fade out rather than
+ * stopping at a hard edge: two upright lines ran down the pill while its title scrolled
+ * (2026-09-26). How much of each end is cut is the marquee's own reading - the fading edge
+ * strengths, 0 at the start before it moves, 0 on the right once it has run out - so a line
+ * that fits, or the end that is not cut, is left sharp, and one that fits carries no effect.
+ * The fade is the framework's fading edge; the blur is a RenderEffect over the line, redone only
+ * when an end's strength changes by a step.
+ */
+internal class EdgeBlurText(context: Context) : TextView(context) {
+    private val edgePx = 16f * resources.displayMetrics.density
+    private val blurPx = 3f * resources.displayMetrics.density
+    private var shader: android.graphics.RuntimeShader? = null
+    private var left = 0f
+    private var right = 0f
+    private var shownLeft = -1f
+    private var shownRight = -1f
+    private var shownWidth = -1
+
+    init {
+        isHorizontalFadingEdgeEnabled = true
+        setFadingEdgeLength(edgePx.toInt())
+    }
+
+    override fun getLeftFadingEdgeStrength(): Float = super.getLeftFadingEdgeStrength().also { left = it }
+
+    override fun getRightFadingEdgeStrength(): Float = super.getRightFadingEdgeStrength().also { right = it }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        // The strengths were read for this frame's fade just before; the blur follows them.
+        val l = step(left)
+        val r = step(right)
+        if (l == shownLeft && r == shownRight && width == shownWidth) return
+        shownLeft = l
+        shownRight = r
+        shownWidth = width
+        post { applyEdges(l, r) }
+    }
+
+    private fun step(v: Float) = (v.coerceIn(0f, 1f) * 10f).roundToInt() / 10f
+
+    private fun applyEdges(l: Float, r: Float) {
+        if (l == 0f && r == 0f || width <= 0) {
+            setRenderEffect(null)
+            return
+        }
+        val s = shader ?: android.graphics.RuntimeShader(EDGE_BLUR).also { shader = it }
+        s.setFloatUniform("width", width.toFloat())
+        s.setFloatUniform("edgeL", edgePx * l)
+        s.setFloatUniform("edgeR", edgePx * r)
+        s.setFloatUniform("maxBlur", blurPx)
+        setRenderEffect(android.graphics.RenderEffect.createRuntimeShaderEffect(s, "content"))
+    }
+
+    private companion object {
+        /** A horizontal blur growing to [maxBlur] at each cut end, over [edgeL] and [edgeR]. */
+        const val EDGE_BLUR = """
+            uniform shader content;
+            uniform float width;
+            uniform float edgeL;
+            uniform float edgeR;
+            uniform float maxBlur;
+            half4 main(float2 p) {
+                float e = 0.0;
+                if (edgeL > 0.0) e = max(e, 1.0 - clamp(p.x / edgeL, 0.0, 1.0));
+                if (edgeR > 0.0) e = max(e, 1.0 - clamp((width - p.x) / edgeR, 0.0, 1.0));
+                if (e <= 0.0) return content.eval(p);
+                float r = e * e * maxBlur;
+                half4 c = half4(0.0);
+                float total = 0.0;
+                for (int i = -4; i <= 4; i++) {
+                    float w = exp(-float(i * i) / 8.0);
+                    c += content.eval(p + float2(float(i) * r / 4.0, 0.0)) * w;
+                    total += w;
+                }
+                return c / total;
+            }
+        """
+    }
+}

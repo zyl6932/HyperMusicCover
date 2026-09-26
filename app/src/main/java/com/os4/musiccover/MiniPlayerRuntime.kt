@@ -1854,6 +1854,7 @@ private class MiniPlayerController(
         // files draw at different sizes on their canvases, and in the same box the small island's
         // stopwatch came out smaller than the pill's (2026-09-25).
         val moving = focusLottie(view, note?.anim)
+        view.setLive(liveArt(view, note?.live))
         val picture: Any? = if (key == MUSIC_ISLAND) (thumbShown ?: cachedCover) else moving ?: note?.icon
         // Another island in a small island that is showing, nothing else moving it (a switch
         // animates its own): it comes up anew in the place rather than just changing its picture.
@@ -6712,7 +6713,7 @@ private class MiniPlayerController(
             focusLotties.entries.joinToString(" ") { (owner, held) ->
                 val d = held.second.drawable
                 val shownIn = when (owner) {
-                    is MiniPlayerView -> (owner.artworkView as? ImageView)?.drawable.let { it === d || it === lottieWatches[d] }
+                    is MiniPlayerView -> owner.artworkDrawable.let { it === d || it === lottieWatches[d] }
                     else -> d?.callback != null
                 }
                 "lottie[${if (owner === v) "pill" else owner.javaClass.simpleName} ${held.first} " +
@@ -6720,6 +6721,10 @@ private class MiniPlayerController(
                     "p=${runCatching { Xp.callMethod(held.second, "getProgress") }.getOrNull()} " +
                     "vis=${d?.isVisible} cb=${d?.callback?.javaClass?.simpleName} " +
                     "shown=$shownIn]"
+            } + liveArts.entries.joinToString(" ", prefix = " ") { (owner, held) ->
+                "live[${if (owner === v) "pill" else owner.javaClass.simpleName} ${held.first} " +
+                    "attached=${held.second.isAttachedToWindow} shown=${held.second.isShown} " +
+                    "${held.second.width}x${held.second.height}]"
             } + " lottieWhy=[$focusLottieWhy] failed=$focusLottieFailed lottieLog=[" +
             synchronized(lottieLog) { lottieLog.joinToString(" ; ") } + "] "
         val h = header?.get()
@@ -7233,7 +7238,7 @@ private class MiniPlayerController(
         view.setSecondFace(null)
         view.skippable = true
         showTimer(view, null)
-        showFocusAnim(view, null)
+        showFocusAnim(view, null, null)
         val metadata = metadataOf(current)
         val shown = thumbnailFor(musicCover(metadata), view)
         view.setToggleShown(true)
@@ -7292,7 +7297,7 @@ private class MiniPlayerController(
             { expandNote(note.key) },
         )
         showTimer(view, note.timer)
-        showFocusAnim(view, note.anim)
+        showFocusAnim(view, note.anim, note.live)
     }
 
     /**
@@ -7304,9 +7309,81 @@ private class MiniPlayerController(
      */
     private val focusLotties = java.util.WeakHashMap<Any, Pair<String, android.widget.ImageView>>()
 
-    private fun showFocusAnim(view: MiniPlayerView, anim: LockIslands.Anim?) {
+    private fun showFocusAnim(view: MiniPlayerView, anim: LockIslands.Anim?, live: LockIslands.Live?) {
         val d = focusLottie(view, anim)
         if (d == null) view.clearArtworkDrawable() else view.showArtworkDrawable(d)
+        view.showArtworkView(liveArt(view, live))
+    }
+
+    /**
+     * Each place's own live picture ([LockIslands.Live]) and which one it is: a view has one
+     * parent, so the pill, the small island and a flight each make their own.
+     */
+    private val liveArts = java.util.WeakHashMap<Any, Pair<String, View>>()
+    private val liveFailed = HashSet<String>()
+
+    /** [owner]'s view of [live], made on first asking; null for none, or one that would not make. */
+    private fun liveArt(owner: Any, live: LockIslands.Live?): View? {
+        if (live == null) {
+            liveArts.remove(owner)
+            return null
+        }
+        liveArts[owner]?.let { if (it.first == live.id) return it.second }
+        if (live.id in liveFailed) return null
+        val view = runCatching { makeLiveArt(live) }.onFailure {
+            // Thrown: this build has no way to it, not worth trying on every refresh.
+            liveFailed += live.id
+            lottieNote("live ${live.id} failed: ${(it as? java.lang.reflect.InvocationTargetException)?.targetException ?: it}", null)
+        }.getOrNull() ?: return null
+        liveArts[owner] = live.id to view
+        lottieNote("live ${live.id} made", null)
+        return view
+    }
+
+    /**
+     * The plugin's own view for [live], set up as the row sets its own
+     * (ModuleNewImageTextViewHolder.showEffects, IslandIconViewHolder.setMP4Icon), in a host that
+     * draws it at the size the row's layout gives it.
+     */
+    private fun makeLiveArt(live: LockIslands.Live): View? {
+        val plugin = LockIslands.pluginOf(live.row.get()) ?: return null
+        val ctx = plugin.ctx
+        fun dimen(name: String): Int {
+            val id = ctx.resources.getIdentifier(name, "dimen", "miui.systemui.plugin")
+            return if (id == 0) 0 else ctx.resources.getDimensionPixelSize(id)
+        }
+        return when (live.kind) {
+            LockIslands.Live.FLASH -> {
+                val v = plugin.loader.loadClass("com.mi.widget.view.FlashLightView")
+                    .getConstructor(android.content.Context::class.java).newInstance(ctx) as View
+                // Its row's layout lets its glow - taller than its square - out (clipChildren
+                // false); made in code, a FrameLayout clips it.
+                (v as? ViewGroup)?.clipChildren = false
+                (Xp.callMethod(v, "getFlashLightOffset") as? FloatArray)?.let { o ->
+                    o[0] = 0f; o[1] = 0.14f; o[2] = -50f; o[3] = 0f
+                }
+                LiveArtHost(context, v, dimen("focus_notify_profile_container_size"))
+            }
+            LockIslands.Live.VIDEO -> {
+                val v = plugin.loader.loadClass("miui.systemui.widget.TextureVideoView")
+                    .getConstructor(android.content.Context::class.java).newInstance(ctx) as View
+                val uri = plugin.call("miui.systemui.util.VideoResUtils", "getVideoRes", live.src, ctx) as String
+                Xp.callMethod(v, "setOnPreparedListener", android.media.MediaPlayer.OnPreparedListener { mp ->
+                    // Silent on the lock screen whatever the clip carries.
+                    runCatching { mp.setVolume(0f, 0f) }
+                    mp.isLooping = live.loop
+                    Xp.callMethod(v, "start")
+                })
+                Xp.callMethod(v, "setOnErrorListener", android.media.MediaPlayer.OnErrorListener { _, what, extra ->
+                    lottieNote("live ${live.id} error $what/$extra", null)
+                    runCatching { Xp.callMethod(v, "stopPlayback") }
+                    true
+                })
+                Xp.callMethod(v, "setVideoURI", android.net.Uri.parse(uri))
+                LiveArtHost(context, v, 0)
+            }
+            else -> null
+        }
     }
 
     /**
@@ -7431,7 +7508,7 @@ private class MiniPlayerController(
         val instance = runCatching { utils.getField("INSTANCE").get(null) }.getOrNull()
         val res = utils.methods.first { it.name == "getLottieRes" && it.parameterTypes.size == 2 }
             .invoke(instance, anim.src, anim.number) as Int
-        if (res == 0) return lottieMiss("no res for ${anim.src}")
+        if (res <= 0) return lottieMiss("no res for ${anim.src}")
         val systemui = host.javaClass.classLoader ?: return lottieMiss("no systemui loader")
         val composition = compositionFor(res, plugin)
             ?: return lottieMiss("load ${anim.src}: $lottieLoadError")
@@ -7531,9 +7608,9 @@ private class MiniPlayerController(
 
     /** The plugin's context and classes as the row has them, else its package's. */
     private fun pluginOf(row: View?): Pair<android.content.Context, ClassLoader>? {
-        val source = row?.let(LockIslands::focusIconView)
-        val ctx = source?.context ?: pluginContext ?: return null
-        return ctx to (source?.javaClass?.classLoader ?: ctx.classLoader)
+        LockIslands.pluginOf(row)?.let { return it.ctx to it.loader }
+        val ctx = pluginContext ?: return null
+        return ctx to ctx.classLoader
     }
 
     /** The plugin's name-to-picture maps for its buttons: its stills and its Lotties. */

@@ -107,13 +107,40 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         val l = (width - shapeW) / 2 + shapeDx
         val t = (height - shapeH) / 2
         element.layout(l, t, l + shapeW, t + shapeH)
-        icon?.let {
-            // Inset from the shape, round: an app icon or an album cover sits inside the glass.
-            val side = (min(shapeW, shapeH) * ICON_SHARE).toInt()
-            val il = if (iconAtStart) l + (min(shapeW, shapeH) - side) / 2 else l + (shapeW - side) / 2
-            val it0 = (height - side) / 2
-            it.layout(il, it0, il + side, it0 + side)
+        if (icon == null && live == null) return
+        // Inset from the shape, round: an app icon or an album cover sits inside the glass.
+        val side = (min(shapeW, shapeH) * ICON_SHARE).toInt()
+        val il = if (iconAtStart) l + (min(shapeW, shapeH) - side) / 2 else l + (shapeW - side) / 2
+        val it0 = (height - side) / 2
+        icon?.layout(il, it0, il + side, it0 + side)
+        live?.let { v ->
+            // Measured only when its size changes: this runs on every frame of a squeeze.
+            if (v.measuredWidth != side || v.isLayoutRequested) {
+                v.measure(MeasureSpec.makeMeasureSpec(side, MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(side, MeasureSpec.EXACTLY))
+            }
+            v.layout(il, it0, il + side, it0 + side)
         }
+    }
+
+    /** A live view in the picture's place (MiniPlayerView.showArtworkView); null takes it out. */
+    private var live: View? = null
+
+    fun setLive(view: View?) {
+        if (live === view) return
+        live?.let { removeView(it) }
+        live = view
+        if (view != null) {
+            (view.parent as? android.view.ViewGroup)?.removeView(view)
+            addView(view, LayoutParams(0, 0))
+            view.alpha = icon?.alpha ?: 1f
+            view.clipToOutline = false
+            view.transitionAlpha = if (iconHidden) 0f else 1f
+        }
+        icon?.let { it.visibility = if (view != null) View.INVISIBLE else if (it.drawable == null) View.GONE else View.VISIBLE }
+        // Its glow past its box, as in the pill (MiniPlayerView.showArtworkView).
+        clipChildren = view == null
+        placeElement()
     }
 
     private var icon: ImageView? = null
@@ -142,7 +169,7 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
             addView(this, LayoutParams(0, 0))
         }
         if (view.drawable !== drawable) view.setImageDrawable(drawable)
-        view.visibility = if (drawable == null) View.GONE else View.VISIBLE
+        view.visibility = if (live != null) View.INVISIBLE else if (drawable == null) View.GONE else View.VISIBLE
         view.transitionAlpha = if (iconHidden) 0f else 1f
         placeElement()
     }
@@ -154,6 +181,7 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     fun setIconHidden(hidden: Boolean) {
         iconHidden = hidden
         icon?.transitionAlpha = if (hidden) 0f else 1f
+        live?.transitionAlpha = if (hidden) 0f else 1f
     }
 
     private var iconHidden = false
@@ -170,6 +198,7 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     /** The picture's alpha: it comes in last on a small island forming out of the pill. */
     fun setIconAlpha(alpha: Float) {
         icon?.let { if (kotlin.math.abs(it.alpha - alpha) > 0.002f) it.alpha = alpha }
+        live?.let { if (kotlin.math.abs(it.alpha - alpha) > 0.002f) it.alpha = alpha }
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) =
