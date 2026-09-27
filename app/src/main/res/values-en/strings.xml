@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="cover_flow_enabled">Animated flowing backdrop</string>
+    <string name="cover_flow_summary">Flowing colors from album art behind the cover card</string>
+    <string name="cover_flow_preset">Flow style</string>
+    <string name="cover_flow_apple">Apple Music style</string>
+    <string name="cover_flow_soft">Soft ambience</string>
+    <string name="cover_flow_vivid">Vivid rhythm</string>
+    <string name="cover_flow_strength">Strength</string>
+    <string name="cover_flow_speed">Speed</string>
+    <string name="cover_flow_blur">Blur passes</string>
     <string name="app_name">HyperMusicCover</string>
     <string name="about_source_code_summary">https://github.com/zyl6932/HyperMusicCover</string>
     <string name="about_telegram">Telegram Group</string>

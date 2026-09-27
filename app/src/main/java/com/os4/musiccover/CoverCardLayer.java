@@ -26,15 +26,18 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
     private static final class Prepared {
         final Bitmap art;
         final Bitmap aodBackdrop;
+        final Bitmap flowArt;
         final int generation;
-        Prepared(Bitmap art, Bitmap aodBackdrop, int generation) {
+        Prepared(Bitmap art, Bitmap aodBackdrop, Bitmap flowArt, int generation) {
             this.art = art;
             this.aodBackdrop = aodBackdrop;
+            this.flowArt = flowArt;
             this.generation = generation;
         }
         void recycle() {
             art.recycle();
             if (aodBackdrop != null) aodBackdrop.recycle();
+            if (flowArt != null) flowArt.recycle();
         }
     }
 
@@ -145,6 +148,15 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
             host.addView(v.wash, host.indexOfChild(below), new ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
+        // Shortcut glass discs are siblings in the window root. Keep the flow below their
+        // background as well as below the keyguard's own icons and artwork.
+        View root = layer.getRootView();
+        if (root instanceof ViewGroup) {
+            View anchor = zoomed != null ? zoomed : layer;
+            while (anchor.getParent() instanceof View && anchor.getParent() != root)
+                anchor = (View) anchor.getParent();
+            CoverFlowRuntime.attach((ViewGroup) root, anchor);
+        }
         v.style = sStyle;
         v.playing = sPlayingState;
         v.watchGeometry(layer);
@@ -249,7 +261,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
     static void publish(Bitmap source) {
         final int generation = ++sGeneration;
         if (source == null || source.isRecycled()) return;
-        Bitmap readable = null, art = null, aodBackdrop = null;
+        Bitmap readable = null, art = null, aodBackdrop = null, flowArt = null;
         try {
             readable = source.getConfig() == Bitmap.Config.HARDWARE
                     ? source.copy(Bitmap.Config.ARGB_8888, false) : source;
@@ -266,6 +278,9 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
             new Canvas(art).drawBitmap(readable, crop,
                     new Rect(0, 0, art.getWidth(), art.getHeight()),
                     new Paint(Paint.FILTER_BITMAP_FLAG));
+            flowArt = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888);
+            new Canvas(flowArt).drawBitmap(art, null, new Rect(0, 0, 128, 128),
+                    new Paint(Paint.FILTER_BITMAP_FLAG));
             // The AOD's own dimming can flatten the wallpaper almost to black. A small copy of
             // the same static blur is drawn over it at low alpha only in the full-screen AOD.
             // Prepare it with the artwork, off the UI thread, then reuse it without animation.
@@ -278,9 +293,10 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
             } catch (Throwable t) {
                 Xp.log("[MCCard] AOD backdrop preparation failed: " + t);
             }
-            final Prepared p = new Prepared(art, aodBackdrop, generation);
+            final Prepared p = new Prepared(art, aodBackdrop, flowArt, generation);
             art = null;
             aodBackdrop = null;
+            flowArt = null;
             final Prepared old = sPending;
             sPending = p;
             Main.main().post(new Runnable() {
@@ -306,6 +322,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
             if (readable != null && readable != source) readable.recycle();
             if (art != null) art.recycle();
             if (aodBackdrop != null) aodBackdrop.recycle();
+            if (flowArt != null) flowArt.recycle();
         }
     }
 
@@ -347,6 +364,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
     }
 
     static void refresh() {
+        CoverFlowRuntime.refresh();
         CoverCardLayer v = sView;
         if (v != null) {
             v.start();
@@ -355,6 +373,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
     }
 
     static void hideNow() {
+        CoverFlowRuntime.hide();
         CoverCardLayer v = sView;
         if (v == null) return;
         v.hideImmediately();
@@ -436,6 +455,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
     }
 
     private void hideImmediately() {
+        CoverFlowRuntime.hide();
         stop();
         opacity = 0f;
         exitWithCard = false;
@@ -456,6 +476,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
 
     static void playback(boolean on) {
         sPlayingState = on;
+        CoverFlowRuntime.playback(on);
         CoverCardLayer v = sView;
         if (v != null) {
             v.playing = on;
@@ -529,8 +550,20 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         if (previous != null) previous.recycle();
         previous = current;
         current = p;
+        CoverFlowRuntime.publish(p.flowArt);
         changedAt = SystemClock.uptimeMillis();
         start();
+    }
+
+    static Bitmap currentFlowArt() {
+        CoverCardLayer v = sView;
+        return v == null || v.current == null ? null : v.current.flowArt;
+    }
+
+    /** The same 200ms sleep / 350ms wake brightness that the card uses under the AOD clock. */
+    static float flowLit() {
+        CoverCardLayer v = sView;
+        return v == null ? 1f : v.lit;
     }
 
     private void start() {
@@ -827,6 +860,7 @@ final class CoverCardLayer extends View implements Choreographer.FrameCallback {
         else rise += (1f - rise) * Math.min(1f, dt * 3f / response);
         if (rise > 0.998f) rise = 1f;
         if (Math.abs(opacity - target) < 0.002f) opacity = target;
+        CoverFlowRuntime.refresh();
         float scaleTarget = playing ? CardSpring.PLAYING : CardSpring.PAUSED;
         if (phase == ClockCollapse.Phase.AOD) scale.snap(scaleTarget);
         // At the response the app's 缩放动画阻尼 sets, so the card keeps time with the clock,

@@ -26,9 +26,9 @@ import kotlin.math.sqrt
  * recorded calls. It never takes a touch - the button above it keeps its own.
  */
 internal class ShortcutDisc(context: Context) : FrameLayout(context) {
-    private val element = ImageView(context)
+    private var element = ImageView(context)
     private var dressWith: ((ImageView) -> Unit)? = null
-    private var dressedAs = -1
+    private var dressedAs: String? = null
     private var shapeW = 0
     private var shapeH = 0
     private var shapeDx = 0
@@ -65,9 +65,17 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     }
 
     /** The card's material, applied again only when the card has been dressed anew. */
-    fun dress(generation: Int, apply: (ImageView) -> Unit) {
+    fun dress(generation: String, apply: (ImageView) -> Unit) {
         dressWith = apply
         if (generation == dressedAs) return
+        // Xiaomi material APIs retain native state on the view. A fresh element keeps a former
+        // glass or blur recipe from leaking into a newly selected solid/system recipe.
+        if (dressedAs != null) {
+            removeView(element)
+            element = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_XY }
+            addView(element, 0, LayoutParams(0, 0))
+            placeElement()
+        }
         dressedAs = generation
         if (shapeW > 1 && shapeH > 1) applyDress()
     }
@@ -90,6 +98,7 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         element.invalidateOutline()
         // A material applied before there was a size draws nothing; it goes on again now.
         if (first && w > 1 && h > 1) applyDress()
+        MiniGlassOutline.geometry(element)
     }
 
     /**
@@ -201,14 +210,22 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         live?.let { if (kotlin.math.abs(it.alpha - alpha) > 0.002f) it.alpha = alpha }
     }
 
-    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) =
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         placeElement()
+        MiniGlassOutline.geometry(element)
+    }
 
     private fun applyDress() {
         dressWith?.invoke(element)
-        // The recipe gives the element the card's own corner; the disc's is its own.
+        restoreMaterialOutline(element)
+    }
+
+    internal fun restoreMaterialOutline(view: ImageView) {
+        if (view !== element) return
+        // The element has its own SDF bounds; the frame clips the finished disc once.
         element.outlineProvider = elementShape
-        element.clipToOutline = true
+        element.clipToOutline = false
+        element.invalidateOutline()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean = false

@@ -13,12 +13,23 @@ You should have received a copy of the GNU Affero General Public License along
 with this program; the full text is in LICENSE at the root of this repository,
 and at <https://www.gnu.org/licenses/agpl-3.0.txt>.
 
-The complete corresponding source for every published build is this repository:
-<https://github.com/zyl6932/HyperMusicCover>
+The complete corresponding source for this custom build is this fork:
+<https://github.com/ciallouma-ai/HyperMusicCover>
 
 --------------------------------------------------------------------------------
 Third-party code
 --------------------------------------------------------------------------------
+
+GNU Lesser General Public License, version 3
+---------------------------------------------
+  Kawarp-AGSL (https://github.com/meowarex/kawarp-agsl)
+  Copyright (C) 2026 meowarex. Its AGSL renderer is included as
+  app/src/main/java/dev/kawarp/KawarpEngine.java. It remains under LGPL-3.0;
+  its complete license and source attribution are in third_party/kawarp-agsl/.
+  The original Kawarp rendering design and shader mathematics are by
+  better-lyrics (@boidushya), licensed under MIT. The original MIT text is
+  reproduced in third_party/kawarp-agsl/THIRD-PARTY.md.
+
 
 Parts of this program are adapted from the projects below and remain under the
 licences stated here. The files carrying those changes are marked in their
@@ -68,6 +79,9 @@ part of the whole without being relicensed.
   from its compact music card, and those files keep its Apache-2.0 header,
   Copyright 2026 btm_m; the transition between it and the media card
   (MiniCardMorph) is this project's own.
+  The lock screen material presets and Xiaomi blur/MiGlass calls in
+  MiniMaterialStyle.kt are adapted from HyperChanger 1.1.3, Copyright 2026
+  btm_m, Apache-2.0.
 
   HyperLyrics Enhanced (https://github.com/juren233/HyperLyrics-Enhanced)
   The Kuwo lyric source and the TTML Hub catalogue client are adapted from

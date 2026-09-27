@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="cover_flow_enabled">动态流光背景</string>
+    <string name="cover_flow_summary">从专辑封面取色，在卡片后方流动</string>
+    <string name="cover_flow_preset">流光风格</string>
+    <string name="cover_flow_apple">Apple Music 风格</string>
+    <string name="cover_flow_soft">柔和氛围</string>
+    <string name="cover_flow_vivid">鲜明律动</string>
+    <string name="cover_flow_strength">强度</string>
+    <string name="cover_flow_speed">速度</string>
+    <string name="cover_flow_blur">模糊次数</string>
     <string name="app_name">HyperMusicCover</string>
     <string name="about_source_code_summary">https://github.com/zyl6932/HyperMusicCover</string>
     <string name="about_telegram">Telegram群组</string>

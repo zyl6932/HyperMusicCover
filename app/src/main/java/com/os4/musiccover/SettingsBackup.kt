@@ -53,6 +53,7 @@ object SettingsBackup {
     /** The whole notification-shade page, as one object keyed the way the module names them. */
     private const val KEY_SHADE = "shade"
     private const val KEY_MINI = "lockscreenMiniPlayer"
+    private const val KEY_FLOW = CoverFlowConfig.BACKUP_KEY
 
     suspend fun export(context: Context): String {
         val json = JSONObject(AppSettings.load(context).toJson())
@@ -92,6 +93,7 @@ object SettingsBackup {
                 json.put(KEY_SHADE, JSONObject(module.shade as Map<*, *>))
             }
             json.put(KEY_MINI, JSONObject(module.miniConfig))
+            json.put(KEY_FLOW, JSONObject(module.flowConfig))
         }
         return json.toString(2)
     }
@@ -199,6 +201,7 @@ object SettingsBackup {
             if (obj.has(KEY_MINI)) {
                 ModuleBridge.setMiniConfig(context, obj.getJSONObject(KEY_MINI).toString())
             }
+            CoverFlowConfig.backupValue(obj)?.let { ModuleBridge.setCoverFlowConfig(context, it) }
         } catch (_: Exception) {
             // The app half is already applied; a malformed module half is not worth losing it over.
         }

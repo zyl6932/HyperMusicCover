@@ -327,6 +327,7 @@ final class LyricView extends View {
     private int focusKey = Integer.MIN_VALUE;
     private int ms;
     private float show;
+    float flowShow() { return show; }
     private float bandTop, bandBottom;
     private final float[] bandBounds = new float[2];
     private boolean bandOk;
@@ -539,6 +540,7 @@ final class LyricView extends View {
             show = s;
             changed = true;
             why |= 4;
+            CoverFlowRuntime.refresh();
         }
         if (show == 0f && showTo == 0f && !LockLyrics.wantsAttached()) {
             // Faded out with nothing to come back for: leave the keyguard's tree, and let the

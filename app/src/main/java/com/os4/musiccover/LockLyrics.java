@@ -289,6 +289,12 @@ final class LockLyrics {
         return wanted() && Main.coverModeOn() && hasLyrics();
     }
 
+    /** Actual lyric fade, including the last frames after cover mode has started leaving. */
+    static float flowShow() {
+        LyricView v = sView;
+        return v == null ? 0f : v.flowShow();
+    }
+
     /** The lyric page a tap into cover mode will land on. */
     static boolean willAttachOnEntry() {
         return hasLyrics() && CoverMorphRoute.lyricsAfterEntry(sEnabled, sTapHidden, sDemo);

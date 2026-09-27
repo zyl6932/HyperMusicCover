@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
 import com.os4.musiccover.CoverActivity
+import com.os4.musiccover.CoverFlowConfig
 import com.os4.musiccover.ModuleBridge
 import com.os4.musiccover.R
 import com.os4.musiccover.ShadeActivity
@@ -266,6 +267,7 @@ internal fun CoverPageView(
                 coverCardFill = module.coverCardFill,
                 coverCardPos = module.coverCardPos,
                 coverCardCorner = module.coverCardCorner,
+                flowConfig = module.flowConfig,
                 clockHeightDp = module.clockHeightDp,
                 clockSize = module.clockSize,
                 clockOffsetDp = module.clockOffsetDp,
@@ -340,6 +342,67 @@ private fun CoverGroup(
                 },
             )
         } else {
+            val flow = CoverFlowConfig.fromJson(module.flowConfig)
+            SwitchPreference(
+                title = stringResource(R.string.cover_flow_enabled),
+                summary = stringResource(R.string.cover_flow_summary),
+                checked = flow.enabled,
+                enabled = enabled,
+                onCheckedChange = {
+                    val json = flow.copy(enabled = it).json()
+                    onChange(module.copy(flowConfig = json))
+                    ModuleBridge.setCoverFlowConfig(context, json)
+                },
+            )
+            if (flow.enabled) {
+                WindowDropdownPreference(
+                    title = stringResource(R.string.cover_flow_preset),
+                    items = listOf(
+                        stringResource(R.string.cover_flow_apple),
+                        stringResource(R.string.cover_flow_soft),
+                        stringResource(R.string.cover_flow_vivid),
+                    ),
+                    selectedIndex = flow.preset,
+                    enabled = enabled,
+                    onSelectedIndexChange = {
+                        val json = CoverFlowConfig.selectPreset(flow, it).json()
+                        onChange(module.copy(flowConfig = json))
+                        ModuleBridge.setCoverFlowConfig(context, json)
+                    },
+                )
+                ValueSlider(
+                    title = stringResource(R.string.cover_flow_strength),
+                    value = flow.warp, valueRange = 0f..1f, enabled = enabled,
+                    label = { "${(it * 100).roundToInt()}%" },
+                    onValueChange = {
+                        val json = flow.copy(warp = it).json()
+                        onChange(module.copy(flowConfig = json))
+                        ModuleBridge.setCoverFlowConfig(context, json)
+                    },
+                )
+                ValueSlider(
+                    title = stringResource(R.string.cover_flow_speed),
+                    value = flow.speed, valueRange = 0.1f..3f, enabled = enabled,
+                    label = { "${(it * 10).roundToInt() / 10f}×" },
+                    onValueChange = {
+                        val value = (it * 10).roundToInt() / 10f
+                        val json = flow.copy(speed = value).json()
+                        onChange(module.copy(flowConfig = json))
+                        ModuleBridge.setCoverFlowConfig(context, json)
+                    },
+                )
+                ValueSlider(
+                    title = stringResource(R.string.cover_flow_blur),
+                    value = flow.blur.toFloat(), valueRange = 1f..40f, enabled = enabled,
+                    label = { it.roundToInt().toString() },
+                    onValueChange = {
+                        onChange(module.copy(flowConfig = flow.copy(blur = it.roundToInt()).json()))
+                    },
+                    onValueChangeFinished = {
+                        ModuleBridge.setCoverFlowConfig(context, module.flowConfig)
+                    },
+                )
+            }
             ValueSlider(
                 title = stringResource(R.string.cover_card_size),
                 value = module.coverCardFill.coerceIn(0.4f, 1f),
@@ -871,6 +934,7 @@ internal fun ValueSlider(
     detent: Float? = null,
     label: (Float) -> String = ::format,
     onValueChange: (Float) -> Unit,
+    onValueChangeFinished: (() -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxWidth()) {
         BasicComponent(
@@ -892,6 +956,7 @@ internal fun ValueSlider(
                 .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
             value = value,
             onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
             valueRange = valueRange,
             enabled = enabled,
             // Step is what makes a key point produce a tick at all; the default effect only fires

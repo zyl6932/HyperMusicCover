@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
+import android.graphics.Rect as AndroidRect
 import android.graphics.Shader
 import androidx.compose.foundation.Canvas as ComposeCanvas
 import androidx.compose.foundation.border
@@ -17,7 +18,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -32,6 +37,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -39,7 +45,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.os4.musiccover.ModuleBridge
+import com.os4.musiccover.CoverFlowConfig
 import com.os4.musiccover.R
+import dev.kawarp.KawarpEngine
+import kotlinx.coroutines.delay
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -80,6 +89,7 @@ fun LockPreview(
     coverCardFill: Float,
     coverCardPos: Float,
     coverCardCorner: Float,
+    flowConfig: String,
     clockHeightDp: Float,
     clockSize: Float,
     clockOffsetDp: Float,
@@ -122,6 +132,47 @@ fun LockPreview(
         BitmapFactory.decodeResource(resources, sampleCardRes)
     }
     val cover = art ?: sampleCover
+    val flow = CoverFlowConfig.fromJson(flowConfig)
+    val flowOn = coverStyle == 1 && flow.enabled && KawarpEngine.isSupported()
+    val flowEngine = remember(flowOn) {
+        if (flowOn) runCatching { KawarpEngine() }.getOrNull() else null
+    }
+    var flowFrame by remember { mutableIntStateOf(0) }
+    LaunchedEffect(flowEngine, cover, flowConfig, flowOn) {
+        if (!flowOn || flowEngine == null) return@LaunchedEffect
+        // A drag can change blur many times; debounce its cover preprocessing.
+        delay(180L)
+        flowEngine.setWarpIntensity(flow.warp)
+        flowEngine.setAnimationSpeed(flow.speed)
+        flowEngine.setBlurPasses(flow.blur)
+        flowEngine.setSaturation(when (flow.preset) {
+            CoverFlowConfig.SOFT -> 1.1f
+            CoverFlowConfig.VIVID -> 1.8f
+            else -> 1.5f
+        })
+        flowEngine.setAutoDarken(when (flow.preset) {
+            CoverFlowConfig.SOFT -> 0.55f
+            CoverFlowConfig.VIVID -> 0.1f
+            else -> 0f
+        })
+        flowEngine.setTransitionDuration(180)
+        val readable = if (cover.config == Bitmap.Config.HARDWARE)
+            cover.copy(Bitmap.Config.ARGB_8888, false) else cover
+        // 129px guarantees the engine's 128px scale creates its own copy.
+        val thumbnail = Bitmap.createBitmap(129, 129, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(thumbnail).drawBitmap(readable, null,
+            AndroidRect(0, 0, 129, 129), Paint(Paint.FILTER_BITMAP_FLAG))
+        flowEngine.setCover(thumbnail)
+        thumbnail.recycle()
+        if (readable !== cover) readable.recycle()
+    }
+    LaunchedEffect(flowEngine, flowOn) {
+        if (!flowOn || flowEngine == null) return@LaunchedEffect
+        while (true) {
+            delay(33L)
+            flowFrame++
+        }
+    }
     val shownCard = card ?: sampleShot(sampleCard, geometry, screenW, screenH)
     val shownSlot = if (card != null) artSlot else if (cardHideArt) null else SAMPLE_ART_SLOT
 
@@ -162,6 +213,13 @@ fun LockPreview(
                 dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
                 filterQuality = FilterQuality.High,
             )
+            if (flowOn && flowFrame >= 0 && flowEngine?.isReady() == true) {
+                try {
+                    flowEngine.draw(drawContext.canvas.nativeCanvas, size.width, size.height)
+                } catch (_: Throwable) {
+                    // Wallpaper remains as the preview fallback too.
+                }
+            }
             if (coverStyle == 1) {
                 drawSquareCover(cover, k, screenW, screenH, geometry, shownCard,
                     clockHeightDp, clockSize, clockOffsetDp,

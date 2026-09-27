@@ -855,6 +855,7 @@ public class Main extends XposedModule {
         HyperTweaks.systemUi(cl);
         // The mini player hangs off the shortcut row, not the clock container.
         MiniPlayerRuntime.install(cl);
+        CoverFlowCards.install(cl);
 
         try {
             sContainerCls = Xp.findClass(CLS_CONTAINER, cl);
@@ -1777,6 +1778,9 @@ public class Main extends XposedModule {
                     + "\nminicfg=" + android.util.Base64.encodeToString(
                             MiniPlayerRuntime.configJson(sAppCtx).getBytes(java.nio.charset.StandardCharsets.UTF_8),
                             android.util.Base64.NO_WRAP)
+                    + "\ncoverflowcfg=" + android.util.Base64.encodeToString(
+                            CoverFlowRuntime.configJson().getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                            android.util.Base64.NO_WRAP)
                     // Not a setting - a measurement. Kept so the app's preview is to scale from
                     // the first frame after a SystemUI restart, instead of only once the phone
                     // has been locked again.
@@ -1890,6 +1894,9 @@ public class Main extends XposedModule {
                         }
                         else if ("fpavoid".equals(k)) sFpAvoid = Integer.parseInt(v);
                         else if ("minicfg".equals(k)) MiniPlayerRuntime.applyConfig(sAppCtx,
+                                new String(android.util.Base64.decode(v, android.util.Base64.DEFAULT),
+                                        java.nio.charset.StandardCharsets.UTF_8));
+                        else if ("coverflowcfg".equals(k)) CoverFlowRuntime.applyConfig(
                                 new String(android.util.Base64.decode(v, android.util.Base64.DEFAULT),
                                         java.nio.charset.StandardCharsets.UTF_8));
                         // The whole shade settings page, in one prefix - the keys and their
@@ -2545,6 +2552,9 @@ public class Main extends XposedModule {
                     } else if ("minicfg".equals(op)) {
                         MiniPlayerRuntime.applyConfig(c, i.getStringExtra("json"));
                         saveState();
+                    } else if ("coverflowcfg".equals(op)) {
+                        CoverFlowRuntime.applyConfig(i.getStringExtra("json"));
+                        saveState();
                     } else if ("query".equals(op)) {
                         // Answered through the ordered broadcast's result extras: the app is a
                         // separate process and this is the only channel it already has. A reply
@@ -2553,6 +2563,7 @@ public class Main extends XposedModule {
                         out.putBoolean("alive", true);
                         out.putBoolean("cover", sCoverMode);
                         out.putString("minicfg", MiniPlayerRuntime.configJson(c));
+                        out.putString("coverflowcfg", CoverFlowRuntime.configJson());
                         float[] shortcuts = MiniPlayerRuntime.shortcutGeometry();
                         if (shortcuts != null) out.putFloatArray("minishortcuts", shortcuts);
                         out.putBoolean("auto", sAuto);
@@ -6195,7 +6206,6 @@ public class Main extends XposedModule {
         CoverCardLayer.leaving();
         sCoverMode = false;
         LockIslands.INSTANCE.setCoverMode(false);
-        CoverCardLayer.refresh();
         // The cover is on its way out, so the reading that coloured the clock describes the
         // wallpaper coming back even less than it described the old one. Dropped at the start:
         // the clock is at its smallest now, so the colour going back to the OEM's is at its
@@ -6211,6 +6221,9 @@ public class Main extends XposedModule {
         // (CoverPush.dropVideoCover), not in front of it now.
         if (!(sVideoWallpaper && sCover != null)) setDepthHidden(false);
         ClockCollapse.exit(animate);
+        // The exit phase must be visible before the backdrop reads scene eligibility: the
+        // card is still fading out here, even though sCoverMode was cleared above.
+        CoverCardLayer.refresh();
         MiniPlayerRuntime.refresh();
         // No applyMediaCard() while the exit is flying: it would drop the card's guard, and the
         // guard is what draws every frame of the thumbnail coming back. onClockReleased() hands
@@ -6406,6 +6419,11 @@ public class Main extends XposedModule {
         return (sCoverMode || ClockCollapse.phase() == ClockCollapse.Phase.EXIT)
                 && keyguardShowing() && c != null && c.isShown()
                 && (sScreenOn || coverCardInAod() || coverCardFallingAsleep());
+    }
+
+    /** Card backdrops stop at AOD, even while the album-art wash fades with the clock. */
+    static boolean flowCardsEligible() {
+        return sScreenOn && coverCardVisible();
     }
 
     /**
