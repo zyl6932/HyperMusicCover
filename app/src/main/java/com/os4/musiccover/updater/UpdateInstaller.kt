@@ -96,7 +96,8 @@ object UpdateInstaller {
     @Volatile
     private var cancelled = false
 
-    fun start(context: Context, apkUrls: List<String>, fileName: String) {
+    /** [apkUrl] is the release asset's own URL; the hosts to try it through are worked out here. */
+    fun start(context: Context, apkUrl: String, fileName: String) {
         if (inFlight) return
         inFlight = true
         lastOutcome = null
@@ -105,7 +106,7 @@ object UpdateInstaller {
         val app = context.applicationContext
         scope.launch {
             val outcome = try {
-                val file = download(app, apkUrls, fileName)
+                val file = download(app, apkUrl, fileName)
                 if (!UpdateApi.isOurs(app, file)) {
                     file.delete()
                     InstallOutcome.NotOurs
@@ -140,14 +141,15 @@ object UpdateInstaller {
     }
 
     /**
-     * Fetches the APK, trying [apkUrls] in order.
+     * Fetches the APK, trying each host for [apkUrl], the one that worked last time first.
      *
      * The order is not a preference: the release lives on `github.com`, which is not reachable on
      * every network this app runs on - measured on the project's own test device, a direct
      * connection to `github.com:443` aborts after the 15 second connect timeout while a proxy in
      * front of the same URL returns all 2.9MB in under two seconds.
      */
-    private fun download(context: Context, apkUrls: List<String>, fileName: String): File {
+    private fun download(context: Context, apkUrl: String, fileName: String): File {
+        val apkUrls = UpdateApi.orderedCandidates(context, apkUrl)
         val dir = File(context.cacheDir, DOWNLOAD_DIR)
         dir.listFiles()?.forEach { it.delete() }
         dir.mkdirs()
@@ -186,7 +188,10 @@ object UpdateInstaller {
                         }
                     }
                 }
-                UpdateApi.rememberSource(context, apkUrls.first(), url)
+                // Against the asset's own URL, not the first of the list: that is whichever host
+                // worked last time, and the proxy's address taken as the original read back as
+                // "direct" - so every other update paid the direct host's timeout again.
+                UpdateApi.rememberSource(context, apkUrl, url)
                 return target
             } catch (t: Throwable) {
                 if (cancelled) throw t

@@ -126,7 +126,7 @@ class UpdateController internal constructor(internal val states: UpdateStates) {
         states.status = null
         UpdateInstaller.start(
             context,
-            UpdateApi.orderedCandidates(context, target.apkUrl),
+            target.apkUrl,
             "HyperMusicCover-${target.versionName}.apk",
         )
     }
