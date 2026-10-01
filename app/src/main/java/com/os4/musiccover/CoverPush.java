@@ -1237,11 +1237,15 @@ final class CoverPush {
      */
     private static String writeSharedArt(byte[] jpg) {
         try {
+            // Written beside it and renamed over it, as writeSource does: the wallpaper process
+            // may still be reading the last track's file when a quick skip writes the next one.
             java.io.File f = new java.io.File(SHARE_DIR, SHARE_FILE);
-            java.io.FileOutputStream out = new java.io.FileOutputStream(f);
-            out.write(jpg);
-            out.close();
-            f.setReadable(true, false);
+            java.io.File tmp = new java.io.File(SHARE_DIR, SHARE_FILE + ".tmp");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(tmp)) {
+                out.write(jpg);
+            }
+            tmp.setReadable(true, false);
+            if (!tmp.renameTo(f)) throw new java.io.IOException("rename " + tmp + " -> " + f);
             return f.getAbsolutePath();
         } catch (Throwable t) {
             Xp.log(Main.TAG + "shared art write failed, carrying it in the broadcast: " + t);

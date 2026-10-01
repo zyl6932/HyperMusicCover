@@ -1871,9 +1871,11 @@ public class Main extends XposedModule {
         // read; the damage only showed at the NEXT SystemUI start, which is why it read as
         // "installing the app turns some switches off". loadState saves once at the end instead.
         if (sLoading) return;
+        android.util.AtomicFile af = new android.util.AtomicFile(
+                new java.io.File(sAppCtx.getFilesDir(), STATE_FILE));
+        java.io.FileOutputStream f = null;
         try {
-            java.io.FileOutputStream f =
-                    new java.io.FileOutputStream(new java.io.File(sAppCtx.getFilesDir(), STATE_FILE));
+            f = af.startWrite();
             f.write(("cover=" + (sCoverMode ? 1 : 0)
                     + "\nbias=" + sBias
                     // Only the mode. The square's size, place and corners, the clock's offset,
@@ -1927,8 +1929,9 @@ public class Main extends XposedModule {
                     // has been locked again.
                     + "\ncardrect=" + sCardL + "," + sCardT + "," + sCardW + "," + sCardH
                     + "\n").getBytes());
-            f.close();
+            af.finishWrite(f);
         } catch (Throwable t) {
+            if (f != null) af.failWrite(f);
             Xp.log(TAG + "saveState failed: " + t);
         }
     }
@@ -1953,16 +1956,15 @@ public class Main extends XposedModule {
 
     private static void loadState() {
         if (sAppCtx == null) return;
-        java.io.File f = new java.io.File(sAppCtx.getFilesDir(), STATE_FILE);
+        // An AtomicFile, so a SystemUI killed in the middle of saveState leaves the last whole
+        // file behind rather than a truncated one that silently resets every setting.
+        android.util.AtomicFile f = new android.util.AtomicFile(
+                new java.io.File(sAppCtx.getFilesDir(), STATE_FILE));
         if (!f.exists()) return;
         boolean cover = false;
         sLoading = true;
         try {
-            byte[] buf = new byte[(int) f.length()];
-            java.io.FileInputStream in = new java.io.FileInputStream(f);
-            int n = in.read(buf);
-            in.close();
-            String body = new String(buf, 0, Math.max(0, n)).trim();
+            String body = new String(f.readFully()).trim();
             // The first version of this file was a bare "1"/"0"; keep reading those so an
             // upgrade does not silently drop a cover that is still on the phone.
             if (body.length() <= 1) {
@@ -6964,13 +6966,10 @@ public class Main extends XposedModule {
                 sHideFpPeeked = false;
                 return;
             }
-            java.io.File f = new java.io.File(c.getFilesDir(), STATE_FILE);
+            android.util.AtomicFile f = new android.util.AtomicFile(
+                    new java.io.File(c.getFilesDir(), STATE_FILE));
             if (!f.exists()) return;
-            byte[] buf = new byte[(int) f.length()];
-            java.io.FileInputStream in = new java.io.FileInputStream(f);
-            int n = in.read(buf);
-            in.close();
-            for (String line : new String(buf, 0, Math.max(0, n)).split("\n")) {
+            for (String line : new String(f.readFully()).split("\n")) {
                 if (line.startsWith("hidefp=")) {
                     sHideFp = "1".equals(line.substring(7).trim());
                     Xp.log(TAG + "fingerprint setting read early: hide=" + sHideFp);

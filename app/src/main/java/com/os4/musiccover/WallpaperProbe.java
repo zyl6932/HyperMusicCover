@@ -1161,10 +1161,15 @@ public class WallpaperProbe {
     }
 
     private static void saveArt(Context ctx, byte[] jpg) {
+        // Beside it, then renamed: killed half way, the process came back to a truncated JPEG.
+        File tmp = new File(ctx.getFilesDir(), ART_FILE + ".tmp");
         try {
-            FileOutputStream fos = new FileOutputStream(new File(ctx.getFilesDir(), ART_FILE));
-            fos.write(jpg);
-            fos.close();
+            try (FileOutputStream fos = new FileOutputStream(tmp)) {
+                fos.write(jpg);
+            }
+            if (!tmp.renameTo(new File(ctx.getFilesDir(), ART_FILE))) {
+                throw new java.io.IOException("rename failed");
+            }
         } catch (Throwable t) {
             Xp.log(TAG + "saveArt failed: " + t);
         }
