@@ -77,8 +77,11 @@ object SettingsBackup {
             // Only the mode. The square's size, place and corners are fixed, so a file that still
             // carries coverCardFill, coverCardPos, coverCardCorner or the dp coverCardSizeDp from
             // before them is not read for any of it - the module holds them where they are.
-            ModuleBridge.setCoverStyle(context, "mode",
-                if (obj.has(KEY_COVER_STYLE)) obj.getInt(KEY_COVER_STYLE).toFloat() else 0f)
+            // Only when the file has one: a file without the module's half (exported while the
+            // module did not answer, or from before it was included) used to reset it to FULL.
+            if (obj.has(KEY_COVER_STYLE)) {
+                ModuleBridge.setCoverStyle(context, "mode", obj.getInt(KEY_COVER_STYLE).toFloat())
+            }
             if (obj.has(KEY_CLOCK_SIZE)) {
                 ModuleBridge.setClockSize(context, obj.getDouble(KEY_CLOCK_SIZE).toFloat())
             }

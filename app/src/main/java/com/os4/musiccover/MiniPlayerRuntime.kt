@@ -841,6 +841,11 @@ object MiniPlayerRuntime {
             routedDrag = false
             routedMorph = false
             routedPullRefused = false
+            // What the last gesture was, in case it never reached its UP or CANCEL here.
+            routedOwner?.stopAnticipating()
+            routedIsland = false
+            routedNote = false
+            routedOwner = null
             routedTracker?.recycle()
             routedTracker = null
             // A morph still moving on its own is taken hold of where it is: a pull, a let-go and
@@ -849,8 +854,8 @@ object MiniPlayerRuntime {
             val catcher = live().firstOrNull { it.catchableAt(ev.rawX, ev.rawY) }
             routed = catcher?.pill()?.let(::WeakReference)
             if (catcher != null && routed != null) {
-                routedTracker = VelocityTracker.obtain()
                 if (catchDrag(catcher, ev)) {
+                    routedTracker = VelocityTracker.obtain()
                     routedDrag = true
                     routedMorph = true
                 } else routed = null
@@ -8206,8 +8211,12 @@ private class MiniPlayerController(
         // this runtime no longer watches: gone with it, not left asking for vsyncs.
         Choreographer.getInstance().let { c ->
             listOf(pulseFrame, smallNudgeFrame, swapFrame, rowFrame, appearFrame, smallGrowFrame,
-                traceFrame, pileSettle, spreadFrame).forEach(c::removeFrameCallback)
+                traceFrame, pileSettle, spreadFrame, switchWait, rowWait).forEach(c::removeFrameCallback)
         }
+        // The waits for a row would otherwise go on to open it, on a controller already gone;
+        // and a card still pinned is the stack's again, drawn where the stack has it.
+        rowWaitKey = null
+        unpinCard()
         if (spread != null) {
             spread?.items?.forEach { it.morph?.cancel() }
             spread = null

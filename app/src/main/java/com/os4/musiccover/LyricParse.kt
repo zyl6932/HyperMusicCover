@@ -128,9 +128,10 @@ object LyricParse {
             val min = m.groupValues[1].toIntOrNull() ?: continue
             val sec = m.groupValues[2].toIntOrNull() ?: continue
             val frac = m.groupValues[3]
-            // Two digits are hundredths, three are milliseconds.
+            // One digit is tenths, two are hundredths, three are milliseconds.
             val ms = when (frac.length) {
                 0 -> 0
+                1 -> (frac.toIntOrNull() ?: 0) * 100
                 3 -> frac.toIntOrNull() ?: 0
                 else -> (frac.toIntOrNull() ?: 0) * 10
             }
