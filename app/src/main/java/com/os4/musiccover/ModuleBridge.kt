@@ -696,8 +696,8 @@ object ModuleBridge {
 
             try {
                 // With the app's identity: the module answers no one else (ProbeGuard).
-                app.sendOrderedBroadcast(intent, 0, null, null, receiver, handler, null, null,
-                    ProbeGuard.options())
+                app.sendOrderedBroadcast(intent, null, ProbeGuard.options(), receiver, handler,
+                    0, null, null)
             } catch (_: Throwable) {
                 if (!done) {
                     done = true
