@@ -2425,6 +2425,15 @@ public class Main extends XposedModule {
                         new Thread(new Runnable() {
                             @Override
                             public void run() {
+                                // Its own thread: anything thrown here would take SystemUI down.
+                                try {
+                                    describeLocal();
+                                } catch (Throwable t) {
+                                    Xp.log(TAG + "local probe failed: " + t);
+                                }
+                            }
+
+                            private void describeLocal() {
                                 String d = LocalLyrics.describe(sAppCtx, lw);
                                 Xp.log(TAG + "local: " + d);
                                 try {
@@ -2465,6 +2474,14 @@ public class Main extends XposedModule {
                         new Thread(new Runnable() {
                             @Override
                             public void run() {
+                                try {
+                                    describeNcm();
+                                } catch (Throwable t) {
+                                    Xp.log(TAG + "ncm probe failed: " + t);
+                                }
+                            }
+
+                            private void describeNcm() {
                                 // All three catalogues, in one account. Which of them was asked
                                 // and what each one said is the whole question behind "this
                                 // song never got lyrics", and asking them one probe at a time
