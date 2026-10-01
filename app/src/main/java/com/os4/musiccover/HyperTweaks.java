@@ -95,7 +95,6 @@ final class HyperTweaks {
     private static final String CLS_HIERARCHY_ENABLE = "com.android.keyguard.wallpaper.entity.LargeScreenHierarchyEnable";
     private static final String CLS_AOD_WALLPAPER_INFO = "com.miui.keyguard.editor.data.bean.WallpaperInfo";
     private static final String CLS_AOD_HIERARCHY_ENABLE = "com.miui.keyguard.editor.data.bean.LargeScreenHierarchyEnable";
-    private static final String CLS_AOD_WALLPAPER_CONTROLLER = "com.miui.keyguard.editor.edit.wallpaper.WallpaperController";
     private static final String CLS_CROSS_LIST_MODEL = "com.miui.keyguard.editor.homepage.model.CrossListDataModel";
     private static final String CLS_TEMPLATE_HISTORY_DAO =
             "com.miui.keyguard.editor.data.db.TemplateHistoryDao_Impl";

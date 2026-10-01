@@ -8,16 +8,10 @@
     <string name="about_qq_group_summary">https://qm.qq.com/q/RcLbYXgBy2</string>
     <string name="about_feedback">Feedback</string>
     <string name="about_feedback_summary">https://github.com/zyl6932/HyperMusicCover/issues</string>
-    <string name="home_now_playing">Now playing</string>
-    <string name="home_no_track">No media card on the lock screen</string>
-    <string name="home_cover_on">Cover lock screen is on</string>
-    <string name="home_cover_off">Cover lock screen is off</string>
-    <string name="cover_section">Cover</string>
     <string name="cover_bias">Vertical position</string>
     <string name="cover_style">Cover presentation</string>
     <string name="cover_style_full">Full-screen cover</string>
     <string name="cover_style_card">Square card</string>
-    <string name="clock_section">Clock</string>
     <string name="cover_clock_section">Cover &amp; clock</string>
     <string name="lyrics_section">Lyrics</string>
     <string name="clock_size">Clock size</string>

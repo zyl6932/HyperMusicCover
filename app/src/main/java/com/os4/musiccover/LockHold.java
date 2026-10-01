@@ -53,10 +53,6 @@ final class LockHold {
         return !sOwners.isEmpty();
     }
 
-    static boolean heldBy(Owner o) {
-        return sOwners.contains(o);
-    }
-
     /** The clock is still flying home from [o] giving the lock screen back. */
     static boolean exitingFor(Owner o) {
         return sExitOwner == o && ClockCollapse.phase() != ClockCollapse.Phase.OFF;

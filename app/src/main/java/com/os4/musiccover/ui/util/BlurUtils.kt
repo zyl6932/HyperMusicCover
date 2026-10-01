@@ -41,10 +41,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
-val LocalEnableBlur: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { false }
-
-val LocalIsWideScreen: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { false }
-
 /**
  * 顶栏渐进模糊（Progressive Blur）统一参数。
  *

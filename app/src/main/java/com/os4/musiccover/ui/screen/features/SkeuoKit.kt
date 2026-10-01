@@ -160,46 +160,6 @@ internal fun DrawScope.drawPhoneScreen(pal: SkeuoPalette) {
     drawRoundRect(pal.screen, Offset.Zero, Size(PHONE_W, PHONE_H), CornerRadius(PHONE_CORNER))
 }
 
-/** A wireframe row: its pill, a square where the icon goes, and a bar where the words go. */
-internal fun DrawScope.drawRowPill(pal: SkeuoPalette, x: Float, y: Float, w: Float, h: Float,
-                                   on: Float = 0f, icon: Boolean = true, bar: Float = 0.62f,
-                                   alpha: Float = 1f) {
-    if (alpha <= 0.003f) return
-    val fill = androidx.compose.ui.graphics.lerp(pal.pill, pal.pillOn, on.coerceIn(0f, 1f))
-    drawRoundRect(fill, Offset(x, y), Size(w, h), CornerRadius(h * 0.3f), alpha = alpha)
-    val cy = y + h / 2f
-    var tx = x + h * 0.32f
-    if (icon) {
-        val s = h * 0.3f
-        drawRoundRect(pal.line, Offset(tx, cy - s / 2f), Size(s, s), CornerRadius(s * 0.22f), alpha = alpha)
-        tx += s + h * 0.22f
-    }
-    val bh = h * 0.1f
-    drawRoundRect(pal.line, Offset(tx, cy - bh / 2f), Size((x + w - tx) * bar, bh), CornerRadius(bh / 2f),
-        alpha = alpha)
-}
-
-/** A check drawn in one stroke, `t` of the way along it. */
-internal fun DrawScope.drawCheck(color: Color, cx: Float, cy: Float, s: Float, t: Float, width: Float) {
-    if (t <= 0.001f) return
-    val a = Offset(cx - s * 0.5f, cy)
-    val b = Offset(cx - s * 0.12f, cy + s * 0.38f)
-    val c = Offset(cx + s * 0.55f, cy - s * 0.4f)
-    val first = 0.35f
-    val path = Path().apply {
-        moveTo(a.x, a.y)
-        if (t < first) {
-            val k = t / first
-            lineTo(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k)
-        } else {
-            lineTo(b.x, b.y)
-            val k = (t - first) / (1f - first)
-            lineTo(b.x + (c.x - b.x) * k, b.y + (c.y - b.y) * k)
-        }
-    }
-    drawPath(path, color, style = Stroke(width, cap = StrokeCap.Round, join = StrokeJoin.Round))
-}
-
 // ---- the finger
 
 private val ARRIVE_X = CubicBezierEasing(0.15f, 0.7f, 0.3f, 1f)

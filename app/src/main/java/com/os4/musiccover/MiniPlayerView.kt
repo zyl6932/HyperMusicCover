@@ -857,25 +857,6 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     }
 
     /**
-     * Another island has taken the pill: its content comes in from the side the swipe sent it,
-     * the pill itself staying where it is.
-     */
-    fun slideContentIn(fromEnd: Boolean) {
-        if (morphing) return
-        val dx = dp(28).toFloat() * if (fromEnd) 1f else -1f
-        listOf<View>(slot, textColumn, toggle).forEach { v ->
-            v.animate().cancel()
-            v.translationX = dx
-            v.alpha = 0f
-            v.animate().translationX(0f)
-                .alpha(if (v === slot && artworkHidden) 0f else 1f)
-                .setDuration(280L)
-                .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.3f, 1f))
-                .start()
-        }
-    }
-
-    /**
      * The pill's content - artwork, text, button - at one alpha, the glass left alone: an
      * island switch brings the new island's content in over the frame as it grows.
      */

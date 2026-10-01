@@ -37,7 +37,6 @@ final class LyricMatch {
     }
 
     static final int PASS_SCORE = 85;
-    private static final long STRONG_DURATION_TOLERANCE_MS = 1500L;
 
     /** One search result, in the terms the scoring asks about. `extra` is the source's own. */
     static final class Candidate {
@@ -140,10 +139,6 @@ final class LyricMatch {
             }
         }
         return score;
-    }
-
-    static boolean strongDuration(long wantedMs, long gotMs) {
-        return wantedMs <= 0L || Math.abs(wantedMs - gotMs) < STRONG_DURATION_TOLERANCE_MS;
     }
 
     private static int durationScore(long local, long remote) {

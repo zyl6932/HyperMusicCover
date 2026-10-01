@@ -659,14 +659,12 @@ final class CoverPush {
     static volatile int sVideoReloadSignals;
 
     /**
-     * The bounds on a fade that is matched to the wallpaper process's own timing.
-     *
-     * A floor because a fast reload - a cover video that has not changed, an encode off the cache
-     * - would otherwise leave a 50ms dissolve, which is a cut. A ceiling because a phone that
+     * The ceiling on a fade that is matched to the wallpaper process's own timing: a phone that
      * was busy for a second on one transition must not leave the next one dissolving for a
-     * second and a half.
+     * second and a half. The floor is coverFadeMs() itself, which the matched length never goes
+     * under (armCoverFade).
      */
-    private static final long COVER_FADE_MIN_MS = 200L, COVER_FADE_MAX_MS = 800L;
+    private static final long COVER_FADE_MAX_MS = 800L;
 
     /**
      * How long the owed fade waits for that word before starting anyway.

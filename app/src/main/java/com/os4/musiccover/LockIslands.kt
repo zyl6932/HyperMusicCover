@@ -559,15 +559,6 @@ internal object LockIslands {
     /** [key]'s notifications: the stack island's, or itself. */
     fun membersOf(key: String): List<String> = if (key == STACK_KEY) stackMembers else listOf(key)
 
-    /** The lock screen went away: every notification is an island again next time. */
-    fun resetReleased() {
-        if (released.all { it == sceneKey } && (!stackOut || nativeStack)) return
-        clearReleased()
-        // Folded natively, it is the stack's state and not ours to clear.
-        if (!nativeStack) stackOut = false
-        invalidate("released cleared")
-    }
-
     private fun invalidate(reason: String) {
         val f = filter?.get() ?: return
         // Each is a rebuild of the whole notification list on the next frame (3-8ms on the lock

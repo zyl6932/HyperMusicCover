@@ -145,11 +145,6 @@ final class LyricWindow {
         return h == null ? null : h.getRootView();
     }
 
-    /** Whether the lyrics are up in their own window right now. */
-    static boolean isUp() {
-        return sView != null;
-    }
-
     /**
      * Brings the lyrics up, or returns the view already up. `anchor` is the clock container: the
      * keyguard's tree is found through it, and nothing else of it is used.

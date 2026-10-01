@@ -608,9 +608,6 @@ internal class MiniSqueeze(private val gapPx: Float, private val onFrame: () -> 
     fun pillScaleY() = pillPressScale() *
         (1f + BULGE * 0.5f * (pillGive[0] + pillGive[1]))
 
-    /** The pill's centre, as a share of its width, pushed away from whichever side pressed. */
-    fun pillShift() = (pillGive[0] - pillGive[1]) / 2f
-
     /**
      * What the row gives on [side], in pixels. With a small island the row is wider than the
      * pill: the camera's push takes the small island back by this much and the pill's right end

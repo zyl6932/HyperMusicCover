@@ -45,38 +45,6 @@ final class NcmLyrics {
             "https://music.163.com/api/search/get?s=%s&type=10&limit=10";
     private static final String ALBUM = "https://music.163.com/api/album/%s";
 
-    /**
-     * How far a candidate's duration may sit from the session's and still be the same recording.
-     *
-     * Tight on purpose, because duration is what carries the whole match. Measured on this
-     * device, Salt playing a local file reported 187675ms and NetEase's entry for the same
-     * recording said 187675ms - identical to the millisecond - while the studio version of the
-     * same song, same artists, same title, is 162586ms. A window of a few seconds tells those
-     * apart; a window of thirty would not, and would hand the lock screen a live take's timings
-     * over a studio recording.
-     */
-    static final long DURATION_SLACK_MS = 3000L;
-
-    /**
-     * The window for a candidate that is on the session's own album, which is a wider one.
-     *
-     * The tight window above separates two recordings of a song, and the difference it is there
-     * to catch is large: the live take it was measured against is 25 seconds from the studio one.
-     * What it also rejects, being tight, is the same recording the session is playing - because
-     * one release is pressed and mastered differently by different catalogues, and three seconds
-     * is inside that noise. Measured 2026-09-20: Apple Music's 勇敢 (张惠妹) is 239964ms and every
-     * copy of it on NetEase is longer, the album's own at 244746ms and two compilations at
-     * 243000ms, all four with the exact title and the right artist. The song played with no lyrics
-     * at all, twice over: two of the four missed the three-second window by 36 milliseconds.
-     *
-     * The album is what tells the two situations apart. A different take is a different release
-     * and does not sit on the album the session says it is playing; a different pressing of it
-     * does, and its lyrics are the same lines timed against the same performance. So a candidate
-     * whose album matches gets six seconds and a candidate whose album does not is left where it
-     * was, still bounded by the window that was measured against real takes of real songs.
-     */
-    static final long SAME_ALBUM_SLACK_MS = 6000L;
-
     /** What the session says about the song, reduced to the four things a match can use. */
     static final class Query {
         final String title;

@@ -823,8 +823,6 @@ object MiniPlayerRuntime {
 
     internal fun takeRestoreScene(): Boolean = restoreScene.also { restoreScene = false }
 
-    internal fun restorePending(): Boolean = restoreScene
-
     private var routed: WeakReference<MiniPlayerView>? = null
 
     /**
@@ -8237,8 +8235,6 @@ private class MiniPlayerController(
         handler.removeCallbacksAndMessages(null)
     }
 
-    fun isShowing(): Boolean = player?.visibility == View.VISIBLE
-
     fun shortcutGeometry(): FloatArray? {
         if (host.width <= 0 || left.width <= 0 || right.width <= 0) return null
         val l = restCentre(left)
@@ -10207,7 +10203,6 @@ private class MiniPlayerController(
 
     private fun dp(value: Float) = (value * context.resources.displayMetrics.density + .5f).toInt()
 
-    private fun Float.approximatelyEquals(other: Float): Boolean = abs(this - other) <= 0.01f
 }
 
 /** The small island's nudge home: MiniPlayerView's OFFSET_RESPONSE, CoverMorphMotion's damping. */
@@ -10323,8 +10318,6 @@ private const val SWIPE_SHARE = 0.14f
  */
 private fun pillNudgeX(dx: Float, d: Float): Float =
     Math.copySign(MiniCardMorph.rubber(kotlin.math.abs(dx), 24f * d, 0.6f), dx)
-/** How much of the pull the pill still follows past the row's end (islandDrag). */
-private const val SWIPE_END_GIVE = 0.35f
 /** The stack island's other rows come in over this part of their own way out from under it (pileStack). */
 private const val PILE_IN_FROM = 0f
 private const val PILE_IN_TO = 0.3f

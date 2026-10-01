@@ -36,7 +36,6 @@ public class CoverVideoEncoder {
 
     private static final java.util.Map<String, Long> sCachedKeys = new java.util.concurrent.ConcurrentHashMap<>();
     private static volatile long sLastContentKey = 0;
-    private static volatile String sCachedVideoPath = null;
 
     /**
      * Encodes a 1-frame (or brief 2-frame) MP4 video from the provided bitmap.
@@ -114,7 +113,6 @@ public class CoverVideoEncoder {
                 || destFile.length() == 0) {
             return false;
         }
-        sCachedVideoPath = destFile.getAbsolutePath();
         return true;
     }
 
@@ -133,7 +131,6 @@ public class CoverVideoEncoder {
         Long cachedKey = sCachedKeys.get(destFile.getAbsolutePath());
         if (contentKey != 0 && cachedKey != null && cachedKey == contentKey && destFile.exists() && destFile.length() > 0) {
             Xp.log(TAG + "encodeBitmapToMp4: reusing cached video at " + destFile.getAbsolutePath());
-            sCachedVideoPath = destFile.getAbsolutePath();
             return true;
         }
 
@@ -315,7 +312,6 @@ public class CoverVideoEncoder {
 
             sCachedKeys.put(destFile.getAbsolutePath(), contentKey);
             sLastContentKey = contentKey;
-            sCachedVideoPath = destFile.getAbsolutePath();
             long cost = SystemClock.uptimeMillis() - startTime;
             Xp.log(TAG + "cover MP4" + (depthTrack ? " with its depth track" : "") + " written to " + destFile.getAbsolutePath()
                     + " (" + width + "x" + height + ", " + (fadeFrames + 1) + " frames"
@@ -358,10 +354,6 @@ public class CoverVideoEncoder {
                 } catch (Throwable ignored) {}
             }
         }
-    }
-
-    public static String getCachedVideoPath() {
-        return sCachedVideoPath;
     }
 
     /** The muxer plumbing that has to live across frames: the track, whether it is open, and whether the stream has ended. */

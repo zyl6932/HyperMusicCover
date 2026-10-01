@@ -28,9 +28,6 @@ internal object MiniPlayerScene {
     val customAodActive: Boolean
         get() = aodActive && !fullScreenAod
 
-    val hasBlockingOverlay: Boolean
-        get() = editorActive || chargingActive || controlCenterActive
-
     val blocksMiniPlayer: Boolean
         get() = editorActive || chargingActive
 

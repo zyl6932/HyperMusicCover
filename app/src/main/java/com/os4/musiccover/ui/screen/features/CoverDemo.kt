@@ -136,7 +136,6 @@ private val THUMB = Rect2(CARD.x + 5f, CARD.y + 5f, 15f, 15f)
 private val PLAY = Offset(CARD.right - 11f, CARD.y + 12.5f)
 /** The pill between the two shortcuts, and its artwork: a circle, as MiniPlayerView draws it. */
 private val PILL = Rect2(23f, RY - 6.5f, 54f, 13f)
-private val PILL_ART = Rect2(PILL.x + 2.2f, PILL.y + 2.2f, 8.6f, 8.6f)
 private val SQUARE = Rect2(15f, 46f, 70f, 70f)
 /** The power key, the upper of the two SkeuoKit draws on the right. */
 private val POWER = Offset(PW + 1.2f, 50f)
