@@ -154,7 +154,7 @@ final class WebLyrics {
         synchronized (CACHE) {
             if (got != null) {
                 CACHE.put(key, got);
-            } else if (ask.answered && !ask.ranOut) {
+            } else if (ask.answered && !ask.ranOut && !ask.failed) {
                 // Both catalogues were asked and both answered: this song has no lyrics on
                 // either, which is worth remembering. A lookup that ran out of its budget has
                 // proven nothing of the sort and is left to be tried again.
@@ -187,6 +187,11 @@ final class WebLyrics {
         boolean answered;
         /** Set when a request was skipped because the budget was gone. */
         boolean ranOut;
+        /**
+         * Set by a request that got no answer at all, or a server error: the search may have
+         * answered and the lyric's own download not, and that is no miss to remember.
+         */
+        boolean failed;
 
         Http.Reply get(String url) {
             if (android.os.SystemClock.uptimeMillis() > deadline) {
@@ -195,6 +200,7 @@ final class WebLyrics {
             }
             Http.Reply r = Http.get(url, "MCWeb");
             answered |= r.ok() || r.code == 404;
+            failed |= !r.ok() && r.code != 404;
             return r;
         }
     }

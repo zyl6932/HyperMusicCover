@@ -71,6 +71,7 @@ final class QqLyrics {
             got = fetch(q, answered);
         } catch (Throwable t) {
             Xp.log("[" + TAG + "] failed: " + t);
+            answered[0] = false;
         }
         // A miss is remembered only when the search actually answered.
         if (got != null || answered[0]) {
@@ -99,6 +100,9 @@ final class QqLyrics {
         }
         if (!p.passes()) return null;
         Found f = lyrics(p.candidate);
+        // The song was found and its lyric did not arrive: that is not a miss to remember for
+        // the rest of the track, only a request to try again.
+        if (f == null) answered[0] = false;
         if (f != null) {
             Xp.log("[" + TAG + "] " + f.id + " -> " + (f.words ? "qrc" : "lrc")
                     + (f.translation != null ? " + translation" : "")
