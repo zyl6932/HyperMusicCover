@@ -65,6 +65,8 @@ final class Http {
             if (code != 200) {
                 Xp.log("[" + tag + "] HTTP " + code + " in "
                         + (android.os.SystemClock.uptimeMillis() - started) + "ms");
+                // Nothing of its body is read, so it cannot go back to the pool: let it go.
+                conn.disconnect();
                 return new Reply(null, code);
             }
             return new Reply(read(conn.getInputStream()), 200);
@@ -112,6 +114,7 @@ final class Http {
             if (code != 200) {
                 Xp.log("[" + tag + "] HTTP " + code + " in "
                         + (android.os.SystemClock.uptimeMillis() - started) + "ms");
+                conn.disconnect();
                 return new Raw(null, code);
             }
             return new Raw(bytes(conn.getInputStream()), 200);

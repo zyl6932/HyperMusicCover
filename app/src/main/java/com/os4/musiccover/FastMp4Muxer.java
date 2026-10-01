@@ -376,7 +376,9 @@ public class FastMp4Muxer {
 
             // Update track_id to 2 in tkhd
             int relTkhd = tkhd.offset - trakRelOffset;
-            ByteBuffer.wrap(trakData).order(ByteOrder.BIG_ENDIAN).putInt(relTkhd + 20, 2);
+            // track_ID: after the version and two times, which are 64-bit in a version 1 tkhd.
+            int tkhdTrackId = (trakData[relTkhd + 8] & 0xFF) == 1 ? 28 : 20;
+            ByteBuffer.wrap(trakData).order(ByteOrder.BIG_ENDIAN).putInt(relTkhd + tkhdTrackId, 2);
 
             // Rebuild stsc: 1 entry (first_chunk=1, samples_per_chunk=1, desc_idx=1)
             byte[] newStsc = new byte[28];

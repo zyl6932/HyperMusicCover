@@ -283,8 +283,6 @@ final class NcmLyrics {
      * with ten covers, a music box version and two "pop beat" backing tracks, while the lyric
      * endpoint handed over the real thing by id without complaint - the block is on searching,
      * not on the catalogue.
-     *
-     * Written as escapes rather than characters because the build sets no source encoding.
      */
     private static final String HEALTH_TERMS = "七里香 周杰伦";
     private static final String HEALTH_ID = "186001";

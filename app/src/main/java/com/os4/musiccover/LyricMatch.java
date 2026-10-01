@@ -125,7 +125,10 @@ final class LyricMatch {
         int score = 0;
         if (w.durationMs > 0 && c.durationMs > 0) score += durationScore(w.durationMs, c.durationMs);
         String t = clean(c.title);
-        if (!w.title.isEmpty() && (w.title.equals(t) || t.contains(w.title) || w.title.contains(t))) {
+        // Both sides non-empty: a result whose title was all brackets cleans to "", and every
+        // title contains "".
+        if (!w.title.isEmpty() && !t.isEmpty()
+                && (w.title.equals(t) || t.contains(w.title) || w.title.contains(t))) {
             score += 50;
         }
         if (hasCommonArtist(w.artists, cleanedArtists(c.artist))) score += 30;
