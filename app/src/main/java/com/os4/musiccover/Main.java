@@ -1954,13 +1954,19 @@ public class Main extends XposedModule {
     /** Set while the file is being applied, to keep a setter from writing a half-read state back. */
     private static volatile boolean sLoading;
 
+    /** The file, or the backup an interrupted write leaves (AtomicFile.exists is not in the SDK). */
+    private static boolean stateExists(android.util.AtomicFile f) {
+        java.io.File base = f.getBaseFile();
+        return base.exists() || new java.io.File(base.getPath() + ".bak").exists();
+    }
+
     private static void loadState() {
         if (sAppCtx == null) return;
         // An AtomicFile, so a SystemUI killed in the middle of saveState leaves the last whole
         // file behind rather than a truncated one that silently resets every setting.
         android.util.AtomicFile f = new android.util.AtomicFile(
                 new java.io.File(sAppCtx.getFilesDir(), STATE_FILE));
-        if (!f.exists()) return;
+        if (!stateExists(f)) return;
         boolean cover = false;
         sLoading = true;
         try {
@@ -6985,7 +6991,7 @@ public class Main extends XposedModule {
             }
             android.util.AtomicFile f = new android.util.AtomicFile(
                     new java.io.File(c.getFilesDir(), STATE_FILE));
-            if (!f.exists()) return;
+            if (!stateExists(f)) return;
             for (String line : new String(f.readFully()).split("\n")) {
                 if (line.startsWith("hidefp=")) {
                     sHideFp = "1".equals(line.substring(7).trim());
