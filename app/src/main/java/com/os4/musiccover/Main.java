@@ -2084,9 +2084,10 @@ public class Main extends XposedModule {
         sReceiverRegistered = true;
         sAppCtx = ctx;
 
-        BroadcastReceiver r = new BroadcastReceiver() {
+        class Probe extends ProbeGuard.Receiver {
             @Override
             public void onReceive(Context c, Intent i) {
+                if (!ProbeGuard.admit(this)) return;
                 String op = i.getStringExtra("op");
                 if (op == null) op = "info";
                 Xp.log(TAG + "recv op=" + op + " extras=" + i.getExtras());
@@ -2302,7 +2303,7 @@ public class Main extends XposedModule {
                         sTexFit = i.getBooleanExtra("on", !sTexFit);
                         Intent wp = CoverPush.wallpaperIntent("texfit");
                         wp.putExtra("on", sTexFit);
-                        c.sendBroadcast(wp);
+                        ProbeGuard.send(c, wp);
                         Xp.log(TAG + "texture fit to screen " + (sTexFit ? "ON" : "off")
                                 + " (wallpaper re-fit " + (sTexFit ? "skipped" : "enabled") + ")");
                     } else if ("lyrics".equals(op)) {
@@ -2928,8 +2929,10 @@ public class Main extends XposedModule {
                 // and sending it again would only throw again.
                 if (!async && isOrderedBroadcast()) setResultCode(OP_ACK);
             }
-        };
-        ctx.registerReceiver(r, new IntentFilter(ACTION), Context.RECEIVER_EXPORTED);
+        }
+        // The app, the wallpaper process (its hello and first-frame signals) and 高德 (its map).
+        ProbeGuard.register(ctx, new IntentFilter(ACTION), TAG, Probe::new,
+                BuildConfig.APPLICATION_ID, "com.miui.miwallpaper", AmapNavScene.PKG);
         registerSecretCode(ctx);
         Xp.log(TAG + "receiver registered for " + ACTION);
         // A SystemUI that starts mid-navigation missed 高德's init; there is a receiver now.
@@ -2939,7 +2942,7 @@ public class Main extends XposedModule {
         // Asks the wallpaper process what it can take, now that there is a receiver for the
         // answer. A build that predates the question never answers, which is the answer.
         try {
-            ctx.sendBroadcast(CoverPush.wallpaperIntent("hello"));
+            ProbeGuard.send(ctx, CoverPush.wallpaperIntent("hello"));
         } catch (Throwable t) {
             Xp.log(TAG + "hello to the wallpaper process failed: " + t);
         }

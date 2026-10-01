@@ -257,7 +257,7 @@ object ModuleBridge {
         val intent = intent(op).apply(extras)
         scope.launch {
             if (!moduleAcks) {
-                app.sendBroadcast(intent)
+                ProbeGuard.send(app, intent)
                 return@launch
             }
             val key = pendingKey(intent)
@@ -695,7 +695,9 @@ object ModuleBridge {
             }, timeoutMs)
 
             try {
-                app.sendOrderedBroadcast(intent, null, receiver, handler, 0, null, null)
+                // With the app's identity: the module answers no one else (ProbeGuard).
+                app.sendOrderedBroadcast(intent, 0, null, null, receiver, handler, null, null,
+                    ProbeGuard.options())
             } catch (_: Throwable) {
                 if (!done) {
                     done = true

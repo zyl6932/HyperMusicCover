@@ -1,7 +1,6 @@
 package com.os4.musiccover
 
 import android.app.Application
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -150,7 +149,7 @@ internal object AmapImmerse {
             return
         }
         try {
-            ctx.sendBroadcast(Intent(SYSUI_PROBE).setPackage(SYSUI)
+            ProbeGuard.send(ctx, Intent(SYSUI_PROBE).setPackage(SYSUI)
                 .putExtra("op", "immersive")
                 .putExtra("id", AmapNavScene.ID)
                 .putExtra("do", if (on) "arm" else "disarm")
@@ -164,8 +163,9 @@ internal object AmapImmerse {
     private fun register(ctx: Context) {
         if (!registered.compareAndSet(false, true)) return
         appCtx = ctx
-        val r = object : BroadcastReceiver() {
+        class Probe : ProbeGuard.Receiver() {
             override fun onReceive(c: Context, i: Intent) {
+                if (!ProbeGuard.admit(this)) return
                 if (i.getBooleanExtra("ask", false)) {
                     Xp.log(TAG + "SystemUI asked, armed=" + armed)
                     if (armed) tell(true)
@@ -185,7 +185,8 @@ internal object AmapImmerse {
                 resultData = sb.toString()
             }
         }
-        ctx.registerReceiver(r, IntentFilter(ACTION), Context.RECEIVER_EXPORTED)
+        // SystemUI's ask after a restart, and adb.
+        ProbeGuard.register(ctx, IntentFilter(ACTION), TAG, { Probe() }, SYSUI, BuildConfig.APPLICATION_ID)
         Xp.log(TAG + "probe registered")
     }
 }

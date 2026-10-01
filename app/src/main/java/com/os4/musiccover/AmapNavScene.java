@@ -132,7 +132,7 @@ final class AmapNavScene extends LiveAlertScene {
      */
     void ask(Context ctx) {
         try {
-            ctx.sendBroadcast(new Intent(AMAP_PROBE).setPackage(PKG).putExtra("ask", true));
+            ProbeGuard.send(ctx, new Intent(AMAP_PROBE).setPackage(PKG).putExtra("ask", true));
         } catch (Throwable t) {
             Xp.log("MCImmersive: " + ID + ": ask failed: " + t);
         }

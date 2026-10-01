@@ -104,7 +104,7 @@ final class CoverPush {
             CoverCardLayer.clear();
             if (Main.sVideoWallpaper) showVideoCover(ctx, false, null, null, 0);
             out.putExtra("off", true);
-            ctx.sendBroadcast(out);
+            ProbeGuard.send(ctx, out);
             Main.sTrackKey = "";
             // Nothing behind the clock any more, so nothing to take a colour from. The repaint
             // that hands the OEM's own colours back happens with the rest of cover mode.
@@ -141,7 +141,7 @@ final class CoverPush {
             if (shared != null) {
                 out.putExtra("src", shared);
                 out.putExtra("tsent", android.os.SystemClock.uptimeMillis());
-                ctx.sendBroadcast(out);
+                ProbeGuard.send(ctx, out);
                 long sent = android.os.SystemClock.uptimeMillis();
                 // Still composed here, but now after the send: the clock's tint and the shade
                 // both need the picture, and neither of them is what the user is waiting on.
@@ -256,7 +256,7 @@ final class CoverPush {
         else out.putExtra("jpg", jpg);
         // Send broadcast first so wallpaper process begins decoding/encoding immediately!
         out.putExtra("tsent", android.os.SystemClock.uptimeMillis());
-        ctx.sendBroadcast(out);
+        ProbeGuard.send(ctx, out);
         // After the send: the shade's background is not what anyone is waiting on.
         ShadeLayer.setArt(art);
         Xp.log(Main.TAG + "pushart " + w + "x" + h + " bias=" + Main.sBias
@@ -1098,7 +1098,7 @@ final class CoverPush {
         Intent out = wallpaperIntent(op);
         out.putExtra("on", on);
         if (decidedAt > 0L) out.putExtra("blurseq", decidedAt);
-        c.sendBroadcast(out);
+        ProbeGuard.send(c, out);
     }
 
     static Intent wallpaperIntent(String op) {
@@ -1127,7 +1127,7 @@ final class CoverPush {
      */
     static void pushFadeMs(Context ctx) {
         if (ctx == null) return;
-        ctx.sendBroadcast(wallpaperIntent("fadems")
+        ProbeGuard.send(ctx, wallpaperIntent("fadems")
                 .putExtra("v", (int) Main.fadeMsFor(Main.sClockResponse)));
         Xp.log(Main.TAG + "wallpaper fade = " + Main.fadeMsFor(Main.sClockResponse) + "ms for response "
                 + Main.sClockResponse);
@@ -1135,7 +1135,7 @@ final class CoverPush {
 
     /** Asks the wallpaper process to re-upload the art it already has on disk. */
     static void requestWallpaperReload(Context ctx) {
-        ctx.sendBroadcast(wallpaperIntent("reload"));
+        ProbeGuard.send(ctx, wallpaperIntent("reload"));
         Xp.log(Main.TAG + "wallpaper reload requested");
     }
 

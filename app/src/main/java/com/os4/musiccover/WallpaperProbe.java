@@ -1,7 +1,6 @@
 package com.os4.musiccover;
 
 import android.app.Application;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -284,7 +283,7 @@ public class WallpaperProbe {
             out.setPackage("com.android.systemui");
             out.putExtra("op", "needart");
             out.putExtra("why", why);
-            c.sendBroadcast(out);
+            ProbeGuard.send(c, out);
             Xp.log(TAG + "no art here, asked SystemUI for it (" + why + " "
                     + sAsks + "/" + ASK_TRIES + ")");
         } catch (Throwable t) {
@@ -1785,9 +1784,10 @@ public class WallpaperProbe {
         // process that asked. 1.3s a round, for as long as the module is loaded. The push has
         // to stop killing it before this can be turned back on.
         if (sArt == null) askForArt("process start");
-        BroadcastReceiver r = new BroadcastReceiver() {
+        class Probe extends ProbeGuard.Receiver {
             @Override
             public void onReceive(Context c, Intent i) {
+                if (!ProbeGuard.admit(this)) return;
                 String op = i.getStringExtra("op");
                 byte[] carried = i.getByteArrayExtra("jpg");
                 Xp.log(TAG + "recv op=" + op
@@ -2051,8 +2051,10 @@ public class WallpaperProbe {
                     Xp.log(TAG + "op failed: " + Log.getStackTraceString(t));
                 }
             }
-        };
-        ctx.registerReceiver(r, new IntentFilter(ACTION), Context.RECEIVER_EXPORTED);
+        }
+        // Only SystemUI's half of the module talks to this one, besides adb.
+        ProbeGuard.register(ctx, new IntentFilter(ACTION), TAG, Probe::new,
+                "com.android.systemui", BuildConfig.APPLICATION_ID);
         Xp.log(TAG + "receiver registered for " + ACTION);
         // Unprompted as well as when asked: a restart of this process alone would otherwise
         // leave SystemUI on whatever it last heard, which may be nothing.
@@ -2221,7 +2223,7 @@ public class WallpaperProbe {
             out.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
             out.putExtra("op", "wphello");
             out.putExtra("composes", true);
-            c.sendBroadcast(out);
+            ProbeGuard.send(c, out);
         } catch (Throwable t) {
             Xp.log(TAG + "hello failed: " + t);
         }
@@ -2303,7 +2305,7 @@ public class WallpaperProbe {
             out.setPackage("com.android.systemui");
             out.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
             out.putExtra("op", "wpart");
-            c.sendBroadcast(out);
+            ProbeGuard.send(c, out);
         } catch (Throwable t) {
             Xp.log(TAG + "wpart failed: " + t);
         }
@@ -4102,7 +4104,7 @@ public class WallpaperProbe {
             out.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
             out.putExtra("op", op);
             out.putExtra("why", why);
-            c.sendBroadcast(out);
+            ProbeGuard.send(c, out);
             Xp.log(TAG + "told SystemUI: " + op + " (" + why + ")");
         } catch (Throwable t) {
             Xp.log(TAG + "tellSystemUi(" + op + ") failed: " + t);
