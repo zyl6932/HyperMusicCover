@@ -33,10 +33,13 @@ final class ProbeGuard {
     }
 
     private static final String DUMP = "android.permission.DUMP";
+    private static final int SHELL_UID = 2000;
 
     /** The options every probe broadcast goes out with: the sender's identity, for the check. */
     static Bundle options() {
-        return BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle();
+        BroadcastOptions o = BroadcastOptions.makeBasic();
+        o.setShareIdentityEnabled(true);
+        return o.toBundle();
     }
 
     /** A probe broadcast, sent the way the receivers will take it. */
@@ -83,8 +86,8 @@ final class ProbeGuard {
             // Anonymous: adb's, answered by the DUMP registration if the sender holds it.
             return false;
         }
-        if (uid == Process.ROOT_UID || uid == Process.SYSTEM_UID || uid == Process.SHELL_UID
-                || uid == Process.myUid()) {
+        // root, system, shell, and this process's own app.
+        if (uid == 0 || uid == Process.SYSTEM_UID || uid == SHELL_UID || uid == Process.myUid()) {
             return true;
         }
         String pkg = r.getSentFromPackage();
