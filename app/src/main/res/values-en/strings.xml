@@ -138,6 +138,8 @@
     <string name="lyrics_provider_got_it">Got it</string>
     <string name="lyrics_provider_got_it_wait">Got it (%1$d)</string>
     <string name="lyrics_trans">Show translations</string>
+    <string name="lyrics_hide_aod">Hide lyrics in AOD</string>
+    <string name="lyrics_hide_aod_summary">Hide scrolling lyrics in full-screen AOD and show them again on wake</string>
     <string name="lyrics_align">Lyric alignment</string>
     <string name="lyrics_align_left">Left</string>
     <string name="lyrics_align_center">Center</string>

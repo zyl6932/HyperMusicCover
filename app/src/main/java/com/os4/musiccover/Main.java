@@ -578,6 +578,36 @@ public class Main extends XposedModule {
      * different things - stop reserving the space, or reserve it even with no print enrolled.
      */
     private static volatile int sFpAvoid;
+    /** The island setting is stored in MiniPlayerConfig; the live hold decides when it applies. */
+    private static volatile boolean sMiniBackdropSinkEnabled;
+    private static volatile boolean sMiniBackdropSinkActive;
+
+    static void onMiniBackdropSettingChanged(boolean enabled) {
+        sMiniBackdropSinkEnabled = enabled;
+        onBackdropHoldChanged();
+    }
+
+    /** Cover art and immersive pages share LockHold, so both restore this policy together. */
+    static void onBackdropHoldChanged() {
+        boolean active = sMiniBackdropSinkEnabled && LockHold.clockHeld();
+        if (active == sMiniBackdropSinkActive) return;
+        sMiniBackdropSinkActive = active;
+        if (sAppCtx != null) applyHideFp();
+        MiniPlayerRuntime.onBackdropSinkChanged();
+        Xp.log(TAG + "expanded backdrop fingerprint policy " + (active ? "on" : "off"));
+    }
+
+    static boolean backdropSinkActive() {
+        return sMiniBackdropSinkActive;
+    }
+
+    private static boolean hideFpNow() {
+        return sHideFp || sMiniBackdropSinkActive;
+    }
+
+    private static int fpAvoidNow() {
+        return sMiniBackdropSinkActive ? 1 : sFpAvoid;
+    }
     /**
      * Every fingerprint icon view built since SystemUI started, weakly held. The alpha is set at
      * construction, but the switch can move afterwards, and a hidden icon has to be able to come
@@ -1342,7 +1372,7 @@ public class Main extends XposedModule {
                 peekHideFp();
                 // draw(int resId) is the frame. Any other overload is not ours to touch, which
                 // the argument check below says without having to name the signature.
-                if (sHideFp && args.length == 1 && args[0] instanceof Integer
+                if (hideFpNow() && args.length == 1 && args[0] instanceof Integer
                         && isFodRing((Integer) args[0])) {
                     // Substituting the drawable rather than skipping the draw: the animation
                     // keeps its own timing and its own lifecycle, it just paints nothing. A
@@ -1366,7 +1396,7 @@ public class Main extends XposedModule {
                     // this is the one chance to dim it before it is ever seen.
                     peekHideFp();
                     sFodIcons.put(v, Boolean.TRUE);
-                    v.setAlpha(sHideFp ? 0f : 1f);
+                    v.setAlpha(hideFpNow() ? 0f : 1f);
                 } catch (Throwable ignored) {
                     // A view we cannot dim is a visible print, not a broken keyguard.
                 }
@@ -1380,7 +1410,7 @@ public class Main extends XposedModule {
                 try {
                     Xp.hookAll(iconCls, name, chain -> {
                         peekHideFp();
-                        if (sHideFp) return null;
+                        if (hideFpNow()) return null;
                         return chain.proceed();
                     });
                     break;
@@ -1405,7 +1435,7 @@ public class Main extends XposedModule {
                         peekHideFp();
                         // Painting nothing, rather than dimming: the alpha on this view is the
                         // OEM's to animate, and a frame it never paints cannot be animated back.
-                        if (sHideFp) return null;
+                        if (hideFpNow()) return null;
                         return chain.proceed();
                     });
                     hooked++;
@@ -1435,7 +1465,8 @@ public class Main extends XposedModule {
                         + " - fingerprint avoidance cannot be overridden");
             } else {
                 Xp.hook(invoke, chain -> {
-                    if (sFpAvoid != 0) {
+                    int avoid = fpAvoidNow();
+                    if (avoid != 0) {
                         try {
                             java.util.List<Object> a = chain.getArgs();
                             Object second = a.size() > 1 ? a.get(1) : null;
@@ -1445,7 +1476,7 @@ public class Main extends XposedModule {
                                 // build that combines a different number of flows gets left
                                 // alone rather than having two unknown values overwritten.
                                 if (vals.length == 7) {
-                                    Boolean forced = sFpAvoid == 2;
+                                    Boolean forced = avoid == 2;
                                     // 5 is "fingerprint unlock is on", 6 is "a print is
                                     // enrolled". Written in place: the array is the one the
                                     // original will read, so proceed() needs no new arguments.
@@ -1913,6 +1944,7 @@ public class Main extends XposedModule {
                     // the key did not exist before this setting did, and the lyrics are supposed
                     // to look the way they always have on a file that predates it.
                     + "\nlyrictrans=" + (LockLyrics.sTrans ? 1 : 0)
+                    + "\nlyrichideaod=" + (LockLyrics.sHideInAod ? 1 : 0)
                     // 0 left, 1 centre, 2 right, and left when the key is absent: a file from
                     // before this setting is one where the lyrics always sat left.
                     + "\nlyricalign=" + LockLyrics.sAlign
@@ -2021,6 +2053,7 @@ public class Main extends XposedModule {
                         else if ("lyrichidden".equals(k)) LockLyrics.sTapHidden = "1".equals(v);
                         else if ("lyrichdr".equals(k)) LockLyrics.sHdr = "1".equals(v);
                         else if ("lyrictrans".equals(k)) LockLyrics.sTrans = "1".equals(v);
+                        else if ("lyrichideaod".equals(k)) LockLyrics.sHideInAod = "1".equals(v);
                         // Clamped in the setter; absent or unreadable means left, see saveState.
                         else if ("lyricalign".equals(k)) LockLyrics.setAlign(Integer.parseInt(v));
                         // The dp lyricoff and lyricgap from before the shares are dropped: what
@@ -2031,7 +2064,7 @@ public class Main extends XposedModule {
                             LockLyrics.sSawSessionLyric = "1".equals(v);
                         }
                         else if ("fpavoid".equals(k)) sFpAvoid = Integer.parseInt(v);
-                        else if ("minicfg".equals(k)) MiniPlayerRuntime.applyConfig(sAppCtx,
+                        else if ("minicfg".equals(k)) MiniPlayerRuntime.restoreLegacyConfig(sAppCtx,
                                 new String(android.util.Base64.decode(v, android.util.Base64.DEFAULT),
                                         java.nio.charset.StandardCharsets.UTF_8));
                         // The whole shade settings page, in one prefix - the keys and their
@@ -2093,6 +2126,7 @@ public class Main extends XposedModule {
                 Xp.log(TAG + "recv op=" + op + " extras=" + i.getExtras());
                 // An op answering later, through goAsync: the receipt is its to send.
                 boolean async = false;
+                boolean failed = false;
                 try {
                     if ("info".equals(op)) {
                         dumpInfo();
@@ -2320,6 +2354,10 @@ public class Main extends XposedModule {
                         Xp.log(TAG + "lyrics translations: " + LockLyrics.sTrans);
                         // The view notices the switch itself and lays the lines out again around
                         // it; refresh only has to start the frames that let it.
+                        LockLyrics.refresh();
+                        saveState();
+                    } else if ("lyrichideaod".equals(op)) {
+                        LockLyrics.sHideInAod = i.getBooleanExtra("on", !LockLyrics.sHideInAod);
                         LockLyrics.refresh();
                         saveState();
                     } else if ("lyricstyle".equals(op)) {
@@ -2741,6 +2779,7 @@ public class Main extends XposedModule {
                         out.putBoolean("alive", true);
                         out.putBoolean("cover", sCoverMode);
                         out.putString("minicfg", MiniPlayerRuntime.configJson(c));
+                        out.putInt("minicfgschema", MiniPlayerConfig.SCHEMA_VERSION);
                         float[] shortcuts = MiniPlayerRuntime.shortcutGeometry();
                         if (shortcuts != null) out.putFloatArray("minishortcuts", shortcuts);
                         out.putBoolean("auto", sAuto);
@@ -2789,6 +2828,7 @@ public class Main extends XposedModule {
                         out.putBoolean("lyrickeep", LockLyrics.sKeepOn);
                         out.putBoolean("lyrichdr", LockLyrics.sHdr);
                         out.putBoolean("lyrictrans", LockLyrics.sTrans);
+                        out.putBoolean("lyrichideaod", LockLyrics.sHideInAod);
                         out.putInt("lyricalign", LockLyrics.sAlign);
                         out.putFloat("lyricfill", LockLyrics.sStyle.fill);
                         out.putFloat("lyricpos", LockLyrics.sStyle.pos);
@@ -2948,14 +2988,16 @@ public class Main extends XposedModule {
                         Xp.log(TAG + "unknown op " + op);
                     }
                 } catch (Throwable t) {
+                    failed = true;
                     Xp.log(TAG + "op failed: " + Log.getStackTraceString(t));
                 }
                 // The receipt. A setting sent while SystemUI is down, or before this receiver
                 // exists, goes nowhere and the broadcast still comes back - only with the code it
                 // was sent with. This is how the app tells the two apart and sends it again once
-                // there is someone here. An op that threw is acknowledged too: it was received,
-                // and sending it again would only throw again.
-                if (!async && isOrderedBroadcast()) setResultCode(OP_ACK);
+                // there is someone here. Config writes are the exception to acknowledging a
+                // failed op: the app must retain them for retry if durable storage failed.
+                if (!async && isOrderedBroadcast() && (!failed || !"minicfg".equals(op)))
+                    setResultCode(OP_ACK);
             }
         }
         // The app, the wallpaper process (its hello and first-frame signals) and 高德 (its map).
@@ -2975,6 +3017,7 @@ public class Main extends XposedModule {
             Xp.log(TAG + "hello to the wallpaper process failed: " + t);
         }
         loadState();
+        onMiniBackdropSettingChanged(MiniPlayerRuntime.sinkWithExpandedBackground(ctx));
         // Again at startup, not only when the switch is touched: the flag the always-on display
         // reads is written by this process, and a phone that was rebooted with the switch on has
         // nothing in it otherwise.
@@ -7086,7 +7129,7 @@ public class Main extends XposedModule {
      */
     private static void applyHideFp() {
         adoptFodIcons();
-        float alpha = sHideFp ? 0f : 1f;
+        float alpha = hideFpNow() ? 0f : 1f;
         java.util.List<View> views;
         synchronized (sFodIcons) {
             views = new java.util.ArrayList<>(sFodIcons.keySet());
@@ -8586,7 +8629,7 @@ public class Main extends XposedModule {
         sTrackKey = "";
         Xp.log(TAG + why + ": expanding into cover mode");
         MotionTrace.start("toggle-in");
-        onMediaUpdate();
+        onMediaUpdate(true);
     }
 
     private static void guardCard(final View card) {
@@ -9320,6 +9363,11 @@ public class Main extends XposedModule {
      * card on the lockscreen, and still music mode.
      */
     private static void onMediaUpdate() {
+        onMediaUpdate(false);
+    }
+
+    /** A tap or pull can enter the cover even when new media defaults to a collapsed island. */
+    private static void onMediaUpdate(boolean explicitEntry) {
         MiniPlayerRuntime.refresh();
         if (!sAuto || !sCardShowing) return;
         // The user tapped the cover away and the card is still up. The one case where "there is
@@ -9348,6 +9396,7 @@ public class Main extends XposedModule {
             // against - each payload once, three per track. Cheap enough to reach from a path
             // that a title-in-the-metadata player runs on every sung line.
             LockLyrics.onTrack(key, sWatched);
+            CoverPush.retryMissingArt();
             return;
         }
         sTrackKey = key;
@@ -9382,7 +9431,8 @@ public class Main extends XposedModule {
             return;
         }
         if (sCoverMode) CoverPush.pushArtAsync(true, true);
-        else setCoverEnabled(true, true);
+        else if (explicitEntry || !MiniPlayerRuntime.mediaCollapsedByDefault(sAppCtx))
+            setCoverEnabled(true, true);
     }
 
     /**

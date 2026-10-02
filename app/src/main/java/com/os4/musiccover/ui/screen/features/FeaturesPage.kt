@@ -490,6 +490,16 @@ private fun LyricsGroup(
             },
         )
         SwitchPreference(
+            title = stringResource(R.string.lyrics_hide_aod),
+            summary = stringResource(R.string.lyrics_hide_aod_summary),
+            checked = module.lyricsHideAod,
+            enabled = enabled,
+            onCheckedChange = {
+                onChange(module.copy(lyricsHideAod = it))
+                ModuleBridge.setLyricsHideAod(context, it)
+            },
+        )
+        SwitchPreference(
             title = stringResource(R.string.lyrics_hdr),
             summary = stringResource(R.string.lyrics_hdr_summary),
             checked = module.lyricsHdr,
@@ -607,6 +617,7 @@ internal fun ValueSlider(
     detent: Float? = null,
     label: (Float) -> String = ::format,
     onValueChange: (Float) -> Unit,
+    onValueChangeFinished: (() -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxWidth()) {
         BasicComponent(
@@ -628,6 +639,7 @@ internal fun ValueSlider(
                 .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
             value = value,
             onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
             valueRange = valueRange,
             enabled = enabled,
             // Step is what makes a key point produce a tick at all; the default effect only fires

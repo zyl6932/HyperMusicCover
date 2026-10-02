@@ -94,6 +94,7 @@ internal class MiniCardMorph(
     private class Piece(val view: View, val native: View?, val text: Boolean, val art: Boolean) {
         val baseTx = view.translationX
         val baseTy = view.translationY
+        val ownAlpha = if (text) view.alpha else 1f
         val nativeTransitionAlpha = native?.transitionAlpha ?: 1f
         var paired = false
         /** A line's own colour and words, given back when the morph ends. */
@@ -535,13 +536,16 @@ internal class MiniCardMorph(
             // The blur is on the two ends' whole content (blurCard, setMorphContentBlur), not the
             // pieces: per piece (2d269db, 2026-09-26) the unpaired buttons, rings and pictures
             // showed sharp through it, and it was taken out.
-            v.alpha = when {
+            val fade = when {
                 piece.art && bridged -> 0f
                 piece.art -> asPill
                 // Out of a circle, only the picture is there at first; the lines join it once
                 // the shape has room for them.
                 else -> lerp(asPill, if (piece.paired) circleIn(c) * pairedOut(c) else 0f, round)
             }
+            // Keep the subtitle's resting opacity, blending to the native line as it lands.
+            v.alpha = fade * if (piece.text)
+                lerp(piece.ownAlpha, piece.native?.alpha ?: piece.ownAlpha, mix) else 1f
             if (piece.art) {
                 artDrawn = CoverMorphMotion.Box(box.x + tx - ax * kx, box.y + ty - ay * ky,
                     v.width * kx, v.height * ky)
@@ -644,7 +648,7 @@ internal class MiniCardMorph(
             v.resetPivot()
             v.translationX = piece.baseTx
             v.translationY = piece.baseTy
-            v.alpha = 1f
+            v.alpha = piece.ownAlpha
             if (piece.paired && piece.text) piece.native?.transitionAlpha = piece.nativeTransitionAlpha
             (v as? TextView)?.let { tv ->
                 if (tv.currentTextColor != piece.ownColor) tv.setTextColor(piece.ownColor)

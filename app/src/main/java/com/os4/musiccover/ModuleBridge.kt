@@ -124,6 +124,7 @@ object ModuleBridge {
         val lyricsHdr: Boolean = false,
         /** Draw each line's translation under it. On unless the user turns it off. */
         val lyricsTrans: Boolean = true,
+        val lyricsHideAod: Boolean = false,
         /** Where the lines settle in their column: 0 left, 1 centre, 2 right. */
         val lyricsAlign: Int = 0,
         /** The lyric band's height as a share of the room between the clock and the card. */
@@ -171,6 +172,7 @@ object ModuleBridge {
          */
         val shade: Map<String, Int> = emptyMap(),
         val miniConfig: String = MiniPlayerConfig.defaultJson(),
+        val miniConfigSchema: Int = 0,
         /** The lock screen's torch and camera, in px; see MiniPlayerRuntime.shortcutGeometry. */
         val miniShortcuts: FloatArray? = null,
         val geometry: Geometry = Geometry(),
@@ -428,6 +430,9 @@ object ModuleBridge {
     fun setLyricsTrans(context: Context, on: Boolean) =
         send(context, "lyrictrans") { putExtra("on", on) }
 
+    fun setLyricsHideAod(context: Context, on: Boolean) =
+        send(context, "lyrichideaod") { putExtra("on", on) }
+
     fun setLyricsAlign(context: Context, mode: Int) =
         send(context, "lyricalign") { putExtra("v", mode) }
 
@@ -467,7 +472,20 @@ object ModuleBridge {
      * module is not there - "not installed" is a normal thing for this screen to display.
      */
     suspend fun query(context: Context): State {
-        val b = ask(context, "query")
+        val before = sendSeq
+        var b = ask(context, "query")
+        // A page can resume while its last config broadcast is still being delivered. Its first
+        // query may run ahead of that broadcast; do not paint the older settings over the ones
+        // the user just changed. Re-read after the outstanding write has settled.
+        val miniInFlight = { inFlight.any { it.startsWith("minicfg|") } ||
+            queued.keys.any { it.startsWith("minicfg|") } }
+        val wasSendingMini = miniInFlight()
+        if (wasSendingMini) {
+            kotlinx.coroutines.withTimeoutOrNull(OP_TIMEOUT_MS + 500L) {
+                while (miniInFlight()) kotlinx.coroutines.delay(20L)
+            }
+        }
+        if (wasSendingMini || sendSeq != before) b = ask(context, "query")
         val state = fromBundle(b)
         if (!state.alive) return state
         moduleAcks = b?.getBoolean("acks", false) == true
@@ -745,6 +763,7 @@ object ModuleBridge {
             lyricsHdr = b.getBoolean("lyrichdr", false),
             // Defaults the other way: this one is on for anyone whose module predates the key.
             lyricsTrans = b.getBoolean("lyrictrans", true),
+            lyricsHideAod = b.getBoolean("lyrichideaod", false),
             lyricsAlign = b.getInt("lyricalign", 0),
             lyricFill = b.getFloat("lyricfill", 1f),
             lyricPos = b.getFloat("lyricpos", 0.5f),
@@ -759,6 +778,7 @@ object ModuleBridge {
                 .filter { it.startsWith("shade_") }
                 .associate { it.removePrefix("shade_") to b.getInt(it, 0) },
             miniConfig = MiniPlayerConfig.normalizedJson(b.getString("minicfg")),
+            miniConfigSchema = b.getInt("minicfgschema", 0),
             miniShortcuts = b.getFloatArray("minishortcuts")?.takeIf { it.size == 9 },
             geometry = Geometry(
                 screenW = b.getInt("sw", 0),

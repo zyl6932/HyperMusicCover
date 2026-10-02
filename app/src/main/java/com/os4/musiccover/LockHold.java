@@ -68,6 +68,7 @@ final class LockHold {
     static void take(Owner o, boolean animate, String src) {
         boolean first = sOwners.isEmpty();
         sOwners.add(o);
+        Main.onBackdropHoldChanged();
         Main.setDepthHidden(true);
         if (first || o.ridesEntry) {
             sExitOwner = null;
@@ -82,6 +83,7 @@ final class LockHold {
      */
     static void give(Owner o, boolean animate) {
         if (!sOwners.remove(o)) return;
+        Main.onBackdropHoldChanged();
         Xp.log(TAG + "lock screen given back by " + o + " (owners " + sOwners + ")");
         if (!sOwners.isEmpty()) return;
         sExitOwner = o;

@@ -97,6 +97,8 @@ final class LockLyrics {
      * than leaving a gap where it was.
      */
     static volatile boolean sTrans = true;
+    /** Keep the lyric page attached through a full AOD, but draw it only while awake. */
+    static volatile boolean sHideInAod;
     /** Where the lines settle in their column: left, centre or right, as the settings offer. */
     static final int ALIGN_LEFT = 0, ALIGN_CENTER = 1, ALIGN_RIGHT = 2;
     /**
@@ -539,6 +541,7 @@ final class LockLyrics {
      */
     static boolean wantsShown() {
         if (!wantsWindow()) return false;
+        if (sHideInAod && inHeldAod()) return false;
         // Hold the band back until the cover's blur transition has settled, so it does not
         // land over an artwork that is still sharpening. blurSettled() answers true when there
         // is no blur pending, so the held-AOD path below still shows through untouched.
@@ -558,9 +561,8 @@ final class LockLyrics {
      * out for the lyrics to sit between. Only that one doze: with the clock handed back to the
      * OEM there is nothing measured to sit under, and `inkBottomOnScreen()` says NaN.
      *
-     * No switch of its own. The one that decides this is "keep the small clock in the full-screen
-     * AOD", which is what makes the doze this lock screen; where that is on, carrying the lyrics
-     * through is what the lock screen was showing.
+     * The user's hide-in-AOD switch changes visibility in wantsShown(), not this state reading:
+     * layout and still-mode handling must continue to know that the display is dozing.
      */
     static boolean inHeldAod() {
         return ClockCollapse.aodHeld() && !Main.screenOnCached();

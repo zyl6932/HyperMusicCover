@@ -144,6 +144,8 @@
     <string name="lyrics_provider_got_it">知道了</string>
     <string name="lyrics_provider_got_it_wait">知道了 (%1$d)</string>
     <string name="lyrics_trans">显示翻译</string>
+    <string name="lyrics_hide_aod">息屏时隐藏歌词</string>
+    <string name="lyrics_hide_aod_summary">全屏息屏显示时隐藏滚动歌词，点亮后继续显示</string>
     <string name="lyrics_align">歌词对齐方式</string>
     <string name="lyrics_align_left">居左</string>
     <string name="lyrics_align_center">居中</string>

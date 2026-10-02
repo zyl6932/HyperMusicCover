@@ -30,6 +30,10 @@ import java.util.concurrent.CopyOnWriteArrayList
 internal object LockIslands {
     /** The one island every notification but the focus ones shares (stackMembers). */
     const val STACK_KEY = "mc:stack"
+    private const val APP_PREFIX = "mc:app:"
+
+    private fun appKey(pkg: String) = APP_PREFIX + pkg
+    fun isAppGroup(key: String): Boolean = key.startsWith(APP_PREFIX)
 
     /** One notification as an island. */
     class Note(
@@ -267,6 +271,26 @@ internal object LockIslands {
     /** The stack island as the row shows it; null with no notification in it. */
     private var stackNote: Note? = null
     private var stackFrom: List<Note> = emptyList()
+    private var appGroupNotes: Map<String, Note> = emptyMap()
+    private var appGroupFrom: Map<String, List<Note>> = emptyMap()
+    private var appGroupMembers: Map<String, List<String>> = emptyMap()
+    @Volatile private var groupByApp = false
+
+    /** Keep the native count for the default mode; app groups own their rows separately. */
+    fun setGroupByApp(value: Boolean) {
+        if (groupByApp == value) return
+        groupByApp = value
+        stackOut = false
+        released.removeAll(::isAppGroup)
+        if (NumState.available) NumState.setFolding(!value && active)
+        if (value) buildAppGroups(stackFrom) else {
+            appGroupNotes = emptyMap()
+            appGroupFrom = emptyMap()
+            appGroupMembers = emptyMap()
+        }
+        publish()
+        invalidate("notification grouping ${if (value) "by app" else "all"}")
+    }
 
     /** The stack island tapped open: all of its notifications back in the stack, new ones too. */
     private var stackOut = false
@@ -292,7 +316,7 @@ internal object LockIslands {
      *
      * Only with NumState's hooks in; without them, the old way.
      */
-    private val nativeStack get() = NumState.available
+    private val nativeStack get() = NumState.available && !groupByApp
 
     /** For the controller: the stack island opens as the stack's list (openStack), no flight. */
     fun foldsNatively(): Boolean = nativeStack
@@ -314,10 +338,16 @@ internal object LockIslands {
     /** For NumState: the list is the spread's, not a pile to fold. */
     fun spreadingNow(): Boolean = spreading
 
-    fun setSpread(on: Boolean) {
+    fun setSpread(on: Boolean, folded: Boolean = false) {
         if (spreading == on) return
         spreading = on
         NumState.trace("spread=$on")
+        if (!on && groupByApp) {
+            // The spread temporarily returns every app's rows to the pipeline. At its end,
+            // the open list owns all of them; a folded list gives every app its island back.
+            if (folded) released.removeAll(::isAppGroup)
+            else released.addAll(appGroupNotes.keys)
+        }
         // Over: the island stands as the stack does. A pull let go before the stack ever left its
         // fold said nothing (no exitNumState), and the island taken out for it stayed out.
         if (!on && nativeStack) stackOut = !stackFolded()
@@ -394,7 +424,8 @@ internal object LockIslands {
 
     /** For `op mini`: what the filter has, and whether the stack is leaving it out. */
     fun describe(): String = "islands active=$active cover=$cover filter=${filter?.get() != null} " +
-        "released=${released.size} stack=${stackMembers.size}${if (stackOut) "/out" else ""} notes=" + notes.joinToString(",") {
+        "released=${released.size} stack=${stackMembers.size}${if (stackOut) "/out" else ""}" +
+        " appGroups=$groupByApp notes=" + notes.joinToString(",") {
             (if (it.focus) "F:" else "") + (if (it.redacted) "R:" else "") + it.pkg +
                 (if (!it.focus || it.redacted) "<${it.iconFrom}>" else "") +
                 "[${it.property}/${it.priority}${if (it.order) "/o" else ""} " +
@@ -493,6 +524,7 @@ internal object LockIslands {
             return
         }
         if (released.add(key)) invalidate("island $key released")
+        if (isAppGroup(key)) return
         val opened = sceneOf(key)
         if (opened != null && key != sceneKey) {
             scene?.let { runCatching { ImmersiveHost.close(it) } }
@@ -554,10 +586,18 @@ internal object LockIslands {
         released.toList() + if (stackOut && !nativeStack) listOf(STACK_KEY) else emptyList()
 
     /** A notification as last read, released or not: what a row collapsing back will show. */
-    fun noteFor(key: String): Note? = if (key == STACK_KEY) stackNote else readCache[key]?.second
+    fun noteFor(key: String): Note? = when {
+        key == STACK_KEY -> stackNote
+        isAppGroup(key) -> appGroupNotes[key]
+        else -> readCache[key]?.second
+    }
 
     /** [key]'s notifications: the stack island's, or itself. */
-    fun membersOf(key: String): List<String> = if (key == STACK_KEY) stackMembers else listOf(key)
+    fun membersOf(key: String): List<String> = when {
+        key == STACK_KEY -> stackMembers
+        isAppGroup(key) -> appGroupMembers[key].orEmpty()
+        else -> listOf(key)
+    }
 
     private fun invalidate(reason: String) {
         val f = filter?.get() ?: return
@@ -612,7 +652,7 @@ internal object LockIslands {
             val key = (Xp.getObjectField(entry, "mSbn") as? StatusBarNotification)?.key
             // Folded natively, the stack island's rows were never out of the stack to flash in.
             val held = key != null && notes.any {
-                it.key == key || it.key == STACK_KEY && !nativeStack && key in stackMembers
+                it.key == key || !it.focus && !nativeStack && key in membersOf(it.key)
             }
             if (held) watchUnlock()
             return held
@@ -629,7 +669,11 @@ internal object LockIslands {
             pendingEntries[note.key] = entry
             return false
         }
-        val out = if (note.focus) note.key in released else stackOut
+        val out = when {
+            note.focus -> note.key in released
+            groupByApp -> appKey(note.pkg) in released
+            else -> stackOut
+        }
         // Spread out, every focus row is the list's, the cover's too: tapped open in the cover,
         // the list came up with the ordinary notifications alone (the user, 2026-09-30).
         val kept = !spreading && (active && !out || cover && note.focus && !out)
@@ -821,6 +865,7 @@ internal object LockIslands {
         val members = shown.filter { !it.focus }.sortedWith(bigFirst)
         stackMembers = members.map { it.key }
         stackNote = aggregate(members)
+        if (groupByApp) buildAppGroups(members)
         focusShown = shown.filter { it.focus && it.key !in released }
         if (nativeStack) {
             // The stack said nothing yet this lock screen: read where it is.
@@ -837,7 +882,9 @@ internal object LockIslands {
         val stack = stackNote?.takeIf { !stackOut }
         // Spread out, the count stays hidden too: the row folding back comes into its place.
         if (nativeStack) NumState.hideCount(spreading || active && stack != null)
-        val next = (focusShown + listOfNotNull(stack)).sortedWith(bigFirst)
+        val ordinary = if (groupByApp) appGroupNotes.values.filter { it.key !in released }
+            else listOfNotNull(stack)
+        val next = (focusShown + ordinary).sortedWith(bigFirst)
         // Unchanged is the same reading (read() hands back the cached note): by key and time, a
         // stopwatch paused or resumed - its `when` the same - never reached the island.
         if (next.size == notes.size && next.indices.all { next[it] === notes[it] }) return
@@ -878,13 +925,36 @@ internal object LockIslands {
             return cached
         }
         stackFrom = members
+        return groupedNote(STACK_KEY, members)
+    }
+
+    private fun buildAppGroups(members: List<Note>) {
+        val previousFrom = appGroupFrom
+        val previousNotes = appGroupNotes
+        val from = LinkedHashMap<String, List<Note>>()
+        val groups = LinkedHashMap<String, Note>()
+        val keys = LinkedHashMap<String, List<String>>()
+        for ((key, notes) in members.groupBy { appKey(it.pkg) }) {
+            from[key] = notes
+            keys[key] = notes.map { it.key }
+            val old = previousFrom[key]
+            groups[key] = if (old != null && old.size == notes.size &&
+                notes.indices.all { notes[it] === old[it] }) previousNotes[key] ?: groupedNote(key, notes)
+                else groupedNote(key, notes)
+        }
+        appGroupFrom = from
+        appGroupNotes = groups
+        appGroupMembers = keys
+    }
+
+    private fun groupedNote(key: String, members: List<Note>): Note {
         val lead = members.first()
         val n = members.size
         // From more than one app, the newest one's picture alone read as that app's pile (the
         // user, 2026-09-30): the apps' pictures together, newest first, as a folder shows them.
         val apps = members.distinctBy { it.pkg }
         val icon = if (apps.size > 1) AppsIcon(apps.mapNotNull { it.icon }) else lead.icon
-        return Note(STACK_KEY, lead.pkg, lead.title, stackText(lead, n),
+        return Note(key, lead.pkg, lead.title, stackText(lead, n),
             icon, focus = false, time = lead.time, intent = lead.intent, group = null,
             summary = false, redacted = lead.redacted, since = members.maxOf { it.since },
             iconFrom = if (apps.size > 1) "apps${apps.size}" else lead.iconFrom)
@@ -920,7 +990,11 @@ internal object LockIslands {
 
     /** A notification island's standing, released or not; null for one this lock screen has not got. */
     fun rankOf(key: String): Rank? {
-        val note = (if (key == STACK_KEY) stackNote else lastRead[key]) ?: return null
+        val note = when {
+            key == STACK_KEY -> stackNote
+            isAppGroup(key) -> appGroupNotes[key]
+            else -> lastRead[key]
+        } ?: return null
         return Rank(note.property, note.priority, note.since)
     }
 

@@ -2,6 +2,7 @@ package com.os4.musiccover
 
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /** Keeps the pill inside the shortcut host even if an OEM layout moves a shortcut off centre. */
 internal object MiniPlayerGeometry {
@@ -10,6 +11,17 @@ internal object MiniPlayerGeometry {
 
     /** However close the buttons, the pill keeps this width and presses on the discs instead. */
     const val MIN_PILL_DP = 140f
+
+    const val STACK_BACK_SCALE = 0.9f
+    const val STACK_BACK_ALPHA = 0.7f
+    const val STACK_EDGE_DP = 4f
+
+    fun stackBackSizePx(frontPx: Int): Int =
+        (frontPx * STACK_BACK_SCALE).roundToInt().coerceAtLeast(1)
+
+    /** Keep the rear card's lower edge [edgePx] below the front card's lower edge. */
+    fun stackBackCenterYPx(frontCenterY: Float, frontHeightPx: Int, edgePx: Int): Float =
+        frontCenterY + (frontHeightPx - stackBackSizePx(frontHeightPx)) / 2f + edgePx
 
     fun heightDp(radiusDp: Float): Float = (radiusDp.coerceIn(10f, 60f) * 2f).coerceAtLeast(48f)
 
