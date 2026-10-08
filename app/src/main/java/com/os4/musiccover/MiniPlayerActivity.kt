@@ -180,11 +180,8 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                         checked = config.optBoolean(MiniPlayerConfig.NAV_KEEP_ON),
                         enabled = ready && config.optBoolean(MiniPlayerConfig.ENABLED),
                         onCheckedChange = { push(MiniPlayerConfig.NAV_KEEP_ON, it) })
-                    SwitchPreference(title = stringResource(R.string.mini_status_at_date),
-                        summary = stringResource(R.string.mini_status_at_date_summary),
-                        checked = config.optBoolean(MiniPlayerConfig.STATUS_AT_DATE),
-                        enabled = ready && config.optBoolean(MiniPlayerConfig.ENABLED),
-                        onCheckedChange = { push(MiniPlayerConfig.STATUS_AT_DATE, it) })
+                    // No 状态显示在日期后面 row: the placement is fixed with the islands on
+                    // (MiniPlayerRuntime.statusAtDate), so there is nothing left to switch.
                     SwitchPreference(title = stringResource(R.string.mini_fod_lift),
                         summary = stringResource(R.string.mini_fod_lift_summary),
                         checked = config.optBoolean(MiniPlayerConfig.FOD_LIFT),

@@ -44,6 +44,8 @@ final class AmapFocus {
     private static final String AMAP = "com.autonavi.minimap";
     /** 小爱建议, whose ride-code island MetroCodeIsland posts as it. */
     private static final String ASSISTANT = "com.miui.personalassistant";
+    /** SystemUI itself, whose pickup-code island PickupCodeIsland posts. */
+    private static final String SYSUI = "com.android.systemui";
     /** The plugin's settings manager, the one asked about a focus view. */
     private static final String SETTINGS =
             "miui.systemui.notification.NotificationSettingsManager";
@@ -107,7 +109,7 @@ final class AmapFocus {
                     Xp.hookAll(cls, name, chain -> {
                         final java.util.List<Object> a = chain.getArgs();
                         final Object arg = a != null && !a.isEmpty() ? a.get(0) : null;
-                        if (AMAP.equals(arg) || ASSISTANT.equals(arg)) {
+                        if (AMAP.equals(arg) || ASSISTANT.equals(arg) || SYSUI.equals(arg)) {
                             // Asked on every post of every 高德 notification (its walking island
                             // reposts each second), so said once rather than each time.
                             if (sAnswered.add(name + arg)) Xp.log(TAG + name + "(" + arg + ") -> true");

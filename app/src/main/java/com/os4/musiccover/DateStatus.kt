@@ -63,7 +63,7 @@ internal object DateStatus {
 
     private val main = Handler(Looper.getMainLooper())
 
-    /** The switch on the island page (MiniPlayerConfig.STATUS_AT_DATE, with the islands on). */
+    /** Whether the islands are on: the placement is fixed (MiniPlayerRuntime.statusAtDate). */
     @Volatile private var switchOn = false
     private var switchRead = false
 

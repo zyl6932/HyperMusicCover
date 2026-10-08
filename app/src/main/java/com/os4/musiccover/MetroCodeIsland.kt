@@ -53,10 +53,12 @@ import org.json.JSONObject
  *
  * 小爱建议 sends a card at every station it notices, the ones ridden through as well. Which of
  * them get the island is ColorOS's rule (Metis, MetroIntentManager.d), kept per trip ([Trip]): the
- * first station after none, then only the ones 高德's navigation boards or leaves the subway at
- * (its remindType 0 / 1 come from a learned commute; here from the plan, AmapTransitShare), each
- * once. A trip ends the way TripManager's monitor ends it - no station for a while, or one stayed
- * at too long - or on the way out ([exit], from RideCodeExit in SystemUI).
+ * first station after none, then only the ones the trip changes lines at or leaves the subway at
+ * (its remindType 0 / 1), each once. Metis has those from the commute it learned the trip to be;
+ * here from [MetroCommute], learned the same way from the trips this ride-code island has seen,
+ * and from 高德's plan while it navigates (AmapTransitShare). A trip ends the way TripManager's
+ * monitor ends it - no station for a while, or one stayed at too long - or on the way out
+ * ([exit], from RideCodeExit in SystemUI), and is then recorded for the learning.
  *
  * A tap is the widget's own tap: the island opens the assistant's RouterActivity, which hands the
  * card to a SmallMetroCodeWidgetProvider of its own - h() to take the intention, onReceive with
@@ -99,6 +101,7 @@ internal object MetroCodeIsland {
     private const val TOPIC_EDU = "metro_qr_code.metro_qr_code_education.metro_education"
 
     private const val ID = 1240
+    private const val COMMUTE_FILE = "mc_metro_commute.json"
     private const val CHANNEL = "mc_metro_code"
     private const val PIC = "miui.focus.pic_mc_metro"
     private const val PIC_APP = "miui.focus.pic_mc_metro_app"
@@ -162,8 +165,14 @@ internal object MetroCodeIsland {
      * One ride through the subway as Metis keeps it (TripManager.h, tripStations): the stations
      * in the order their cards came, from the first one after none.
      */
-    private class Trip(now: Long) {
+    private class Trip(now: Long, val city: String) {
         val stations = ArrayList<String>()
+        /** The lines each station's card named, for where the trip changed ([MetroCommute.changes]). */
+        val lines = HashMap<String, Set<String>>()
+        /** Wall clock at the first station: the commute's half hour. */
+        val startedAt = System.currentTimeMillis()
+        /** Where the commute this trip was matched to changes and ends ([MetroCommute.match]). */
+        var learned: Set<String> = emptySet()
         /** When the newest station came, and when any card last said where the phone is. */
         var newAt = now
         var seenAt = now
@@ -172,6 +181,8 @@ internal object MetroCodeIsland {
     }
 
     private var trip: Trip? = null
+    /** The commutes learned so far, in 小爱建议's no-backup storage ([register]). */
+    private var commute: MetroCommute? = null
     /** Where 高德's plan boards and leaves the subway, and when it last said so. */
     private var planStops: Set<String> = emptySet()
     private var planAt = 0L
@@ -231,6 +242,8 @@ internal object MetroCodeIsland {
     private fun register(app: Context) {
         if (ctx != null) return
         ctx = app
+        commute = runCatching { MetroCommute(java.io.File(app.noBackupFilesDir, COMMUTE_FILE)) }
+            .onFailure { Xp.w(TAG + "commutes not loaded: $it") }.getOrNull()
         val heard = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 try {
@@ -262,7 +275,12 @@ internal object MetroCodeIsland {
         class Trips : ProbeGuard.Receiver() {
             override fun onReceive(c: Context, i: Intent) {
                 if (!ProbeGuard.admit(this, i)) return
-                onTrip(c, i)
+                val answer = onTrip(c, i) ?: return
+                // The app's page asks with an ordered broadcast (ModuleBridge.commute).
+                if (isOrderedBroadcast) {
+                    resultCode = 1
+                    setResultExtras(answer)
+                }
             }
         }
         ProbeGuard.register(app, IntentFilter(ACTION_TRIP), TAG, { Trips() },
@@ -311,7 +329,8 @@ internal object MetroCodeIsland {
         expire(now)
         val n = norm(s.location)
         val known = trip
-        val t = known ?: Trip(now)
+        val t = known ?: Trip(now, s.city)
+        if (n.isNotEmpty() && s.lines.isNotEmpty()) t.lines[n] = s.lines.map { it.first }.toSet()
         val remind: Boolean
         if (known == null) {
             // No trip: it starts here (tripStations.size == 1, metro_commute_start).
@@ -319,16 +338,23 @@ internal object MetroCodeIsland {
             trip = t
             main.removeCallbacks(entryOver)
             main.postDelayed(entryOver, ENTRY_MS)
-            Xp.log(TAG + "trip starts at ${s.name}")
+            val route = runCatching { commute?.match(s.city, n, t.startedAt) }.getOrNull()
+            t.learned = route?.stops.orEmpty()
+            Xp.log(TAG + "trip starts at ${s.name}" +
+                (route?.let { ", a learned commute (${it.trips} trips)" } ?: ""))
+            route?.let { Xp.d(TAG + "commute: $it") }
             remind = true
         } else if (n.isNotEmpty() && t.stations.last() != n) {
             t.stations += n
             t.newAt = now
             main.removeCallbacks(entryOver)
             val plan = if (now - planAt < PLAN_STALE_MS) planStops else emptySet()
-            remind = n in plan
-            Xp.log(TAG + "in the trip at ${s.name} (station ${t.stations.size}): " +
-                if (remind) "高德's plan boards or leaves here" else "riding through")
+            remind = n in plan || n in t.learned
+            Xp.log(TAG + "in the trip at ${s.name} (station ${t.stations.size}): " + when {
+                n in plan -> "高德's plan boards or leaves here"
+                remind -> "the learned commute changes or leaves here"
+                else -> "riding through"
+            })
         } else {
             // The same station again: as it was.
             remind = shown != null
@@ -355,11 +381,35 @@ internal object MetroCodeIsland {
         end(why)
     }
 
-    private fun end(why: String) {
+    private fun end(why: String, fareFrom: String = "", fareTo: String = "") {
         val t = trip ?: return
         trip = null
         main.removeCallbacks(entryOver)
         Xp.log(TAG + "trip over (" + t.stations.joinToString(" -> ") + "): $why")
+        learn(t, fareFrom, fareTo)
+    }
+
+    /**
+     * The trip, for [MetroCommute] (recordTrip). A card's fare names the gates it went in and out
+     * of, which beat the first and last cards (a station noticed from the street, a last one
+     * missed); a ride code's trip has only its cards.
+     */
+    private fun learn(t: Trip, fareFrom: String, fareTo: String) {
+        val c = commute ?: return
+        if (!c.learning) return
+        val stations = ArrayList(t.stations)
+        if (fareFrom.isNotEmpty() && stations.firstOrNull() != fareFrom) {
+            if (stations.size > 1 && stations[1] == fareFrom) stations.removeAt(0) else stations[0] = fareFrom
+        }
+        if (fareTo.isNotEmpty() && stations.last() != fareTo) stations += fareTo
+        if (stations.size < 2) return
+        val changes = MetroCommute.changes(stations, t.lines)
+        runCatching {
+            c.record(MetroCommute.Trip(t.city, stations.first(), stations.last(), changes, t.startedAt))
+        }.onFailure { Xp.w(TAG + "trip not recorded: $it") }
+        Xp.d(TAG + "recorded: ${stations.first()} -> ${stations.last()}" +
+            (if (changes.isEmpty()) "" else ", changing at " + changes.joinToString()) +
+            " (${c.count()} trips kept)")
     }
 
     /** SINGLE_STATION_TIMEOUT: still at the first station, its card goes. */
@@ -375,8 +425,22 @@ internal object MetroCodeIsland {
      * navigation over (`do end`), or the way out of a station (`do exit`, `how` card or code).
      */
     @Synchronized
-    private fun onTrip(c: Context, i: Intent) {
+    private fun onTrip(c: Context, i: Intent): Bundle? {
         when (i.getStringExtra("do")) {
+            // The app's page: what is learned, whether to learn, and forgetting it.
+            "commute" -> return commuteState()
+            "learn" -> {
+                val on = i.getBooleanExtra("on", true)
+                commute?.setLearning(on)
+                Xp.log(TAG + "commute learning " + if (on) "on" else "off")
+                return commuteState()
+            }
+            "forget" -> {
+                commute?.forget()
+                trip?.learned = emptySet()
+                Xp.log(TAG + "learned commutes forgotten")
+                return commuteState()
+            }
             "plan" -> {
                 val stops = i.getStringArrayExtra("stops").orEmpty()
                     .map { norm(it) }.filter { it.isNotEmpty() }.toSet()
@@ -388,7 +452,24 @@ internal object MetroCodeIsland {
                 planStops = emptySet()
                 Xp.log(TAG + "高德's navigation over")
             }
-            "exit" -> exit(c, i.getStringExtra("how").orEmpty())
+            "exit" -> exit(c, i.getStringExtra("how").orEmpty(),
+                norm(i.getStringExtra("from").orEmpty()), norm(i.getStringExtra("to").orEmpty()))
+        }
+        return null
+    }
+
+    /** For the app's page: each commute as start, changes (joined by a comma), end, trips. */
+    private fun commuteState(): Bundle {
+        val c = commute
+        val routes = c?.routes().orEmpty()
+        return Bundle().apply {
+            putBoolean("loaded", c != null)
+            putBoolean("learning", c?.learning ?: false)
+            putInt("trips", c?.count() ?: 0)
+            putStringArray("starts", routes.map { it.start }.toTypedArray())
+            putStringArray("changes", routes.map { it.transfers.joinToString(",") }.toTypedArray())
+            putStringArray("ends", routes.map { it.end }.toTypedArray())
+            putIntArray("counts", routes.map { it.trips }.toIntArray())
         }
     }
 
@@ -398,11 +479,11 @@ internal object MetroCodeIsland {
      * way in; after it, the way out - the island is left to its card, which may be the one opened.
      * A trip begun after it, an out-of-station change, starts with a card of its own.
      */
-    private fun exit(c: Context, how: String) {
+    private fun exit(c: Context, how: String, from: String = "", to: String = "") {
         val t = trip ?: return
         if (how == "card") cancel(c, "out of the station (card)")
         else if (t.stations.size < 2) return
-        end("out of the station ($how)")
+        end("out of the station ($how)", from, to)
     }
 
     /** A station's name as both 高德 and 小爱建议 write it: no (地铁站), no 站 on the end. */
@@ -864,7 +945,8 @@ internal object MetroCodeIsland {
 
     /**
      * The probe: the state; `--es json '<list of intentions>'` as if the engine had sent it;
-     * `--es do demo` a made-up station; `--es do end` an empty set; `--es do exit` the way out.
+     * `--es do demo` a made-up station; `--es do end` an empty set; `--es do exit` the way out;
+     * `--es do forget` the learned commutes gone.
      */
     fun command(json: String?, what: String?): String {
         val c = ctx ?: return "not registered yet"
@@ -877,6 +959,7 @@ internal object MetroCodeIsland {
                 }
                 what == "end" -> update(c, JSONArray(), "probe")
                 what == "exit" -> synchronized(this) { exit(c, "probe") }
+                what == "forget" -> synchronized(this) { commute?.forget() }
             }
             describe()
         } catch (t: Throwable) {
@@ -890,7 +973,11 @@ internal object MetroCodeIsland {
             (s?.let { "${it.name} id=${it.instanceId} end=${it.end}" } ?: "none") +
             (dismissed?.let { " dismissed=$it" } ?: "") + (lastError?.let { " error=$it" } ?: "") +
             " trip=" + (trip?.stations?.joinToString(" -> ") ?: "none") +
-            " plan=" + planStops.joinToString(",").ifEmpty { "none" }
+            " plan=" + planStops.joinToString(",").ifEmpty { "none" } +
+            " learned=" + (trip?.learned?.joinToString(",")?.ifEmpty { null } ?: "none") +
+            " commutes=" + (commute?.let { c ->
+                (if (c.learning) "" else "off ") + "${c.count()} trips " + c.routes().joinToString("; ", "[", "]")
+            } ?: "not loaded")
     }
 
     private fun demo(): JSONArray {

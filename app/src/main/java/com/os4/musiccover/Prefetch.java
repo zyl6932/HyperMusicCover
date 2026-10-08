@@ -171,6 +171,19 @@ final class Prefetch {
     }
 
     /**
+     * The artwork already decoded for one URI, or null. Read by ArtUri: the cover asks for the
+     * same URLs the queue holds - the track playing is in the queue too - and taking this copy is
+     * what stops one picture being downloaded twice for the same track change.
+     */
+    static Bitmap cached(String uri) {
+        if (uri == null) return null;
+        synchronized (CACHE) {
+            Bitmap b = CACHE.get(uri);
+            return b != null && !b.isRecycled() ? b : null;
+        }
+    }
+
+    /**
      * A skip was just asked for. Answers the artwork for where the queue says it lands, or null -
      * no queue, not fetched yet, or the queue has run out that way.
      *
@@ -479,30 +492,21 @@ final class Prefetch {
     }
 
     /**
-     * The artwork behind one URI. http(s) goes over the network - SystemUI holds INTERNET, and
-     * this runs on the prefetch thread - and anything else goes through the resolver, so a player
-     * that publishes content:// artwork is served the same way.
+     * The artwork behind one URI. http(s) goes through ArtUri - SystemUI holds INTERNET, and this
+     * runs on the prefetch thread - and anything else goes through the resolver, so a player that
+     * publishes content:// artwork is served the same way.
+     *
+     * It goes through ArtUri rather than one more connection of its own because SystemUI cannot
+     * read a cleartext URL at all: every http artwork URL a player publishes (MeiloX's NetEase
+     * covers, measured 2026-10-08) failed here with "Cleartext HTTP traffic ... not permitted",
+     * 207 times in a day and no arrival. ArtUri rewrites the scheme and reads the size, so the
+     * queue art arrives and the press prediction has something to answer with.
      */
     private static Bitmap load(Uri uri) {
         String scheme = uri.getScheme();
         try {
             if ("http".equals(scheme) || "https".equals(scheme)) {
-                java.net.HttpURLConnection conn =
-                        (java.net.HttpURLConnection) new java.net.URL(uri.toString())
-                                .openConnection();
-                try {
-                    conn.setConnectTimeout(3000);
-                    conn.setReadTimeout(5000);
-                    conn.setInstanceFollowRedirects(true);
-                    InputStream in = conn.getInputStream();
-                    try {
-                        return BitmapFactory.decodeStream(in);
-                    } finally {
-                        in.close();
-                    }
-                } finally {
-                    conn.disconnect();
-                }
+                return ArtUri.fetch(uri.toString());
             }
             Context ctx = Main.appContext();
             if (ctx == null) return null;

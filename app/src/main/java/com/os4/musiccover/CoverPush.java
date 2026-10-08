@@ -1384,13 +1384,18 @@ final class CoverPush {
                         && sArtLong > 0 && Main.sameTrack(sArtKey, Main.sTrackKey)
                         && Math.max(art.getWidth(), art.getHeight()) < sArtLong;
                 if ((art == null || stale || worse) && !last) {
-                    // 0 is "a session was there and carried no bitmap", which more tries will not
-                    // change. -1 is "there was nothing to ask", which more tries might. Once the
-                    // card is in it stays in, so this is worth looking at on any attempt - the
-                    // session can turn up late - and declaring it once keeps the line off the log.
-                    boolean bare = sessionBits[0] == 0 && !allowCard;
+                    // -2 is "a session was there and published neither a bitmap nor an artwork
+                    // URI": nothing on that side is coming, so the card is read from the next try.
+                    // 0 is the opposite case - art published as a URI and being read right now -
+                    // and is deliberately not in here: what it needs is the wait, and it ends by
+                    // itself when the read lands or fails. -1 is "there was nothing to ask", which
+                    // more tries might. Once the card is in it stays in, so this is worth looking
+                    // at on any attempt - the session can turn up late - and declaring it once
+                    // keeps the line off the log.
+                    boolean bare = sessionBits[0] == -2 && !allowCard;
                     if (bare) {
-                        Xp.log(Main.TAG + "session carries no bitmap at all, reading the card from here");
+                        Xp.log(Main.TAG + "session carries no bitmap and no artwork URI,"
+                                + " reading the card from here");
                     }
                     Xp.log(Main.TAG + "art " + (art == null ? "not ready"
                                     : stale ? "still the old one" : "smaller than the one up")

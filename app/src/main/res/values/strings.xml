@@ -87,6 +87,8 @@
     <string name="credits_hle">QQ 音乐、酷我、TTML Hub 取词与歌曲匹配规则</string>
     <string name="credits_lsposed">模块赖以运行的框架</string>
     <string name="credits_installerx">把更新交给安装器、隐藏图标和拨号密令的做法</string>
+    <string name="credits_group_pickup">取餐码</string>
+    <string name="credits_autopickupisland">取餐码的整套做法：调用 ColorOS 原版 PCR 插件认码、它云端下发的品牌名单和规则、以及卡片里的品牌素材（卡片布局用的是系统自己那张）</string>
     <string name="rules_cancel">取消</string>
     <string name="tl_compose">Jetpack Compose</string>
     <string name="tl_compose_summary">Apache-2.0</string>
@@ -199,11 +201,19 @@
     <string name="features_shade_summary">动态流光</string>
     <string name="features_mini_title">锁屏超级岛</string>
     <string name="features_mini_summary">音乐、通知与导航</string>
-    <string name="features_transit_title">高德公交地铁</string>
-    <string name="features_transit_summary">逐站超级岛</string>
+    <string name="features_transit_title">主动智能</string>
+    <string name="features_transit_summary">为您提供主动、贴心的智能服务~</string>
 
     <!-- The bus and subway trip's page, which the features page opens: one switch. -->
-    <string name="transit_enabled">启用高德公交地铁</string>
+    <string name="transit_enabled">地铁行程上岛</string>
+    <string name="commute_title">地铁通勤</string>
+    <string name="commute_learn">学习通勤路线</string>
+    <string name="commute_learn_summary">存在本机，30天后自动删除</string>
+    <string name="commute_unreached">小爱建议没有运行，打开一次负一屏后再进来</string>
+    <string name="commute_route_direct">直达 · %1$d 次</string>
+    <string name="commute_route_via">%1$s 换乘 · %2$d 次</string>
+    <string name="commute_forget">清除通勤记录</string>
+    <string name="commute_forget_summary">已记下 %1$d 趟</string>
 
     <string name="shade_enabled">启用流光效果</string>
     <string name="shade_section_behaviour">行为</string>
@@ -238,8 +248,6 @@
     <string name="mini_normals_in_stack">普通通知不上岛</string>
     <string name="mini_normals_in_stack_summary">消息通知留在系统通知列表，音乐、导航、倒计时等照常上岛；关闭后普通通知也会合并到锁屏岛</string>
     <string name="mini_nav_keep_on">导航时屏幕常亮</string>
-    <string name="mini_status_at_date">状态显示在日期后面</string>
-    <string name="mini_status_at_date_summary">勿扰、充电不再被胶囊挡住</string>
     <string name="mini_fod_lift">避开屏下指纹</string>
     <string name="mini_fod_lift_summary">光学短焦指纹位置较低的机型，把胶囊抬到指纹区上方</string>
     <string name="mini_nav_keep_on_summary">显示高德导航或公交页面时</string>
@@ -259,4 +267,10 @@
     <string name="demo_transit_alert_title">换乘与到站</string>
     <string name="mini_reduce_aod_updates">息屏时减少内容刷新</string>
     <string name="mini_reduce_aod_updates_summary">息屏时每 30 秒检查并更新有变化的锁屏岛内容，倒计时显示 --:--，歌词改为封面；亮屏后恢复</string>
+    <string name="pickup_title">取餐码</string>
+    <string name="pickup_cloud_refresh">刷新取餐码云端规则</string>
+    <string name="pickup_cloud_date">更新于 %1$s · %2$d 个小程序</string>
+    <string name="pickup_cloud_never">尚未同步</string>
+    <string name="pickup_cloud_syncing">正在同步…</string>
+    <string name="pickup_enabled">取餐码上岛</string>
 </resources>

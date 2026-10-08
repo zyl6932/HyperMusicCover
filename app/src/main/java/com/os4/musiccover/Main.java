@@ -1002,6 +1002,8 @@ public class Main extends XposedModule {
         AmapFocus.install(cl);
         // A ride code opened or a card's fare taken, for the trip card's 到站 (RideCodeExit).
         RideCodeExit.INSTANCE.install(cl);
+        // A 微信 order page's pickup code, as an island (PickupCodeIsland).
+        PickupCodeIsland.INSTANCE.install(cl);
 
         try {
             sContainerCls = Xp.findClass(CLS_CONTAINER, cl);
@@ -2048,6 +2050,7 @@ public class Main extends XposedModule {
                     + "\nfpavoid=" + sFpAvoid
                     // On when absent: the trip's page and island shipped before their switch.
                     + "\ntransit=" + (AmapTransitScene.sOn ? 1 : 0)
+                    + "\npickup=" + (PickupCodeIsland.sOn ? 1 : 0)
                     + "\nminicfg=" + android.util.Base64.encodeToString(
                             MiniPlayerRuntime.configJson(sAppCtx).getBytes(java.nio.charset.StandardCharsets.UTF_8),
                             android.util.Base64.NO_WRAP)
@@ -2158,6 +2161,10 @@ public class Main extends XposedModule {
                         }
                         else if ("fpavoid".equals(k)) sFpAvoid = Integer.parseInt(v);
                         else if ("transit".equals(k)) AmapTransitScene.sOn = "1".equals(v);
+                        else if ("pickup".equals(k)) PickupCodeIsland.sOn = "1".equals(v);
+                        else if ("card".equals(k)) PickupCodeIsland.sCard = "1".equals(v);
+                        // Not applyConfig: this file is migration data, and a config the user has
+                        // since changed must win over what was saved here (see restoreLegacyConfig).
                         else if ("minicfg".equals(k)) MiniPlayerRuntime.restoreLegacyConfig(sAppCtx,
                                 new String(android.util.Base64.decode(v, android.util.Base64.DEFAULT),
                                         java.nio.charset.StandardCharsets.UTF_8));
@@ -2208,6 +2215,9 @@ public class Main extends XposedModule {
         }
         sReceiverRegistered = true;
         sAppCtx = ctx;
+        // 取餐码的云端名单：上一次拉到的那份从这里读回来（存在 SystemUI 自己的 filesDir 里，
+        // app 和它是两个 uid，所以不能由 app 下载）。
+        PickupCloud.INSTANCE.load(ctx);
         // Before the first send: the wallpaper process answers with it (ProbeGuard).
         ProbeGuard.mint();
 
@@ -2881,6 +2891,64 @@ public class Main extends XposedModule {
                     } else if ("minicfg".equals(op)) {
                         MiniPlayerRuntime.applyConfig(c, i.getStringExtra("json"));
                         saveState();
+                    } else if ("pickup".equals(op)) {
+                        // 取餐码: --ez on true|false from the app; --es do read for one read now;
+                        // --es do vdtest [--ei task N] [--ei min M] for the hidden display's
+                        // experiment (§6 of 取餐码方案.md); --es do vdoff to put it back. The state
+                        // of both halves is the result either way.
+                        if (i.hasExtra("on")) {
+                            PickupCodeIsland.INSTANCE.setOn(i.getBooleanExtra("on", true));
+                            saveState();
+                        }
+                        // --ez card false draws the island with the system's focus template again,
+                        // which is the way back if ColorOS's card does not come up on this build.
+                        if (i.hasExtra("card")) {
+                            PickupCodeIsland.sCard = i.getBooleanExtra("card", true);
+                            saveState();
+                        }
+                        String doIt = i.getStringExtra("do");
+                        if ("read".equals(doIt)) PickupCodeIsland.INSTANCE.readNow();
+                        if ("vdtest".equals(doIt)) {
+                            int task = i.getIntExtra("task", PickupCodeIsland.INSTANCE.trackedTask());
+                            if (task < 0) setResultData("no task: open the order page first");
+                            else setResultData(PickupPark.INSTANCE.experiment(task,
+                                    i.getIntExtra("min", 5), 0));
+                        } else if ("vdoff".equals(doIt)) {
+                            PickupPark.INSTANCE.releaseFrom("the probe said so", null);
+                            setResultData(PickupPark.INSTANCE.describe());
+                        } else {
+                            setResultData(PickupCodeIsland.INSTANCE.describe()
+                                    + " | " + PickupPark.INSTANCE.describe());
+                        }
+                    } else if ("art".equals(op)) {
+                        // 取餐码卡片的素材。The app asks SystemUI to fetch them, because the two are
+                        // different uids and it is SystemUI that draws the card - the app has nowhere
+                        // to put a file SystemUI could read. --es do fetch starts one; without it the
+                        // answer is only what the last attempt did, which is what a settings row that
+                        // has to offer a download link when it failed needs. The fetch takes a while,
+                        // so it runs off this thread and reports by changing its own state.
+                        setResultData("art=bundled in assets/coloros/pickupcode");
+                    } else if ("cloud".equals(op)) {
+                        // 取餐码的云端名单（OPPO 的 iwisdom，AIFluidWxAppletList）。一次网络往返，
+                        // 不能在 onReceive 里做——那跑在 SystemUI 的主线程上——所以它走 goAsync：
+                        // 收据归这个分支发。
+                        if ("fetch".equals(i.getStringExtra("do"))) {
+                            final PendingResult receipt = goAsync();
+                            async = true;
+                            new Thread(() -> {
+                                String said;
+                                try {
+                                    said = PickupCloud.INSTANCE.fetch(c);
+                                } catch (Throwable t) {
+                                    said = "同步失败：" + t.getClass().getSimpleName();
+                                }
+                                receipt.setResultData(said);
+                                receipt.setResultCode(OP_ACK);
+                                receipt.finish();
+                            }, "mc-pickup-cloud").start();
+                        } else {
+                            setResultData(PickupCloud.INSTANCE.describe());
+                        }
                     } else if ("transitcfg".equals(op)) {
                         // 「高德公交地铁」: --ez on true|false from the app; without it, 高德
                         // asking as it starts (AmapImmerse), and told what it is.
@@ -2961,6 +3029,11 @@ public class Main extends XposedModule {
                                 || LyricSource.hasLyricInfo(sWatched));
                         out.putInt("fpavoid", sFpAvoid);
                         out.putBoolean("transit", AmapTransitScene.sOn);
+                        out.putBoolean("pickup", PickupCodeIsland.sOn);
+                        out.putBoolean("card", PickupCodeIsland.sCard);
+                        // 设置页那行「手动刷新取餐码云端规则」的副标题，和这一份名单有几个小程序。
+                        out.putString("rulesdate", PickupCloud.INSTANCE.stamp(PickupCloud.INSTANCE.getUpdatedAt()));
+                        out.putInt("rulescount", PickupCloud.INSTANCE.count());
                         // Everything the app's preview needs to be to scale. It draws a lock
                         // screen it cannot see, and every one of these is device-specific, so
                         // they are measured here rather than written down twice.
@@ -5326,14 +5399,24 @@ public class Main extends XposedModule {
     }
 
     /**
-     * allowCard gates the media card thumbnail. It is the only source when the player publishes
-     * nothing but an artwork URI, but it lags a track change by a moment - long enough to hand
-     * back the PREVIOUS album - so callers that can afford to wait ask for the session only.
+     * Three sources, most preferred first: the session's own bitmap, the artwork URI it published
+     * (read by ArtUri), and the media card thumbnail.
      *
-     * sessionBits, when passed, is filled in with what the session turned out to be: 1 it
-     * carried a bitmap, 0 it carried none, -1 there was no session to ask. The caller needs the
-     * difference between the last two, because one is a player still filling its bitmap in and
-     * the other is a player that never publishes one - and this is the only place that sees it.
+     * allowCard gates the card. It lags a track change by a moment - long enough to hand back the
+     * PREVIOUS album, or the card's own empty art - so callers that can afford to wait ask for the
+     * session only, and the URI is given its window before the card is let in at all.
+     *
+     * The URI is read only on the push path (sessionBits != null), and only when the session
+     * carried no bitmap of its own. That is the narrow case it exists for: a player that
+     * publishes art as a URL and nothing else - MeiloX, and Bilibili for most of its switches -
+     * had no source here at all, and the card underneath it answered with a black stub often
+     * enough to be the visible bug. A player that does hand over a bitmap is never touched.
+     *
+     * sessionBits, when passed, is filled in with what the session turned out to be: 1 it carried
+     * a bitmap (its own, or the one behind its URI), 0 it carried none but published artwork that
+     * is being read right now, -1 there was no session to ask, -2 it carried no bitmap and no
+     * artwork URI either. The caller needs the last two apart from the rest: 0 is a player still
+     * coming, -2 is one that never will, and this is the only place that sees the difference.
      */
     static Bitmap albumArt(Context ctx, boolean allowCard, int[] sessionBits) {
         if (sessionBits != null) sessionBits[0] = -1;
@@ -5353,13 +5436,45 @@ public class Main extends XposedModule {
                             + md.getString(MediaMetadata.METADATA_KEY_TITLE) + "\"");
                     return b;
                 }
-                if (sessionBits != null) sessionBits[0] = 0;
-                Xp.log(TAG + c.getPackageName() + " carries no art bitmap (uri="
-                        + md.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI) + ")");
+                String uri = artworkUri(md);
+                if (sessionBits != null && uri != null) {
+                    Bitmap got = ArtUri.peek(uri);
+                    if (got != null) {
+                        sessionBits[0] = 1;
+                        Xp.log(TAG + "album art from " + c.getPackageName()
+                                + "'s own artwork URI " + got.getWidth() + "x" + got.getHeight()
+                                + " \"" + md.getString(MediaMetadata.METADATA_KEY_TITLE) + "\"");
+                        return got;
+                    }
+                    ArtUri.warm(uri);
+                    // Held back only while the read is young and the card is not yet allowed -
+                    // which is every try but the last one, and the last one would otherwise push
+                    // nothing at all. Past the window, or once the read has failed, this falls
+                    // through to the card exactly as it did before.
+                    if (ArtUri.waiting(uri) && !allowCard) {
+                        sessionBits[0] = 0;
+                        Xp.log(TAG + c.getPackageName() + " carries no bitmap, reading its artwork"
+                                + " URI (" + uri + ")");
+                        return null;
+                    }
+                }
+                if (sessionBits != null) sessionBits[0] = -2;
+                Xp.log(TAG + c.getPackageName() + " carries no art bitmap (uri=" + uri + ")");
             }
         }
         if (!allowCard) return null;
         return cardThumbnail();
+    }
+
+    /**
+     * The one URI worth reading for this track: the album art's, or - when a player sets only
+     * that - the general artwork's. Not the display icon: that is a notification's icon in most
+     * players here, and a 96px one blown up to a wallpaper is worse than the card's copy.
+     */
+    private static String artworkUri(MediaMetadata md) {
+        String u = md.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI);
+        if (u == null || u.isEmpty()) u = md.getString(MediaMetadata.METADATA_KEY_ART_URI);
+        return u == null || u.isEmpty() ? null : u;
     }
 
     /**

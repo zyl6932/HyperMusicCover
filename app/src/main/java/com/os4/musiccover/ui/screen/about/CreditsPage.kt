@@ -126,12 +126,23 @@ fun CreditsPageContent(
         ),
     )
 
+    val pickupCredits = listOf(
+        // A person's handle, as the two @-entries above: what this module took from them is the
+        // project in the summary, and the row opens it.
+        Credit(
+            "@Maga-King",
+            stringResource(R.string.credits_autopickupisland),
+            "https://github.com/Maga-King/AutoPickupIsland",
+        ),
+    )
+
     // This group leads, so the first name on the page is InstallerX Revived.
-    val groups = remember(uiCredits, lyricCredits, toolCredits) {
+    val groups = remember(uiCredits, lyricCredits, toolCredits, pickupCredits) {
         listOf(
             R.string.credits_group_tools to toolCredits,
             R.string.credits_group_ui to uiCredits,
             R.string.credits_group_lyrics to lyricCredits,
+            R.string.credits_group_pickup to pickupCredits,
         )
     }
 

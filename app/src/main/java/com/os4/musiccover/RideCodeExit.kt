@@ -49,8 +49,8 @@ internal object RideCodeExit {
         "com.nsmetro.shengjingtong/com.nsmetro.shengjingtong.core.home.activity.QrCodeGoTrainActivity",
     )
 
-    /** A station's fare: 「<in> -> <out>：<amount>元」. */
-    private val FARE = Regex(".+ -> .+[：:].*元")
+    /** A station's fare: 「<in> -> <out>：<amount>元」. Only the two stations are passed on. */
+    private val FARE = Regex("(.+) -> (.+)[：:].*元")
 
     private val main = Handler(Looper.getMainLooper())
     private var lastTop: ComponentName? = null
@@ -76,7 +76,11 @@ internal object RideCodeExit {
                 val sbn = chain.args.firstOrNull { it is StatusBarNotification } as? StatusBarNotification
                 if (sbn?.packageName == MI_CARD) {
                     val text = sbn.notification.extras.getCharSequence(Notification.EXTRA_TEXT)
-                    if (text != null && FARE.matches(text)) main.post { tell("card", "card: $text") }
+                    val fare = text?.let { FARE.matchEntire(it) }
+                    if (fare != null) {
+                        val (from, to) = fare.destructured
+                        main.post { tell("card", "card: $from -> $to", from.trim(), to.trim()) }
+                    }
                 }
                 out
             }
@@ -94,14 +98,19 @@ internal object RideCodeExit {
         if (rideCode) tell("code", "ride code: " + top.flattenToShortString())
     }
 
-    /** [how] is `card` (a fare taken, so certainly out) or `code` (a ride code opened). */
-    private fun tell(how: String, why: String) {
+    /**
+     * [how] is `card` (a fare taken, so certainly out; [from] and [to] its gates, for the commute
+     * the trip is learned as) or `code` (a ride code opened).
+     */
+    private fun tell(how: String, why: String, from: String = "", to: String = "") {
         val ctx = Main.appContext() ?: return
         Xp.log(TAG + why)
         runCatching {
             ProbeGuard.send(ctx, Intent(MetroCodeIsland.ACTION_TRIP).setPackage(MetroCodeIsland.PKG)
                 .putExtra("do", "exit")
-                .putExtra("how", how))
+                .putExtra("how", how)
+                .putExtra("from", from)
+                .putExtra("to", to))
         }.onFailure { Xp.log(TAG + "小爱建议 not told: $it") }
         if (!AmapTransitScene.INSTANCE.tripUp()) return
         runCatching {

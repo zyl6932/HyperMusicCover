@@ -87,6 +87,8 @@
     <string name="credits_hle">QQ Music, Kuwo and TTML Hub lyrics, and the song matching rules</string>
     <string name="credits_lsposed">The framework this module runs in</string>
     <string name="credits_installerx">Handing an update to an installer app, hiding the icon, and the dial code</string>
+    <string name="credits_group_pickup">Pickup codes</string>
+    <string name="credits_autopickupisland">The whole pickup-code approach: driving ColorOS\' original PCR plugin, its cloud applet list and its rules, and the brand artwork the card draws (the card\'s layout is the system\'s own)</string>
     <string name="rules_cancel">Cancel</string>
     <string name="tl_compose">Jetpack Compose</string>
     <string name="tl_compose_summary">Apache-2.0</string>
@@ -191,9 +193,17 @@
     <string name="features_shade_summary">Flowing light</string>
     <string name="features_mini_title">Lock screen super island</string>
     <string name="features_mini_summary">Music, notifications and navigation</string>
-    <string name="features_transit_title">Amap bus &amp; subway</string>
-    <string name="features_transit_summary">Stop-by-stop island</string>
-    <string name="transit_enabled">Enable Amap bus &amp; subway</string>
+    <string name="features_transit_title">Proactive intelligence</string>
+    <string name="features_transit_summary">Proactive, thoughtful service~</string>
+    <string name="transit_enabled">Subway trips on the island</string>
+    <string name="commute_title">Subway commute</string>
+    <string name="commute_learn">Learn commutes</string>
+    <string name="commute_learn_summary">Kept on this phone, deleted after 30 days</string>
+    <string name="commute_unreached">XiaoAi Suggestions is not running. Open the minus-one screen once, then come back</string>
+    <string name="commute_route_direct">Direct · %1$d trips</string>
+    <string name="commute_route_via">Change at %1$s · %2$d trips</string>
+    <string name="commute_forget">Forget commutes</string>
+    <string name="commute_forget_summary">%1$d trips kept</string>
 
     <string name="shade_enabled">Enable flowing light</string>
     <string name="shade_section_behaviour">Behaviour</string>
@@ -228,8 +238,6 @@
     <string name="mini_normals_in_stack">Keep ordinary notifications off islands</string>
     <string name="mini_normals_in_stack_summary">Keep messages in the system notification list. Music, navigation and timers still appear as islands. Turn off to include ordinary notifications in islands</string>
     <string name="mini_nav_keep_on">Keep the screen on while navigating</string>
-    <string name="mini_status_at_date">Status after the date</string>
-    <string name="mini_status_at_date_summary">Keeps Do Not Disturb and charging clear of the pill</string>
     <string name="mini_fod_lift">Clear of the fingerprint sensor</string>
     <string name="mini_fod_lift_summary">On phones with a low optical sensor, lifts the pill above it</string>
     <string name="mini_nav_keep_on_summary">While an Amap navigation or transit page is up</string>
@@ -246,4 +254,10 @@
     <string name="demo_transit_alert_title">Transfers and arrival</string>
     <string name="mini_reduce_aod_updates">Reduce content updates in AOD</string>
     <string name="mini_reduce_aod_updates_summary">Update islands only when media or notification state changes. Replace lyrics with album artwork and restore them when the screen wakes.</string>
+    <string name="pickup_title">Pickup code</string>
+    <string name="pickup_cloud_refresh">Refresh pickup cloud rules</string>
+    <string name="pickup_cloud_date">Updated %1$s · %2$d mini programs</string>
+    <string name="pickup_cloud_never">Not synced yet</string>
+    <string name="pickup_cloud_syncing">Syncing…</string>
+    <string name="pickup_enabled">Pickup code on the island</string>
 </resources>

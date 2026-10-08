@@ -1,0 +1,1118 @@
+<?xml version='1.0' encoding='utf-8'?>
+
+<config>
+    <version>20260225</version>
+    <!--辅助功能配置-->
+    <useAccessibility>false</useAccessibility>
+    <useMemoryBreeno>true</useMemoryBreeno>
+    <!--流体云静态自动更新时长 单位 秒 300-->
+    <seeding_update_frequency_time>300</seeding_update_frequency_time>
+    <!--流体云初级等待时间时长 单位 秒 300-->
+    <seeding_min_time>300</seeding_min_time>
+    <!--流体云二级等待时间时长 单位 秒 1200-->
+    <seeding_middle_time>1200</seeding_middle_time>
+    <!--流体云最大等待时间时长 单位 秒 7200-->
+    <seeding_max_time>7200</seeding_max_time>
+    <!--退出白名单界面后无订单状态时长 单位 秒 1800-->
+    <seeding_max_time_unfinish>1800</seeding_max_time_unfinish>
+    <!--退出白名单界面后订单已完成状态时长 单位 秒 300-->
+    <seeding_max_time_finish>0</seeding_max_time_finish>
+    <!--获取到订单时间后，将多久之前的订单视为已完成状态，单位时间 分钟，如果不想使用该特性，可将其配置为-1-->
+    <order_status_finish_time_gap>240</order_status_finish_time_gap>
+
+    <!--引导首页显示时长 一分钟无操作后自动切为胶囊态 单位 毫秒 60000-->
+    <seeding_guide_card_step_origin_time>60000</seeding_guide_card_step_origin_time>
+    <!--引导开启权限提示页面显示时长 无操作后5秒自动切为胶囊态 单位 毫秒 5000-->
+    <seeding_guide_card_step_last_time>5000</seeding_guide_card_step_last_time>
+    <!--引导胶囊显示时长 无操作后5秒自动消失 单位 毫秒 5000-->
+    <seeding_guide_compact_close_time>5000</seeding_guide_compact_close_time>
+    <!--特性9502846 隔离开关, 用于 是否可使用 brandName做模糊匹配-->
+    <use_label_path_change>true</use_label_path_change>
+    <!--是否使用云侧算法，需要注意：使用云侧算法一般需要显示餐品名，端侧一般不用，所以这里可能需要和show_meal_name联动-->
+    <use_remote_ai_plugin>true</use_remote_ai_plugin>
+    <!--对详情页面，端侧失败后是否试用云侧图片算法-->
+    <use_remote_img>false</use_remote_img>
+    <!--云侧图片算法识别到取餐码后是否直接出卡-->
+    <remote_img_send_card>false</remote_img_send_card>
+    <!--启用帮看轮询服务刷新订单状态-->
+    <use_observer>true</use_observer>
+
+    <!-- filter_paths 当前关注的小程序核心Path -->
+    <!-- monitor_activities 当前应用/小程序监听的页面 -->
+    <!-- origin_id 小程序原始ID -->
+    <!-- launch_path 点击卡片冷启的落地页 -->
+    <!-- app_logo 当前应用/小程序图标 -->
+    <!-- base_bg_style 当前卡片左侧杯子/外卖袋砸落动画资源 -->
+    <!-- stickers 当前卡片杯上贴图资源 -->
+    <!-- pickup_btn_color 当前卡片"我已取餐"按钮背景色 -->
+    <!-- pickup_code_color 当前卡片取餐码字体颜色 -->
+    <!-- pickup_btn_icon 当前卡片"我已取餐"按钮图标 -->
+    <!-- card_bg_color 当前卡片背景色 -->
+    <!-- card_bg_alpha 当前卡片背景透明度 -->
+
+    <tea_base_style_config
+        aod_static_common_cold="aod_static_tea_common_cold.webp"
+        aod_static_common_hot="aod_static_tea_common_hot.webp"
+        common_style_cold="base_bg_tea_style_common_cold.webp"
+        common_style_hot="base_bg_tea_style_common_hot.webp">
+        <style keywords="杨枝甘露;芒果;鲜橙;胡萝卜;芒芒" category="tea" drink_temperature="cold" brand="" special="false" aod_static_image="aod_static_tea_orange.webp">base_bg_tea_style_orange.webp</style>
+        <style keywords="草莓;红豆;西瓜;杨梅;莓莓;蔓越莓" category="tea" drink_temperature="cold" brand="" special="false" aod_static_image="aod_static_tea_red.webp">base_bg_tea_style_red.webp</style>
+        <style keywords="青提;抹茶;猕猴桃;牛油果;青柠;青芒;甘蓝;薄荷;黄瓜;青苹果;玉菇;羽衣" category="tea" drink_temperature="cold" brand="" special="false" aod_static_image="aod_static_tea_green.webp">base_bg_tea_style_green.webp</style>
+        <style keywords="柠檬;百香果;百香;凤梨;菠萝" category="tea" drink_temperature="cold" brand="" special="false" aod_static_image="aod_static_tea_yellow.webp">base_bg_tea_style_yellow.webp</style>
+        <style keywords="奶茶" category="tea" drink_temperature="cold" brand="" special="false" aod_static_image="aod_static_tea_milk.webp">base_bg_tea_style_milk.webp</style>
+        <style keywords="蜜桃;桃桃;鲜桃;芭乐" category="tea" drink_temperature="cold" brand="" special="false" aod_static_image="aod_static_tea_peach.webp">base_bg_tea_style_peach.webp</style>
+        <style keywords="葡萄;蓝莓;黑加仑;紫薯;火龙果" category="tea" drink_temperature="cold" brand="" special="false" aod_static_image="aod_static_tea_grap.webp">base_bg_tea_style_grap.webp</style>
+        <style keywords="乌龙;红袍" category="tea" drink_temperature="cold" brand="" special="false" aod_static_image="aod_static_tea_oolong.webp">base_bg_tea_style_oolong.webp</style>
+    </tea_base_style_config>
+
+    <coffee_base_style_config
+        aod_static_common_cold="aod_static_coffee_common_cold.webp"
+        aod_static_common_hot="aod_static_coffee_common_hot.webp"
+        common_style_cold="base_bg_coffee_style_common_cold.webp"
+        common_style_hot="base_bg_coffee_style_common_hot.webp">
+        <style keywords="美式" category="coffee" drink_temperature="cold" brand="" special="false" aod_static_image="aod_static_coffee_common_cold.webp">base_bg_coffee_style_common_cold.webp</style>
+        <style keywords="拿铁;摩卡;生椰" category="coffee" drink_temperature="cold" brand="" special="false" aod_static_image="aod_static_coffee_latte.webp">base_bg_coffee_style_latte.webp</style>
+        <style keywords="馥芮白;焦糖;卡布奇诺" category="coffee" drink_temperature="cold" brand="" special="false" aod_static_image="aod_static_coffee_milk.webp">base_bg_coffee_style_milk.webp</style>
+        <style keywords="星冰乐" category="coffee" drink_temperature="cold" brand="星巴克" special="true" aod_static_image="aod_static_coffee_xingbake_xingbingle.webp">base_bg_coffee_style_xingbake_xingbingle.webp</style>
+        <style keywords="" category="coffee" drink_temperature="normal" brand="星巴克" special="true" aod_static_image="aod_static_coffee_xingbake_hot.webp">base_bg_coffee_style_xingbake_hot.webp</style>
+        <style keywords="" category="coffee" drink_temperature="hot" brand="星巴克" special="true" aod_static_image="aod_static_coffee_xingbake_hot.webp">base_bg_coffee_style_xingbake_hot.webp</style>
+        <style keywords="" category="coffee" drink_temperature="unknown" brand="星巴克" special="true" aod_static_image="aod_static_coffee_xingbake_hot.webp">base_bg_coffee_style_xingbake_hot.webp</style>
+    </coffee_base_style_config>
+    <!--模糊匹配label关键字黑名单-->
+    <black_labels>商城;四喜茶;加盟;合伙;合作;宅急送;助手;店;茶室;茶楼;茶局;茶社;茶境;烘焙坊;空间;中心;门;古茗茶饮永安;天驿古茗;茶餐厅;桃喜茶;米喜茶;歡喜茶檔;用星说 星巴克;星巴克咖啡服务;星巴克香港及澳門;星粉互动星巴克;奈雪生活;奈雪茶院;挪瓦24h健身;沪上阿姨百货;沪上阿姨福利Go;选址;招聘;访客;CoCo高玩电竞;CoCooo;曹市益禾堂外卖点单;效期管理;广州华莱士食品配送有限公司;加入我们;库迪扎依的牧场;小库迪科技;M Stand场牌街区;WeLucky幸运咖啡;来去茶山上;邓氏阿嬷手作点单;梓茶 X 混果汁;混果汁小助理</black_labels>
+
+    <order_prepare_status app_name="麦当劳" detail_activity="com.mcd.order.activity.OrderDetailActivity" process_status="确认中,配餐中,待取餐,已完成"/>
+    <order_prepare_status app_name="喜茶" detail_activity="pages/code/order_detail/index" process_status="门店已接单,制茶中,确认取茶"/>
+    <!--微信小程序定制用此TAG，detail_activity字段填path-->
+    <order_prepare_status_wx app_name="喜茶" detail_activity="pages/code/order_detail/index" process_status="门店已接单,制茶中,确认取茶"/>
+
+    <wx_mini_activity>
+    com.tencent.mm.plugin.appbrand.ui.AppBrandUI;
+    </wx_mini_activity>
+
+    <ali_mini_activity>
+    com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$App01; com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$App02;
+    com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$App03; com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$App04;
+    com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$App05; com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$App06;
+    com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$App07; com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$App08;
+    com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$App09;
+    com.alipay.mobile.nebulax.xriver.activity.XRiverActivity; com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$XRiverLite;
+    com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$XRiverLite1; com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$XRiverLite2;
+    com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$XRiverLite3;  com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$XRiverLite4;
+    com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$XRiverLite5;  com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$XRiverLite6;
+    com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$XRiverLite7;  com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$XRiverLite8;
+    com.alipay.mobile.nebulax.xriver.activity.XRiverActivity$XRiverLite9
+    </ali_mini_activity>
+
+    <webviewname package_name="com.eg.android.AlipayGphone">
+        <item miniVersionCode="3471"><![CDATA[myweb_jar.c4]]></item>
+        <item miniVersionCode="3411"><![CDATA[myweb_jar.t3]]></item>
+    </webviewname>
+
+    <!--小程序-->
+    <scan isWebView="true" category="coffee" label="luckincoffee瑞幸咖啡" package_name="com.tencent.mm">
+        <app_name>瑞幸咖啡</app_name>
+        <brand_name>瑞幸咖啡</brand_name>
+        <filter_paths>
+            <item path="pages/order/detail/detail"  useCloud="true"/>
+            <item path="pages/order/list/list"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            null
+        </black_paths>
+        <tag_ai_app_name>luckin</tag_ai_app_name>
+        <origin_id>gh_fa66ea1664f1</origin_id>
+        <launch_path>pages/order/list/list</launch_path>
+        <app_package>com.lucky.luckyclient</app_package>
+        <app_logo>applogo/ruixing.png</app_logo>
+        <stickers>stickers/ruixing.png</stickers>
+        <pickup_btn_color>#0022AA</pickup_btn_color>
+        <pickup_code_color>#5F7FFF</pickup_code_color>
+        <card_bg_color>#0022AA</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+        <need_waiting_status>true</need_waiting_status>
+        <extract_wx_root_portal>true</extract_wx_root_portal>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="霸王茶姬" package_name="com.tencent.mm">
+        <app_name>霸王茶姬</app_name>
+        <brand_name>霸王茶姬</brand_name>
+        <filter_paths>
+            <item path="subpackages/detail/index"  useCloud="true"/>
+            <item path="pages/order/list/index"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            pages/multi/list-search;pages/multi/list-instore;pages/takefood/index;pages/multi/list;subpackages/confirm/confirm
+        </black_paths>
+        <tag_ai_app_name>kingtea</tag_ai_app_name>
+        <origin_id>gh_e9d25e745aae</origin_id>
+        <launch_path>pages/order/list/index</launch_path>
+        <app_logo>applogo/bawangchaji.png</app_logo>
+        <stickers>stickers/bawangchaji.png</stickers>
+        <pickup_btn_color>#BB9664</pickup_btn_color>
+        <pickup_code_color>#BB9664</pickup_code_color>
+        <card_bg_color>#BB9664</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="古茗茶饮点单" package_name="com.tencent.mm">
+        <app_name>古茗</app_name>
+        <brand_name>古茗</brand_name>
+        <filter_paths>
+            <item path="pages/orderDetail/goodme/index"  useCloud="true"/>
+            <item path="pages/index/index"  useCloud="false"/>
+            <item path="pages/order/index"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            pages/home/home;pages/settle/goodme/index;pages/shopList/index;pages/collaborate-purchase/home/index
+        </black_paths>
+        <tag_ai_app_name>gutea</tag_ai_app_name>
+        <origin_id>gh_c9b69950bccf</origin_id>
+        <launch_path>pages/order/index</launch_path>
+        <app_logo>applogo/guming.png</app_logo>
+        <stickers>stickers/guming.png</stickers>
+        <pickup_btn_color>#000000</pickup_btn_color>
+        <pickup_code_color>#FFFFFF</pickup_code_color>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="coffee" label="星巴克" package_name="com.tencent.mm">
+        <app_name>星巴克咖啡</app_name>
+        <brand_name>星巴克</brand_name>
+        <filter_paths>
+            <item path="shares/mop/pages/orderDetail"  useCloud="true"/>
+            <item path="shares/order/pages/orderDetail/index"  useCloud="true"/>
+            <item path="customized/pages/main/index"  useCloud="false"/>
+            <item path="shares/mop/pages/visitorPayShare"  useCloud="false"/>
+            <item path="shares/mop/pages/mopPayShare"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            shares/mop/pages/friendTake;shares/electronicTicket/pages/index
+        </black_paths>
+        <tag_ai_app_name>starbucks</tag_ai_app_name>
+        <origin_id>gh_4cf4a631a0c9</origin_id>
+        <launch_path>customized/pages/main/index</launch_path>
+        <app_logo>applogo/xingbake.png</app_logo>
+        <stickers>stickers/xingbake.png</stickers>
+        <pickup_btn_color>#00643C</pickup_btn_color>
+        <pickup_code_color>#00B26B</pickup_code_color>
+        <card_bg_color>#00643C</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="coffee" label="MannerCoffee" package_name="com.tencent.mm">
+        <app_name>Manner 咖啡</app_name>
+        <brand_name>Manner</brand_name>
+        <filter_paths>
+            <item path="pages/order/order"  useCloud="true"/>
+            <item path="pages/order-list/order-list"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            pages/pay/pay
+        </black_paths>
+        <tag_ai_app_name>manner</tag_ai_app_name>
+        <origin_id>gh_7de105040ade</origin_id>
+        <launch_path>pages/order-list/order-list</launch_path>
+        <app_logo>applogo/manner.png</app_logo>
+        <stickers>stickers/manner.png</stickers>
+        <pickup_btn_color>#000000</pickup_btn_color>
+        <pickup_code_color>#FFFFFF</pickup_code_color>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <!--蜜雪的finish页面是明确的单独页面，可以考虑单独配置该页面取餐码只用来更新状态，不做上云触发-->
+    <scan isWebView="true" category="tea" label="蜜雪冰城" package_name="com.tencent.mm">
+        <app_name>蜜雪冰城</app_name>
+        <brand_name>蜜雪冰城</brand_name>
+        <filter_paths>
+            <item path="pages/order_detail/take/index"  useCloud="true"/>
+            <item path="pages/order_detail/finish/index"  useCloud="true"/>
+            <item path="pages/index/index"  useCloud="false"/>
+            <item path="pages/mine/index"  useCloud="false"/>
+            <item path="pages/order/index"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            pages/menu/index;pages/activity/joint-order/index
+        </black_paths>
+        <tag_ai_app_name>icecreamtea</tag_ai_app_name>
+        <origin_id>gh_c5110cb8e4ba</origin_id>
+        <launch_path>pages/order/index</launch_path>
+        <app_package>com.mxbc.mxsa</app_package>
+        <app_logo>applogo/mixuebingcheng.png</app_logo>
+        <stickers>stickers/mixuebingcheng.png</stickers>
+        <pickup_btn_color>#DA3C48</pickup_btn_color>
+        <pickup_code_color>#DA3C48</pickup_code_color>
+        <card_bg_color>#DA3C48</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="catering" label="肯德基自助点餐" package_name="com.tencent.mm">
+        <app_name>肯德基</app_name>
+        <brand_name>肯德基</brand_name>
+        <filter_paths>
+            <item path="portals/pages/preOrder/index/index"  useCloud="false"/>
+            <item path="order/kfcOrderDetails/detail/index"  useCloud="true"/>
+            <item path="order/kfcOrderList/index"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            order/kfcOrderDetails/pages/friend-take/index;pin/pin/pages/pin/index
+        </black_paths>
+        <tag_ai_app_name>kfc</tag_ai_app_name>
+        <origin_id>gh_50338e5b8c9d</origin_id>
+        <launch_path>order/kfcOrderList/index</launch_path>
+        <app_package>com.yek.android.kfc.activitys</app_package>
+        <app_logo>applogo/kendeji.png</app_logo>
+        <base_bg_style>base_bg_takeout_style_kendeji.webp</base_bg_style>
+        <aod_static_image>aod_static_takeout_kendeji.webp</aod_static_image>
+        <pickup_btn_color>#E40031</pickup_btn_color>
+        <pickup_code_color>#FC325E</pickup_code_color>
+        <card_bg_color>#E40031</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="catering" label="肯德基+" package_name="com.tencent.mm">
+        <app_name>肯德基</app_name>
+        <brand_name>肯德基</brand_name>
+        <filter_paths>
+            <item path="index/kfcUcenterHomepage/index/index"  useCloud="false"/>
+            <item path="home/pages/kfcNewOrderList/index"  useCloud="false"/>
+            <item path="home/pages/kfcPersonelCenter/index/index"  useCloud="false"/>
+            <item path="order/kfcOrderDetails/detail/index"  useCloud="true"/>
+            <item path="order/kfcOrderList/index"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            order/kfcOrderDetails/pages/friend-take/index;taro/pages/receipt/order/list/index;pin/pin/pages/pin/index
+        </black_paths>
+        <tag_ai_app_name>kfc</tag_ai_app_name>
+        <origin_id>gh_f01f85672b87</origin_id>
+        <launch_path>home/pages/kfcNewOrderList/index</launch_path>
+        <app_package>com.yek.android.kfc.activitys</app_package>
+        <app_logo>applogo/kendeji.png</app_logo>
+        <base_bg_style>base_bg_takeout_style_kendeji.webp</base_bg_style>
+        <aod_static_image>aod_static_takeout_kendeji.webp</aod_static_image>
+        <pickup_btn_color>#E40031</pickup_btn_color>
+        <pickup_code_color>#FC325E</pickup_code_color>
+        <card_bg_color>#E40031</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+
+    <scan isWebView="true" category="tea" label="CoCo点单+" package_name="com.tencent.mm">
+        <app_name>CoCo都可</app_name>
+        <brand_name>CoCo</brand_name>
+        <filter_paths>
+            <item path="app/shop/pages/orderDetail/index"  useCloud="true"/>
+            <item path="app/main/newOrders/index"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>coco</tag_ai_app_name>
+        <origin_id>gh_276bfaaaa096</origin_id>
+        <launch_path>app/main/newOrders/index</launch_path>
+        <app_logo>applogo/coco.png</app_logo>
+        <stickers>stickers/coco.png</stickers>
+        <pickup_btn_color>#EE7D1F</pickup_btn_color>
+        <pickup_code_color>#EE7D1F</pickup_code_color>
+        <card_bg_color>#EE7D1F</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="益禾堂手机点单" package_name="com.tencent.mm">
+        <app_name>益禾堂</app_name>
+        <brand_name>益禾堂</brand_name>
+        <filter_paths>
+            <item path="subpackages/detail/index"  useCloud="true"/>
+            <item path="pages/order/list/index"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            subpackages/confirm/confirm
+        </black_paths>
+        <tag_ai_app_name>yhttea</tag_ai_app_name>
+        <origin_id>gh_79aafff9edb7</origin_id>
+        <launch_path>pages/order/list/index</launch_path>
+        <app_logo>applogo/yihetang.png</app_logo>
+        <stickers>stickers/yihetang.png</stickers>
+        <pickup_btn_color>#0F9072</pickup_btn_color>
+        <pickup_code_color>#0F9072</pickup_code_color>
+        <card_bg_color>#0F9072</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="1点点alittleTea+" package_name="com.tencent.mm">
+        <app_name>1点点</app_name>
+        <brand_name>1点点</brand_name>
+        <filter_paths>
+            <item path="pages/order/fetch"  useCloud="false"/>
+            <item path="pages/order/forthwith_order_details"  useCloud="true"/>
+        </filter_paths>
+        <black_paths>
+            storeMap/pages/map;pages/commodity/goods;pages/order/place_order;pages/order/takeout_order_details;activity/pages/commandCoupon/page
+        </black_paths>
+        <tag_ai_app_name>alittle</tag_ai_app_name>
+        <origin_id>gh_9558bbe0a605</origin_id>
+        <launch_path>pages/order/order_list</launch_path>
+        <app_logo>applogo/yidiandian.png</app_logo>
+        <stickers>stickers/yidiandian.png</stickers>
+        <pickup_btn_color>#0F9072</pickup_btn_color>
+        <pickup_code_color>#0F9072</pickup_code_color>
+        <card_bg_color>#0F9072</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="书亦烧仙草点单+" package_name="com.tencent.mm">
+        <app_name>书亦烧仙草</app_name>
+        <brand_name>书亦烧仙草</brand_name>
+        <filter_paths>
+            <item path="orderPlus/pages/order/detail/index"  useCloud="true"/>
+            <item path="pages/order/index/index"  useCloud="false"/>
+            <item path="pages/home/index"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>sytea</tag_ai_app_name>
+        <origin_id>gh_9364522474d9</origin_id>
+        <launch_path>pages/order/index/index</launch_path>
+        <app_logo>applogo/shuyishaoxiancao.png</app_logo>
+        <stickers>stickers/shuyishaoxiancao.png</stickers>
+        <pickup_btn_color>#DA3C48</pickup_btn_color>
+        <pickup_code_color>#DA3C48</pickup_code_color>
+        <card_bg_color>#DA3C48</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="甜啦啦" package_name="com.tencent.mm">
+        <app_name>甜啦啦</app_name>
+        <brand_name>甜啦啦</brand_name>
+        <filter_paths>
+            <item path="pages/subpackage/orderDetail/index"  useCloud="true"/>
+            <item path="pages/tabBar/order/index"  useCloud="false"/>
+            <item path="mainFlow/pages/order/detail/index"  useCloud="true"/>
+            <item path="pages/order/index/index"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>sweety</tag_ai_app_name>
+        <origin_id>gh_829483a671fa</origin_id>
+        <launch_path>pages/order/index/index</launch_path>
+        <app_logo>applogo/tianlala.png</app_logo>
+        <stickers>stickers/tianlala.png</stickers>
+        <pickup_btn_color>#F8DC4A</pickup_btn_color>
+        <pickup_code_color>#F8DC4A</pickup_code_color>
+        <card_bg_color>#F8DC4A</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="coffee" label="M Stand" package_name="com.tencent.mm">
+        <app_name>M Stand 咖啡</app_name>
+        <brand_name>M Stand</brand_name>
+        <filter_paths>
+            <item path="order/pages/preFoodsCurOrder/index"  useCloud="true"/>
+            <item path="pages/mine/mine"  useCloud="false"/>
+            <item path="mine/pages/orderCenter/index"  useCloud="false"/>
+            <item path="order/pages/foodsCurOrder/index"  useCloud="true"/>
+        </filter_paths>
+        <black_paths>
+            order/pages/foodsHistoryOrder/index
+        </black_paths>
+        <tag_ai_app_name>MStand</tag_ai_app_name>
+        <origin_id>gh_9b900ade05f7</origin_id>
+        <launch_path>mine/pages/orderCenter/index</launch_path>
+        <app_logo>applogo/mstand.png</app_logo>
+        <stickers>stickers/mstand.png</stickers>
+        <pickup_btn_color>#000000</pickup_btn_color>
+        <pickup_code_color>#FFFFFF</pickup_code_color>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="coffee" label="COSTA咖世家咖啡" package_name="com.tencent.mm">
+        <app_name>COSTA 咖啡</app_name>
+        <brand_name>COSTA</brand_name>
+        <filter_paths>
+            <item path="pages/index/store_order/store_order"  useCloud="false"/>
+            <item path="pages/mine/code/code"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>costa</tag_ai_app_name>
+        <origin_id>gh_5d597e32743e</origin_id>
+        <launch_path>pages/mine/order/order</launch_path>
+        <app_logo>applogo/costa.png</app_logo>
+        <stickers>stickers/costa.png</stickers>
+        <pickup_btn_color>#721834</pickup_btn_color>
+        <pickup_code_color>#CC2B5D</pickup_code_color>
+        <card_bg_color>#721834</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="茶百道饮品点单" package_name="com.tencent.mm">
+        <app_name>茶百道</app_name>
+        <brand_name>茶百道</brand_name>
+        <filter_paths>
+            <item path="packages/order/orderDetail/index"  useCloud="true"/>
+            <item path="pages/order/index"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            packages/basic/store/index;packages/order/confirmOrder/index;pages/menu/index
+        </black_paths>
+        <tag_ai_app_name>cbdtea</tag_ai_app_name>
+        <origin_id>gh_d22cf66fc005</origin_id>
+        <launch_path>pages/order/index</launch_path>
+        <app_logo>applogo/chabaidao.png</app_logo>
+        <stickers>stickers/chabaidao.png</stickers>
+        <pickup_btn_color>#3259A8</pickup_btn_color>
+        <pickup_code_color>#487EF0</pickup_code_color>
+        <card_bg_color>#0A4ACF</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="coffee" label="Cotti Coffee 库迪咖啡" package_name="com.tencent.mm">
+        <app_name>库迪咖啡</app_name>
+        <brand_name>库迪</brand_name>
+        <filter_paths>
+            <item path="packages/order/order-detail/index"  useCloud="true"/>
+            <item path="pages/order/index"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            packages/order/survey-list-page/index;pages/purchase/index
+        </black_paths>
+        <tag_ai_app_name>cotti</tag_ai_app_name>
+        <origin_id>gh_e0f5951e0d87</origin_id>
+        <launch_path>pages/order/index</launch_path>
+        <app_logo>applogo/kudi.png</app_logo>
+        <stickers>stickers/kudi.png</stickers>
+        <pickup_btn_color>#A32439</pickup_btn_color>
+        <pickup_code_color>#CC2B5D</pickup_code_color>
+        <card_bg_color>#A32439</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="catering" label="麦当劳" package_name="com.tencent.mm">
+        <app_name>麦当劳</app_name>
+        <brand_name>麦当劳</brand_name>
+        <filter_paths>
+            <item path="order/pages/detail/index"  useCloud="true"/>
+            <item path="pages/orderList/list"  useCloud="false"/>
+            <item path="pages/home/index"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>mcdonald</tag_ai_app_name>
+        <origin_id>gh_f1f7cebb53a3</origin_id>
+        <launch_path>pages/orderList/list</launch_path>
+        <app_package>com.mcdonalds.gma.cn</app_package>
+        <app_logo>applogo/maidanglao.png</app_logo>
+        <base_bg_style>base_bg_takeout_style_maidanglao.webp</base_bg_style>
+        <aod_static_image>aod_static_takeout_maidanglao.webp</aod_static_image>
+        <pickup_btn_color>#FFBC0D</pickup_btn_color>
+        <pickup_code_color>#FFBC0D</pickup_code_color>
+        <card_bg_color>#E99610</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="喜茶GO" package_name="com.tencent.mm">
+        <app_name>喜茶</app_name>
+        <brand_name>喜茶</brand_name>
+        <!--filter_paths修改需要同步喜茶GOAPP的配置-->
+        <filter_paths>
+            <item path="pages/code/order_detail/index"  useCloud="true"/>
+            <item path="pages/home/home"  useCloud="false"/>
+            <item path="pages/my/index"  useCloud="false"/>
+            <item path="pages/code/code"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            null;subPlugins/__plugin__/wxae5e29812005203f/pages/chat/chat
+        </black_paths>
+        <origin_id>gh_afe6acb517f0</origin_id>
+        <launch_path>pages/code/code</launch_path>
+        <app_package>com.heyteago</app_package>
+        <tag_ai_app_name>heytea</tag_ai_app_name>
+        <app_logo>applogo/xicha.png</app_logo>
+        <stickers>stickers/xicha.png</stickers>
+        <pickup_btn_color>#000000</pickup_btn_color>
+        <pickup_code_color>#FFFFFF</pickup_code_color>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="奈雪点单" package_name="com.tencent.mm">
+        <app_name>奈雪的茶</app_name>
+        <brand_name>奈雪</brand_name>
+        <filter_paths>
+            <item path="pages/order/orderList/orderList"  useCloud="false"/>
+            <item path="pages/index/index"  useCloud="false"/>
+            <item path="pages/takeMeals/index"  useCloud="true"/>
+        </filter_paths>
+        <black_paths>
+            pkgOrder/pages/orderSubmit/orderSubmit
+        </black_paths>
+        <tag_ai_app_name>naixue</tag_ai_app_name>
+        <origin_id>gh_b3436b600b3f</origin_id>
+        <launch_path>pages/order/orderList/orderList</launch_path>
+        <app_logo>applogo/naixue.png</app_logo>
+        <stickers>stickers/naixue.png</stickers>
+        <pickup_btn_color>#9DC71C</pickup_btn_color>
+        <pickup_code_color>#9DC71C</pickup_code_color>
+        <card_bg_color>#9DC71C</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="catering" label="华莱士自助点餐" package_name="com.tencent.mm">
+        <app_name>华莱士</app_name>
+        <brand_name>华莱士</brand_name>
+        <filter_paths>
+            <item path="pagesOrder/payorder/payOrderItem/index"  useCloud="true"/>
+            <item path="pages/index/index"  useCloud="false"/>
+            <item path="pagesOrder/orderPayResult/index"  useCloud="true"/>
+        </filter_paths>
+        <tag_ai_app_name>wallace</tag_ai_app_name>
+        <origin_id>gh_ba5b2c9efdbf</origin_id>
+        <launch_path>pagesOrder/payorder/payOrderList/index</launch_path>
+        <app_logo>applogo/hualaishi.png</app_logo>
+        <base_bg_style>base_bg_takeout_style_common.webp</base_bg_style>
+        <aod_static_image>aod_static_takeout_common.webp</aod_static_image>
+        <pickup_btn_color>#E40031</pickup_btn_color>
+        <pickup_code_color>#FC325E</pickup_code_color>
+        <card_bg_color>#E40031</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="沪上阿姨点单" package_name="com.tencent.mm">
+        <app_name>沪上阿姨</app_name>
+        <brand_name>沪上阿姨</brand_name>
+        <filter_paths>
+            <item path="subpackages/detail/index"  useCloud="true"/>
+            <item path="pages/order/list/index"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            subpackages/confirm/confirm
+        </black_paths>
+        <tag_ai_app_name>aunttea</tag_ai_app_name>
+        <origin_id>gh_6613a6cac7ea</origin_id>
+        <launch_path>pages/order/list/index</launch_path>
+        <app_logo>applogo/hushangayi.png</app_logo>
+        <stickers>stickers/hushangayi.png</stickers>
+        <pickup_btn_color>#F27106</pickup_btn_color>
+        <pickup_code_color>#F27106</pickup_code_color>
+        <card_bg_color>#F27106</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="去茶山" package_name="com.tencent.mm">
+        <app_name>去茶山</app_name>
+        <brand_name>去茶山</brand_name>
+        <filter_paths>
+            <item path="subpackages/detail/index"  useCloud="true"/>
+            <item path="pages/order/list/index"  useCloud="false"/>
+            <item path="pages/index/index" useCloud="false" />
+        </filter_paths>
+        <black_paths>
+            subpackages/confirm/confirm
+        </black_paths>
+        <tag_ai_app_name>quchashan</tag_ai_app_name>
+        <origin_id>gh_f8ef8703aff3</origin_id>
+        <launch_path>pages/order/list/index</launch_path>
+        <app_logo>applogo/quchashan.png</app_logo>
+        <stickers>stickers/quchashan.png</stickers>
+        <pickup_btn_color>#E3BA38</pickup_btn_color>
+        <pickup_code_color>#F4CB4B</pickup_code_color>
+        <card_bg_color>#F4CB4B</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="coffee" label="KUDDO COFFEE" package_name="com.tencent.mm">
+        <app_name>KUDDO</app_name>
+        <brand_name>KUDDO</brand_name>
+        <filter_paths>
+            <item path="pages/pay-success/pay-success"  useCloud="false"/>
+            <item path="pages/vip-home/vip-home"  useCloud="false"/>
+            <item path="pages/vip-order-list/vip-order-list"  useCloud="false"/>
+            <item path="member/vip-order-detail/vip-order-detail"  useCloud="true"/>
+            <item path="backup/vip-order-list/vip-order-list"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>kuddocoffee</tag_ai_app_name>
+        <origin_id>gh_15e57f60db9d</origin_id>
+        <launch_path>pages/vip-order-list/vip-order-list</launch_path>
+        <app_logo>applogo/kuddocoffee.png</app_logo>
+        <stickers>stickers/kuddocoffee.png</stickers>
+        <pickup_btn_color>#7B7C5C</pickup_btn_color>
+        <pickup_code_color>#A2A376</pickup_code_color>
+        <card_bg_color>#7B7C5C</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="阿嬷手作点单" package_name="com.tencent.mm">
+        <app_name>阿嬷手作</app_name>
+        <brand_name>阿嬷手作</brand_name>
+        <filter_paths>
+            <item path="subpackages/detail/index"  useCloud="true"/>
+            <item path="pages/index/index"  useCloud="false"/>
+            <item path="pages/order/list/index"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            pages/multi/list;pages/multi/list-instore;subpackages/confirm/confirm
+        </black_paths>
+        <tag_ai_app_name>amotea</tag_ai_app_name>
+        <origin_id>gh_8d8aed60a2fa</origin_id>
+        <launch_path>pages/order/list/index</launch_path>
+        <app_logo>applogo/amoshouzuo.png</app_logo>
+        <stickers>stickers/amoshouzuo.png</stickers>
+        <pickup_btn_color>#BEA386</pickup_btn_color>
+        <pickup_code_color>#BEA386</pickup_code_color>
+        <card_bg_color>#BEA386</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="coffee" label="Peets皮爷咖啡" package_name="com.tencent.mm">
+        <app_name>Peets</app_name>
+        <brand_name>Peets</brand_name>
+        <filter_paths>
+            <item path="pages/order/index/index"  useCloud="false"/>
+            <item path="mainFlow/pages/order/detail/index"  useCloud="true"/>
+            <item path="pages/home/index" useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>peetscoffee</tag_ai_app_name>
+        <origin_id>gh_5109abadda6e</origin_id>
+        <launch_path>pages/order/index/index</launch_path>
+        <app_logo>applogo/peetscoffee.png</app_logo>
+        <stickers>stickers/peetscoffee.png</stickers>
+        <pickup_btn_color>#CDAA72</pickup_btn_color>
+        <pickup_code_color>#CDAA72</pickup_code_color>
+        <card_bg_color>#CDAA72</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="混果汁" package_name="com.tencent.mm">
+        <app_name>混果汁</app_name>
+        <brand_name>混果汁</brand_name>
+        <filter_paths>
+            <item path="subpackages/detail/index"  useCloud="true"/>
+            <item path="pages/order/list/index"  useCloud="false"/>
+            <item path="pages/multi/list-instore"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            subpackages/confirm/confirm
+        </black_paths>
+        <tag_ai_app_name>hunjuice</tag_ai_app_name>
+        <origin_id>gh_dcc9f454261f</origin_id>
+        <launch_path>pages/order/list/index</launch_path>
+        <app_logo>applogo/hunguozhi.png</app_logo>
+        <stickers>stickers/hunguozhi.png</stickers>
+        <pickup_btn_color>#000000</pickup_btn_color>
+        <pickup_code_color>#FFFFFF</pickup_code_color>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="coffee" label="KONOMI COFFEE" package_name="com.tencent.mm">
+        <app_name>KONOMI</app_name>
+        <brand_name>KONOMI</brand_name>
+        <filter_paths>
+            <item path="pages/pay-success/pay-success"  useCloud="false"/>
+            <item path="pages/vip-index/vip-index"  useCloud="false"/>
+            <item path="pages/vip-order-list/vip-order-list"  useCloud="false"/>
+            <item path="member/vip-order-detail/vip-order-detail"  useCloud="true"/>
+        </filter_paths>
+        <tag_ai_app_name>konomicoffee</tag_ai_app_name>
+        <origin_id>gh_d9e05fe94765</origin_id>
+        <launch_path>pages/vip-order-list/vip-order-list</launch_path>
+        <app_logo>applogo/konomicoffee.png</app_logo>
+        <stickers>stickers/konomicoffee.png</stickers>
+        <pickup_btn_color>#BE8D48</pickup_btn_color>
+        <pickup_code_color>#BE8D48</pickup_code_color>
+        <card_bg_color>#BE8D48</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="丘大叔柠檬茶" package_name="com.tencent.mm">
+        <app_name>丘大叔</app_name>
+        <brand_name>丘大叔</brand_name>
+        <filter_paths>
+            <item path="subpackages/detail/index"  useCloud="true"/>
+            <item path="pages/order/list/index"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>uncleqiu</tag_ai_app_name>
+        <origin_id>gh_3aef3c66a821</origin_id>
+        <launch_path>pages/order/list/index</launch_path>
+        <app_logo>applogo/qiudashu.png</app_logo>
+        <stickers>stickers/qiudashu.png</stickers>
+        <pickup_btn_color>#4C653D</pickup_btn_color>
+        <pickup_code_color>#77D93D</pickup_code_color>
+        <card_bg_color>#4C653D</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <!--pages/order_detail/finish/index是明确完成页面-->
+    <scan isWebView="true" category="coffee" label="幸运咖LuckyCup" package_name="com.tencent.mm">
+        <app_name>幸运咖</app_name>
+        <brand_name>幸运咖</brand_name>
+        <filter_paths>
+            <item path="pages/order_detail/take/index"  useCloud="true"/>
+            <item path="pages/order/index"  useCloud="false"/>
+            <item path="pages/order_detail/finish/index"  useCloud="true"/>
+        </filter_paths>
+        <tag_ai_app_name>lucky</tag_ai_app_name>
+        <origin_id>gh_b1b969c92f2a</origin_id>
+        <launch_path>pages/order/index</launch_path>
+        <app_logo>applogo/xingyunka.png</app_logo>
+        <stickers>stickers/xingyunka.png</stickers>
+        <pickup_btn_color>#DA3C48</pickup_btn_color>
+        <pickup_code_color>#DA3C48</pickup_code_color>
+        <card_bg_color>#DA3C48</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="coffee" label="NOWWA挪瓦咖啡" package_name="com.tencent.mm">
+        <app_name>NOWWA咖啡</app_name>
+        <brand_name>挪瓦</brand_name>
+        <filter_paths>
+            <item path="subpackages/detail/index"  useCloud="true"/>
+            <item path="pages/order/list/index"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>nowwa</tag_ai_app_name>
+        <origin_id>gh_ba2b35e8973e</origin_id>
+        <launch_path>pages/order/list/index</launch_path>
+        <app_logo>applogo/nuowa.png</app_logo>
+        <stickers>stickers/nuowa.png</stickers>
+        <pickup_btn_color>#F18522</pickup_btn_color>
+        <pickup_code_color>#F18522</pickup_code_color>
+        <card_bg_color>#F18522</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="coffee" label="太平洋咖啡会员" package_name="com.tencent.mm">
+        <app_name>太平洋咖啡</app_name>
+        <brand_name>太平洋咖啡</brand_name>
+        <filter_paths>
+            <item path="packageOrdering/pages/orderDetail/orderDetail"  useCloud="true"/>
+            <item path="pages/start/start"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>pacific</tag_ai_app_name>
+        <origin_id>gh_e6d5337aec30</origin_id>
+        <launch_path>pages/start/start</launch_path>
+        <app_package>cn.com.pacificcoffee</app_package>
+        <app_logo>applogo/taipingyang.png</app_logo>
+        <stickers>stickers/taipingyang.png</stickers>
+        <pickup_btn_color>#B41929</pickup_btn_color>
+        <pickup_code_color>#E01F33</pickup_code_color>
+        <card_bg_color>#B41929</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <!-- List expansion -->
+    <scan isWebView="true" category="catering" label="塔斯汀+" package_name="com.tencent.mm">
+        <app_name>塔斯汀</app_name>
+        <brand_name>塔斯汀</brand_name>
+        <filter_paths>
+            <item path="subpackages/order/pages/order/index"  useCloud="true"/>
+            <item path="subpackages/order/pages/order-list/index"  useCloud="false"/>
+            <item path="pages/index/index"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>tustin</tag_ai_app_name>
+        <origin_id>gh_0dd6520e7b96</origin_id>
+        <launch_path>subpackages/order/pages/order-list/index</launch_path>
+        <app_logo>applogo/tustin.png</app_logo>
+        <base_bg_style>base_bg_takeout_style_tustin.webp</base_bg_style>
+        <aod_static_image>aod_static_takeout_tustin.webp</aod_static_image>
+        <pickup_btn_color>#E40031</pickup_btn_color>
+        <pickup_code_color>#FC325E</pickup_code_color>
+        <card_bg_color>#E40031</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="爷爷不泡茶" package_name="com.tencent.mm">
+        <app_name>爷爷不泡茶</app_name>
+        <brand_name>爷爷不泡茶</brand_name>
+        <filter_paths>
+            <item path="subpackages/detail/index"  useCloud="true"/>
+            <item path="pages/order/list/index"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>notea</tag_ai_app_name>
+        <origin_id>gh_9e2dbe88a92b</origin_id>
+        <launch_path>pages/order/list/index</launch_path>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="catering" label="正新鸡排点餐" package_name="com.tencent.mm">
+        <app_name>正新鸡排</app_name>
+        <brand_name>正新鸡排</brand_name>
+        <filter_paths>
+            <item path="pages/packageOrderSystem/pages/orderDetail/orderDetail"  useCloud="true"/>
+            <item path="pages/packageOrderSystem/pages/orderList/orderList"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>zxchicken</tag_ai_app_name>
+        <origin_id>gh_895373cd0690</origin_id>
+        <launch_path>pages/packageOrderSystem/pages/orderList/orderList</launch_path>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="茉莉奶白" package_name="com.tencent.mm">
+        <app_name>茉莉奶白</app_name>
+        <brand_name>茉莉奶白</brand_name>
+        <filter_paths>
+            <item path="subpackages/detail/index"  useCloud="true"/>
+            <item path="pages/order/list/index"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>jasminemilkwhite</tag_ai_app_name>
+        <origin_id>gh_9b7f71ecdd28</origin_id>
+        <launch_path>pages/order/list/index</launch_path>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="catering" label="0090汉堡工厂+" package_name="com.tencent.mm">
+        <app_name>0090汉堡工厂</app_name>
+        <brand_name>0090汉堡工厂</brand_name>
+        <filter_paths>
+            <item path="pages/OrderDetail/OrderDetail"  useCloud="true"/>
+            <item path="pages/order/order"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>0090hamburger</tag_ai_app_name>
+        <origin_id>gh_fcbf244e0a1a</origin_id>
+        <launch_path>pages/order/order</launch_path>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="catering" label="德克士" package_name="com.tencent.mm">
+        <app_name>德克士</app_name>
+        <brand_name>德克士</brand_name>
+        <filter_paths>
+            <item path="subPackage/orderDetail/index"  useCloud="true"/>
+            <item path="pages/myOrder/index"  useCloud="false"/>
+        </filter_paths>
+        <tag_ai_app_name>dicos</tag_ai_app_name>
+        <origin_id>gh_ee14bb8b65db</origin_id>
+        <launch_path>pages/myOrder/index</launch_path>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <!--支付宝小程序-->
+    <scan isWebView="true" category="catering" label="麦当劳" package_name="com.eg.android.AlipayGphone">
+        <app_name>麦当劳</app_name>
+        <brand_name>麦当劳</brand_name>
+        <filter_paths>
+            <item path="pages/home/index"  useCloud="false"/>
+            <item path="pages/orderList/list"  useCloud="false"/>
+            <item path="order/pages/detail/index"  useCloud="true"/>
+        </filter_paths>
+        <tag_ai_app_name>mcdonald</tag_ai_app_name>
+        <origin_id>2017090708602953</origin_id>
+        <launch_path>pages/orderList/list</launch_path>
+        <app_package>com.mcdonalds.gma.cn</app_package>
+        <app_logo>applogo/maidanglao.png</app_logo>
+        <base_bg_style>base_bg_takeout_style_maidanglao.webp</base_bg_style>
+        <aod_static_image>aod_static_takeout_maidanglao.webp</aod_static_image>
+        <pickup_btn_color>#FFBC0D</pickup_btn_color>
+        <pickup_code_color>#FFBC0D</pickup_code_color>
+        <card_bg_color>#E99610</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="catering" label="肯德基+" package_name="com.eg.android.AlipayGphone">
+        <app_name>肯德基</app_name>
+        <brand_name>肯德基</brand_name>
+        <filter_paths>
+            <item path="home/kfcUcenterHomepage/index/index"  useCloud="false"/>
+            <item path="home/pages/kfcNewOrderList/index"  useCloud="false"/>
+            <item path="home/pages/kfcPersonelCenter/index/index"  useCloud="false"/>
+            <item path="order/kfcOrderDetails/detail/index"  useCloud="true"/>
+        </filter_paths>
+        <black_paths>
+            taro/pages/receipt/order/list/index
+        </black_paths>
+        <tag_ai_app_name>kfc</tag_ai_app_name>
+        <origin_id>2021002103626854</origin_id>
+        <launch_path>home/pages/kfcNewOrderList/index</launch_path>
+        <app_package>com.yek.android.kfc.activitys</app_package>
+        <app_logo>applogo/kendeji.png</app_logo>
+        <base_bg_style>base_bg_takeout_style_kendeji.webp</base_bg_style>
+        <aod_static_image>aod_static_takeout_kendeji.webp</aod_static_image>
+        <pickup_btn_color>#E40031</pickup_btn_color>
+        <pickup_code_color>#FC325E</pickup_code_color>
+        <card_bg_color>#E40031</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <scan isWebView="true" category="tea" label="霸王茶姬+" package_name="com.eg.android.AlipayGphone">
+        <app_name>霸王茶姬</app_name>
+        <brand_name>霸王茶姬</brand_name>
+        <filter_paths>
+            <item path="subpackages/detail/index"  useCloud="true"/>
+            <item path="pages/order/list/index"  useCloud="false"/>
+        </filter_paths>
+        <black_paths>
+            subpackages/confirm/confirm;pages/multi/list-instore
+        </black_paths>
+        <tag_ai_app_name>kingtea</tag_ai_app_name>
+        <origin_id>2021002162629140</origin_id>
+        <launch_path>pages/order/list/index</launch_path>
+        <app_logo>applogo/bawangchaji.png</app_logo>
+        <stickers>stickers/bawangchaji.png</stickers>
+        <pickup_btn_color>#BB9664</pickup_btn_color>
+        <pickup_code_color>#BB9664</pickup_code_color>
+        <card_bg_color>#BB9664</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <!--应用-->
+    <!--瑞幸咖啡-->
+    <scan isWebView="false" category="coffee" package_name="com.lucky.luckyclient">
+        <app_name>瑞幸咖啡</app_name>
+        <monitor_activities>
+            <item ac="com.lucky.luckyclient.order.takecode.TakeCodeActivity"  ignoreVis="false" useCloud="false"/>
+            <item ac="com.lucky.luckyclient.order.detail.OrderDetailActivity" ignoreVis="true" useCloud="true"/>
+            <item ac="com.lucky.luckyclient.order.mineorder.MineOrderActivity"  ignoreVis="false" useCloud="false"/>
+            <item ac="com.luckin.lkb.engine.EngineActivity" ignoreVis="true" useCloud="false"/>
+        </monitor_activities>
+        <black_paths>
+            com.luckin.commclient.share.ShareConfirmDialogActivity;com.lucky.luckincoffee.comm.social.wx.share.ShareConfirmDialogActivity
+        </black_paths>
+        <tag_ai_app_name>luckin</tag_ai_app_name>
+        <launch_path>com.lucky.luckincoffee.MainActivity</launch_path>
+        <app_logo>applogo/ruixing.png</app_logo>
+        <stickers>stickers/ruixing.png</stickers>
+        <pickup_btn_color>#0022AA</pickup_btn_color>
+        <pickup_code_color>#5F7FFF</pickup_code_color>
+        <card_bg_color>#0022AA</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+        <need_waiting_status>true</need_waiting_status>
+    </scan>
+
+    <!--喜茶GO-->
+    <scan isWebView="true" category="tea" package_name="com.heyteago">
+        <app_name>喜茶</app_name>
+        <filter_paths>
+            <item path="pages/code/order_detail/index"  useCloud="true"/>
+            <item path="pages/home/home"  useCloud="false"/>
+            <item path="pages/my/index"  useCloud="false"/>
+            <item path="pages/code/code"  useCloud="false"/>
+        </filter_paths>
+        <monitor_activities>
+            <item ac="com.tencent.luggage.wxa.SaaA.app.SaaAContainerActivity0"  ignoreVis="false" useCloud="false"/>
+            <item ac="com.tencent.luggage.wxa.standalone_open_runtime.container.WxaContainerActivity0"  ignoreVis="false" useCloud="false"/>
+        </monitor_activities>
+        <tag_ai_app_name>heytea</tag_ai_app_name>
+        <app_logo>applogo/xicha.png</app_logo>
+        <stickers>stickers/xicha.png</stickers>
+        <pickup_btn_color>#000000</pickup_btn_color>
+        <pickup_code_color>#FFFFFF</pickup_code_color>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <!--蜜雪冰城-->
+    <!--OrderFinishActivity也是明确的完成页面-->
+    <scan isWebView="false" category="tea" package_name="com.mxbc.mxsa">
+        <app_name>蜜雪冰城</app_name>
+        <monitor_activities>
+            <item ac="com.mxbc.mxsa.modules.order.status.wait.OrderWaitTakeAwayActivity"  ignoreVis="true" useCloud="true"/>
+            <item ac="com.mxbc.mxsa.modules.order.status.finish.OrderFinishActivity"  ignoreVis="true" useCloud="true"/>
+            <item ac="com.mxbc.mxsa.modules.main.MainActivity"  ignoreVis="false" useCloud="false"/>
+        </monitor_activities>
+        <black_paths>
+            com.mxbc.mxsa.modules.webview.WebViewActivity
+        </black_paths>
+        <tag_ai_app_name>icecreamtea</tag_ai_app_name>
+        <launch_path>com.mxbc.mxsa.modules.main.MainActivity</launch_path>
+        <app_logo>applogo/mixuebingcheng.png</app_logo>
+        <stickers>stickers/mixuebingcheng.png</stickers>
+        <pickup_btn_color>#DA3C48</pickup_btn_color>
+        <pickup_code_color>#DA3C48</pickup_code_color>
+        <card_bg_color>#DA3C48</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>true</show_meal_name>
+    </scan>
+
+    <!--肯德基-->
+    <scan isWebView="false" category="catering" package_name="com.yek.android.kfc.activitys">
+        <app_name>肯德基</app_name>
+        <monitor_activities>
+            <item ac="com.yumc.android.kfc.kfcreactcontainer.brandcontainer.React2Activity"  ignoreVis="true" useCloud="false"/>
+            <item ac="com.yum.android.superkfc.ui.v5.HomeV5Activity"  ignoreVis="false" useCloud="false"/>
+            <item ac="com.yum.android.superkfc.ui.portal.activity.MainActivity"  ignoreVis="false" useCloud="false"/>
+            <item ac="com.yumc.android.kfc.kfcreactcontainer.brandcontainer.React1Activity"  ignoreVis="true" useCloud="false"/>
+            <item ac="com.yumc.android.kfc.kfcreactcontainer.brandcontainer.React3Activity"  ignoreVis="true" useCloud="false"/>
+            <item ac="com.yumc.android.kfc.kfcreactcontainer.brandcontainer.React4Activity"  ignoreVis="true" useCloud="false"/>
+            <item ac="com.yumc.android.kfc.kfcreactcontainer.brandcontainer.React5Activity"  ignoreVis="true" useCloud="false"/>
+            <item ac="com.yumc.android.kfc.kfcreactcontainer.brandcontainer.React6Activity"  ignoreVis="true" useCloud="false"/>
+            <item ac="com.yumc.android.kfc.kfcreactcontainer.brandcontainer.React7Activity"  ignoreVis="true" useCloud="false"/>
+            <item ac="com.yumc.android.kfc.kfcreactcontainer.brandcontainer.React8Activity"  ignoreVis="true" useCloud="false"/>
+            <item ac="com.yumc.android.kfc.kfcreactcontainer.brandcontainer.React9Activity"  ignoreVis="true" useCloud="false"/>
+            <item ac="com.yumc.android.kfc.kfcreactcontainer.brandcontainer.React10Activity"  ignoreVis="true" useCloud="false"/>
+        </monitor_activities>
+        <tag_ai_app_name>kfc</tag_ai_app_name>
+        <launch_path>com.yumc.android.kfc.kfcreactcontainer.brandcontainer.React2Activity
+        </launch_path>
+        <black_paths>
+            com.yumc.android.kfc.kfcreactcontainer.reactload.ReactLoadActivity
+        </black_paths>
+        <app_logo>applogo/kendeji.png</app_logo>
+        <base_bg_style>base_bg_takeout_style_kendeji.webp</base_bg_style>
+        <aod_static_image>aod_static_takeout_kendeji.webp</aod_static_image>
+        <pickup_btn_color>#E40031</pickup_btn_color>
+        <pickup_code_color>#FC325E</pickup_code_color>
+        <card_bg_color>#E40031</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+        <show_meal_name>false</show_meal_name>
+    </scan>
+
+    <!--麦当劳-->
+    <scan isWebView="false" category="catering" package_name="com.mcdonalds.gma.cn">
+        <app_name>麦当劳</app_name>
+        <monitor_activities>
+            <item ac="com.mcd.order.activity.OrderDetailActivity"  ignoreVis="true" useCloud="true"/>
+            <item ac="com.mcd.order.activity.OrderListActivity"  ignoreVis="false" useCloud="false"/>
+            <item ac="com.mcdonalds.gma.cn.activity.MainActivity"  ignoreVis="false" useCloud="false"/>
+        </monitor_activities>
+        <tag_ai_app_name>mcdonald</tag_ai_app_name>
+        <launch_path>com.mcd.order.activity.OrderListActivity</launch_path>
+        <app_logo>applogo/maidanglao.png</app_logo>
+        <base_bg_style>base_bg_takeout_style_maidanglao.webp</base_bg_style>
+        <aod_static_image>aod_static_takeout_maidanglao.webp</aod_static_image>
+        <pickup_btn_color>#FFBC0D</pickup_btn_color>
+        <pickup_code_color>#FFBC0D</pickup_code_color>
+        <card_bg_color>#E99610</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+	<show_meal_name>true</show_meal_name>
+    </scan>
+
+    <!--星巴克-->
+    <scan isWebView="false" category="coffee" package_name="com.starbucks.cn">
+        <app_name>星巴克咖啡</app_name>
+        <monitor_activities>
+            <item ac="com.starbucks.cn.home.revamp.RevampMainActivity"  ignoreVis="false" useCloud="false"/>
+            <item ac="com.starbucks.cn.mop.payment.activity.PickupPaymentDoneActivity"  ignoreVis="true" useCloud="false"/>
+            <item ac="com.starbucks.cn.mop.receipt.activity.PickupReceiptActivity"  ignoreVis="true" useCloud="true"/>
+            <item ac="com.starbucks.cn.modmop.orderdetail.OrderDetailActivity"  ignoreVis="true" useCloud="true"/>
+        </monitor_activities>
+        <black_paths>
+            com.starbucks.cn.mop.confirm.activity.PickupConfirmOrderActivity;com.starbucks.cn.services.jsbridge.JsBridgeWebViewActivity
+        </black_paths>
+        <tag_ai_app_name>starbucks</tag_ai_app_name>
+        <launch_path>com.starbucks.cn.home.revamp.RevampMainActivity</launch_path>
+        <app_logo>applogo/xingbake.png</app_logo>
+        <stickers>stickers/xingbake.png</stickers>
+        <pickup_btn_color>#00643C</pickup_btn_color>
+        <pickup_code_color>#00B26B</pickup_code_color>
+        <card_bg_color>#00643C</card_bg_color>
+        <card_bg_alpha>0.12</card_bg_alpha>
+	<show_meal_name>true</show_meal_name>
+    </scan>
+</config>
