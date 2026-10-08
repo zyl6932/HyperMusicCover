@@ -87,6 +87,8 @@
     <string name="credits_hle">QQ 音乐、酷我、TTML Hub 取词与歌曲匹配规则</string>
     <string name="credits_lsposed">模块赖以运行的框架</string>
     <string name="credits_installerx">把更新交给安装器、隐藏图标和拨号密令的做法</string>
+    <string name="credits_group_pickup">取餐码</string>
+    <string name="credits_autopickupisland">取餐码的整套做法：调用 ColorOS 原版 PCR 插件认码、它云端下发的品牌名单和规则、以及卡片里的品牌素材（卡片布局用的是系统自己那张）</string>
     <string name="rules_cancel">取消</string>
     <string name="tl_compose">Jetpack Compose</string>
     <string name="tl_compose_summary">Apache-2.0</string>

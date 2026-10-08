@@ -77,6 +77,9 @@ android {
     // uncompressed - carries all of them.
     androidResources {
         localeFilters += listOf("zh", "en")
+        // assets/coloros/pcr_plugin.apk is copied back out whole when the pickup recognizer is
+        // loaded. Deflating it would only be undone; storing it keeps that copy a straight read.
+        noCompress += "apk"
     }
 
     // Library licence texts, version markers and Kotlin's reflection metadata: nothing at runtime
@@ -164,6 +167,13 @@ dependencies {
     implementation(libs.miuix.icons)
     implementation(libs.miuix.squircle)
     implementation(libs.material.icons.extended)
+
+    // ColorOS's pickup plugin (assets/coloros/pcr_plugin.apk) is loaded at runtime into a class
+    // loader whose parent is this module's, and it resolves Gson and the Kotlin stdlib by name out
+    // of this dex - its OEM host supplies them, so the plugin bundles neither. Gson is therefore
+    // here for a caller nothing on our own classpath can see; see proguard-rules.pro, which has to
+    // keep it for the same reason.
+    implementation("com.google.code.gson:gson:2.11.0")
 
     testImplementation("junit:junit:4.13.2")
     // The real org.json for the JVM tests: android.jar's is a stub (AmapTransitCardTest).

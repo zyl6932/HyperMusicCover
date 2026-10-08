@@ -25,7 +25,20 @@ internal object PickupParse {
     /** One text node: [page] is the index of the WebView it is in, -1 for none. */
     data class Node(val text: String, val page: Int)
 
-    data class Result(val code: String, val label: String, val status: String?, val store: String?)
+    /**
+     * [product] and [oemStatus] come from ColorOS's recognizer, not from anything in this file: they
+     * are filled in by [PickupCodeIsland] when it is the recognizer that answered, and are null when
+     * this parser answered alone. [status] stays the page's own wording either way, because the
+     * island's ready/over decisions read that; the recognizer's verdict is only ever shown.
+     */
+    data class Result(
+        val code: String,
+        val label: String,
+        val status: String?,
+        val store: String?,
+        val product: String? = null,
+        val oemStatus: String? = null,
+    )
 
     /** 取餐码, 取餐号, 取单号, 取茶号, 取餐号码, 取件码 ... - 取, up to two more, then 码 or 号 (码). */
     private val LABEL = Regex("^(?:您的)?取.{0,2}[码号]码?[:：]?$")

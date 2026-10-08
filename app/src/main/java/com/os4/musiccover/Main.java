@@ -2056,6 +2056,7 @@ public class Main extends XposedModule {
                         else if ("fpavoid".equals(k)) sFpAvoid = Integer.parseInt(v);
                         else if ("transit".equals(k)) AmapTransitScene.sOn = "1".equals(v);
                         else if ("pickup".equals(k)) PickupCodeIsland.sOn = "1".equals(v);
+                        else if ("card".equals(k)) PickupCodeIsland.sCard = "1".equals(v);
                         else if ("minicfg".equals(k)) MiniPlayerRuntime.applyConfig(sAppCtx,
                                 new String(android.util.Base64.decode(v, android.util.Base64.DEFAULT),
                                         java.nio.charset.StandardCharsets.UTF_8));
@@ -2778,6 +2779,12 @@ public class Main extends XposedModule {
                             PickupCodeIsland.INSTANCE.setOn(i.getBooleanExtra("on", true));
                             saveState();
                         }
+                        // --ez card false draws the island with the system's focus template again,
+                        // which is the way back if ColorOS's card does not come up on this build.
+                        if (i.hasExtra("card")) {
+                            PickupCodeIsland.sCard = i.getBooleanExtra("card", true);
+                            saveState();
+                        }
                         String doIt = i.getStringExtra("do");
                         if ("read".equals(doIt)) PickupCodeIsland.INSTANCE.readNow();
                         if ("vdtest".equals(doIt)) {
@@ -2792,6 +2799,14 @@ public class Main extends XposedModule {
                             setResultData(PickupCodeIsland.INSTANCE.describe()
                                     + " | " + PickupPark.INSTANCE.describe());
                         }
+                    } else if ("art".equals(op)) {
+                        // 取餐码卡片的素材。The app asks SystemUI to fetch them, because the two are
+                        // different uids and it is SystemUI that draws the card - the app has nowhere
+                        // to put a file SystemUI could read. --es do fetch starts one; without it the
+                        // answer is only what the last attempt did, which is what a settings row that
+                        // has to offer a download link when it failed needs. The fetch takes a while,
+                        // so it runs off this thread and reports by changing its own state.
+                        setResultData("art=bundled in assets/coloros/pickupcode");
                     } else if ("transitcfg".equals(op)) {
                         // 「高德公交地铁」: --ez on true|false from the app; without it, 高德
                         // asking as it starts (AmapImmerse), and told what it is.
@@ -2871,6 +2886,7 @@ public class Main extends XposedModule {
                         out.putInt("fpavoid", sFpAvoid);
                         out.putBoolean("transit", AmapTransitScene.sOn);
                         out.putBoolean("pickup", PickupCodeIsland.sOn);
+                        out.putBoolean("card", PickupCodeIsland.sCard);
                         // Everything the app's preview needs to be to scale. It draws a lock
                         // screen it cannot see, and every one of these is device-specific, so
                         // they are measured here rather than written down twice.

@@ -51,10 +51,19 @@ internal object PickupCodeIsland {
     private const val WECHAT = "com.tencent.mm"
     private const val MINI = "com.tencent.mm.plugin.appbrand.ui.AppBrandUI"
     private const val TOP_OBSERVER = "com.miui.systemui.functions.MiuiTopActivityObserver"
+    /**
+     * The brand tag ColorOS hands its recognizer. Every brand in its config has one; a tag it does
+     * not know is answered as `common`, which is what the plugin falls back to anyway - and the 47
+     * brands' tags live in that config, which is not ours to read yet, so this is the honest empty
+     * one rather than a guess at a name.
+     */
+    private const val OEM_APP = "common"
 
     private const val ID = 1241
     private const val CHANNEL = "mc_pickup"
     private const val PIC = "miui.focus.pic_mc_pickup"
+    private const val PIC_AOD = "miui.focus.pic_mc_aod"
+    private const val PIC_MODEL = "miui.focus.pic_mc_model"
     private const val ACTION_OPEN = "com.os4.musiccover.PICKUP_OPEN"
     private const val ACTION_GONE = "com.os4.musiccover.PICKUP_GONE"
 
@@ -111,6 +120,17 @@ internal object PickupCodeIsland {
     /** The settings switch, kept with Main's state. On unless turned off. */
     @JvmField var sOn = true
 
+    /**
+     * Whether the card is attached to the notification.
+     *
+     * **On, and it is the point of the card now**: this is HyperOS's own pickup card, taken from
+     * 小爱同学's layout (`PickupCard`), so there is no longer a second card style to prefer - the
+     * reason it was off was that the old one was ColorOS's and the system's own template read
+     * better beside the system's island. Turned off, the template is back and the code is read
+     * from the param alone (probe: `op pickup --ez card false`).
+     */
+    @JvmField var sCard = true
+
     private val bg: Handler by lazy { Handler(HandlerThread("mc-pickup").apply { start() }.looper) }
 
     // All below on [bg].
@@ -121,6 +141,14 @@ internal object PickupCodeIsland {
     /** Until when the task is not parked again, set when the island is tapped (see [left]). */
     private var noParkUntil = 0L
     private var brand = ""
+    /** This page's entry in ColorOS's rules - its colours, pictures and brand tag, or null. */
+    private var oemRule: PickupRule? = null
+    /** What ColorOS's recognizer last answered, for the probe's `describe()`. Not shown to anyone. */
+    private var lastOem = ""
+    /** The picture opacity the card is drawn at; 1f except while [fade] is stepping it up. */
+    private var cardAlpha = 1f
+    /** The opacity a floated card starts at; [fade] steps it up to 1. */
+    private val FADE_FROM = 0.15f
     private var reads = 0
     private var gen = 0
     private var shownKey: String? = null
@@ -181,9 +209,11 @@ internal object PickupCodeIsland {
         val timeout = Runnable { once(null, 0) }
         bg.postDelayed(timeout, TIMEOUT)
         val asked = request(task) { st ->
-            bg.removeCallbacks(timeout)
-            val nodes = if (st != null) runCatching { nodes(st) }.getOrNull() else null
-            once(nodes?.let { PickupParse.parse(it) }, nodes?.size ?: 0)
+            bg.post {
+                bg.removeCallbacks(timeout)
+                val nodes = if (st != null) runCatching { nodes(st) }.getOrNull() else null
+                once(nodes?.let { parse(it) }, nodes?.size ?: 0)
+            }
         }
         if (!asked) {
             bg.removeCallbacks(timeout)
@@ -191,9 +221,16 @@ internal object PickupCodeIsland {
         }
     }
 
-    fun describe(): String = "on=$sOn task=$taskId brand=$brand reads=$reads shown=${shownKey != null}" +
-        " up=${Main.appContext()?.let { up(it) }}" +
-        " last=$lastRead" + if (lastHead.isEmpty()) "" else " head=[$lastHead]"
+    // Built rather than concatenated: an `if` in the middle of a `+` chain swallows what follows
+    // it into its own else branch, which is how the oem= segment went missing from this line while
+    // the recognizer behind it was answering all along.
+    fun describe(): String = buildString {
+        append("on=$sOn task=$taskId brand=$brand reads=$reads shown=${shownKey != null}")
+        append(" up=${Main.appContext()?.let { up(it) }}")
+        append(" last=$lastRead")
+        if (lastHead.isNotEmpty()) append(" head=[$lastHead]")
+        if (lastOem.isNotEmpty()) append(" oem=[$lastOem]")
+    }
 
     /** The probe's `do=read`: one read now, of whatever is tracked. */
     fun readNow() = bg.post { if (taskId >= 0) read(taskId, gen) }
@@ -360,7 +397,7 @@ internal object PickupCodeIsland {
                 bg.removeCallbacks(timeout)
                 if (g != gen) return@post
                 val nodes = if (st != null) runCatching { nodes(st) }.getOrNull() else null
-                val r = nodes?.let { PickupParse.parse(it) }
+                val r = nodes?.let { parse(it) }
                 val ms = SystemClock.uptimeMillis() - t0
                 lastRead = when {
                     st == null -> "no structure (${ms}ms)"
@@ -465,6 +502,53 @@ internal object PickupCodeIsland {
         return out
     }
 
+    /**
+     * The page's code: ColorOS's own recognizer first, this file's reading of the page second.
+     *
+     * [PickupOem] is OPPO's plugin - the one ColorOS's 流体云 runs - and it answers for a page by
+     * its rules; when the rules find nothing it would fall to its NER model, which is the part left
+     * out of the bundle we ship (see [PickupOem]). So this is OPPO's first rung and none of its
+     * second: a page the rules cannot read falls through to [PickupParse] exactly as before.
+     *
+     * The code it answers is taken whole. The label and the shop beside it still come from this
+     * file's own reading, since the plugin has neither, and so does the order's wording: the plugin
+     * says `completed`/`uncompleted`, which is its own vocabulary rather than the page's, and it is
+     * the page's that [ready] and [over] read.
+     */
+    private fun parse(nodes: List<PickupParse.Node>): PickupParse.Result? {
+        val fallback = PickupParse.parse(nodes)
+        // The brand's entry in ColorOS's own rules, which carries its colours, its pictures and the
+        // tag its recognizer wants. Scored against the task label - the same low-cost scope ColorOS
+        // uses where an applet id and a route are not observable, and the fallback path its config
+        // describes.
+        val content = nodes.joinToString("\n") { it.text }
+        val texts = nodes.map { it.text }
+        oemRule = Main.appContext()?.let {
+            runCatching { PickupRules.get(it).matchPage(WECHAT, brand, content) }.getOrNull()
+        }
+        val out = PickupOem.recognize(texts, oemRule?.tagAppName?.takeIf { it.isNotEmpty() } ?: OEM_APP, "")
+        if (out == null) {
+            lastOem = "off"
+            return fallback
+        }
+        // Said whether or not a code came out, so the probe can tell "did not run" from "ran and
+        // found nothing" from "answered" - three different things to go and fix.
+        lastOem = (out.code.ifEmpty { "none" }) + " ${out.status} pt=${out.processType}" +
+            " page=${out.orderPage} n=${nodes.size}" +
+            (if (out.product.isEmpty()) "" else " ${out.product}") +
+            (if (out.orderTime.isEmpty()) "" else " ${out.orderTime}") +
+            (if (out.temperature.isEmpty()) "" else " ${out.temperature}")
+        if (out.code.isEmpty()) return fallback
+        return PickupParse.Result(
+            code = out.code,
+            label = fallback?.label?.takeIf { it.isNotEmpty() } ?: "取餐码",
+            status = fallback?.status,
+            store = fallback?.store,
+            product = out.product.ifEmpty { null },
+            oemStatus = out.status.ifEmpty { null },
+        )
+    }
+
     // ---------------------------------------------------------------- the island
 
     private fun show(r: PickupParse.Result, task: Int) {
@@ -482,12 +566,61 @@ internal object PickupCodeIsland {
         // changing again while it is already ready only updates, and so does the shop.
         val sameCode = shownKey?.startsWith("$brand|${r.code}|") == true
         val fresh = !sameCode || ready(r.status) && !ready(shownStatus)
+        cardAlpha = if (fresh) FADE_FROM else 1f
         runCatching { post(ctx, r, task, fresh) }
-            .onSuccess { shownKey = key; shownStatus = r.status; shownTask = task }
-            .onFailure { Xp.log(TAG + "not posted: $it") }
+            .onSuccess {
+                shownKey = key
+                shownStatus = r.status
+                shownTask = task
+                if (fresh) fade(ctx, r, task, gen)
+            }
+            .onFailure {
+                Xp.log(TAG + "not posted: $it")
+                cardAlpha = 1f
+            }
+    }
+
+    /**
+     * The card's pictures folding in.
+     *
+     * A RemoteViews cannot animate - there is no animator to hand it, and nothing in the island's
+     * renderer will run one - so the only fade available is to post the notification again with
+     * the pictures drawn more opaque, and let each post be a frame. Four steps over ~300ms, silent
+     * (the tag is unchanged, so it is an update of the same island and not a new one), and only
+     * for a code that is being floated up; a steady state re-read leaves the card alone.
+     */
+    private fun fade(c: Context, r: PickupParse.Result, task: Int, g: Int) {
+        if (!sCard) return
+        val steps = floatArrayOf(0.3f, 0.6f, 0.85f, 1f)
+        steps.forEachIndexed { i, a ->
+            bg.postDelayed({
+                if (g != gen) return@postDelayed
+                cardAlpha = a
+                runCatching { post(c, r, task, false) }
+                    .onFailure { Xp.log(TAG + "fade step $i not posted: $it") }
+            }, 80L * (i + 1))
+        }
     }
 
     private fun ready(status: String?): Boolean = status != null && READY.any { status.contains(it) }
+
+    /** A colour out of the rules XML as `#RRGGBB`, or the fallback when it cannot be read. */
+    private fun colour(value: String?, fallback: String): String = runCatching {
+        val parsed = android.graphics.Color.parseColor(value?.takeIf { it.isNotEmpty() } ?: fallback)
+        String.format("#%06X", 0xFFFFFF and parsed)
+    }.getOrDefault(fallback)
+
+    /**
+     * ColorOS's verdict on the order, said in the page's vocabulary - its own words are
+     * completed/uncompleted/waiting, which mean nothing to a reader. Null when it did not answer,
+     * so the page's wording stands; this is shown, never decided on (see [PickupParse.Result]).
+     */
+    private fun oemTitle(r: PickupParse.Result): String? = when (r.oemStatus) {
+        "completed" -> "已完成"
+        "uncompleted" -> "制作中"
+        "waiting" -> "等待出码"
+        else -> null
+    }
 
     /** Nothing is up: forget what the island was showing. */
     private fun clear() {
@@ -595,21 +728,51 @@ internal object PickupCodeIsland {
             })
         }
         val pic = icon(c, task)
-        val title = r.status ?: r.label
+        // ColorOS's recognizer names the drink; this file's reading of the page names the shop. The
+        // second line leads with the drink, the way ColorOS's own card does, and falls back to the
+        // shop for the brands whose pages carry no product name (蜜雪冰城's, for one).
+        val title = oemTitle(r) ?: r.status ?: r.label
         // 「麦当劳示例广场餐厅」 under 麦当劳 is 「示例广场餐厅」.
         val store = r.store?.removePrefix(brand)?.trimStart('（', '(', ' ')?.ifEmpty { null }
-        val content = listOfNotNull(brand, store).joinToString(" · ")
+        val detail = r.product?.ifEmpty { null } ?: store
+        val content = listOfNotNull(brand, detail).joinToString(" · ")
+        // The animated drink picture, as an Icon for the param's own icon slot: an Icon is
+        // resolved and drawn by the system, which is the only route by which an animated WebP can
+        // play here - a RemoteViews ImageView never plays one, however it is handed over.
+        val modelIcon = PickupCard.modelIcon(c, oemRule, brand, r.product)
+        // The island, in the shape the system's own renderer reads. Everything here comes out of
+        // the island plugin (`miui.systemui.dynamicisland`): `IslandTemplateFactory.chooseModule`
+        // picks the left area by `imageTextInfoLeft.type` (1 is the picture-and-text module, 5 the
+        // icon-and-fixed-width-digit one, anything else throws IslandParamsException), and the right
+        // area by `imageTextInfoRight.type` when there is one - which is why there is not, here; it
+        // would win over `textInfo`.
+        //   param_island { islandProperty, islandPriority, highlightColor,
+        //                  bigIslandArea { imageTextInfoLeft {type,picInfo,textInfo{title,showHighlightColor}},
+        //                                  textInfo {title,showHighlightColor} },
+        //                  smallIslandArea { picInfo {type,pic} } }
+        // The two halves say different things: the left is ours - our picture and the order's state,
+        // which is the text that changes as the order moves (show() keys the post on the status) -
+        // and the right is the official one, the code itself in the brand's colour. `highlightColor`
+        // is where that colour comes from (`IslandTextViewHolder` paints `textInfo` with it when
+        // `showHighlightColor` is true, at 80% alpha); without it the code reads white.
+        // `smallIslandArea` stays wrapped in a `picInfo`, as 小爱's own notifications write it and as
+        // the plugin's model (`SmallIslandArea` has `picInfo`/`combinePicInfo` and nothing else)
+        // reads it. Flat `{type,pic}` parses to nothing and leaves the small island without a picture.
+        val accent = colour(oemRule?.pickupColor, "#FFFFFF")
         val island = JSONObject()
             .put("islandProperty", 1)
             .put("islandPriority", 2)
+            .put("highlightColor", accent)
             .put("bigIslandArea", JSONObject()
                 .put("imageTextInfoLeft", JSONObject()
                     .put("type", 1)
                     .put("picInfo", JSONObject().put("type", 1).put("pic", PIC))
-                    .put("textInfo", JSONObject().put("title", r.code)))
-                .put("imageTextInfoRight", JSONObject()
-                    .put("type", 2)
-                    .put("textInfo", JSONObject().put("title", title))))
+                    .put("textInfo", JSONObject()
+                        .put("title", title)
+                        .put("showHighlightColor", false)))
+                .put("textInfo", JSONObject()
+                    .put("title", r.code)
+                    .put("showHighlightColor", true)))
             .put("smallIslandArea", JSONObject()
                 .put("picInfo", JSONObject().put("type", 1).put("pic", PIC)))
         val param = JSONObject()
@@ -628,7 +791,24 @@ internal object PickupCodeIsland {
             // in the shade alone. 地铁乘车码's card sets the same key the same way.
             .put("islandFirstFloat", fresh)
             .put("updatable", true)
+            // No `outEffectSrc`. It is the ring of light around the drawn card - the plugin copies
+            // it to `miui.effect.src` (`TemplateFactoryV3`) and SystemUI's glow layer draws it - and
+            // AICR sets `outer_glow` when it posts. The pickup card does not have it: 小爱's own
+            // focus notification carries no effect at all, and with this key set the card came up
+            // inside an orange-and-blue halo that the official one never has.
             .put("param_island", island)
+            // ColorOS animates the drink picture through this slot; the reference implementation
+            // does the same, with the Icon under PIC_MODEL in miui.focus.pics and `autoplay` set.
+            .put("iconTextInfo", JSONObject()
+                .put("title", r.code)
+                .put("content", detail)
+                .put("subContent", title)
+                .put("animIconInfo", JSONObject()
+                    .put("type", if (modelIcon != null) 3 else 0)
+                    .put("src", PIC_MODEL)
+                    .put("autoplay", true)
+                    .put("loop", false)
+                    .put("number", 0)))
             .put("title", r.code)
             .put("content", content)
             .put("baseInfo", JSONObject()
@@ -637,9 +817,34 @@ internal object PickupCodeIsland {
                 .put("content", content)
                 .put("subContent", title))
             .put("picInfo", JSONObject().put("type", 1).put("pic", PIC))
+        // The always-on picture is the drink's own still where ColorOS ships one for this brand, and
+        // the logo where it does not - the same file the card's left half is drawn from. Set here,
+        // before the param is written out: the notification carries a string, not this object.
+        val aod = PickupArt.aod(oemRule, PickupArt.model(oemRule, brand, r.product))
+            ?.let { PickupArt.bitmap(it, 200) }
+        if (aod != null) param.put("aodPic", PIC_AOD)
         val extras = Bundle()
         extras.putString("miui.focus.param", JSONObject().put("param_v2", param).toString())
-        extras.putBundle("miui.focus.pics", Bundle().apply { putParcelable(PIC, Icon.createWithBitmap(pic)) })
+        // And under `custom`, which is the key the island reads once the notification carries a
+        // card - and here the object has to go in **unwrapped**. The plugin picks the key by
+        // whether there is a custom view and unwraps `param_v2` on only one of the two paths
+        // (`DynamicIslandUtils.resolveFocusParam`):
+        //     string = extras.getString(hasCustomFocusView(sbn) ? "…param.custom" : "…param")
+        //     return (hasCustomFocusView || obj == null || obj.optJSONObject("param_v2") == null)
+        //            ? obj : obj.optJSONObject("param_v2")
+        // Without a card it unwraps for us, which is why the wrapped form worked while the card was
+        // off. With a card it hands back exactly what was written, and every reader downstream
+        // (`FocusNotifUtils`, `FocusNotifPreHandler`, `TemplateFactoryV3`) then looks for
+        // `param_island` on what it was given. A wrapped string puts `param_island` one level too
+        // deep: the island loses both halves and falls back to the notification's own app icon.
+        // This is also how the reference implementation writes it - AICR's `jd3.b` puts
+        // `param_island` straight into `.custom` and never writes `miui.focus.param` at all.
+        extras.putString("miui.focus.param.custom", param.toString())
+        extras.putBundle("miui.focus.pics", Bundle().apply {
+            putParcelable(PIC, Icon.createWithBitmap(pic))
+            if (aod != null) putParcelable(PIC_AOD, Icon.createWithBitmap(aod))
+            if (modelIcon != null) putParcelable(PIC_MODEL, modelIcon)
+        })
         val tap = PendingIntent.getBroadcast(c, ID, Intent(ACTION_OPEN).setPackage(SYSUI),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val gone = PendingIntent.getBroadcast(c, ID + 1, Intent(ACTION_GONE).setPackage(SYSUI),
@@ -658,6 +863,32 @@ internal object PickupCodeIsland {
             .setContentIntent(tap)
             .addExtras(extras)
             .build()
+        // The card ColorOS draws, in place of the focus template the system draws. Attached only
+        // when it was actually built: a RemoteViews that fails to inflate takes the whole island
+        // with it, and a card with a missing layout is worse than the template.
+        if (sCard) {
+            // Two cards, one per theme: the official card has no background of its own - SystemUI
+            // draws the backdrop behind it - so its text and its rule are picked against that
+            // backdrop, and the notification carries both rather than asking which is showing.
+            runCatching {
+                PickupCard.build(c, oemRule, r.code, r.product, store, brand, tap, cardAlpha, false) to
+                    PickupCard.build(c, oemRule, r.code, r.product, store, brand, tap, cardAlpha, true)
+            }.onSuccess { (day, night) ->
+                // Every key Xiaomi's own focus notification sets, which is what this copies (the
+                // assistant's card builder, `jd3.b`): the card in both themes, the always-on form,
+                // and the island's expanded form.
+                //
+                // `miui.focus.rv.deco.*` and `miui.focus.rv.tiny*` are deliberately NOT here: that
+                // same code sets those only when `MiuiMultiDisplayTypeInfo.isFlipDevice` is true -
+                // they are the flip's cover-screen and its decorated window. On a normal phone the
+                // card that comes up when the island is tapped is `miui.focus.rv`, which is why
+                // posting only the deco keys left it looking like the plain template.
+                n.extras.putParcelable("miui.focus.rv", day)
+                n.extras.putParcelable("miui.focus.rvNight", night)
+                n.extras.putParcelable("miui.focus.rv.fullAod", night)
+                n.extras.putParcelable("miui.focus.rv.island.expand", night)
+            }.onFailure { Xp.log(TAG + "card not built: $it") }
+        }
         // A post that must float the island gets a notification key of its own. MIUI keeps per-key
         // state for a focus notification (FocusNotificationController's hasEverExpandedKeys and its
         // island-data map), and with one fixed key - 1241, no tag, the same for every order - the

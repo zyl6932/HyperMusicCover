@@ -87,6 +87,8 @@
     <string name="credits_hle">QQ Music, Kuwo and TTML Hub lyrics, and the song matching rules</string>
     <string name="credits_lsposed">The framework this module runs in</string>
     <string name="credits_installerx">Handing an update to an installer app, hiding the icon, and the dial code</string>
+    <string name="credits_group_pickup">Pickup codes</string>
+    <string name="credits_autopickupisland">The whole pickup-code approach: driving ColorOS\' original PCR plugin, its cloud applet list and its rules, and the brand artwork the card draws (the card\'s layout is the system\'s own)</string>
     <string name="rules_cancel">Cancel</string>
     <string name="tl_compose">Jetpack Compose</string>
     <string name="tl_compose_summary">Apache-2.0</string>

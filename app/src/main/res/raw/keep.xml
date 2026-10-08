@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The drink pictures are reached by name at runtime, from the file name ColorOS's rules XML gives
+  (`base_bg_style`), through Resources.getIdentifier. Nothing in this module's code names them, so
+  the resource shrinker sees no reference to any of them and drops all twenty - silently, and only
+  in a release build with isShrinkResources on, which is what made the card lose its picture.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/base_bg_*" />
