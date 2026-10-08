@@ -173,11 +173,14 @@ final class PickupRules {
         String cleanPackage = PickupEvent.clean(packageName);
         String label = comparable(taskLabel);
         String body = comparable(PickupEvent.truncate(content, PickupConst.MAX_CONTENT_LENGTH));
-        // AssistStructure contains the whole visible WeChat task. Never select a mini-program
-        // rule from body text alone: a chat, search result or another mini-program can mention
-        // the same brand. ColorOS has an applet-id/path signal; on Xiaomi the task label is the
-        // equivalent low-cost, non-invasive scope boundary available to this fallback path.
-        boolean requireLabelScope = "com.tencent.mm".equals(cleanPackage);
+        // AssistStructure contains the whole task. Never select a mini-program rule from body
+        // text alone: a chat, search result or another mini-program can mention the same brand.
+        // ColorOS has an applet-id/path signal; on Xiaomi the task label is the equivalent
+        // low-cost, non-invasive scope boundary available to this fallback path. That holds on
+        // both platforms - 微信 gives each mini program a task of its own, and so does 支付宝
+        // (`AppBrandUI02` and `XRiverActivity$App01`, each in a task named after the program) -
+        // so the scope is asked of whoever the rules call a mini program host, not of 微信 alone.
+        boolean requireLabelScope = recognitionPolicy.isMiniProgramHost(cleanPackage);
         PickupRule best = null;
         int bestScore = 0;
         for (PickupRule rule : rules) {
@@ -194,6 +197,69 @@ final class PickupRules {
             }
         }
         return best;
+    }
+
+    /**
+     * The rule for one mini program, by the appId the page's own launch intent carries.
+     *
+     * This is ColorOS's own index (`PickupCodeOderQuery.appId` theirs, `origin_id` here), and it is
+     * the only one that needs no guess: 支付宝's entries in this config are keyed by it, and a page
+     * whose appId is not in it is a page the config has nothing to say about.
+     */
+    PickupRule ruleForOrigin(String packageName, String appId) {
+        for (PickupRule rule : rules) {
+            if (!rule.packageName.equals(PickupEvent.clean(packageName))) continue;
+            if (cloudDisabledOrigins.contains(comparable(rule.originId))) continue;
+            if (rule.originMatches(appId)) return rule;
+        }
+        return null;
+    }
+
+    /**
+     * The rule for a brand by name, on either platform.
+     *
+     * A brand is one company whether it is reached through 微信 or 支付宝 - 蜜雪冰城's own rule is
+     * written for 微信, but it names the same logo, the same drink and the same red - so a page
+     * whose appId the config does not list is still drawn with its brand's card rather than with
+     * none. That matters because 支付宝's entries here are three brands where the 微信 ones are
+     * 44, and a bare code is a worse answer than the brand's own card.
+     *
+     * Matched on the rule's own names: [label], [brandName], [appName]. An exact name wins outright.
+     * A looser match - either name containing the other - is only taken from a name of three
+     * characters or more, because the caller's name is a search query as often as it is a brand:
+     * 「咖啡」, 「奶茶」, 「炸鸡」 are searches a user makes before opening a shop of their own
+     * choosing, and any of them would otherwise borrow the first brand that happens to contain it.
+     * Two characters still match exactly (「喜茶」 is a brand), which is the one case where a short
+     * name is worth believing.
+     */
+    PickupRule matchBrand(String name) {
+        String wanted = comparable(name);
+        if (wanted.length() < 2) return null;
+        PickupRule best = null;
+        int bestScore = 0;
+        for (PickupRule rule : rules) {
+            if (cloudDisabledOrigins.contains(comparable(rule.originId))) continue;
+            int score = brandScore(wanted, rule);
+            if (score > bestScore) {
+                best = rule;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    private static int brandScore(String wanted, PickupRule rule) {
+        int score = 0;
+        for (String configured : new String[]{rule.label, rule.brandName, rule.appName}) {
+            String candidate = comparable(configured);
+            if (candidate.length() < 2) continue;
+            if (wanted.equals(candidate)) score = Math.max(score, 100_000 + candidate.length());
+            else if (wanted.length() >= 3
+                    && (wanted.contains(candidate) || candidate.contains(wanted))) {
+                score = Math.max(score, 10_000 + Math.min(candidate.length(), wanted.length()));
+            }
+        }
+        return score;
     }
 
     boolean hasPageScope(String packageName, String taskLabel) {
@@ -290,6 +356,21 @@ final class PickupRules {
         private static final CloudPolicy EMPTY = new CloudPolicy(Map.of(), Set.of());
     }
 
+    /**
+     * What the parser makes of a config, without a Context to build a [PickupRules] around.
+     *
+     * The blocks this exists for - `wx_mini_activity` / `ali_mini_activity` - are plain tags with
+     * no provider behind them, and one that parses to nothing reads exactly like a phone with no
+     * mini programs open: silently. So this is the seam the on-device probe drives
+     * (`scratch/pickup-probe/rules`, `app_process` over the debug apk's own dex - release strips
+     * it, nothing in the module calls it), which is the only place the parser can be run against
+     * the config that actually ships: `android.util.Xml` is a stub off-device, so a plain JVM
+     * test of it cannot be written.
+     */
+    static PickupPolicy parsePolicy(String xml) throws Exception {
+        return parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8))).policy;
+    }
+
     static boolean looksLikeRuleXml(String xml) {
         if (xml == null || xml.length() < 100 || xml.length() > 500_000) return false;
         try {
@@ -353,6 +434,8 @@ final class PickupRules {
                     // m6.h.c replaces the prior entry for the exact package; it
                     // does not merge classes across repeated XML blocks.
                     if (names != null) policy.webViewNames.put(names.packageName(), names);
+                } else if (current == null && isMiniActivityTag(name)) {
+                    policy.readMiniActivities(name, parser.nextText());
                 } else if (current == null && isPrepareTag(name)) {
                     PickupPolicy.Host host = switch (name) {
                         case "order_prepare_status_wx" -> PickupPolicy.Host.WECHAT;
@@ -381,6 +464,10 @@ final class PickupRules {
         return result;
     }
 
+    private static boolean isMiniActivityTag(String name) {
+        return "wx_mini_activity".equals(name) || "ali_mini_activity".equals(name);
+    }
+
     private static boolean isPrepareTag(String name) {
         return "order_prepare_status".equals(name) || "order_prepare_status_wx".equals(name)
                 || "order_prepare_status_ali".equals(name);
@@ -400,7 +487,8 @@ final class PickupRules {
             case "app_name", "brand_name", "origin_id", "tag_ai_app_name", "launch_path",
                     "app_package", "app_logo", "stickers", "base_bg_style", "aod_static_image",
                     "pickup_btn_color", "pickup_code_color", "card_bg_color", "card_bg_alpha",
-                    "black_paths", "extract_wx_root_portal", "need_waiting_status" -> true;
+                    "black_paths", "extract_wx_root_portal", "need_waiting_status",
+                    "show_meal_name" -> true;
             default -> false;
         };
     }
@@ -431,6 +519,7 @@ final class PickupRules {
             case "black_paths" -> rule.blackPaths = value;
             case "extract_wx_root_portal" -> rule.extractRootPortal = Boolean.parseBoolean(value);
             case "need_waiting_status" -> rule.needWaitingStatus = Boolean.parseBoolean(value);
+            case "show_meal_name" -> rule.showMealName = Boolean.parseBoolean(value);
             default -> {
             }
         }

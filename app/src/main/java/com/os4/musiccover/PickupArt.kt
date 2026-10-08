@@ -38,17 +38,32 @@ internal object PickupArt {
      * The drink picture: the one the brand names, else one picked from what is being ordered - the
      * order's own drink decides its colour, which is what ColorOS does when a brand has no picture
      * of its own (IslandPublisher.modelAsset in the reference implementation).
+     *
+     * A brand with no rule gets a picture too. The table below is keyed by the drink's own name
+     * rather than by the brand, and its config ends in a `common` picture per category
+     * (`common_style_cold` / `common_style_hot`), so an order the config does not list is drawn
+     * with the cup its drink asked for when the page names one - 2026-10-09, 蜜雪冰城's Alipay page
+     * reads 「蓝莓果粒茶」 and comes out purple - and with the plain one when it does not.
+     *
+     * With no rule there is no category either, and only coffee is worth telling apart: the takeout
+     * brands in this config all have rules of their own, and a bag drawn for a milk tea would be
+     * worse than a cup.
      */
-    fun model(rule: PickupRule?, brand: String, product: String?): String? {
-        rule ?: return null
-        if (rule.baseStyle.isNotEmpty()) return rule.baseStyle
+    fun model(rule: PickupRule?, brand: String, product: String?, temperature: String? = null): String {
         val text = "$brand ${product.orEmpty()}"
-        return when (rule.category) {
-            "coffee" -> coffeeStyle(text)
+        val hot = "hot".equals(temperature?.trim(), ignoreCase = true)
+        if (rule != null && rule.baseStyle.isNotEmpty()) return rule.baseStyle
+        return when (rule?.category ?: categoryOf(text)) {
+            "coffee" -> coffeeStyle(text, hot)
             "catering" -> cateringStyle(text)
-            else -> teaStyle(text)
+            else -> teaStyle(text, hot)
         }
     }
+
+    /** Coffee is recognised by the drink's own name; everything else here is a tea. */
+    private fun categoryOf(text: String): String =
+        if (containsAny(text, "美式", "拿铁", "摩卡", "生椰", "卡布奇诺", "馥芮白", "焦糖", "星冰乐",
+                "咖啡")) "coffee" else "tea"
 
     /** The same picture for the always-on display, which ColorOS ships as a still of it. */
     fun aod(rule: PickupRule?, model: String?): String? {
@@ -154,7 +169,13 @@ internal object PickupArt {
 
     private fun containsAny(text: String, vararg words: String) = words.any { text.contains(it) }
 
-    private fun teaStyle(text: String): String = when {
+    /**
+     * [hot] only chooses between the two `common` pictures, which is where ColorOS puts it too: the
+     * keyword styles are all `drink_temperature="cold"` in the config, so a named drink keeps its
+     * own colour whether it is iced or not, and only an unnamed one has to fall back on the
+     * temperature it was ordered at.
+     */
+    private fun teaStyle(text: String, hot: Boolean): String = when {
         containsAny(text, "杨枝甘露", "芒果", "鲜橙", "胡萝卜", "芒芒") -> "base_bg_tea_style_orange.webp"
         containsAny(text, "草莓", "红豆", "西瓜", "杨梅", "莓莓", "蔓越莓") -> "base_bg_tea_style_red.webp"
         containsAny(text, "青提", "抹茶", "猕猴桃", "牛油果", "青柠", "青芒",
@@ -164,15 +185,17 @@ internal object PickupArt {
         containsAny(text, "蜜桃", "桃桃", "鲜桃", "芭乐") -> "base_bg_tea_style_peach.webp"
         containsAny(text, "葡萄", "蓝莓", "黑加仑", "紫薯", "火龙果") -> "base_bg_tea_style_grap.webp"
         containsAny(text, "乌龙", "红袍") -> "base_bg_tea_style_oolong.webp"
+        hot -> "base_bg_tea_style_common_hot.webp"
         else -> "base_bg_tea_style_common_cold.webp"
     }
 
-    private fun coffeeStyle(text: String): String = when {
+    private fun coffeeStyle(text: String, hot: Boolean): String = when {
         containsAny(text, "星冰乐") -> "base_bg_coffee_style_xingbake_xingbingle.webp"
         containsAny(text, "拿铁", "摩卡", "生椰") -> "base_bg_coffee_style_latte.webp"
         containsAny(text, "馥芮白", "焦糖", "卡布奇诺") -> "base_bg_coffee_style_milk.webp"
         containsAny(text, "星巴克") && !containsAny(text, "冰", "冷") ->
             "base_bg_coffee_style_xingbake_hot.webp"
+        hot -> "base_bg_coffee_style_common_hot.webp"
         else -> "base_bg_coffee_style_common_cold.webp"
     }
 

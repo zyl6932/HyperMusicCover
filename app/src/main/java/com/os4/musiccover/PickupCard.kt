@@ -59,6 +59,8 @@ internal object PickupCard {
         rule: PickupRule?,
         code: String,
         product: String?,
+        /** The recognizer's reading of the drink's temperature; it picks the cold or hot cup. */
+        temperature: String?,
         store: String?,
         brand: String,
         tap: PendingIntent,
@@ -70,7 +72,7 @@ internal object PickupCard {
         // An Icon, not a bitmap and not a resource id: a Bitmap is frozen pixels - one frame of a
         // 53-frame animation - while an Icon is handed to the system to resolve, so what the
         // ImageView ends up holding is the animated drawable and it plays.
-        val file = PickupArt.model(rule, brand, product)
+        val file = PickupArt.model(rule, brand, product, temperature)
         val model = file?.let { PickupArt.drawable(c, it) } ?: 0
         // The whole chain in one line: which picture the rules asked for, whether this build can
         // reach it by name, and what the card was told to draw. Three different failures look the

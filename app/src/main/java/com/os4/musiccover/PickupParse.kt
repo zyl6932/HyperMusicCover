@@ -38,6 +38,8 @@ internal object PickupParse {
         val store: String?,
         val product: String? = null,
         val oemStatus: String? = null,
+        /** The drink's own temperature, from the recognizer: it picks between a cold and hot cup. */
+        val temperature: String? = null,
     )
 
     /** 取餐码, 取餐号, 取单号, 取茶号, 取餐号码, 取件码 ... - 取, up to two more, then 码 or 号 (码). */

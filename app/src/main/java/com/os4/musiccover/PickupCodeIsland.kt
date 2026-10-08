@@ -24,21 +24,27 @@ import android.os.SystemClock
 import org.json.JSONObject
 
 /**
- * A 微信 order page's pickup code, as a focus island - ColorOS's 取餐码 (Gleaner's observeagent),
- * the part of it that needs no background display: the code is read while the page is open.
+ * A mini program order page's pickup code, as a focus island - ColorOS's 取餐码 (Gleaner's
+ * observeagent), the part of it that needs no background display: the code is read while the page
+ * is open.
  *
- * ColorOS reads the page with ViewExtract, its own framework code inside 微信's process. Here it
- * is the assist structure, asked for from SystemUI (which holds GET_TOP_ACTIVITY_INFO) by task:
- * IActivityTaskManager.requestAssistDataForTask. A mini program is an XWeb WebView, and its DOM
- * text comes back in the structure - 755 and 823 nodes on two real order pages, 5-17 ms - with
- * nothing hooked in 微信 and no accessibility service. [PickupParse] finds the code in it.
+ * ColorOS reads the page with ViewExtract, its own framework code inside the app's process. Here
+ * it is the assist structure, asked for from SystemUI (which holds GET_TOP_ACTIVITY_INFO) by task:
+ * IActivityTaskManager.requestAssistDataForTask. Nothing is hooked in 微信 or 支付宝 and no
+ * accessibility service is used, and both platforms hand the page over - 微信's mini programs are
+ * XWeb WebViews, whose DOM text comes back in the structure (755 and 823 nodes on two real order
+ * pages, 5-17 ms), and 支付宝's are drawn with real views, which come back as text nodes
+ * (697 nodes / 132 texts on a real order list, 12 ms). [PickupParse] finds the code in either.
  *
  * Only the mini programs [BRANDS] names are read, by the task's own label (the mini program's
- * name, 「霸王茶姬」); ColorOS's list is cloud config by appId, which SystemUI is not handed. While
- * one is in front it is read a second after it arrives and every [EVERY] ms after, as the
- * order list and the order are pages of one task and moving between them changes nothing
- * SystemUI hears. A code found is shown whatever the order's state; the island goes [LIFE] after
- * the code was last seen, or when swiped away (that code is then not shown again for [LIFE]).
+ * name, 「霸王茶姬」); ColorOS's list is cloud config by appId, which SystemUI is not handed. Both
+ * platforms give a mini program a task of its own, labelled with it, which is what makes the label
+ * the brand; which activities those tasks are is asked of the rules XML
+ * (`wx_mini_activity` / `ali_mini_activity`), not assumed. While one is in front it is read a
+ * second after it arrives and every [EVERY] ms after, as the order list and the order are pages of
+ * one task and moving between them changes nothing SystemUI hears. A code found is shown whatever
+ * the order's state; the island goes [LIFE] after the code was last seen, or when swiped away
+ * (that code is then not shown again for [LIFE]).
  *
  * A new code floats the island open, and so does the order turning ready to collect ([READY]);
  * anything else about a code already up only updates it. The island's being up is asked of the
@@ -48,8 +54,9 @@ internal object PickupCodeIsland {
 
     private const val TAG = "MCPickup: "
     private const val SYSUI = "com.android.systemui"
+    /** The app a tap falls back to, and the icon when the task carries none: it is the common case. */
     private const val WECHAT = "com.tencent.mm"
-    private const val MINI = "com.tencent.mm.plugin.appbrand.ui.AppBrandUI"
+    private const val ALIPAY = "com.eg.android.AlipayGphone"
     private const val TOP_OBSERVER = "com.miui.systemui.functions.MiuiTopActivityObserver"
     /**
      * The brand tag ColorOS hands its recognizer. Every brand in its config has one; a tag it does
@@ -76,7 +83,7 @@ internal object PickupCodeIsland {
     private const val EVERY = 5_000L
     /** How often the page is read while the mini program is not the front activity. */
     private const val SLOW = 30_000L
-    /** How long a task is read on after 微信 leaves the front before it is let go. */
+    /** How long a task is read on after the mini program leaves the front before it is let go. */
     private const val LEFT = 2 * 60_000L
     /** How often a parked page is read: OPPO's own three intervals, by what the order is doing. */
     private const val PARK_FIRST = 2 * 60_000L
@@ -140,11 +147,15 @@ internal object PickupCodeIsland {
     // All below on [bg].
     private var lastTop: ComponentName? = null
     private var taskId = -1
+    /** The app the tracked task belongs to - 微信 or 支付宝 - which is resumed behind its pages. */
+    private var host = WECHAT
     /** Whether the tracked mini program is the front activity, which sets how often it is read. */
     private var inFront = false
     /** Until when the task is not parked again, set when the island is tapped (see [left]). */
     private var noParkUntil = 0L
     private var brand = ""
+    /** The mini program the page being read belongs to, out of its own launch intent. */
+    private var program: Program? = null
     /** This page's entry in ColorOS's rules - its colours, pictures and brand tag, or null. */
     private var oemRule: PickupRule? = null
     /** What ColorOS's recognizer last answered, for the probe's `describe()`. Not shown to anyone. */
@@ -198,7 +209,7 @@ internal object PickupCodeIsland {
                 @Suppress("DEPRECATION")
                 val top = ctx.getSystemService(ActivityManager::class.java)
                     .getRunningTasks(1).firstOrNull()?.topActivity
-                if (top != null && top.packageName == WECHAT && top.className.startsWith(MINI)) {
+                if (top != null && miniHost(ctx, top) != null) {
                     Xp.log(TAG + "starting on " + top.shortClassName)
                     front(top)
                 }
@@ -297,9 +308,10 @@ internal object PickupCodeIsland {
         }
         val timeout = Runnable { once(null, 0) }
         bg.postDelayed(timeout, TIMEOUT)
-        val asked = request(task) { st ->
+        val asked = request(task) { st, ex ->
             bg.post {
                 bg.removeCallbacks(timeout)
+                program = programOf(ex)
                 val nodes = if (st != null) runCatching { nodes(st) }.getOrNull() else null
                 once(nodes?.let { parse(it) }, nodes?.size ?: 0)
             }
@@ -315,6 +327,8 @@ internal object PickupCodeIsland {
     // the recognizer behind it was answering all along.
     fun describe(): String = buildString {
         append("on=$sOn task=$taskId brand=$brand reads=$reads shown=${shownKey != null}")
+        program?.let { append(" appId=${it.appId}") }
+        program?.name?.takeIf { it.isNotEmpty() }?.let { append(" name=$it") }
         append(" up=${Main.appContext()?.let { up(it) }}")
         append(" last=$lastRead")
         if (lastHead.isNotEmpty()) append(" head=[$lastHead]")
@@ -323,6 +337,50 @@ internal object PickupCodeIsland {
 
     /** The probe's `do=read`: one read now, of whatever is tracked. */
     fun readNow() = bg.post { if (taskId >= 0) read(taskId, gen) }
+
+    /**
+     * The app whose mini program [top] is, or null when it is not one.
+     *
+     * Asked of the rules rather than of the one class name this file used to carry:
+     * `wx_mini_activity` and `ali_mini_activity` are the containers ColorOS follows, and 支付宝
+     * spreads its mini programs over twenty of them (`XRiverActivity$App01` and its siblings),
+     * so a name written here would be wrong on the other platform and stale on this one.
+     */
+    private fun miniHost(ctx: Context, top: ComponentName): String? {
+        val policy = runCatching { PickupRules.get(ctx).recognitionPolicy() }.getOrNull() ?: return null
+        return if (policy.isMiniProgramActivity(top.packageName, top.className)) top.packageName else null
+    }
+
+    /**
+     * The mini program a page belongs to, out of the page's own launch intent: the appId, and the
+     * name it was searched for when it was reached from a search. Null when the page carries
+     * neither - a page in one of the same containers that is not a mini program, or one whose
+     * intent could not be read.
+     */
+    private class Program(val appId: String, val name: String)
+
+    /**
+     * 支付宝 puts the appId in a nested `startParams` bundle, beside the query and the
+     * `alipays://platformapi/startapp?appId=…` scheme it was opened with (measured 2026-10-09:
+     * `appId = 2021002163601771`, `globalSearchQuery = 蜜雪冰城`).
+     *
+     * Read as a field and never as a regex over the string extras, which is the fallback ColorOS
+     * has (`"appId"\s*:\s*"(\d{8,20})"`): the renderer's own `__config__ta_render_anr_cfg` in this
+     * very bundle carries `"appId":"2021001178689171,…"`, a list of *other* mini programs, and a
+     * regex finds that first. (ColorOS's own readers take `mExtras.appInfo.appId`; 支付宝's pages
+     * have not shown that shape, so it is looked for second rather than relied on.)
+     */
+    private fun programOf(extras: Bundle?): Program? {
+        if (extras == null) return null
+        val start = runCatching { extras.getBundle("startParams") }.getOrNull()
+        val info = runCatching { extras.getBundle("mExtras")?.getBundle("appInfo") }.getOrNull()
+        val appId = text(start, "appId").ifEmpty { text(info, "appId") }
+        if (!appId.matches(Regex("\\d{8,20}"))) return null
+        return Program(appId, text(start, "globalSearchQuery"))
+    }
+
+    private fun text(from: Bundle?, key: String): String =
+        runCatching { from?.getString(key) }.getOrNull().orEmpty()
 
     /**
      * [top] is MiuiTopActivityObserver's, which can be ahead of the task list: the task it names
@@ -336,31 +394,43 @@ internal object PickupCodeIsland {
         } else if (top != lastTop) {
             return
         }
-        if (!sOn || top == null || top.packageName != WECHAT || !top.className.startsWith(MINI)) {
-            // A parked task must not stay on the hidden display once 微信 is in front again: the mini
-            // program tapped from its own list would come back on a display nobody can see.
-            if (top?.packageName == WECHAT) PickupPark.releaseFrom("微信 is in front again")
+        // No context is read as "not a mini program" rather than as a reason to stop looking: the
+        // top must still be handed on, or a task being kept is never let go.
+        val ctx = Main.appContext()
+        val pkg = if (sOn && ctx != null && top != null) miniHost(ctx, top) else null
+        if (ctx == null || top == null || pkg == null) {
+            // A parked task must not stay on the hidden display once its own app is in front again:
+            // the mini program tapped from its list would come back on a display nobody can see.
+            if (top != null && top.packageName == host) PickupPark.releaseFrom("its app is in front again")
             left(top)
             return
         }
-        val ctx = Main.appContext() ?: return
         @Suppress("DEPRECATION")
         val info = runCatching {
             ctx.getSystemService(ActivityManager::class.java).getRunningTasks(8)
                 .firstOrNull { it.topActivity == top }
         }.getOrNull()
         val label = info?.taskDescription?.label.orEmpty()
-        if (info == null || label.isEmpty()) {
+        // Both platforms give a mini program a task of its own, and normally name it - but not
+        // always: 支付宝 runs one inside the app's own task, which carries no description at all
+        // (measured 2026-10-09, 蜜雪冰城's page sitting in task 44419), so on 支付宝 the task is
+        // taken without a label and the page itself is asked for its appId on the first read.
+        if (info == null || (label.isEmpty() && pkg != ALIPAY)) {
             if (retry < RETRIES) bg.postDelayed({ front(top, retry + 1) }, RETRY_GAP)
             else Xp.log(TAG + "no labelled task for ${top.shortClassName}")
             return
         }
-        val name = BRANDS.firstOrNull { label.contains(it, ignoreCase = true) }
-        if (name == null) {
+        // The list still scopes 微信, whose pages are a whole app's - a chat or a search result can
+        // name a brand without being one. 支付宝's scope is the appId its page carries, which is
+        // part of the page rather than of the task, and is checked where the page is read.
+        if (pkg == WECHAT && BRANDS.none { label.contains(it, ignoreCase = true) }) {
             Xp.d(TAG + "mini program not on the list: $label")
             stop()
             return
         }
+        // Both platforms give a mini program a task of its own, so the same app can be tracking a
+        // different one than it did before - which is why this is set before the task is compared.
+        host = pkg
         if (info.taskId == taskId) {
             inFront = true
             return
@@ -377,13 +447,13 @@ internal object PickupCodeIsland {
 
     /**
      * The front activity is not the mini program, or not any more. Being in front is how a task is
-     * found, not what it is read for: 微信's own pages, and whatever comes over the mini program while
-     * the user is still in it, arrive as a top that is not it - and with the top settling back on the
-     * mini program no further event comes, so a read loop killed here never came back. A second order
-     * in the same mini program stopped updating the island that way (2026-10-08: the task was dropped
-     * and its reads froze at 7 while the user sat in the mini program). So the task is kept and read
-     * on, slower; only [LEFT] spent without being in front ends it - 微信's own pages are worth being
-     * read over, the phone in a pocket is not.
+     * found, not what it is read for: the app's own pages, and whatever comes over the mini program
+     * while the user is still in it, arrive as a top that is not it - and with the top settling back
+     * on the mini program no further event comes, so a read loop killed here never came back. A
+     * second order in the same mini program stopped updating the island that way (2026-10-08: the
+     * task was dropped and its reads froze at 7 while the user sat in the mini program). So the task
+     * is kept and read on, slower; only [LEFT] spent without being in front ends it - the app's own
+     * pages are worth being read over, the phone in a pocket is not.
      */
     private fun left(top: ComponentName?) {
         if (taskId < 0) {
@@ -394,18 +464,31 @@ internal object PickupCodeIsland {
         inFront = false
         Xp.log(TAG + "left the mini program: top=" + (top?.flattenToShortString() ?: "none") +
             ", reading task $taskId on")
-        // Out of 微信 altogether: the order is worth waiting on, so the task goes onto the hidden
-        // display where the mini program keeps its own page current (PickupPark, §6). Not while 微信
-        // itself is in front: a mini program started from its own list would come back on a display
-        // nobody can see, and 微信 coming to the front releases it for the same reason. Not right
-        // after the island was tapped either: the user is in the mini program, and the front flickers
-        // through the launcher as they move about it - parking on that flicker took the mini program
-        // away from them mid-use (2026-10-08).
-        if (top?.packageName != WECHAT && waiting() && SystemClock.uptimeMillis() >= noParkUntil) {
+        // Out of the app altogether: the order is worth waiting on, so the task goes onto the hidden
+        // display where the mini program keeps its own page current (PickupPark, §6). Not while the
+        // app itself is in front: a mini program started from its own list would come back on a
+        // display nobody can see, and the app coming to the front releases it for the same reason.
+        // Not right after the island was tapped either: the user is in the mini program, and the
+        // front flickers through the launcher as they move about it - parking on that flicker took
+        // the mini program away from them mid-use (2026-10-08). And not at all unless the rules ask
+        // for it: `use_observer` is ColorOS's own switch for the polling this park is.
+        if (top?.packageName != host && waiting() && observes() &&
+            SystemClock.uptimeMillis() >= noParkUntil) {
             PickupPark.parkFrom(taskId)
             return
         }
         bg.postDelayed({ if (!inFront && taskId >= 0 && PickupPark.parked() != taskId) stop() }, LEFT)
+    }
+
+    /**
+     * Whether the rules allow a page to be kept off-screen at all - ColorOS's `use_observer`,
+     * 「启用帮看轮询服务刷新订单状态」. Their observeagent is that polling; the park here is the same
+     * thing done with the framework's own hidden display, so it is what the key gates. Off, or
+     * unreadable, the task is still read while it is in front and dropped when it is left.
+     */
+    private fun observes(): Boolean {
+        val ctx = Main.appContext() ?: return false
+        return runCatching { PickupRules.get(ctx).recognitionPolicy().useObserver }.getOrDefault(false)
     }
 
     /**
@@ -483,10 +566,24 @@ internal object PickupCodeIsland {
         val t0 = SystemClock.uptimeMillis()
         val timeout = Runnable { if (g == gen) { lastRead = "timeout"; next(task, g) } }
         bg.postDelayed(timeout, TIMEOUT)
-        val asked = request(task) { st ->
+        val asked = request(task) { st, ex ->
             bg.post {
                 bg.removeCallbacks(timeout)
                 if (g != gen) return@post
+                program = programOf(ex)
+                // 支付宝's mini program pages carry their appId in their own launch intent; a page
+                // in the same container without one is not a mini program page - an H5 or a service
+                // page reached the same way, which is where reading every XRiverActivity would end
+                // up. Asked here rather than up front because the appId is part of the page, not of
+                // the task, and only exists once there is a page to read. A page whose text did
+                // come back but whose appId did not is left alone rather than tracked on nothing.
+                if (host == ALIPAY && st != null && program == null) {
+                    Xp.d(TAG + "no appId on the page: not a mini program" +
+                        if (ex == null) " (nothing came back with the structure)" else " (extras, but no appId)")
+                    lastRead = "no appId"
+                    stop()
+                    return@post
+                }
                 val nodes = if (st != null) runCatching { nodes(st) }.getOrNull() else null
                 val r = nodes?.let { parse(it) }
                 val ms = SystemClock.uptimeMillis() - t0
@@ -542,18 +639,27 @@ internal object PickupCodeIsland {
      * SystemUI's own package. The receiver is a bare Binder: IAssistDataReceiver's transaction 1
      * is onHandleAssistData(Bundle), 2 the screenshot, both oneway.
      */
-    private fun request(task: Int, done: (AssistStructure?) -> Unit): Boolean {
+    private fun request(task: Int, done: (AssistStructure?, Bundle?) -> Unit): Boolean {
         val receiver = object : Binder() {
             override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
                 if (code == 1) {
-                    val st = runCatching {
+                    val b = runCatching {
                         data.enforceInterface("android.app.IAssistDataReceiver")
-                        val b = if (data.readInt() != 0) Bundle.CREATOR.createFromParcel(data) else null
-                        b?.classLoader = AssistStructure::class.java.classLoader
-                        @Suppress("DEPRECATION")
-                        b?.getParcelable<AssistStructure>("structure")
+                        if (data.readInt() != 0) Bundle.CREATOR.createFromParcel(data) else null
                     }.getOrNull()
-                    done(st)
+                    b?.classLoader = AssistStructure::class.java.classLoader
+                    @Suppress("DEPRECATION")
+                    val st = runCatching { b?.getParcelable<AssistStructure>("structure") }.getOrNull()
+                    // The page's own launch intent rides along in `content`, and it is read apart
+                    // from the structure and after it. 支付宝 puts a Parcelable of its own class in
+                    // this same bundle (…fulllinktracker…SyncData, seen 2026-10-09) which does not
+                    // unmarshal in SystemUI at all; one try around both would throw a page's text
+                    // away for the sake of its intent, and the text is what the island is for.
+                    val extras = runCatching {
+                        @Suppress("DEPRECATION")
+                        b?.getParcelable<android.app.assist.AssistContent>("content")?.intent?.extras
+                    }.getOrNull()
+                    done(st, extras)
                     return true
                 }
                 if (code == 2) return true
@@ -608,14 +714,11 @@ internal object PickupCodeIsland {
      */
     private fun parse(nodes: List<PickupParse.Node>): PickupParse.Result? {
         val fallback = PickupParse.parse(nodes)
-        // The brand's entry in ColorOS's own rules, which carries its colours, its pictures and the
-        // tag its recognizer wants. Scored against the task label - the same low-cost scope ColorOS
-        // uses where an applet id and a route are not observable, and the fallback path its config
-        // describes.
         val content = nodes.joinToString("\n") { it.text }
         val texts = nodes.map { it.text }
-        oemRule = Main.appContext()?.let {
-            runCatching { PickupRules.get(it).matchPage(WECHAT, brand, content) }.getOrNull()
+        brandOf(content).let { (rule, name) ->
+            oemRule = rule
+            brand = name
         }
         val out = PickupOem.recognize(texts, oemRule?.tagAppName?.takeIf { it.isNotEmpty() } ?: OEM_APP, "")
         if (out == null) {
@@ -637,7 +740,44 @@ internal object PickupCodeIsland {
             store = fallback?.store,
             product = out.product.ifEmpty { null },
             oemStatus = out.status.ifEmpty { null },
+            temperature = out.temperature.ifEmpty { null },
         )
+    }
+
+    /**
+     * The brand of the page being read: its entry in ColorOS's rules, and what to call it.
+     *
+     * Four ways in, most exact first:
+     *  1. the appId the page's own launch intent carries, matched against a rule's `origin_id` -
+     *     which is how 支付宝's entries in the config are keyed, and needs no guess;
+     *  2. the task label, scored together with the page's text ([PickupRules.matchPage]) - how the
+     *     微信 brands are found, and still the better answer there because the text says what the
+     *     label cannot;
+     *  3. the name, searched by [PickupRules.matchBrand] across **both** platforms, because a brand
+     *     is one company whichever app it is reached through: 蜜雪冰城's rule is written for 微信
+     *     and names the same logo, the same drink and the same red, so it draws its 支付宝 card too;
+     *  4. nothing, and the card is drawn from the order's own drink ([PickupArt.model]).
+     *
+     * The name is a heuristic - it is the query the page was opened from, so it is the brand in the
+     * common case and something else when it is not - and its failure is harmless: 「奶茶」 finds no
+     * rule anywhere and falls to 4. Identity is always the appId; the name only chooses artwork.
+     */
+    private fun brandOf(content: String): Pair<PickupRule?, String> {
+        val rules = Main.appContext()?.let { runCatching { PickupRules.get(it) }.getOrNull() }
+        program?.appId?.takeIf { it.isNotEmpty() }?.let { appId ->
+            rules?.ruleForOrigin(host, appId)?.let { return it to brand.ifEmpty { it.label } }
+        }
+        if (brand.isNotEmpty()) {
+            rules?.matchPage(host, brand, content)?.let { return it to brand.ifEmpty { it.label } }
+        }
+        val name = program?.name?.takeIf { it.isNotEmpty() } ?: brand
+        if (name.isNotEmpty()) {
+            rules?.matchBrand(name)?.let { return it to brand.ifEmpty { it.label } }
+        }
+        // Nothing corroborated the name, so nothing is claimed: the task label still stands - it is
+        // the mini program's own name, which is what 微信 puts there - but a search query that
+        // matched no rule is not shown as a brand.
+        return null to brand
     }
 
     // ---------------------------------------------------------------- the island
@@ -703,8 +843,14 @@ internal object PickupCodeIsland {
 
     /**
      * ColorOS's verdict on the order, said in the page's vocabulary - its own words are
-     * completed/uncompleted/waiting, which mean nothing to a reader. Null when it did not answer,
-     * so the page's wording stands; this is shown, never decided on (see [PickupParse.Result]).
+     * completed/uncompleted/waiting, which mean nothing to a reader. This is the fallback, not the
+     * first choice: see [post], and 麦当劳 below.
+     *
+     * Its three values are coarser than the page's own words and its default is the middle one -
+     * the recognizer sets `orderStatus = uncompleted` when it starts and only moves it to
+     * `completed` on a marker it knows - so `uncompleted` means "not read as finished" rather than
+     * "being made". Shown as 「制作中」 that turned a page reading 「已准备完毕」 into an order still
+     * in the kitchen (2026-10-09, 支付宝's 麦当劳 order).
      */
     private fun oemTitle(r: PickupParse.Result): String? = when (r.oemStatus) {
         "completed" -> "已完成"
@@ -766,12 +912,12 @@ internal object PickupCodeIsland {
     }
 
     /**
-     * The mini program's task back in front, over 微信's own task so that Back from it lands in 微信,
-     * and 微信 itself if the task is gone.
+     * The mini program's task back in front, over its own app's task so that Back from it lands in
+     * the app, and the app itself if the task is gone.
      *
-     * 微信's task is moved forward first, and the mini program's without [MOVE_TASK_WITH_HOME]: that
-     * flag brings the task's home along, and the home of an appbrand task is the launcher - tapping
-     * the island opened the mini program over the desktop, so Back took the user out of 微信
+     * The app's task is moved forward first, and the mini program's without [MOVE_TASK_WITH_HOME]:
+     * that flag brings the task's home along, and the home of an appbrand task is the launcher -
+     * tapping the island opened the mini program over the desktop, so Back took the user out of 微信
      * altogether (2026-10-08, the top the module saw right after a tap was com.miui.home/.launcher).
      */
     private fun open(c: Context) {
@@ -793,15 +939,15 @@ internal object PickupCodeIsland {
         @Suppress("DEPRECATION")
         val tasks = runCatching { am.getRunningTasks(64) }.getOrDefault(emptyList())
         val ok = shownTask >= 0 && tasks.any { it.taskId == shownTask } && runCatching {
-            tasks.firstOrNull { it.taskId != shownTask && it.baseActivity?.packageName == WECHAT }
+            tasks.firstOrNull { it.taskId != shownTask && it.baseActivity?.packageName == host }
                 ?.let { am.moveTaskToFront(it.taskId, 0) }
             am.moveTaskToFront(shownTask, 0)
         }.isSuccess
         if (!ok) {
             runCatching {
-                c.packageManager.getLaunchIntentForPackage(WECHAT)
+                c.packageManager.getLaunchIntentForPackage(host)
                     ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let { c.startActivity(it) }
-            }.onFailure { Xp.log(TAG + "微信 not opened: $it") }
+            }.onFailure { Xp.log(TAG + "$host not opened: $it") }
         }
     }
 
@@ -822,10 +968,19 @@ internal object PickupCodeIsland {
         // ColorOS's recognizer names the drink; this file's reading of the page names the shop. The
         // second line leads with the drink, the way ColorOS's own card does, and falls back to the
         // shop for the brands whose pages carry no product name (蜜雪冰城's, for one).
-        val title = oemTitle(r) ?: r.status ?: r.label
+        // The page's own words first, the recognizer's verdict only where the page has none: its
+        // three values cannot say 「已准备完毕」, and its middle one is what it defaults to when it
+        // read nothing it knows (see [oemTitle]). Both mean the same thing to a reader - what the
+        // order is doing - so the page, which has the finer vocabulary, is the one to hear.
+        val title = r.status ?: oemTitle(r) ?: r.label
         // 「麦当劳示例广场餐厅」 under 麦当劳 is 「示例广场餐厅」.
         val store = r.store?.removePrefix(brand)?.trimStart('（', '(', ' ')?.ifEmpty { null }
-        val detail = r.product?.ifEmpty { null } ?: store
+        // The rules' own `<show_meal_name>`, which says whether the meal's name is shown at all;
+        // off, the shop stands in its place - the same thing the card already does for the brands
+        // whose pages carry no product name. Every rule for a page this module reads sets it true
+        // today (the single exception, 肯德基's own app, is a path this module does not read).
+        val meal = if (oemRule?.showMealName == false) null else r.product?.ifEmpty { null }
+        val detail = meal ?: store
         val content = listOfNotNull(brand, detail).joinToString(" · ")
         // The animated drink picture, as an Icon for the param's own icon slot: an Icon is
         // resolved and drawn by the system, which is the only route by which an animated WebP can
@@ -913,7 +1068,7 @@ internal object PickupCodeIsland {
         // The always-on picture is the drink's own still where ColorOS ships one for this brand, and
         // the logo where it does not - the same file the card's left half is drawn from. Set here,
         // before the param is written out: the notification carries a string, not this object.
-        val aod = PickupArt.aod(oemRule, PickupArt.model(oemRule, brand, r.product))
+        val aod = PickupArt.aod(oemRule, PickupArt.model(oemRule, brand, r.product, r.temperature))
             ?.let { PickupArt.bitmap(it, 200) }
         if (aod != null) param.put("aodPic", PIC_AOD)
         val extras = Bundle()
@@ -964,8 +1119,10 @@ internal object PickupCodeIsland {
             // draws the backdrop behind it - so its text and its rule are picked against that
             // backdrop, and the notification carries both rather than asking which is showing.
             runCatching {
-                PickupCard.build(c, oemRule, r.code, r.product, store, brand, tap, cardAlpha, false) to
-                    PickupCard.build(c, oemRule, r.code, r.product, store, brand, tap, cardAlpha, true)
+                PickupCard.build(c, oemRule, r.code, meal, r.temperature, store, brand, tap,
+                    cardAlpha, false) to
+                    PickupCard.build(c, oemRule, r.code, meal, r.temperature, store, brand, tap,
+                        cardAlpha, true)
             }.onSuccess { (day, night) ->
                 // Every key Xiaomi's own focus notification sets, which is what this copies (the
                 // assistant's card builder, `jd3.b`): the card in both themes, the always-on form,
@@ -1001,8 +1158,14 @@ internal object PickupCodeIsland {
     }
 
     /**
-     * The mini program's own icon, which its task carries (TaskDescription: in memory, or the
-     * file the system keeps it in); 微信's when it has none.
+     * The mini program's own icon, which its task carries (TaskDescription: in memory, or the file
+     * the system keeps it in); the brand's logo when the task has none; and the app's own icon only
+     * when neither is there.
+     *
+     * 支付宝 runs a mini program inside the app's own task, and that description carries no icon at
+     * all - so the app's own mark is what the small island and the lock screen's capsule showed for
+     * a 支付宝 order: 支付宝's logo on 蜜雪冰城's pickup (2026-10-09). By then the brand is known,
+     * and its logo is the picture ColorOS puts in that slot too.
      */
     private fun icon(c: Context, task: Int): Bitmap {
         val fromTask = runCatching {
@@ -1020,8 +1183,13 @@ internal object PickupCodeIsland {
             if (!iconSaid) { iconSaid = true; Xp.log(TAG + "task icon: $it") }
         }.getOrNull()
         if (fromTask != null) return fromTask
-        if (!iconSaid) { iconSaid = true; Xp.log(TAG + "task icon: none, 微信's instead") }
-        val d = c.packageManager.getApplicationIcon(WECHAT)
+        val logo = PickupArt.logo(oemRule)?.let { PickupArt.bitmap(it, 144) }
+        if (logo != null) {
+            if (!iconSaid) { iconSaid = true; Xp.log(TAG + "task icon: none, the brand's logo instead") }
+            return logo
+        }
+        if (!iconSaid) { iconSaid = true; Xp.log(TAG + "task icon: none, $host's instead") }
+        val d = c.packageManager.getApplicationIcon(host)
         val size = 144
         return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also {
             d.setBounds(0, 0, size, size)

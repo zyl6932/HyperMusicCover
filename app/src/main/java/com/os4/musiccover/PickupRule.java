@@ -32,6 +32,8 @@ final class PickupRule {
     boolean webView;
     boolean extractRootPortal;
     boolean needWaitingStatus;
+    /** Whether the meal's name is shown on the card; `<show_meal_name>`, on unless said otherwise. */
+    boolean showMealName = true;
     final List<Target> filterPaths = new ArrayList<>();
     final List<Target> activities = new ArrayList<>();
 

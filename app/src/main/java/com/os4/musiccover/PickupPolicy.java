@@ -32,6 +32,7 @@ final class PickupPolicy {
         final List<PrepareStatus> preparing = new ArrayList<>();
         final List<String> blackLabels = new ArrayList<>();
         final Map<String, PickupWebViewNames> webViewNames = new LinkedHashMap<>();
+        final Map<String, List<String>> miniActivities = new LinkedHashMap<>();
 
         boolean read(String name, String value) {
             switch (name) {
@@ -56,6 +57,27 @@ final class PickupPolicy {
             return true;
         }
 
+        /**
+         * The two blocks that say which activities a mini program is shown in - m6.e keeps them
+         * per platform, and the tags name the platform rather than a package, so `wx_` is 微信's
+         * list and `ali_` is 支付宝's. Each is a `;`-separated list that the XML spreads over
+         * several lines, and 支付宝's runs to twenty names.
+         */
+        void readMiniActivities(String name, String value) {
+            String owner = switch (name) {
+                case "wx_mini_activity" -> PickupConst.PKG_WECHAT;
+                case "ali_mini_activity" -> PickupConst.PKG_ALIPAY;
+                default -> "";
+            };
+            if (owner.isEmpty()) return;
+            ArrayList<String> activities = new ArrayList<>();
+            for (String entry : value.split(";")) {
+                String activity = entry.trim();
+                if (!activity.isEmpty()) activities.add(activity);
+            }
+            if (!activities.isEmpty()) miniActivities.put(owner, List.copyOf(activities));
+        }
+
         PickupPolicy build() { return new PickupPolicy(this); }
     }
 
@@ -66,6 +88,7 @@ final class PickupPolicy {
     final List<PrepareStatus> preparing;
     final List<String> blackLabels;
     final Map<String, PickupWebViewNames> webViewNames;
+    final Map<String, List<String>> miniActivities;
 
     private PickupPolicy(Builder builder) {
         finishGapMinutes = builder.finishGapMinutes;
@@ -78,6 +101,31 @@ final class PickupPolicy {
         preparing = List.copyOf(builder.preparing);
         blackLabels = List.copyOf(builder.blackLabels);
         webViewNames = Map.copyOf(builder.webViewNames);
+        miniActivities = Map.copyOf(builder.miniActivities);
+    }
+
+    /** The mini program containers the rules name for [packageName]; empty for anyone else's. */
+    List<String> miniActivities(String packageName) {
+        return packageName == null ? List.of() : miniActivities.getOrDefault(packageName, List.of());
+    }
+
+    /** Whether the rules know mini program containers for [packageName] at all. */
+    boolean isMiniProgramHost(String packageName) {
+        return !miniActivities(packageName).isEmpty();
+    }
+
+    /**
+     * Whether [className] is one of those containers. A prefix, not equality: 微信 names one class
+     * and shows every mini program in a copy of it (`AppBrandUI02` for the phone's second one), and
+     * 支付宝 lists the subclasses it uses (`XRiverActivity$App01` and its siblings) beside the
+     * plain one they are subclasses of.
+     */
+    boolean isMiniProgramActivity(String packageName, String className) {
+        if (className == null) return false;
+        for (String activity : miniActivities(packageName)) {
+            if (className.startsWith(activity)) return true;
+        }
+        return false;
     }
 
     /** i6.l.k refuses unknown/non-positive installed versions before m6.e.m. */
