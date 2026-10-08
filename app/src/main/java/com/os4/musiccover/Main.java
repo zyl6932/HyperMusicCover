@@ -2107,6 +2107,9 @@ public class Main extends XposedModule {
         }
         sReceiverRegistered = true;
         sAppCtx = ctx;
+        // 取餐码的云端名单：上一次拉到的那份从这里读回来（存在 SystemUI 自己的 filesDir 里，
+        // app 和它是两个 uid，所以不能由 app 下载）。
+        PickupCloud.INSTANCE.load(ctx);
         // Before the first send: the wallpaper process answers with it (ProbeGuard).
         ProbeGuard.mint();
 
@@ -2807,6 +2810,27 @@ public class Main extends XposedModule {
                         // has to offer a download link when it failed needs. The fetch takes a while,
                         // so it runs off this thread and reports by changing its own state.
                         setResultData("art=bundled in assets/coloros/pickupcode");
+                    } else if ("cloud".equals(op)) {
+                        // 取餐码的云端名单（OPPO 的 iwisdom，AIFluidWxAppletList）。一次网络往返，
+                        // 不能在 onReceive 里做——那跑在 SystemUI 的主线程上——所以它走 goAsync：
+                        // 收据归这个分支发。
+                        if ("fetch".equals(i.getStringExtra("do"))) {
+                            final PendingResult receipt = goAsync();
+                            async = true;
+                            new Thread(() -> {
+                                String said;
+                                try {
+                                    said = PickupCloud.INSTANCE.fetch(c);
+                                } catch (Throwable t) {
+                                    said = "同步失败：" + t.getClass().getSimpleName();
+                                }
+                                receipt.setResultData(said);
+                                receipt.setResultCode(OP_ACK);
+                                receipt.finish();
+                            }, "mc-pickup-cloud").start();
+                        } else {
+                            setResultData(PickupCloud.INSTANCE.describe());
+                        }
                     } else if ("transitcfg".equals(op)) {
                         // 「高德公交地铁」: --ez on true|false from the app; without it, 高德
                         // asking as it starts (AmapImmerse), and told what it is.
@@ -2887,6 +2911,9 @@ public class Main extends XposedModule {
                         out.putBoolean("transit", AmapTransitScene.sOn);
                         out.putBoolean("pickup", PickupCodeIsland.sOn);
                         out.putBoolean("card", PickupCodeIsland.sCard);
+                        // 设置页那行「手动刷新取餐码云端规则」的副标题，和这一份名单有几个小程序。
+                        out.putString("rulesdate", PickupCloud.INSTANCE.stamp(PickupCloud.INSTANCE.getUpdatedAt()));
+                        out.putInt("rulescount", PickupCloud.INSTANCE.count());
                         // Everything the app's preview needs to be to scale. It draws a lock
                         // screen it cannot see, and every one of these is device-specific, so
                         // they are measured here rather than written down twice.

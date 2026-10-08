@@ -199,14 +199,14 @@
     <string name="features_shade_summary">动态流光</string>
     <string name="features_mini_title">锁屏超级岛</string>
     <string name="features_mini_summary">音乐、通知与导航</string>
-    <string name="features_transit_title">高德公交地铁</string>
-    <string name="features_transit_summary">逐站超级岛</string>
+    <string name="features_transit_title">主动智能</string>
+    <string name="features_transit_summary">为您提供主动、贴心的智能服务~</string>
 
     <!-- The bus and subway trip's page, which the features page opens: one switch. -->
-    <string name="transit_enabled">启用高德公交地铁</string>
+    <string name="transit_enabled">地铁行程上岛</string>
     <string name="commute_title">地铁通勤</string>
     <string name="commute_learn">学习通勤路线</string>
-    <string name="commute_learn_summary">记下常坐的起终点和换乘站，下次不导航也能在换乘和到站时弹乘车码。只记站名和时间，存在本机，30 天后自动删除</string>
+    <string name="commute_learn_summary">存在本机，30天后自动删除</string>
     <string name="commute_unreached">小爱建议没有运行，打开一次负一屏后再进来</string>
     <string name="commute_route_direct">直达 · %1$d 次</string>
     <string name="commute_route_via">%1$s 换乘 · %2$d 次</string>
@@ -227,8 +227,6 @@
     <string name="mini_widen">快捷方式关闭时加宽</string>
     <string name="mini_widen_summary">手电筒或相机关闭后占用空位</string>
     <string name="mini_nav_keep_on">导航时屏幕常亮</string>
-    <string name="mini_status_at_date">状态显示在日期后面</string>
-    <string name="mini_status_at_date_summary">勿扰、充电不再被胶囊挡住</string>
     <string name="mini_fod_lift">避开屏下指纹</string>
     <string name="mini_fod_lift_summary">光学短焦指纹位置较低的机型，把胶囊抬到指纹区上方</string>
     <string name="mini_nav_keep_on_summary">显示高德导航或公交页面时</string>
@@ -247,6 +245,9 @@
     <string name="demo_transit_ride_title">逐站提醒</string>
     <string name="demo_transit_alert_title">换乘与到站</string>
     <string name="pickup_title">取餐码</string>
-    <string name="pickup_enabled">微信点单取餐码上岛</string>
-    <string name="pickup_summary">打开点单小程序的订单页时，把取餐码显示在超级岛和锁屏上。只读名单内的品牌，页面内容不保存</string>
+    <string name="pickup_cloud_refresh">刷新取餐码云端规则</string>
+    <string name="pickup_cloud_date">更新于 %1$s · %2$d 个小程序</string>
+    <string name="pickup_cloud_never">尚未同步</string>
+    <string name="pickup_cloud_syncing">正在同步…</string>
+    <string name="pickup_enabled">取餐码上岛</string>
 </resources>

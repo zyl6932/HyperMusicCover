@@ -107,11 +107,6 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                         checked = config.optBoolean(MiniPlayerConfig.NAV_KEEP_ON),
                         enabled = alive && config.optBoolean(MiniPlayerConfig.ENABLED),
                         onCheckedChange = { push(MiniPlayerConfig.NAV_KEEP_ON, it) })
-                    SwitchPreference(title = stringResource(R.string.mini_status_at_date),
-                        summary = stringResource(R.string.mini_status_at_date_summary),
-                        checked = config.optBoolean(MiniPlayerConfig.STATUS_AT_DATE),
-                        enabled = alive && config.optBoolean(MiniPlayerConfig.ENABLED),
-                        onCheckedChange = { push(MiniPlayerConfig.STATUS_AT_DATE, it) })
                     SwitchPreference(title = stringResource(R.string.mini_fod_lift),
                         summary = stringResource(R.string.mini_fod_lift_summary),
                         checked = config.optBoolean(MiniPlayerConfig.FOD_LIFT),

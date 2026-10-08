@@ -324,28 +324,18 @@ final class PickupRules {
         }
     }
 
+    /**
+     * The brand names and the switch-offs the cloud's applet list carries.
+     *
+     * This used to be a ContentProvider call - the reference implementation's own app, whose
+     * authority [PickupConst.PROVIDER_URI] still names - and that provider does not exist here: the
+     * app this ships in is `com.github.zyl6932.HyperMusicCover`, so the call could only ever throw
+     * and the list was always empty. [PickupCloud] is where it comes from now, filled from
+     * ColorOS's cloud by the module itself, and its `disabled` flag is read for the first time.
+     */
     private static CloudPolicy readCloudPolicy(Context host) {
         try {
-            Bundle out = host.getContentResolver().call(
-                    PickupConst.PROVIDER_URI, "cloud_rules", null, null);
-            String raw = out == null ? "" : out.getString("whitelist", "");
-            if (raw.isEmpty() || raw.length() > 300_000) return CloudPolicy.EMPTY;
-            JSONArray entries = new JSONArray(raw);
-            HashMap<String, String> names = new HashMap<>();
-            HashSet<String> disabled = new HashSet<>();
-            int count = Math.min(entries.length(), 500);
-            for (int i = 0; i < count; i++) {
-                JSONObject item = entries.optJSONObject(i);
-                if (item == null) continue;
-                String origin = comparable(item.optString("origId"));
-                String name = PickupEvent.truncate(PickupEvent.clean(
-                        item.optString("name")), 80);
-                if (!origin.matches("gh_[a-z0-9]{6,40}") || name.isEmpty()) continue;
-                names.put(origin, name);
-                if (item.optBoolean("disabled", false)) disabled.add(origin);
-            }
-            return new CloudPolicy(Collections.unmodifiableMap(names),
-                    Collections.unmodifiableSet(disabled));
+            return new CloudPolicy(PickupCloud.INSTANCE.names(), PickupCloud.INSTANCE.disabled());
         } catch (Exception ignored) {
             return CloudPolicy.EMPTY;
         }

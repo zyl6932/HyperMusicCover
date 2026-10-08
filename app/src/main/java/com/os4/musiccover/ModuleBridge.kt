@@ -34,6 +34,8 @@ object ModuleBridge {
     private const val ACTION = "com.os4.musiccover.PROBE"
     private const val TARGET = "com.android.systemui"
     private const val QUERY_TIMEOUT_MS = 1500L
+    /** The cloud fetch is a network round trip on SystemUI's side; the module answers it late. */
+    private const val REFRESH_TIMEOUT_MS = 25_000L
 
     data class State(
         val alive: Boolean = false,
@@ -168,6 +170,12 @@ object ModuleBridge {
         val transit: Boolean = true,
         /** 取餐码: a 微信 order page's pickup code on the island (PickupCodeIsland.sOn). */
         val pickup: Boolean = true,
+        /**
+         * 取餐码云端名单的状态：ColorOS 那一份自己的更新日期（空字符串＝从未同步过），
+         * 和它有几个小程序。设置页那行「手动刷新取餐码云端规则」的副标题读的就是它。
+         */
+        val rulesDate: String = "",
+        val rulesCount: Int = 0,
         /**
          * The notification-shade settings, keyed exactly as the module's own CFG_KEYS.
          *
@@ -482,6 +490,19 @@ object ModuleBridge {
     /** 取餐码. SystemUI reads the page and posts the island itself. */
     fun setPickup(context: Context, on: Boolean) =
         send(context, "pickup") { putExtra("on", on) }
+
+    /**
+     * 取餐码的云端名单，去 OPPO 那儿拉一次（settings 页那个按钮）。
+     *
+     * Answered rather than merely sent, because the answer is the point - it says how many mini
+     * programs came back and what date the cloud's copy carries, or why it did not. The fetch is a
+     * network round trip on SystemUI's side, so it is given longer than the usual query: the module
+     * answers it through goAsync once the request is done.
+     */
+    suspend fun refreshPickupRules(context: Context): String =
+        broadcast(context.applicationContext,
+            intent("cloud").apply { putExtra("do", "fetch") }, REFRESH_TIMEOUT_MS)?.data
+            ?: "同步超时：模块没有在 ${REFRESH_TIMEOUT_MS / 1000} 秒内回答"
 
     /**
      * One shade setting, by the module's own key.
@@ -826,6 +847,8 @@ object ModuleBridge {
             fpAvoid = b.getInt("fpavoid", 0),
             transit = b.getBoolean("transit", true),
             pickup = b.getBoolean("pickup", true),
+            rulesDate = b.getString("rulesdate") ?: "",
+            rulesCount = b.getInt("rulescount", 0),
             shade = b.keySet()
                 .filter { it.startsWith("shade_") }
                 .associate { it.removePrefix("shade_") to b.getInt(it, 0) },

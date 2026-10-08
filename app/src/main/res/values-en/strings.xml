@@ -191,12 +191,12 @@
     <string name="features_shade_summary">Flowing light</string>
     <string name="features_mini_title">Lock screen super island</string>
     <string name="features_mini_summary">Music, notifications and navigation</string>
-    <string name="features_transit_title">Amap bus &amp; subway</string>
-    <string name="features_transit_summary">Stop-by-stop island</string>
-    <string name="transit_enabled">Enable Amap bus &amp; subway</string>
+    <string name="features_transit_title">Proactive intelligence</string>
+    <string name="features_transit_summary">Proactive, thoughtful service~</string>
+    <string name="transit_enabled">Subway trips on the island</string>
     <string name="commute_title">Subway commute</string>
     <string name="commute_learn">Learn commutes</string>
-    <string name="commute_learn_summary">Remembers the starts, ends and changes you ride often, so the ride code also comes up at changes and arrival without navigation. Station names and times only, kept on this phone, deleted after 30 days</string>
+    <string name="commute_learn_summary">Kept on this phone, deleted after 30 days</string>
     <string name="commute_unreached">XiaoAi Suggestions is not running. Open the minus-one screen once, then come back</string>
     <string name="commute_route_direct">Direct · %1$d trips</string>
     <string name="commute_route_via">Change at %1$s · %2$d trips</string>
@@ -216,8 +216,6 @@
     <string name="mini_widen">Widen when a shortcut is off</string>
     <string name="mini_widen_summary">Takes the flashlight or camera space when it is off</string>
     <string name="mini_nav_keep_on">Keep the screen on while navigating</string>
-    <string name="mini_status_at_date">Status after the date</string>
-    <string name="mini_status_at_date_summary">Keeps Do Not Disturb and charging clear of the pill</string>
     <string name="mini_fod_lift">Clear of the fingerprint sensor</string>
     <string name="mini_fod_lift_summary">On phones with a low optical sensor, lifts the pill above it</string>
     <string name="mini_nav_keep_on_summary">While an Amap navigation or transit page is up</string>
@@ -233,6 +231,9 @@
     <string name="demo_transit_ride_title">Stop by stop</string>
     <string name="demo_transit_alert_title">Transfers and arrival</string>
     <string name="pickup_title">Pickup code</string>
-    <string name="pickup_enabled">WeChat order pickup code on the island</string>
-    <string name="pickup_summary">When an ordering mini program\'s order page is open, its pickup code is shown on the island and the lock screen. Only listed brands are read, and nothing on the page is kept</string>
+    <string name="pickup_cloud_refresh">Refresh pickup cloud rules</string>
+    <string name="pickup_cloud_date">Updated %1$s · %2$d mini programs</string>
+    <string name="pickup_cloud_never">Not synced yet</string>
+    <string name="pickup_cloud_syncing">Syncing…</string>
+    <string name="pickup_enabled">Pickup code on the island</string>
 </resources>

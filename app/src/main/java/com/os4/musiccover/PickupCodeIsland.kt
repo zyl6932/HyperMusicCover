@@ -72,6 +72,8 @@ internal object PickupCodeIsland {
     private const val PIC_AOD = "miui.focus.pic_mc_aod"
     private const val PIC_MODEL = "miui.focus.pic_mc_model"
     private const val ACTION_OPEN = "com.os4.musiccover.PICKUP_OPEN"
+    /** The island's own "back down" broadcast, which the plugin listens for and collapses on. */
+    private const val ACTION_COLLAPSE_ISLAND = "com.miui.action.ACTION_COLLAPSE_ISLAND"
     private const val ACTION_GONE = "com.os4.musiccover.PICKUP_GONE"
 
     private const val FIRST = 1_000L
@@ -85,17 +87,10 @@ internal object PickupCodeIsland {
     private const val SLOW = 30_000L
     /** How long a task is read on after the mini program leaves the front before it is let go. */
     private const val LEFT = 2 * 60_000L
-    /** How often a parked page is read: OPPO's own three intervals, by what the order is doing. */
-    private const val PARK_FIRST = 2 * 60_000L
-    private const val PARK_MAKING = 60_000L
-    private const val PARK_READY = 3 * 60_000L
     /** A parked task is let go after this, as ColorOS's observeagent does. */
     private const val PARK_MAX = 30 * 60_000L
     /** How long a task stays unparked after the island was tapped. */
     private const val NO_PARK = 5 * 60_000L
-    /** Battery, in percent: below the first the reads slow down, below the second the park ends. */
-    private const val LOW = 20
-    private const val EMPTY = 10
     /** Reads of one stay in front, at most: an hour at [EVERY]. */
     private const val MAX_READS = 720
     private const val LIFE = 30 * 60_000L
@@ -116,6 +111,15 @@ internal object PickupCodeIsland {
 
     /** The order is over: nothing left to wait on, and a parked task is let go. */
     private val DONE = setOf("已完成", "已取消", "已退款")
+
+    /**
+     * The order is being made. OPPO's config gives this state its own interval beside the plain
+     * ordered one ([PickupObserve]); the two are equal in the file it ships, so this only matters
+     * if a release ever makes them differ.
+     */
+    private val MAKING = setOf(
+        "制作中", "制茶中", "备餐中", "配餐中", "出餐中", "餐厅准备中", "精心制作中", "已接单",
+    )
 
     /** The mini programs read, matched in the task label. */
     private val BRANDS = listOf(
@@ -165,6 +169,10 @@ internal object PickupCodeIsland {
     /** The opacity a floated card starts at; [fade] steps it up to 1. */
     private val FADE_FROM = 0.15f
     private var reads = 0
+    /** Reads finished since this task was parked, which is what OPPO's first-after interval counts. */
+    private var parkedReads = 0
+    /** The task [parkedReads] belongs to, so a new park starts the count over. */
+    private var parkedTask = -1
     private var gen = 0
     private var shownKey: String? = null
     /** The state [shownKey] was posted with, to tell 制作中 → 待取餐 from a re-read of the same. */
@@ -357,7 +365,7 @@ internal object PickupCodeIsland {
      * neither - a page in one of the same containers that is not a mini program, or one whose
      * intent could not be read.
      */
-    private class Program(val appId: String, val name: String)
+    private class Program(val appId: String, val name: String, val scheme: String = "")
 
     /**
      * 支付宝 puts the appId in a nested `startParams` bundle, beside the query and the
@@ -375,9 +383,39 @@ internal object PickupCodeIsland {
         val start = runCatching { extras.getBundle("startParams") }.getOrNull()
         val info = runCatching { extras.getBundle("mExtras")?.getBundle("appInfo") }.getOrNull()
         val appId = text(start, "appId").ifEmpty { text(info, "appId") }
-        if (!appId.matches(Regex("\\d{8,20}"))) return null
-        return Program(appId, text(start, "globalSearchQuery"))
+        if (appId.matches(NUMERIC_ID)) {
+            // `ap_framework_scheme` is the `alipays://platformapi/startapp?appId=…` the system was
+            // handed when this page was opened, and it is what a tap on the island uses to come
+            // back to it (see [openNow]).
+            return Program(appId, text(start, "globalSearchQuery"),
+                text(start, "ap_framework_scheme"))
+        }
+        // 微信 has no such bundle, and ColorOS's own reader for it (`Gleaner`'s `yc/k`) does not
+        // look for one: it walks the extras for a string shaped like 微信's appId. Reading every
+        // string is safe here in a way it was not for 支付宝's numeric ids, where the renderer's
+        // own config carries a list of *other* mini programs' ids in the same bundle - a `wx`
+        // followed by sixteen hex digits is a shape nothing else in an intent has.
+        wechatId(extras)?.let { return Program(it, "") }
+        return null
     }
+
+    /** 微信's appId in a page's extras, one level of nested bundles deep. */
+    private fun wechatId(extras: Bundle, depth: Int = 0): String? {
+        val keys = runCatching { extras.keySet() }.getOrNull() ?: return null
+        for (key in keys) {
+            val id = text(extras, key).lowercase()
+            if (id.matches(WX_ID)) return id
+        }
+        if (depth >= 1) return null
+        for (key in keys) {
+            val nested = runCatching { extras.getBundle(key) }.getOrNull() ?: continue
+            wechatId(nested, depth + 1)?.let { return it }
+        }
+        return null
+    }
+
+    private val NUMERIC_ID = Regex("\\d{8,20}")
+    private val WX_ID = Regex("wx[a-f0-9]{16}")
 
     private fun text(from: Bundle?, key: String): String =
         runCatching { from?.getString(key) }.getOrNull().orEmpty()
@@ -507,13 +545,15 @@ internal object PickupCodeIsland {
             ?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
 
     /**
-     * The rest of §6.3's list: a battery below [LOW] percent, a battery saver on, a phone running
-     * hot. ColorOS also skips while a game is being played or the camera is open; neither is
-     * something this process can see for nothing, so neither is here.
+     * A battery saver on, or a phone running hot. Neither is something ColorOS's observe config
+     * has a key for - its two battery keys are in [PickupObserve] - and neither is a level to wait
+     * out, so a read is skipped rather than slowed. ColorOS also skips while a game is being played
+     * or the camera is open; neither is something this process can see for nothing, so neither is
+     * here.
      */
     private fun tired(ctx: Context): Boolean {
         val pm = ctx.getSystemService(android.os.PowerManager::class.java) ?: return false
-        return battery(ctx) in 1 until LOW || pm.isPowerSaveMode ||
+        return pm.isPowerSaveMode ||
             pm.currentThermalStatus >= android.os.PowerManager.THERMAL_STATUS_MODERATE
     }
 
@@ -530,6 +570,11 @@ internal object PickupCodeIsland {
         if (++reads > MAX_READS) return
         val ctx = Main.appContext() ?: return
         val parked = PickupPark.parked() == task
+        if (parked && parkedTask != task) {
+            parkedTask = task
+            parkedReads = 0
+        }
+        if (!parked) parkedTask = -1
         if (parked) {
             // §6.3's gates, in the order the doc has them: below 10% the wait is over, and a low
             // battery, a battery saver or a phone running hot skip a read. The park's own clock is
@@ -542,7 +587,7 @@ internal object PickupCodeIsland {
                     Xp.log(TAG + "parked for ${PARK_MAX / 60_000} min")
                     PickupPark.releaseFrom("parked long enough")
                 }
-                level in 0..EMPTY -> {
+                level in 0..PickupObserve.intervals.skipPercent -> {
                     Xp.log(TAG + "battery $level%: the wait is over")
                     PickupPark.releaseFrom("battery $level%")
                 }
@@ -551,6 +596,7 @@ internal object PickupCodeIsland {
                     return
                 }
             }
+            parkedReads++
         }
         // Not while the screen is off or the phone is locked, parked or not: the page is not being
         // looked at, and a parked order waiting behind a locked screen is where these reads spent
@@ -629,8 +675,13 @@ internal object PickupCodeIsland {
 
     /** OPPO's intervals for an order being waited on: what it is doing decides how often to look. */
     private fun parkedGap(): Long {
-        val s = shownStatus ?: return PARK_FIRST
-        return if (READY.any { s.contains(it) }) PARK_READY else PARK_MAKING
+        val cfg = PickupObserve.intervals
+        val s = shownStatus
+        if (s != null && READY.any { s.contains(it) }) return cfg.ready
+        if (parkedReads <= 1) return cfg.firstAfter
+        val gap = if (s != null && MAKING.any { s.contains(it) }) cfg.making else cfg.ordered
+        val level = Main.appContext()?.let { battery(it) } ?: -1
+        return if (level in 1 until cfg.lowBatteryPercent) maxOf(gap, cfg.lowBattery) else gap
     }
 
     /**
@@ -764,8 +815,19 @@ internal object PickupCodeIsland {
      */
     private fun brandOf(content: String): Pair<PickupRule?, String> {
         val rules = Main.appContext()?.let { runCatching { PickupRules.get(it) }.getOrNull() }
-        program?.appId?.takeIf { it.isNotEmpty() }?.let { appId ->
+        val appId = program?.appId.orEmpty()
+        if (appId.isNotEmpty()) {
             rules?.ruleForOrigin(host, appId)?.let { return it to brand.ifEmpty { it.label } }
+            // 微信's appId is not what the rules are keyed by - they use the `gh_…` original id -
+            // and the cloud's applet list is the only thing here carrying one for the other. That
+            // is half of what fetching it is for; the other half is its `disabled` flag.
+            if (host == WECHAT) {
+                val origin = PickupCloud.originOf(appId)
+                if (origin != null) {
+                    rules?.ruleForOrigin(WECHAT, origin)
+                        ?.let { return it to brand.ifEmpty { it.label } }
+                }
+            }
         }
         if (brand.isNotEmpty()) {
             rules?.matchPage(host, brand, content)?.let { return it to brand.ifEmpty { it.label } }
@@ -935,6 +997,17 @@ internal object PickupCodeIsland {
     }
 
     private fun openNow(c: Context) {
+        // 支付宝 runs a mini program inside its own app's task, and by the time the island is
+        // tapped that task is usually not sitting on the mini program any more - so moving the
+        // task to the front lands on whatever is, which is the app's own home (measured 2026-10-09:
+        // tapping the order button on a 蜜雪冰城 code opened 支付宝 itself). The page's own launch
+        // url has no such problem: it names the mini program, and asking for it again re-opens that
+        // page - warm, because 支付宝 keeps the mini program alive.
+        val scheme = if (host == ALIPAY) program?.scheme.orEmpty() else ""
+        if (scheme.isNotEmpty() && startScheme(c, scheme)) {
+            collapse(c)
+            return
+        }
         val am = c.getSystemService(ActivityManager::class.java)
         @Suppress("DEPRECATION")
         val tasks = runCatching { am.getRunningTasks(64) }.getOrDefault(emptyList())
@@ -949,7 +1022,36 @@ internal object PickupCodeIsland {
                     ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let { c.startActivity(it) }
             }.onFailure { Xp.log(TAG + "$host not opened: $it") }
         }
+        collapse(c)
     }
+
+    /**
+     * The island back down to its capsule, which the system does not do for this tap on its own.
+     *
+     * 小爱's card is a RemoteViews and the plugin watches its clicks
+     * (`FocusNotifPreHandler.handleRemoteViewClick`) - but only collapses when the PendingIntent is
+     * an *Activity* one, and this one cannot be: the tap has to run this module's own code (bring
+     * the mini program's task forward, or hand 支付宝 back its page's launch url), and that needs a
+     * broadcast. A broadcast PendingIntent only opens the app, so the island stayed expanded over
+     * it (2026-10-09). The broadcast sent here is the very one the plugin's own Activity branch
+     * sends.
+     *
+     * Nothing else collapses it: the `expandedTime` timer returns early once the user has expanded
+     * the island by hand (`DynamicIslandSafeguardsController.delayCollapsed$lambda$3`), and a
+     * re-post of the same notification reuses the island's view with its expanded state intact.
+     */
+    private fun collapse(c: Context) {
+        runCatching { c.sendBroadcast(Intent(ACTION_COLLAPSE_ISLAND)) }
+            .onFailure { Xp.log(TAG + "island not collapsed: $it") }
+    }
+
+    /** The page's own launch url, handed back to the app that gave it. */
+    private fun startScheme(c: Context, scheme: String): Boolean = runCatching {
+        c.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(scheme))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Named, so nothing else is offered and nothing needs to be visible to this process.
+            .setPackage(host))
+    }.onFailure { Xp.log(TAG + "scheme not opened: $it") }.isSuccess
 
     @android.annotation.SuppressLint("NotificationPermission")
     private fun post(c: Context, r: PickupParse.Result, task: Int, fresh: Boolean) {

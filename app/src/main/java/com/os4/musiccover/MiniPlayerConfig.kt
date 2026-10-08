@@ -18,13 +18,19 @@ object MiniPlayerConfig {
     /** 屏幕常亮 while a navigation page is up behind the lock screen (ImmersiveHost.holdScreen, #63). */
     const val NAV_KEEP_ON = "navKeepOn"
 
-    /** 勿扰, charging and the like drawn after the date, clear of the pill (DateStatus). */
+    /**
+     * 勿扰, charging and the like drawn after the date, clear of the pill (DateStatus).
+     *
+     * Not a setting any more (2026-10-09): it is always on, so it sits with the sizes below and
+     * nothing that arrives from anywhere can turn it off. The key stays in the JSON so the state
+     * file and [DateStatus] keep reading the same map.
+     */
     const val STATUS_AT_DATE = "statusAtDate"
 
     /** The row lifted off a low under-display fingerprint sensor (MiniPlayerRuntime.fingerprintArea, #66). */
     const val FOD_LIFT = "fodLift"
 
-    private val switches = setOf(ENABLED, ADAPTIVE_WIDTH, NAV_KEEP_ON, STATUS_AT_DATE, FOD_LIFT)
+    private val switches = setOf(ENABLED, ADAPTIVE_WIDTH, NAV_KEEP_ON, FOD_LIFT)
 
     private val defaults = linkedMapOf<String, Any>(
         ENABLED to false,
@@ -40,8 +46,9 @@ object MiniPlayerConfig {
     @JvmStatic fun defaultJson(): String = normalizedJson(null)
 
     /**
-     * The config as the module will use it: the switches ([ENABLED], [ADAPTIVE_WIDTH], [NAV_KEEP_ON], [STATUS_AT_DATE], [FOD_LIFT]) from the input, the
-     * three size keys always at the values above.
+     * The config as the module will use it: the switches ([ENABLED], [ADAPTIVE_WIDTH],
+     * [NAV_KEEP_ON], [FOD_LIFT]) from the input, the three size keys and [STATUS_AT_DATE] always
+     * at the values above.
      *
      * The sizes were sliders and are not settings any more - the app has no rows for them - so a
      * config that still carries one is not obeyed, whoever wrote it. They stay in the JSON all

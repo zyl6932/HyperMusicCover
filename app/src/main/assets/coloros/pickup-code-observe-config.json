@@ -1,0 +1,57 @@
+{
+  "status_interval_millis": {
+    "first_after_interval_millis": 120000,
+    "ordered_interval_millis": 60000,
+    "making_interval_millis": 60000,
+    "ready_interval_millis": 180000,
+    "low_battery_interval_millis": 120000,
+    "low_battery_threshold_percent": 20,
+    "skip_battery_threshold_percent": 10
+  },
+  "urlMappingRules": [
+    {
+      "label": "CoCo点单+",
+      "targetAppId": "wx89a110bbf29698eb",
+      "urlMappings": [
+        {
+          "originUrlPrefix": "http://com.oplus.test/pullWXMiniProgram?userName=gh_276bfaaaa096&path=app/shop/pages/orderDetail/index",
+          "mappingUrl": "http://com.oplus.test/pullWXMiniProgram?userName=gh_276bfaaaa096&path=app/main/newOrders/index"
+        }
+      ]
+    },
+    {
+      "label": "KUDDO COFFEE",
+      "targetAppId": "wx6f5c94bacd18c167",
+      "urlMappings": [
+        {
+          "originUrlPrefix": "http://com.oplus.test/pullWXMiniProgram?userName=gh_15e57f60db9d&path=pages/pay-success/pay-success",
+          "mappingUrl": "http://com.oplus.test/pullWXMiniProgram?userName=gh_15e57f60db9d&path=pages/vip-order-list/vip-order-list?"
+        },
+        {
+          "originUrlPrefix": "http://com.oplus.test/pullWXMiniProgram?userName=gh_15e57f60db9d&path=backup/pay-success/pay-success",
+          "mappingUrl": "http://com.oplus.test/pullWXMiniProgram?userName=gh_15e57f60db9d&path=backup/vip-order-list/vip-order-list"
+        }
+      ]
+    },
+    {
+      "label": "KONOMI COFFEE",
+      "targetAppId": "wxd78f5d4a003b7558",
+      "urlMappings": [
+        {
+          "originUrlPrefix": "http://com.oplus.test/pullWXMiniProgram?userName=gh_d9e05fe94765&path=pages/pay-success/pay-success",
+          "mappingUrl": "http://com.oplus.test/pullWXMiniProgram?userName=gh_d9e05fe94765&path=pages/vip-order-list/vip-order-list"
+        }
+      ]
+    },
+    {
+      "label": "M Stand",
+      "targetAppId": "wx63e68b8303875d61",
+      "urlMappings": [
+        {
+          "originUrlPrefix": "http://com.oplus.test/pullWXMiniProgram?userName=gh_9b900ade05f7&path=order/pages/preFoodsCurOrder/index",
+          "mappingUrl": "http://com.oplus.test/pullWXMiniProgram?userName=gh_9b900ade05f7&path=mine/pages/orderCenter/index"
+        }
+      ]
+    }
+  ]
+}
