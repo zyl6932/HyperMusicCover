@@ -178,6 +178,40 @@ internal object PickupCodeIsland {
             }
             Xp.log(TAG + "watching the front activity")
         }.onFailure { Xp.log(TAG + "front activity not watched: $it") }
+
+        // The card's picture is an animated WebP - ColorOS's drink, 53 frames of a cup filling -
+        // and the platform will not play it on its own. Resources hands an animated image back as
+        // an AnimatedImageDrawable that is *not running*: ImageDecoder's own contract says so
+        // ("To start its animation, call AnimatedImageDrawable.start()"), ImageView never calls it,
+        // and nothing in the RemoteViews path does either. A card drawn from the resource therefore
+        // holds its first frame, which is the half-full cup that used to look like the picture
+        // sitting too high.
+        //
+        // So it is started here, once, as the card is built: the cup fills the first time the card
+        // comes up and stays full - the artwork is a one-shot 53-frame WebP, and no second start is
+        // reachable (the RemoteViews is never applied again, the view is never detached and
+        // re-attached, no island callback reaches SystemUI, and the copies the island hands over are
+        // not the ones being drawn - all of that was measured in the log on 2026-10-08).
+        //
+        // The notification is posted from this process, so the ImageView that draws it is one this
+        // module can reach. The icon setter is the narrow place to watch - it is the one call
+        // RemoteViews' own `setImageViewIcon` makes, and little else in SystemUI goes through it.
+        // (Switching the card to `setImageViewResource` or `setImageViewBitmap` would move this to
+        // `setImageDrawable`, and a bitmap carries the one frame whatever is done to it.)
+        runCatching {
+            Xp.hookAll(android.widget.ImageView::class.java, "setImageIcon") { chain ->
+                val out = chain.proceed()
+                val v = chain.thisObject
+                // Guarded: this runs inside the host's own `setImageIcon`, and an exception here
+                // would take the whole card down with it - a RemoteViews that throws while it is
+                // applied simply does not appear.
+                if (v is android.widget.ImageView && v.id == R.id.mc_pickup_icon) runCatching {
+                    (v.drawable as? android.graphics.drawable.AnimatedImageDrawable)?.start()
+                }
+                out
+            }
+            Xp.log(TAG + "watching the card's picture")
+        }.onFailure { Xp.log(TAG + "card's picture not watched: $it") }
     }
 
     fun setOn(on: Boolean) {
