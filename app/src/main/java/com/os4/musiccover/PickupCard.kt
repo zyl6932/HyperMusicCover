@@ -123,14 +123,18 @@ internal object PickupCard {
     }
 
     /**
-     * The drink picture as an Icon, for the param's animated slot. An Icon is resolved and drawn by
-     * the system rather than frozen into pixels here, which is the only way an animated WebP can
-     * play in a notification - the card's own ImageView never plays one.
+     * The brand's logo, for the slot the *system* draws the picture in: the island's own icon and
+     * the lock screen's capsule both take it from `iconTextInfo.animIconInfo` and lay it out
+     * themselves, with no card of ours involved.
+     *
+     * The logo rather than the card's drink, because of how that artwork is framed: the drink is a
+     * 300x351 canvas whose cup - shadow included - ends 59px above the bottom edge (measured on
+     * base_bg_tea_style_yellow.webp), so once it is scaled into that small square slot the cup
+     * rides high and reads as a smudge. The logo is already a tight square and is legible at the
+     * size the slot gives it, which is what the official card does there too.
      */
-    fun modelIcon(c: Context, rule: PickupRule?, brand: String, product: String?): Icon? {
-        val id = PickupArt.model(rule, brand, product)?.let { PickupArt.drawable(c, it) } ?: 0
-        return if (id == 0) null else Icon.createWithResource(BuildConfig.APPLICATION_ID, id)
-    }
+    fun logoIcon(rule: PickupRule?): Icon? =
+        PickupArt.logo(rule)?.let { PickupArt.bitmap(it, 96) }?.let { Icon.createWithBitmap(it) }
 
     /**
      * The collapsed island: the brand's logo and the code, which is what the island is for.

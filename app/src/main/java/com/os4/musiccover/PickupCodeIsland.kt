@@ -773,7 +773,9 @@ internal object PickupCodeIsland {
         // The animated drink picture, as an Icon for the param's own icon slot: an Icon is
         // resolved and drawn by the system, which is the only route by which an animated WebP can
         // play here - a RemoteViews ImageView never plays one, however it is handed over.
-        val modelIcon = PickupCard.modelIcon(c, oemRule, brand, r.product)
+        // The brand's logo, for the slot the system draws itself (the island's icon and the lock
+        // screen's capsule); the card's own picture is the drink, and that one is set by the card.
+        val modelIcon = PickupCard.logoIcon(oemRule)
         // The island, in the shape the system's own renderer reads. Everything here comes out of
         // the island plugin (`miui.systemui.dynamicisland`): `IslandTemplateFactory.chooseModule`
         // picks the left area by `imageTextInfoLeft.type` (1 is the picture-and-text module, 5 the
