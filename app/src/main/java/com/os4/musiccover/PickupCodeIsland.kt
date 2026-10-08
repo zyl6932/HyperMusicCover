@@ -93,6 +93,8 @@ internal object PickupCodeIsland {
     private const val MAX_READS = 720
     private const val LIFE = 30 * 60_000L
     private const val TIMEOUT = 3_000L
+    /** How long after the top-activity observer appears its state is read, for the front activity. */
+    private const val STARTUP_LOOK = 2_000L
 
     /**
      * The order states worth floating the island open for - the food can be collected. [PickupParse]
@@ -178,6 +180,28 @@ internal object PickupCodeIsland {
             }
             Xp.log(TAG + "watching the front activity")
         }.onFailure { Xp.log(TAG + "front activity not watched: $it") }
+
+        // And whatever is in front *now*, because the observer above only speaks when the front
+        // activity changes. A SystemUI restart - which is how a new build is picked up - leaves the
+        // mini program sitting in front with nothing changing, so the tracker would stay empty until
+        // the user moved away and came back, which reads as "the island stopped working".
+        //
+        // Asked of ActivityManager rather than of the observer's own state: that state is only
+        // filled in on the way through an update, and the observer may well have been built before
+        // this module's hooks went in. Only the mini program is handed on - `front` is what decides
+        // what is in front, and a wrong name there would stick.
+        bg.postDelayed({
+            runCatching {
+                val ctx = Main.appContext() ?: return@runCatching
+                @Suppress("DEPRECATION")
+                val top = ctx.getSystemService(ActivityManager::class.java)
+                    .getRunningTasks(1).firstOrNull()?.topActivity
+                if (top != null && top.packageName == WECHAT && top.className.startsWith(MINI)) {
+                    Xp.log(TAG + "starting on " + top.shortClassName)
+                    front(top)
+                }
+            }
+        }, STARTUP_LOOK)
 
         // The card's picture is an animated WebP - ColorOS's drink, 53 frames of a cup filling -
         // and the platform will not play it on its own. Resources hands an animated image back as
