@@ -95,6 +95,8 @@ internal object PickupCodeIsland {
     private const val TIMEOUT = 3_000L
     /** How long after the top-activity observer appears its state is read, for the front activity. */
     private const val STARTUP_LOOK = 2_000L
+    /** The logo's fade-in, in ms: ColorOS's own `alpha_up_in` is 300ms on `coui_ease_move`. */
+    private const val LOGO_FADE = 300L
 
     /**
      * The order states worth floating the island open for - the food can be collected. [PickupParse]
@@ -231,11 +233,40 @@ internal object PickupCodeIsland {
                 // applied simply does not appear.
                 if (v is android.widget.ImageView && v.id == R.id.mc_pickup_icon) runCatching {
                     (v.drawable as? android.graphics.drawable.AnimatedImageDrawable)?.start()
+                    fadeLogoIn(v)
                 }
                 out
             }
             Xp.log(TAG + "watching the card's picture")
         }.onFailure { Xp.log(TAG + "card's picture not watched: $it") }
+    }
+
+    /**
+     * The brand's mark, faded in over the drink once the drink has finished filling.
+     *
+     * This is ColorOS's own card behaviour, taken from its implementation: `LevelDView` (the view
+     * their `picture_d19`/`picture_d20` layers are) fades the second layer in over the first, and
+     * its `card_modular_center_access_code.xml` anchors that layer 42dp above the picture's bottom -
+     * the layout here carries the same layer, transparent. The delay is the picture's own length
+     * (`PickupArt.duration`), because the drinks differ: 1749ms for the 53-frame ones, 600ms for the
+     * 20-frame ones.
+     *
+     * The fade itself is a real animator on the live view. It has to be: a re-posted notification
+     * would build the card again, and a card built again starts the drink over from an empty cup.
+     * The module is in the same process as the host, so the view is one it can reach - which is also
+     * how the drink is started in the first place.
+     */
+    private fun fadeLogoIn(picture: android.widget.ImageView) {
+        val ms = PickupCard.lastAnimationMs
+        Main.main().postDelayed({
+            runCatching {
+                val logo = (picture.parent as? android.view.View)
+                    ?.findViewById(R.id.mc_pickup_logo) as? android.view.View ?: return@runCatching
+                android.animation.ObjectAnimator.ofFloat(logo, "alpha", 0f, 1f)
+                    .setDuration(LOGO_FADE)
+                    .start()
+            }
+        }, if (ms > 0) ms.toLong() else 0L)
     }
 
     fun setOn(on: Boolean) {
@@ -438,12 +469,14 @@ internal object PickupCodeIsland {
                 }
             }
         }
-        // Not while the screen is off or locked: the page is not being looked at. A parked one is -
-        // the state wanted on the lock screen is exactly the parked page's, and it is kept current
-        // there - so it is read on, at the park's own intervals.
+        // Not while the screen is off or the phone is locked, parked or not: the page is not being
+        // looked at, and a parked order waiting behind a locked screen is where these reads spent
+        // most of their time. ColorOS skips them there too. The timer is left running, so the first
+        // read after the phone is picked up is at most one interval away - the lock screen's island
+        // shows the state as of the last read until then.
         val power = ctx.getSystemService(android.os.PowerManager::class.java)
         val keyguard = ctx.getSystemService(android.app.KeyguardManager::class.java)
-        if (!parked && (power?.isInteractive == false || keyguard?.isKeyguardLocked == true)) {
+        if (power?.isInteractive == false || keyguard?.isKeyguardLocked == true) {
             next(task, g)
             return
         }

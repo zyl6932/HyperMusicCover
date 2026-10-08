@@ -83,6 +83,52 @@ internal object PickupArt {
     }
 
     /**
+     * How long the animation at [id] runs, in milliseconds: the sum of its WebP frame durations, or
+     * 0 for a still picture or anything unreadable. ColorOS's card needs this to know when the drink
+     * has finished filling - its own `LevelDView` fades the brand's logo in over the cup once the
+     * animation has run - and the artwork differs by brand: the 53-frame drinks run 1749ms, the
+     * 20-frame ones 600ms, so one fixed delay would be wrong for most of them.
+     */
+    fun duration(c: Context, id: Int): Int {
+        if (id == 0) return 0
+        return try {
+            val own = c.createPackageContext(BuildConfig.APPLICATION_ID, 0)
+            val bytes = own.resources.openRawResource(id).use { it.readBytes() }
+            var total = 0
+            var i = -1
+            while (true) {
+                i = indexOf(bytes, ANMF, i + 1)
+                if (i < 0) break
+                // ANMF: 'ANMF' size(4) frameX(3) frameY(3) width(3) height(3) duration(3) flags(1)
+                val at = i + 20
+                if (at + 3 > bytes.size) break
+                total += (bytes[at].toInt() and 0xFF) or
+                    ((bytes[at + 1].toInt() and 0xFF) shl 8) or
+                    ((bytes[at + 2].toInt() and 0xFF) shl 16)
+            }
+            total
+        } catch (_: Throwable) {
+            0
+        }
+    }
+
+    private fun indexOf(hay: ByteArray, needle: ByteArray, from: Int): Int {
+        var i = if (from < 0) 0 else from
+        outer@ while (i <= hay.size - needle.size) {
+            var j = 0
+            while (j < needle.size) {
+                if (hay[i + j] != needle[j]) { i++; continue@outer }
+                j++
+            }
+            return i
+        }
+        return -1
+    }
+
+    /** The chunk every animation frame of a WebP lives in. */
+    private val ANMF = byteArrayOf(0x41, 0x4E, 0x4D, 0x46)
+
+    /**
      * A picture, decoded down to what the slot can show. Two passes: once for the size, once for
      * the pixels at the right sample.
      */

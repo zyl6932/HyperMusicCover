@@ -29,12 +29,33 @@
     android:paddingTop="16dp"
     android:paddingBottom="16dp">
 
-    <ImageView
-        android:id="@+id/mc_pickup_icon"
+    <!-- The one picture slot of the official card, in two layers as ColorOS builds it
+         (`card_modular_center_access_code.xml`): `picture_d19` is the drink animation and
+         `picture_d20` is the brand's logo, centred on it and 42dp above its bottom edge in their
+         117dp box - 35dp in this 98dp one. The logo starts transparent and is faded in by the
+         module once the drink's animation has run; `PickupCard` sets the picture. -->
+    <FrameLayout
+        android:id="@+id/mc_pickup_picture"
         android:layout_width="84dp"
-        android:layout_height="98dp"
-        android:contentDescription="@null"
-        android:scaleType="fitCenter" />
+        android:layout_height="98dp">
+
+        <ImageView
+            android:id="@+id/mc_pickup_icon"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter" />
+
+        <ImageView
+            android:id="@+id/mc_pickup_logo"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_gravity="center_horizontal|bottom"
+            android:layout_marginBottom="35dp"
+            android:alpha="0"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter" />
+    </FrameLayout>
 
     <LinearLayout
         android:id="@+id/mc_pickup_content_area"

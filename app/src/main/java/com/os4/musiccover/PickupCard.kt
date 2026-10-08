@@ -32,6 +32,14 @@ internal object PickupCard {
     private const val DEFAULT_CODE = "#3482FF"
     private const val DEFAULT_BUTTON = "#3482FF"
 
+    /**
+     * How long the drink picture set by the last [build] runs, in milliseconds (0 when it is not
+     * animated or could not be read). Read by [PickupCodeIsland]'s picture hook to time the logo's
+     * fade-in.
+     */
+    @Volatile var lastAnimationMs = 0
+        private set
+
     /** The card's own text, per theme: what 小爱's card uses over its day and night backdrop. */
     private const val DAY_TEXT = 0xFF000000.toInt()
     private const val NIGHT_TEXT = 0xFFFFFFFF.toInt()
@@ -72,8 +80,22 @@ internal object PickupCard {
         if (model != 0) {
             views.setImageViewIcon(R.id.mc_pickup_icon,
                 Icon.createWithResource(BuildConfig.APPLICATION_ID, model))
+            // How long that animation runs, so the module knows when to fade the logo in over it
+            // (see PickupCodeIsland's picture hook).
+            lastAnimationMs = PickupArt.duration(c, model)
         } else {
             views.setViewVisibility(R.id.mc_pickup_icon, View.INVISIBLE)
+            lastAnimationMs = 0
+        }
+
+        // The brand's mark over the drink, as ColorOS's card has it (`stickers/<brand>.png` in the
+        // rules XML, drawn in their second picture layer). Left transparent here: the module fades
+        // it in once the drink has finished filling, which is what their `LevelDView` does.
+        val sticker = PickupArt.sticker(rule)?.let { PickupArt.bitmap(it, (30 * c.resources.displayMetrics.density).toInt()) }
+        if (sticker != null) {
+            views.setImageViewBitmap(R.id.mc_pickup_logo, sticker)
+        } else {
+            views.setViewVisibility(R.id.mc_pickup_logo, View.GONE)
         }
         // The brand's logo is the thing that fades in, so it is what this fades.
         val step = (alpha.coerceIn(0f, 1f) * 255f).toInt()
