@@ -105,6 +105,19 @@ internal object PickupCodeIsland {
     private const val ACTION_COLLAPSE_ISLAND = "com.miui.action.ACTION_COLLAPSE_ISLAND"
     private const val ACTION_GONE = "com.os4.musiccover.PICKUP_GONE"
 
+    /**
+     * What the tap needs, carried in the tap itself.
+     *
+     * The card outlives the process that posted it - a SystemUI restart, which is how a new build is
+     * picked up, leaves the card on the back screen and this process with none of the state the tap
+     * reads ([shownTask], [host], the mini program's launch url). Tapping it then opened nothing at
+     * all, or the app's own home instead of the order page (2026-10-10). So the post writes what the
+     * tap would otherwise have to remember.
+     */
+    private const val EXTRA_TASK = "mc_task"
+    private const val EXTRA_HOST = "mc_host"
+    private const val EXTRA_SCHEME = "mc_scheme"
+
     private const val FIRST = 1_000L
     /** Reads after the first that come quickly, a page just brought back may still be filling. */
     private const val QUICK = 2
@@ -1008,13 +1021,26 @@ internal object PickupCodeIsland {
         Xp.log(TAG + "taken down: $why")
     }
 
+    /**
+     * The tap's receiver, in place as soon as this process has a Context.
+     *
+     * Registering it on the way out of a [post] is not enough, and the case it misses is the one
+     * the tap exists for: a SystemUI restart leaves the last card on the back screen while this
+     * process is tracking an order it has not posted anything for, so nothing reaches [post] - and
+     * the tap on that card was then a broadcast with no receiver behind it, which is to say the
+     * button did nothing at all (2026-10-10, after a restart).
+     */
+    fun wake(ctx: Context) {
+        receivers(ctx)
+    }
+
     private fun receivers(ctx: Context) {
         if (receivers) return
         receivers = true
         val r = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 when (i.action) {
-                    ACTION_OPEN -> bg.post { open(c) }
+                    ACTION_OPEN -> bg.post { open(c, i) }
                     ACTION_GONE -> bg.post {
                         val k = shownKey ?: return@post
                         muted = k.split('|').take(2).joinToString("|")
@@ -1041,45 +1067,68 @@ internal object PickupCodeIsland {
      * tapping the island opened the mini program over the desktop, so Back took the user out of 微信
      * altogether (2026-10-08, the top the module saw right after a tap was com.miui.home/.launcher).
      */
-    private fun open(c: Context) {
+    private fun open(c: Context, i: Intent) {
         // Tapping the island is the user going into the mini program: nothing is parked again for
         // [NO_PARK] while they are in there. See [left] - the front flickers through the launcher as
         // they move about it, and parking on that flicker takes it away from them mid-use.
         noParkUntil = SystemClock.uptimeMillis() + NO_PARK
+        // Where the tap should go, in order of how much it is *this* card's: the task the card was
+        // posted for, then the task this process is tracking, then nothing.
+        //
+        // The first is the faithful one, but it is not always still there: a SystemUI restart takes
+        // the parked mini program's task with it and the app makes another for the same page
+        // (measured 2026-10-10 - 44999 before the restart, 45007 after), while the card that is up
+        // is the older one, and tapping it has to land somewhere. It did not: the only task left to
+        // try was the one from the card, so the button fell through to opening 微信 itself.
+        val tasks = listOf(i.getIntExtra(EXTRA_TASK, -1), shownTask, taskId)
+            .filter { it >= 0 }.distinct()
+        val pkg = i.getStringExtra(EXTRA_HOST)?.takeIf { it.isNotEmpty() } ?: host
+        val scheme = i.getStringExtra(EXTRA_SCHEME).orEmpty().ifEmpty {
+            if (pkg == ALIPAY) program?.scheme.orEmpty() else ""
+        }
+        // The one path in this file with nothing else to go on when it does not work.
+        Xp.log(TAG + "tap: pkg=$pkg tasks=$tasks scheme=${scheme.isNotEmpty()} known=${shownKey != null}")
         if (PickupPark.parked() >= 0) {
             // §6.5: the task goes back to the display the user can see before it is brought to the
             // front - moved to the front while parked, it would come up on the hidden one.
-            PickupPark.releaseFrom("the island was tapped") { openNow(c) }
+            PickupPark.releaseFrom("the island was tapped") { openNow(c, tasks, pkg, scheme) }
         } else {
-            openNow(c)
+            openNow(c, tasks, pkg, scheme)
         }
     }
 
-    private fun openNow(c: Context) {
+    private fun openNow(c: Context, tasks: List<Int>, pkg: String, scheme: String) {
         // 支付宝 runs a mini program inside its own app's task, and by the time the island is
         // tapped that task is usually not sitting on the mini program any more - so moving the
         // task to the front lands on whatever is, which is the app's own home (measured 2026-10-09:
         // tapping the order button on a 蜜雪冰城 code opened 支付宝 itself). The page's own launch
         // url has no such problem: it names the mini program, and asking for it again re-opens that
         // page - warm, because 支付宝 keeps the mini program alive.
-        val scheme = if (host == ALIPAY) program?.scheme.orEmpty() else ""
-        if (scheme.isNotEmpty() && startScheme(c, scheme)) {
+        if (scheme.isNotEmpty() && startScheme(c, scheme, pkg)) {
             collapse(c)
             return
         }
         val am = c.getSystemService(ActivityManager::class.java)
         @Suppress("DEPRECATION")
-        val tasks = runCatching { am.getRunningTasks(64) }.getOrDefault(emptyList())
-        val ok = shownTask >= 0 && tasks.any { it.taskId == shownTask } && runCatching {
-            tasks.firstOrNull { it.taskId != shownTask && it.baseActivity?.packageName == host }
-                ?.let { am.moveTaskToFront(it.taskId, 0) }
-            am.moveTaskToFront(shownTask, 0)
-        }.isSuccess
-        if (!ok) {
+        val running = runCatching { am.getRunningTasks(64) }.getOrDefault(emptyList())
+        // The first of the candidates that is still running, and is moved: the app's own task first,
+        // then the mini program's, so that Back lands in the app rather than out of it.
+        var tried = 0
+        val moved = tasks.any { target ->
+            if (running.none { it.taskId == target }) return@any false
+            tried++
             runCatching {
-                c.packageManager.getLaunchIntentForPackage(host)
+                running.firstOrNull { it.taskId != target && it.baseActivity?.packageName == pkg }
+                    ?.let { am.moveTaskToFront(it.taskId, 0) }
+                am.moveTaskToFront(target, 0)
+            }.isSuccess
+        }
+        if (!moved) {
+            Xp.log(TAG + "tap: none of $tasks running for $pkg (tried $tried), opening the app itself")
+            runCatching {
+                c.packageManager.getLaunchIntentForPackage(pkg)
                     ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let { c.startActivity(it) }
-            }.onFailure { Xp.log(TAG + "$host not opened: $it") }
+            }.onFailure { Xp.log(TAG + "$pkg not opened: $it") }
         }
         collapse(c)
     }
@@ -1104,17 +1153,22 @@ internal object PickupCodeIsland {
             .onFailure { Xp.log(TAG + "island not collapsed: $it") }
     }
 
-    /** The page's own launch url, handed back to the app that gave it. */
-    private fun startScheme(c: Context, scheme: String): Boolean = runCatching {
+    /**
+     * The page's own launch url, handed back to the app that gave it.
+     *
+     * [pkg] is the app the card was posted for, not [host]: after a SystemUI restart the field is
+     * back at its default, and naming the wrong package here fails the launch silently.
+     */
+    private fun startScheme(c: Context, scheme: String, pkg: String): Boolean = runCatching {
         c.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(scheme))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             // Named, so nothing else is offered and nothing needs to be visible to this process.
-            .setPackage(host))
+            .setPackage(pkg))
     }.onFailure { Xp.log(TAG + "scheme not opened: $it") }.isSuccess
 
     @android.annotation.SuppressLint("NotificationPermission")
     private fun post(c: Context, r: PickupParse.Result, task: Int, fresh: Boolean) {
-        receivers(c)
+        receivers(c) // already on at startup; this is for the path where that had no Context yet
         val nm = c.getSystemService(NotificationManager::class.java) ?: return
         if (nm.getNotificationChannel(CHANNEL) == null) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "取餐码",
@@ -1254,7 +1308,14 @@ internal object PickupCodeIsland {
             if (aod != null) putParcelable(PIC_AOD, Icon.createWithBitmap(aod))
             if (modelIcon != null) putParcelable(PIC_MODEL, modelIcon)
         })
-        val tap = PendingIntent.getBroadcast(c, ID, Intent(ACTION_OPEN).setPackage(SYSUI),
+        // The tap carries the task it is about, its app, and (for 支付宝) the mini program's launch
+        // url, so that it still knows where to go after a SystemUI restart has emptied this process
+        // of everything it read - see [EXTRA_TASK]. FLAG_UPDATE_CURRENT keeps them current: the same
+        // PendingIntent goes out with every card, and the one in the notification is the last card's.
+        val tap = PendingIntent.getBroadcast(c, ID, Intent(ACTION_OPEN).setPackage(SYSUI)
+            .putExtra(EXTRA_TASK, task)
+            .putExtra(EXTRA_HOST, host)
+            .putExtra(EXTRA_SCHEME, if (host == ALIPAY) program?.scheme else null),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val gone = PendingIntent.getBroadcast(c, ID + 1, Intent(ACTION_GONE).setPackage(SYSUI),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

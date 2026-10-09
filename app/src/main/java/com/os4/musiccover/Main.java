@@ -2206,6 +2206,9 @@ public class Main extends XposedModule {
         // 取餐码的云端名单：上一次拉到的那份从这里读回来（存在 SystemUI 自己的 filesDir 里，
         // app 和它是两个 uid，所以不能由 app 下载）。
         PickupCloud.INSTANCE.load(ctx);
+        // 取餐码卡片的点击接收器：卡比进程活得久（重启系统界面后那张卡还在背屏上），
+        // 而这个进程可能从没发过卡，所以接收器在这里就装上。见 PickupCodeIsland.wake。
+        PickupCodeIsland.INSTANCE.wake(ctx);
         // Before the first send: the wallpaper process answers with it (ProbeGuard).
         ProbeGuard.mint();
 
