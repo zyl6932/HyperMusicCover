@@ -21,6 +21,7 @@
     <string name="restart_systemui">Restart System UI</string>
     <string name="restart_wallpaper">Restart wallpaper</string>
     <string name="restart_confirm_summary">Restart now?</string>
+    <string name="restart_stale">Restart the outdated apps</string>
 
     <string name="tab_home">Home</string>
     <string name="tab_settings">Settings</string>
@@ -107,7 +108,8 @@
     <string name="home_status_inactive">Module not active</string>
     <string name="home_status_inactive_hint">Enable it in LSPosed and restart System UI</string>
     <string name="home_stale_title">Module updated</string>
-    <string name="home_stale_summary">%1$d processes are still running the old version. Tap to restart them</string>
+    <string name="home_stale_summary">%1$d processes are still running the old version</string>
+    <string name="home_stale_action">Tap to restart them</string>
     <string name="home_device_name">Device name</string>
     <string name="home_device_model">Model</string>
     <string name="home_hyperos_version">HyperOS</string>

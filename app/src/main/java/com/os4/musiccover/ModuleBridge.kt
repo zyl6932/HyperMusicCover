@@ -935,6 +935,28 @@ object ModuleBridge {
         return all
     }
 
+    /**
+     * Only the targets still on the old build - the set the home page's card counted when it
+     * offered this.
+     *
+     * [restartScope] takes everything the module is loaded into and stays for the top bar's own
+     * entry, but an update leaves most of those processes already up to date, and killing a
+     * player that was never stale costs the user its playback and reloads a build that has
+     * nothing wrong with it.
+     *
+     * Nothing is killed without the service: there are no pids then, and the shipped scope is no
+     * substitute - it would restart exactly the processes this exists to leave alone. False
+     * rather than true, so a caller does not clear a card that is still telling the truth. An
+     * empty stale list is the opposite case: there is nothing left to restart, so it is a
+     * success.
+     */
+    fun restartStale(): Boolean {
+        val stale = LsposedService.staleTargets() ?: return false
+        if (stale.isEmpty()) return true
+        restartingSince = SystemClock.elapsedRealtime()
+        return stale.map { killPid(it.pid) }.all { it }
+    }
+
     /** The packages in the APK's own scope.list, one a line; null when it cannot be read. */
     private fun shippedScope(): List<String>? = runCatching {
         ModuleBridge::class.java.classLoader!!.getResourceAsStream("META-INF/xposed/scope.list")
