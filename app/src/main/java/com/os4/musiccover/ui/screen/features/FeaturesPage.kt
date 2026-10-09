@@ -247,6 +247,7 @@ internal fun CoverPageView(
                     coverStyle = module.coverStyle,
                     bias = module.bias,
                     clockSize = module.clockSize,
+                    aodBigClock = module.aodBigClock,
                     modifier = Modifier.padding(top = 16.dp),
                 )
             }
