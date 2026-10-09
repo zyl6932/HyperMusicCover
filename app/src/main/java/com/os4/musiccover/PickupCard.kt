@@ -5,8 +5,12 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Shader
 import android.graphics.drawable.Icon
+import android.hardware.display.DisplayManager
+import android.util.DisplayMetrics
 import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
@@ -31,6 +35,25 @@ internal object PickupCard {
 
     private const val DEFAULT_CODE = "#3482FF"
     private const val DEFAULT_BUTTON = "#3482FF"
+
+    /** The back screen: the display the panel's launcher runs on. */
+    private const val REAR_DISPLAY = 1
+
+    /**
+     * What the back screen's card keeps clear of: the rear layout's own start and end padding
+     * (113dp of camera, 20dp of edge) plus the 10dp its button sits in from the words.
+     */
+    private const val REAR_TEXT_INSET_DP = 143f
+
+    /** The official rear button's corner radius, `memory_scene_rear_action_corner_radius`. */
+    private const val REAR_BUTTON_RADIUS_DP = 30.94f
+
+    /** The rear card's two whites: the product and the button are one, the shop is 50%. */
+    private const val WHITE = 0xFFFFFFFF.toInt()
+    private const val HALF_WHITE = 0x80FFFFFF.toInt()
+
+    /** The rear button's own colour: `memory_scene_rear_action_bg`, 15% white. */
+    private const val CAPSULE = 0x26FFFFFF
 
     /**
      * How long the drink picture set by the last [build] runs, in milliseconds (0 when it is not
@@ -72,6 +95,16 @@ internal object PickupCard {
         // An Icon, not a bitmap and not a resource id: a Bitmap is frozen pixels - one frame of a
         // 53-frame animation - while an Icon is handed to the system to resolve, so what the
         // ImageView ends up holding is the animated drawable and it plays.
+        //
+        // Every picture below goes through `setImageViewIcon` for a second reason, and it is not
+        // cosmetic: this same card is the one the back screen draws (see [RearScreen]), and that
+        // app inflates it with an AppCompat factory, so what its layout calls an ImageView comes
+        // out an `androidx.appcompat.widget.AppCompatImageView`. That class overrides
+        // `setImageBitmap`/`setImageResource`/`setImageDrawable` without `@RemotableViewMethod`, so
+        // RemoteViews refuses every one of them - "view: androidx.appcompat.widget.AppCompatImageView
+        // can't use method with RemoteViews" - and the back screen's app dies on the spot, on every
+        // post. `setImageIcon` is not overridden there and goes through. A card is never built for
+        // one process only: whatever this file hands out has to survive both.
         val file = PickupArt.model(rule, brand, product, temperature)
         val model = file?.let { PickupArt.drawable(c, it) } ?: 0
         // The whole chain in one line: which picture the rules asked for, whether this build can
@@ -95,7 +128,7 @@ internal object PickupCard {
         // it in once the drink has finished filling, which is what their `LevelDView` does.
         val sticker = PickupArt.sticker(rule)?.let { PickupArt.bitmap(it, (30 * c.resources.displayMetrics.density).toInt()) }
         if (sticker != null) {
-            views.setImageViewBitmap(R.id.mc_pickup_logo, sticker)
+            views.setImageViewIcon(R.id.mc_pickup_logo, Icon.createWithBitmap(sticker))
         } else {
             views.setViewVisibility(R.id.mc_pickup_logo, View.GONE)
         }
@@ -124,7 +157,8 @@ internal object PickupCard {
         // from resources but can be handed a bitmap, and the radius (56dp, as in the official
         // card) is well past half the height, so it comes out as the capsule it looks like.
         val button = colour(rule?.pickupButtonColor, DEFAULT_BUTTON)
-        views.setImageViewBitmap(R.id.mc_pickup_action_bg, pill(c, button ?: 0xFF3482FF.toInt()))
+        views.setImageViewIcon(R.id.mc_pickup_action_bg,
+            Icon.createWithBitmap(pill(c, button ?: 0xFF3482FF.toInt())))
         // What the pill says is ours, not the official card's 「确认取餐」: this button does not
         // confirm the pickup, it opens the order's own page.
         views.setTextViewText(R.id.mc_pickup_action, "查看订单")
@@ -134,15 +168,140 @@ internal object PickupCard {
         return views
     }
 
+    /**
+     * The card the back screen draws.
+     *
+     * The same slots filled the same way as [build], in the rear card's own shape - see
+     * [R.layout.mc_pickup_rear], which is 小爱's own rear layout - over a background the official
+     * card gets from a flat scene colour under a black gradient, and this one from the brand's own
+     * colour: one vertical ramp from a quarter of it at the top to seven tenths at the bottom, so
+     * the code, the words and the capsule all sit on something rather than on the black panel.
+     *
+     * Its colours are the official rear card's, out of 小爱's `scene_style_*_dark`: the code in the
+     * brand's colour, the product white, the shop at half white, and the capsule 15% white - the
+     * one colour in their rear layout that is not a scene style (`memory_scene_rear_action_bg`).
+     */
+    fun rear(
+        c: Context,
+        rule: PickupRule?,
+        code: String,
+        product: String?,
+        /** The recognizer's reading of the drink's temperature; it picks the cold or hot cup. */
+        temperature: String?,
+        store: String?,
+        brand: String,
+        tap: PendingIntent,
+    ): RemoteViews {
+        val views = RemoteViews(BuildConfig.APPLICATION_ID, R.layout.mc_pickup_rear)
+        // The panel's own screen, not this process's: this card is built in SystemUI, and the back
+        // screen is a different size. The capsule below is drawn at the size it will be shown at,
+        // so it has to be measured where it is going.
+        val screen = rearScreen(c)
+        val density = screen.density
+        val accent = colour(rule?.pickupColor, DEFAULT_CODE) ?: 0xFF3482FF.toInt()
+        views.setImageViewIcon(R.id.mc_pickup_rear_backdrop, Icon.createWithBitmap(backdrop(accent)))
+
+        val file = PickupArt.model(rule, brand, product, temperature)
+        val model = file?.let { PickupArt.drawable(c, it) } ?: 0
+        Xp.log("MCPickupRear: brand=$brand rule=${rule?.brandName ?: "-"} model=$file" +
+            " id=$model code=$code store=${store ?: "-"} screen=${screen.widthPixels}x${screen.heightPixels}")
+        if (model != 0) {
+            views.setImageViewIcon(R.id.mc_pickup_rear_icon,
+                Icon.createWithResource(BuildConfig.APPLICATION_ID, model))
+        } else {
+            views.setViewVisibility(R.id.mc_pickup_rear_icon, View.INVISIBLE)
+        }
+        // No fade here, unlike the front card: the drink is started by the back screen's own copy
+        // of this module (see [RearScreen]), and nothing there knows how long it runs for.
+        val sticker = PickupArt.sticker(rule)
+            ?.let { PickupArt.bitmap(it, (30 * density).toInt()) }
+        if (sticker != null) {
+            views.setImageViewIcon(R.id.mc_pickup_rear_logo, Icon.createWithBitmap(sticker))
+        } else {
+            views.setViewVisibility(R.id.mc_pickup_rear_logo, View.GONE)
+        }
+
+        views.setTextViewText(R.id.mc_pickup_rear_title, code)
+        views.setTextColor(R.id.mc_pickup_rear_title, accent)
+        // The same rule the front card's title follows: the official card sets its code at 28sp
+        // whatever it says, and one long enough to be cut off steps down instead.
+        views.setTextViewTextSize(R.id.mc_pickup_rear_title, TypedValue.COMPLEX_UNIT_SP,
+            if (code.any { it.code > 127 } || code.length > 6) 24f else 28f)
+        views.setTextViewText(R.id.mc_pickup_rear_product, product?.ifEmpty { null } ?: brand)
+        views.setTextColor(R.id.mc_pickup_rear_product, WHITE)
+        views.setTextViewText(R.id.mc_pickup_rear_store, store.orEmpty())
+        views.setTextColor(R.id.mc_pickup_rear_store, HALF_WHITE)
+
+        // The capsule, at the width it will be drawn at: the words start 113dp in and the row ends
+        // 20dp off the right - the rear layout's own paddings - and the official button is another
+        // 10dp inside that. Drawn rather than stretched, so its ends stay round.
+        val width = screen.widthPixels - (REAR_TEXT_INSET_DP * density).toInt()
+        views.setImageViewIcon(R.id.mc_pickup_rear_action_bg,
+            Icon.createWithBitmap(capsule(width, (42 * density).toInt(), CAPSULE,
+                REAR_BUTTON_RADIUS_DP * density)))
+        views.setTextViewText(R.id.mc_pickup_rear_action, "查看订单")
+        views.setTextColor(R.id.mc_pickup_rear_action, WHITE)
+        views.setOnClickPendingIntent(R.id.mc_pickup_rear_action_container, tap)
+        views.setOnClickPendingIntent(R.id.mc_pickup_rear_root, tap)
+        return views
+    }
+
+    /**
+     * The back screen: the second display when there is one, this one otherwise.
+     *
+     * The id is the one the panel's launcher runs on (`displayId=1` in `dumpsys activity top`). A
+     * phone without a back screen never gets this far - [PickupCodeIsland] asks the same question
+     * before it builds this card at all - so the fallback is only here so the arithmetic below
+     * cannot divide by a null.
+     */
+    private fun rearScreen(c: Context): DisplayMetrics {
+        val display = c.getSystemService(DisplayManager::class.java)?.getDisplay(REAR_DISPLAY)
+        return if (display == null) {
+            c.resources.displayMetrics
+        } else {
+            DisplayMetrics().also { display.getRealMetrics(it) }
+        }
+    }
+
+    /**
+     * The card's background: the brand's colour, darkened the way the official card's is.
+     *
+     * Their rear card lays a flat scene colour down and puts a black gradient over it, opaque at
+     * the top left - where the camera is, and where nothing is meant to be read - and clear at the
+     * bottom. This is that composite as one vertical ramp, and it is one pixel wide: it is going to
+     * be stretched across the card, and a vertical gradient has nothing to put in a second column.
+     * Sixty-four rows is more than the eye can find banding in over 213dp.
+     */
+    private fun backdrop(accent: Int): Bitmap {
+        val rows = 64
+        val bitmap = Bitmap.createBitmap(1, rows, Bitmap.Config.ARGB_8888)
+        val paint = Paint().apply {
+            shader = LinearGradient(0f, 0f, 0f, rows.toFloat(),
+                shade(accent, 0.24f), shade(accent, 0.70f), Shader.TileMode.CLAMP)
+        }
+        Canvas(bitmap).drawRect(0f, 0f, 1f, rows.toFloat(), paint)
+        return bitmap
+    }
+
+    /** [colour] kept to [amount] of its brightness, alpha intact. */
+    private fun shade(colour: Int, amount: Float): Int = Color.argb(255,
+        (Color.red(colour) * amount).toInt(),
+        (Color.green(colour) * amount).toInt(),
+        (Color.blue(colour) * amount).toInt())
+
     /** The card's button: a capsule of [fill], at the 56dp radius the official card is cut to. */
     private fun pill(c: Context, fill: Int): Bitmap {
         val density = c.resources.displayMetrics.density
-        val width = (104 * density).toInt().coerceAtLeast(4)
-        val height = (37 * density).toInt().coerceAtLeast(2)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        return capsule((104 * density).toInt(), (37 * density).toInt(), fill, 56f * density)
+    }
+
+    /** A rectangle of [fill] whose corners are [radius] round - past half the height, a capsule. */
+    private fun capsule(width: Int, height: Int, fill: Int, radius: Float): Bitmap {
+        val bitmap = Bitmap.createBitmap(width.coerceAtLeast(4), height.coerceAtLeast(2),
+            Bitmap.Config.ARGB_8888)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = fill }
-        Canvas(bitmap).drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(),
-            56f * density, 56f * density, paint)
+        Canvas(bitmap).drawRoundRect(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat(),
+            radius, radius, paint)
         return bitmap
     }
 
@@ -171,7 +330,7 @@ internal object PickupCard {
         val logo = PickupArt.logo(rule)?.let { PickupArt.bitmap(it, 72) }
         Xp.log("MCPickupTiny: code=$code logo=${PickupArt.logo(rule) ?: "-"}" +
             " drawn=${logo != null} fallback=${fallback != null}")
-        views.setImageViewBitmap(R.id.mc_pickup_tiny_icon, logo ?: fallback)
+        views.setImageViewIcon(R.id.mc_pickup_tiny_icon, Icon.createWithBitmap(logo ?: fallback))
         views.setTextViewText(R.id.mc_pickup_tiny_code, code)
         colour(rule?.pickupColor, DEFAULT_CODE)?.let {
             views.setTextColor(R.id.mc_pickup_tiny_code, it)
