@@ -246,7 +246,6 @@
     <string name="mini_widen">锁屏快捷功能关闭时加宽</string>
     <string name="mini_widen_summary">锁屏快捷功能关闭后，锁屏岛占用空出的位置</string>
     <string name="mini_normals_in_stack">普通通知不上岛</string>
-    <string name="mini_normals_in_stack_summary">消息通知留在系统通知列表，音乐、导航、倒计时等照常上岛；关闭后普通通知也会合并到锁屏岛</string>
     <string name="mini_nav_keep_on">导航时屏幕常亮</string>
     <string name="mini_fod_lift">避开屏下指纹</string>
     <string name="mini_fod_lift_summary">光学短焦指纹位置较低的机型，把胶囊抬到指纹区上方</string>

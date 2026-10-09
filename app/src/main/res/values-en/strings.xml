@@ -236,7 +236,6 @@
     <string name="mini_widen">Widen when lock screen quick functions are off</string>
     <string name="mini_widen_summary">The island fills the space left by disabled lock screen quick functions</string>
     <string name="mini_normals_in_stack">Keep ordinary notifications off islands</string>
-    <string name="mini_normals_in_stack_summary">Keep messages in the system notification list. Music, navigation and timers still appear as islands. Turn off to include ordinary notifications in islands</string>
     <string name="mini_nav_keep_on">Keep the screen on while navigating</string>
     <string name="mini_fod_lift">Clear of the fingerprint sensor</string>
     <string name="mini_fod_lift_summary">On phones with a low optical sensor, lifts the pill above it</string>
