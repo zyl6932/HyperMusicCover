@@ -15,7 +15,8 @@ package com.os4.musiccover;
  *     (nothing - no widget for it, while 小爱's own card is built and removed by compositeKey)
  *
  * That list is a compiled resource inside a signed apk, so the only place to say otherwise is in
- * the app's own process: two of its answers are reconsidered here, for our package alone.
+ * the app's own process: the answer to "may this package draw a widget" is given here, for our
+ * package alone.
  *
  * What the app then does with the notification is the pickup card's business, not this file's -
  * `miui.rear.rv` is the card it draws, and [PickupCard] is where the card is built the way a
@@ -42,17 +43,24 @@ final class RearScreen {
             Xp.log(TAG + "resolver class not found, back screen will not show the card: " + t);
             return;
         }
-        // The ones that ask "is this package allowed" and hand back a boolean: (String, String,
-        // map), (String, Set, map), (String, String), and the two that ask with the package alone.
-        // The first three are the checks around a *new* notification; the last two are the ones
-        // the restore pass on startup goes through (`App not allowed, skip restore: <pkg>`, which
-        // is logged with nothing of ours having been asked). Nothing here names a template or a
-        // widget - the answer is only ever yes or no, which is why saying yes is enough.
+        // The two that ask "may this package's widget be built" and hand back a boolean: the
+        // (String, String, map) around a LiveUpdate business, and the (String, Set, map) ours goes
+        // through. Nothing here names a template or a widget - the answer is only ever yes or no,
+        // which is why saying yes is enough.
         allow(resolver, "l");
         allow(resolver, "m");
-        allow(resolver, "o");
-        allow(resolver, "n");
-        allow(resolver, "p");
+        // `n`, `o` and `p` are deliberately left alone, though this once answered yes to all five:
+        //
+        //   n(String)           "is this a quick-access package". `m` asks it internally, so a yes
+        //                       here made the app log a block it then had to be talked out of.
+        //   o(String, String)   "is this widget protected" - the answer that makes the app *ignore
+        //                       a removal*. A yes left every card we ever posted on the back screen
+        //                       for good, and had it written into `notification_widget.json` on the
+        //                       way, where a restart restores it with no RemoteViews in it - the
+        //                       black box. Cards now go out under an id each (PickupCodeIsland's
+        //                       ID), and the removal of the one before is what clears its widget,
+        //                       so this must answer as the app means it: no.
+        //   p(String)           a business (the ringing ones), never a package - it never saw ours.
         Xp.log(TAG + "allow-list hooks in place for " + OURS);
         startTheDrink();
     }

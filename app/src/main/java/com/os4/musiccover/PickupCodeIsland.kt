@@ -66,7 +66,19 @@ internal object PickupCodeIsland {
      */
     private const val OEM_APP = "common"
 
+    /**
+     * The notification id a card goes out under, and the base it counts from.
+     *
+     * The back screen keeps a *widget* per (package, id) and slides one out by itself only when it
+     * is a new widget - a notification that updates one it already has is drawn silently (see
+     * [post]). 小爱's own pickup notification is a new id for every order for exactly that reason,
+     * and one fixed id here meant only the first code of a session floated and every later one
+     * waited to be pulled down by hand (2026-10-09). So a fresh code takes the next id and a quiet
+     * update keeps the one it has.
+     */
     private const val ID = 1241
+    /** How many ids [ID] counts through before it starts over; far more codes than one session sees. */
+    private const val IDS = 512
     private const val CHANNEL = "mc_pickup"
     private const val PIC = "miui.focus.pic_mc_pickup"
     private const val PIC_AOD = "miui.focus.pic_mc_aod"
@@ -196,6 +208,10 @@ internal object PickupCodeIsland {
     private var shownStatus: String? = null
     /** The notification tag [shownKey] was posted under, null for the untagged one. */
     private var shownTag: String? = null
+    /** The notification id [shownKey] was posted under, which the back screen's widget is keyed on. */
+    private var shownId = ID
+    /** Fresh codes posted by this process, counted into the id's range ([ID]). */
+    private var ids = 0
     private var shownTask = -1
     private var muted: String? = null
     private var mutedUntil = 0L
@@ -959,22 +975,36 @@ internal object PickupCodeIsland {
 
     /**
      * Whether our own notification is still posted, the island going when it goes. Only this
-     * process's notifications are listed, and only this one is ours ([ID], [CHANNEL]). null is the
-     * system not saying - not an answer, so the caller keeps what it had; reading a failure as
-     * "gone" would float the island open again on every read.
+     * process's notifications are listed, and only ours is on [CHANNEL] - matched on that rather
+     * than on an id, which changes with every fresh code ([ID]). null is the system not saying -
+     * not an answer, so the caller keeps what it had; reading a failure as "gone" would float the
+     * island open again on every read.
      */
     private fun up(c: Context): Boolean? = runCatching {
         c.getSystemService(NotificationManager::class.java)?.activeNotifications
-            ?.any { it.id == ID && it.notification.channelId == CHANNEL }
+            ?.any { it.notification.channelId == CHANNEL }
     }.getOrNull()
+
+    /**
+     * Every card of ours cancelled.
+     *
+     * The back screen's widget for a card is removed when that card's *notification* is removed, and
+     * each fresh code goes out under an id of its own ([ID]) - so the one before has to be taken
+     * down by hand, or its widget stays on the back screen beside the new one. Matched on the
+     * channel rather than on [shownId], which is also what catches a card left posted by an earlier
+     * run of this process.
+     */
+    private fun sweep(nm: NotificationManager) {
+        runCatching {
+            nm.activeNotifications.filter { it.notification.channelId == CHANNEL }
+                .forEach { nm.cancel(it.tag, it.id) }
+        }
+    }
 
     private fun takeDown(why: String) {
         if (shownKey == null) return
-        val tag = shownTag
         clear()
-        Main.appContext()?.getSystemService(NotificationManager::class.java)?.let {
-            if (tag == null) it.cancel(ID) else it.cancel(tag, ID)
-        }
+        Main.appContext()?.getSystemService(NotificationManager::class.java)?.let { sweep(it) }
         Xp.log(TAG + "taken down: $why")
     }
 
@@ -1298,19 +1328,26 @@ internal object PickupCodeIsland {
         }
         // A post that must float the island gets a notification key of its own. MIUI keeps per-key
         // state for a focus notification (FocusNotificationController's hasEverExpandedKeys and its
-        // island-data map), and with one fixed key - 1241, no tag, the same for every order - the
-        // island came up for a key once and never again after it had gone: a second code, or one
-        // re-read after the user tapped the island away, was left in the shade alone while the
-        // module kept posting. A tag makes that a new key, and the one left behind is dropped first
-        // (two focus notifications at once would be two islands). A quiet update keeps the key it
-        // was posted under, so it stays one island being updated.
+        // island-data map), and with one fixed key - no tag, the same for every order - the island
+        // came up for a key once and never again after it had gone: a second code, or one re-read
+        // after the user tapped the island away, was left in the shade alone while the module kept
+        // posting. A tag makes that a new key, and the one left behind is dropped first (two focus
+        // notifications at once would be two islands). A quiet update keeps the key it was posted
+        // under, so it stays one island being updated.
+        //
+        // The same rule carries the *id*, which the back screen's widget is keyed on: a fresh code
+        // is a new id and so a new widget there, which is the only post that screen slides out by
+        // itself - see [ID]. The card before it is swept first, since its widget only goes when its
+        // own notification does.
         val tag = if (fresh) "mc-" + SystemClock.elapsedRealtime() else shownTag
+        val id = if (fresh) ID + (++ids % IDS) else shownId
         runCatching {
-            if (tag != shownTag) {
-                if (shownTag == null) nm.cancel(ID) else nm.cancel(shownTag, ID)
-            }
-            nm.notify(tag, ID, n)
-        }.onSuccess { shownTag = tag }
+            if (fresh) sweep(nm)
+            nm.notify(tag, id, n)
+        }.onSuccess {
+            shownTag = tag
+            shownId = id
+        }
         Xp.log(TAG + (if (fresh) "up: " else "updated: ") + brand + " (tag=${tag ?: "-"})")
     }
 
