@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
 import com.os4.musiccover.CoverActivity
+import com.os4.musiccover.MiniPlayerConfig
 import com.os4.musiccover.ModuleBridge
 import com.os4.musiccover.R
 import com.os4.musiccover.ShadeActivity
@@ -30,6 +31,7 @@ import com.os4.musiccover.MiniPlayerActivity
 import com.os4.musiccover.TransitActivity
 import com.os4.musiccover.ui.util.PageScaffold
 import kotlinx.coroutines.delay
+import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -312,6 +314,30 @@ private fun CoverGroup(
                 },
             )
         }
+        // Moved here off the islands' page (2026-10-09): what it decides is when the cover opens
+        // by itself, which is this page's subject rather than the row's. The value is still the
+        // mini player's own config - the module reads it from that JSON, not from its state file -
+        // so it is read and written through the copy of it that State carries.
+        val mediaCollapsed = remember(module.miniConfig) {
+            JSONObject(module.miniConfig).optBoolean(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT)
+        }
+        SwitchPreference(
+            title = stringResource(R.string.mini_media_collapsed),
+            summary = stringResource(R.string.mini_media_collapsed_summary),
+            checked = mediaCollapsed,
+            enabled = enabled,
+            onCheckedChange = { on ->
+                val next = MiniPlayerConfig.normalizedJson(
+                    JSONObject(module.miniConfig)
+                        .put(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT, on)
+                        .toString(),
+                )
+                ModuleBridge.setMiniConfig(context, next)
+                // Answered here rather than left to the next query: the module's own copy comes
+                // back a broadcast later, and a switch that moves only then reads as stuck.
+                onChange(module.copy(miniConfig = next))
+            },
+        )
     }
 }
 

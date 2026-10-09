@@ -128,11 +128,6 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                             !config.optBoolean(MiniPlayerConfig.NORMALS_IN_STACK, true) &&
                             config.optInt(MiniPlayerConfig.STYLE) == MiniPlayerConfig.STYLE_STACK,
                         onCheckedChange = { push(MiniPlayerConfig.GROUP_NOTIFICATIONS_BY_APP, it) })
-                    SwitchPreference(title = stringResource(R.string.mini_media_collapsed),
-                        summary = stringResource(R.string.mini_media_collapsed_summary),
-                        checked = config.optBoolean(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT),
-                        enabled = ready && config.optBoolean(MiniPlayerConfig.ENABLED),
-                        onCheckedChange = { push(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT, it) })
                     ValueSlider(
                         title = stringResource(R.string.mini_height),
                         summary = stringResource(R.string.mini_height_summary),
