@@ -36,6 +36,11 @@ final class RearScreen {
     }
 
     static void handle(ClassLoader cl) {
+        // First, and before the lookup below that can return: the card this module posted and then
+        // cancelled is still written down in the app's own widget file, and the app's restore brings
+        // it back at every start as a card with nothing to draw. See prune().
+        prune();
+
         Class<?> resolver;
         try {
             resolver = Xp.findClass("m2.d", cl);
@@ -124,5 +129,123 @@ final class RearScreen {
             // does not appear on the back screen.
             Xp.log(TAG + "no " + name + "() to hook: " + t);
         }
+    }
+
+    // ------------------------------------------------------------------ the card left behind
+
+    private static final String WIDGET_FILE = "notification_widget.json";
+
+    /**
+     * Our card taken out of the app's own record of what it has on the back screen.
+     *
+     * That record is a file (`PersistenceManager` logs `Save notification widgets to` it) written
+     * whenever a notification arrives. A Bundle->JSON conversion keeps the plain types only
+     * (`o2.AbstractC0666c.b`), so the two keys that *are* the card - `miui.rear.rv` and
+     * `miui.rear.rvAOD`, both RemoteViews - are lost on the way in, and all that is left of them is
+     * `is_remote_view: true`. A card that is cancelled or times out does not rewrite the file, so
+     * its entry stays behind; the app's start-up restore (`LM/j`) reads it back into a `q2.o` with
+     * nothing to draw, and that is the black box - `SubScreenWidget - updateViews: mInAod = false,
+     * mRemoteViewsDark = null, mRemoteViewsLight = null`, on the back screen until the next start
+     * makes it again. Seen four times on 2026-10-09 (19:04, 20:48, 22:52, 23:34), the last of them
+     * from a card that had been deleted at 22:52:46.
+     *
+     * Nothing else can take that entry out: the widget goes when its *notification* is removed, and
+     * by then ours is long gone - the module's own sweep cancels what is still posted, which is
+     * exactly what this one is not. So it is removed here instead, in the app's own process, as the
+     * app's own uid, just before the app reads the file: that is why this runs from handle(), at
+     * package load, and not from the process that posts the card. Writing it from SystemUI would
+     * also leave the file owned by SystemUI's uid, which is not ours to do to the app.
+     */
+    private static void prune() {
+        try {
+            java.io.File f = widgetFile();
+            if (!f.isFile() || !f.canRead() || !f.canWrite()) return;
+            org.json.JSONArray widgets = new org.json.JSONArray(new String(
+                    java.nio.file.Files.readAllBytes(f.toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8));
+            int dropped = drop(widgets);
+            if (dropped == 0) return;
+            if (!write(f, widgets.toString())) {
+                complain("write refused");
+                return;
+            }
+            Xp.log(TAG + "dropped " + dropped + " stale card entr" + (dropped == 1 ? "y" : "ies")
+                    + " from " + WIDGET_FILE);
+        } catch (Throwable t) {
+            // A file we cannot read or parse is left exactly as it was, and the card is then what it
+            // is today - the worst case here is the bug, never a broken app.
+            complain(t.toString());
+        }
+    }
+
+    /**
+     * Where the app keeps that list: its own tree under /data/system rather than its data dir,
+     * `/data/system/theme_magic/users/<user>/subscreencenter/notification/notification_widget.json`,
+     * and `<user>` is the user id, `uid / 100000` - the same derivation [CoverPush] uses for the
+     * wallpaper records it reads under the same tree.
+     */
+    private static java.io.File widgetFile() {
+        return new java.io.File("/data/system/theme_magic/users/"
+                + (android.os.Process.myUid() / 100000)
+                + "/subscreencenter/notification/" + WIDGET_FILE);
+    }
+
+    /**
+     * Our entries taken out of a loaded list, in place, answering how many went.
+     *
+     * Backwards, because `remove` shifts everything after it. Out of [prune] so a test can hand it
+     * a list with no device and no file behind it.
+     */
+    static int drop(org.json.JSONArray widgets) {
+        int dropped = 0;
+        for (int i = widgets.length() - 1; i >= 0; i--) {
+            org.json.JSONObject entry = widgets.optJSONObject(i);
+            if (entry != null && ours(entry)) {
+                widgets.remove(i);
+                dropped++;
+            }
+        }
+        return dropped;
+    }
+
+    /**
+     * Whether an entry is ours: SystemUI's, under a tag only this module posts.
+     *
+     * The tag is the whole of it - `PickupCodeIsland` posts a card as `mc-<elapsedRealtime>` and
+     * nothing else in this module tags a notification (the islands go out untagged, by id). The
+     * business is no help: ours is `memory`, which is 小爱's as well. The package is asked for too,
+     * so that an entry whose tag merely looks like ours is still left alone.
+     */
+    private static boolean ours(org.json.JSONObject entry) {
+        org.json.JSONObject extra = entry.optJSONObject("extra");
+        if (extra == null) return false;
+        String key = extra.optString("notification_key", "");
+        if (!key.contains("|mc-")) return false;
+        return OURS.equals(extra.optString("package_name")) || key.contains("|" + OURS + "|");
+    }
+
+    /** Written beside it and renamed over it, as [CoverPush] does: the app may be reading it. */
+    private static boolean write(java.io.File f, String json) {
+        java.io.File tmp = new java.io.File(f.getParentFile(), f.getName() + ".tmp");
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(tmp)) {
+            out.write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Throwable t) {
+            return false;
+        }
+        tmp.setReadable(true, false);
+        if (!tmp.renameTo(f)) {
+            tmp.delete();
+            return false;
+        }
+        return true;
+    }
+
+    private static volatile boolean sComplained;
+
+    /** Once per process: a start that cannot be cleaned is worth a line, not one per notification. */
+    private static void complain(String why) {
+        if (sComplained) return;
+        sComplained = true;
+        Xp.w(TAG + WIDGET_FILE + " not pruned: " + why);
     }
 }
