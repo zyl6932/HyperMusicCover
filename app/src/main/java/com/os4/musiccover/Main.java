@@ -2169,6 +2169,13 @@ public class Main extends XposedModule {
         } finally {
             sLoading = false;
         }
+        // The mode fpavoid has just come back to. A policy flow the OEM's combine already had
+        // attached was made with whatever this process started at - 0, "leave it to the system" -
+        // and NotificationSink.withAvoidance hands the decision to that flow whenever it carries
+        // one, so a phone restarted with 始终下沉 saved sank nothing until the setting was touched
+        // again. Nothing else refreshed this on the way up: 展开背景时下移通知 used to, by
+        // accident, on its scene changes and only while it was switched on (2026-10-09).
+        refreshNotificationSink();
         Xp.log(TAG + "state restored: cover=" + cover + " bias=" + sBias);
         if (cover) {
             enterCoverMode(false);
