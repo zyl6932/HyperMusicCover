@@ -40,4 +40,12 @@ class MiniPlayerGeometryTest {
         assertEquals(162, MiniPlayerGeometry.pillBesideIslandPx(477, 250, 162, 24, 420))
     }
 
+    @Test fun stackedRearIsNinetyPercentAndExposesOnlyItsLowerRim() {
+        assertEquals(198, MiniPlayerGeometry.stackBackSizePx(220))
+        assertEquals(49, MiniPlayerGeometry.stackBackSizePx(54))
+        val centerY = MiniPlayerGeometry.stackBackCenterYPx(100f, 54, 2)
+        val backBottom = centerY + MiniPlayerGeometry.stackBackSizePx(54) / 2f
+        assertEquals(129f, backBottom)
+    }
+
 }

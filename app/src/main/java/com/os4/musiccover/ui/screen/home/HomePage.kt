@@ -157,8 +157,8 @@ fun HomePageView(
     // once LSPosed's service binds, which can be after the page is up.
     val service by LsposedService.service.collectAsState()
     var stale by remember { mutableStateOf(0) }
-    // The row is a whole card wide and sits right under the status card, where a scroll starts;
-    // a restart blanks the screen and stops whatever the scoped apps were doing, so it asks.
+    // A restart blanks the screen and stops whatever the scoped apps were doing, so it asks.
+    // Asked from the status card, which is the whole width of the page and where a scroll starts.
     var confirmRestart by remember { mutableStateOf(false) }
     LaunchedEffect(current, resumeKey, service) {
         if (current) stale = withContext(Dispatchers.IO) { LsposedService.staleCount() }
@@ -180,30 +180,39 @@ fun HomePageView(
                 val darkTheme = isInDarkTheme()
                 val dynamicColor = MiuixTheme.isDynamicColor
                 val ok = state.alive
-                val statusColor = if (ok) {
-                    when {
-                        dynamicColor -> MiuixTheme.colorScheme.secondaryContainer
-                        darkTheme -> Color(0xFF1A3825)
-                        else -> Color(0xFFDFFAE4)
-                    }
-                } else {
+                // Processes left on the build before this one. An answer about the module rather
+                // than about this app, so it can be true while the module is not answering at
+                // all - and then the card says the more urgent of the two things.
+                val staleHere = ok && stale > 0
+                // The card is one card with three things to say, and two of them are the same
+                // news: the module is not answering, or it is answering in some processes as the
+                // version before. Both are red, both wear the cross, and only the words and what
+                // tapping it does are different.
+                val problem = !ok || staleHere
+                val statusColor = if (problem) {
                     when {
                         dynamicColor -> MiuixTheme.colorScheme.errorContainer
                         darkTheme -> Color(0xFF3D1C1C)
                         else -> Color(0xFFFDE8E8)
                     }
-                }
-                val iconTint = if (ok) {
-                    if (dynamicColor) MiuixTheme.colorScheme.primary.copy(alpha = 0.8f)
-                    else Color(0xFF36D167)
                 } else {
+                    when {
+                        dynamicColor -> MiuixTheme.colorScheme.secondaryContainer
+                        darkTheme -> Color(0xFF1A3825)
+                        else -> Color(0xFFDFFAE4)
+                    }
+                }
+                val iconTint = if (problem) {
                     if (dynamicColor) MiuixTheme.colorScheme.error.copy(alpha = 0.8f)
                     else Color(0xFFDC3545)
-                }
-                val titleText = if (ok) {
-                    stringResource(R.string.home_status_active)
                 } else {
-                    stringResource(R.string.home_status_inactive)
+                    if (dynamicColor) MiuixTheme.colorScheme.primary.copy(alpha = 0.8f)
+                    else Color(0xFF36D167)
+                }
+                val titleText = when {
+                    !ok -> stringResource(R.string.home_status_inactive)
+                    staleHere -> stringResource(R.string.home_stale_title)
+                    else -> stringResource(R.string.home_status_active)
                 }
                 // When it is working there is nothing to instruct the user about, so
                 // the lines say what is running instead; when it is not, the hint is the
@@ -213,20 +222,20 @@ fun HomePageView(
                 // used to blank this one to "loading", and since a re-check keeps the
                 // previous answer until the new one arrives, that was a flicker showing
                 // nothing the previous answer had not already said.
-                val lineTwo = if (checked && !ok) {
-                    stringResource(R.string.home_status_inactive_hint)
-                } else {
-                    moduleVersion
+                val lineTwo = when {
+                    checked && !ok -> stringResource(R.string.home_status_inactive_hint)
+                    staleHere -> stringResource(R.string.home_stale_summary, stale)
+                    else -> moduleVersion
                 }
                 // The card's bottom-left corner names the app, not the layout: there is
                 // only one layout, so a line saying which one it is told the reader
                 // nothing, while the name is what someone looking at a stranger's lock
                 // screen would want to read off it. Null while the module is not live,
                 // because then the hint above is the only line worth having.
-                val workingMode = if (ok) {
-                    stringResource(R.string.app_name)
-                } else {
-                    null
+                val workingMode = when {
+                    !ok -> null
+                    staleHere -> stringResource(R.string.home_stale_action)
+                    else -> stringResource(R.string.app_name)
                 }
 
                 // Laid out the way KernelSU's HomeMiuix card is: three boxes stacked
@@ -249,7 +258,13 @@ fun HomePageView(
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.defaultColors(color = statusColor),
-                        onClick = { scope.launch { refresh() } },
+                        // A card naming processes to restart restarts them, and asks first: a
+                        // restart blanks the screen and stops whatever the scoped apps were
+                        // doing. Every other answer this card gives is a report, and tapping a
+                        // report asks the module again.
+                        onClick = {
+                            if (staleHere) confirmRestart = true else scope.launch { refresh() }
+                        },
                         showIndication = true,
                         pressFeedbackType = PressFeedbackType.Tilt
                     ) {
@@ -262,8 +277,8 @@ fun HomePageView(
                             ) {
                                 Icon(
                                     modifier = Modifier.size(110.dp),
-                                    imageVector = if (ok) Icons.Rounded.CheckCircleOutline
-                                    else Icons.Rounded.ErrorOutline,
+                                    imageVector = if (problem) Icons.Rounded.ErrorOutline
+                                    else Icons.Rounded.CheckCircleOutline,
                                     tint = iconTint,
                                     contentDescription = null
                                 )
@@ -305,24 +320,6 @@ fun HomePageView(
                     }
                 }
 
-            }
-        }
-
-        // Right under the status, while there is something to restart: the module is answering,
-        // but in some processes as the version before. One tap restarts what LSPosed lists.
-        if (stale > 0) {
-            item {
-                Card(
-                    modifier = Modifier
-                        .padding(top = 12.dp)
-                        .padding(horizontal = 12.dp)
-                ) {
-                    ArrowPreference(
-                        title = stringResource(R.string.home_stale_title),
-                        summary = stringResource(R.string.home_stale_summary, stale),
-                        onClick = { confirmRestart = true },
-                    )
-                }
             }
         }
 
@@ -396,7 +393,7 @@ fun HomePageView(
 
     WindowDialog(
         show = confirmRestart,
-        title = stringResource(R.string.restart_scope),
+        title = stringResource(R.string.restart_stale),
         summary = stringResource(R.string.restart_confirm_summary),
         onDismissRequest = { confirmRestart = false },
     ) {
@@ -414,8 +411,14 @@ fun HomePageView(
                 onClick = {
                     confirmRestart = false
                     scope.launch {
-                        withContext(Dispatchers.IO) { ModuleBridge.restartScope(context) }
-                        stale = 0
+                        val restarted = withContext(Dispatchers.IO) { ModuleBridge.restartStale() }
+                        // Cleared rather than asked again on a success: re-reading the moment
+                        // the kills return races the processes' own death and would put the card
+                        // back up for a restart that has just worked. A refusal is the opposite
+                        // case - something is still on the old build, and the page should go on
+                        // saying so.
+                        stale = if (restarted) 0
+                        else withContext(Dispatchers.IO) { LsposedService.staleCount() }
                     }
                 },
                 colors = ButtonDefaults.textButtonColorsPrimary(),

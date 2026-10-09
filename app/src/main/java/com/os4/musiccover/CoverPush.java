@@ -446,6 +446,10 @@ final class CoverPush {
     }
 
     private static void applyVideoCoverCrossfade(ImageView iv, Bitmap from, Bitmap to, boolean blur) {
+        if (MiniPlayerRuntime.aodContentPaused()) {
+            if (iv != null && to != null && !to.isRecycled()) iv.setImageBitmap(to);
+            return;
+        }
         if (iv == null || from == null || to == null || from == to || from.isRecycled() || to.isRecycled()) {
             if (iv != null && to != null && !to.isRecycled()) iv.setImageBitmap(to);
             return;
@@ -1255,6 +1259,18 @@ final class CoverPush {
 
     static final String SHARE_SOURCE = "mc_src.raw";
 
+    /** A late artwork update can recover a cover whose initial retry window found no image. */
+    private static volatile long sMissingArtRetryAt;
+
+    static void retryMissingArt() {
+        if (!Main.sCoverMode || sArtPrint != 0 || Main.sCtArt == 0L) return;
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - Main.sCtArt < 750L || now - sMissingArtRetryAt < 5000L) return;
+        sMissingArtRetryAt = now;
+        Xp.log(Main.TAG + "cover art still missing; retrying after media update");
+        pushArtAsync(true, true);
+    }
+
     /** The source, where the wallpaper process can read it. See CoverCompose.writeSource(). */
     private static String writeSharedSource(Bitmap src, int w, int h, float bias)
             throws java.io.IOException {
@@ -1268,6 +1284,7 @@ final class CoverPush {
         if (ctx == null) return;
         final int gen = ++Main.sPushGen;
         if (!on) {
+            sMissingArtRetryAt = 0L;
             sArtPrint = 0;
             sArtW = 0;
             sArtH = 0;

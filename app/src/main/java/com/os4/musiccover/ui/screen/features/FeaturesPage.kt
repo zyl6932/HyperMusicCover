@@ -2,7 +2,6 @@ package com.os4.musiccover.ui.screen.features
 
 import android.content.Intent
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -24,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
 import com.os4.musiccover.CoverActivity
+import com.os4.musiccover.MiniPlayerConfig
 import com.os4.musiccover.ModuleBridge
 import com.os4.musiccover.R
 import com.os4.musiccover.ShadeActivity
@@ -31,6 +31,7 @@ import com.os4.musiccover.MiniPlayerActivity
 import com.os4.musiccover.TransitActivity
 import com.os4.musiccover.ui.util.PageScaffold
 import kotlinx.coroutines.delay
+import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -232,29 +233,36 @@ internal fun CoverPageView(
         isBlurEnabled = isBlurEnabled,
         extraBottomPadding = extraBottomPadding,
         onBack = onBack,
-        pinned = {
-            Spacer(Modifier.height(8.dp))
+    ) {
+        item {
             // Framed as the islands' page frames its demonstration: a card, three plays in it.
-            Card(Modifier.padding(horizontal = 12.dp)) {
+            //
+            // An item of the list rather than something pinned above it, which is what this page
+            // used to do and what no other page does: pinned, it never moved, and the list could
+            // not reach the bar - so an upward swipe collapsed nothing, on the one page whose
+            // picture is the tallest thing on it. The tab row below it scrolls with it for the
+            // same reason, as DonatePage's does.
+            Card(Modifier.padding(horizontal = 12.dp).padding(top = 12.dp)) {
                 CoverDemo(
                     coverStyle = module.coverStyle,
                     bias = module.bias,
                     clockSize = module.clockSize,
+                    aodBigClock = module.aodBigClock,
                     modifier = Modifier.padding(top = 16.dp),
                 )
             }
-            Spacer(Modifier.height(12.dp))
+        }
+        item {
             TabRow(
                 tabs = groups,
                 selectedTabIndex = group,
                 onTabSelected = { group = it },
-                modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp),
+                modifier = Modifier.padding(horizontal = 12.dp).padding(top = 12.dp),
             )
-        },
-    ) {
+        }
         item {
             Card(
-                modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)
             ) {
                 when (group) {
                     0 -> Column {
@@ -307,6 +315,30 @@ private fun CoverGroup(
                 },
             )
         }
+        // Moved here off the islands' page (2026-10-09): what it decides is when the cover opens
+        // by itself, which is this page's subject rather than the row's. The value is still the
+        // mini player's own config - the module reads it from that JSON, not from its state file -
+        // so it is read and written through the copy of it that State carries.
+        val mediaCollapsed = remember(module.miniConfig) {
+            JSONObject(module.miniConfig).optBoolean(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT)
+        }
+        SwitchPreference(
+            title = stringResource(R.string.mini_media_collapsed),
+            summary = stringResource(R.string.mini_media_collapsed_summary),
+            checked = mediaCollapsed,
+            enabled = enabled,
+            onCheckedChange = { on ->
+                val next = MiniPlayerConfig.normalizedJson(
+                    JSONObject(module.miniConfig)
+                        .put(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT, on)
+                        .toString(),
+                )
+                ModuleBridge.setMiniConfig(context, next)
+                // Answered here rather than left to the next query: the module's own copy comes
+                // back a broadcast later, and a switch that moves only then reads as stuck.
+                onChange(module.copy(miniConfig = next))
+            },
+        )
     }
 }
 
@@ -501,6 +533,15 @@ private fun LyricsGroup(
             },
         )
         SwitchPreference(
+            title = stringResource(R.string.clock_aod_big),
+            checked = module.aodBigClock,
+            enabled = enabled,
+            onCheckedChange = {
+                onChange(module.copy(aodBigClock = it))
+                ModuleBridge.setAodBigClock(context, it)
+            },
+        )
+        SwitchPreference(
             title = stringResource(R.string.lyrics_roma),
             checked = module.lyricsRoma,
             enabled = enabled,
@@ -638,6 +679,7 @@ internal fun ValueSlider(
     detent: Float? = null,
     label: (Float) -> String = ::format,
     onValueChange: (Float) -> Unit,
+    onValueChangeFinished: (() -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxWidth()) {
         BasicComponent(
@@ -659,6 +701,7 @@ internal fun ValueSlider(
                 .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
             value = value,
             onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
             valueRange = valueRange,
             enabled = enabled,
             // Step is what makes a key point produce a tick at all; the default effect only fires

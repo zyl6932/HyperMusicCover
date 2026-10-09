@@ -10,6 +10,10 @@ import android.view.View
 import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.view.Gravity
+import android.text.TextUtils
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.max
@@ -27,6 +31,28 @@ import kotlin.math.sqrt
  */
 internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     private val element = MaterialElement(context)
+
+    private val cardTitle = TextView(context)
+    private val cardText = TextView(context)
+    private val cardWords = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_VERTICAL
+        visibility = View.GONE
+    }
+
+    fun copyCardTextFrom(other: ShortcutDisc?) {
+        if (other == null || other.cardWords.visibility != View.VISIBLE) setCardText(null, null)
+        else setCardText(other.cardTitle.text, other.cardText.text)
+    }
+
+    /** The rear stacked island has the same two lines as the front card. */
+    fun setCardText(title: CharSequence?, text: CharSequence?) {
+        cardWords.visibility = if (title == null && text == null) View.GONE else View.VISIBLE
+        if (!TextUtils.equals(cardTitle.text, title)) cardTitle.text = title
+        if (!TextUtils.equals(cardText.text, text)) cardText.text = text
+        iconAtStart = cardWords.visibility == View.VISIBLE
+        placeElement()
+    }
 
     private var dressWith: ((ImageView) -> Unit)? = null
     private var dressedAs = -1
@@ -66,6 +92,17 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         // Its own circle, whoever sets another (MaterialElement): the AOD's dim sets the card's.
         element.shape = elementShape
         addView(element, LayoutParams(0, 0))
+        for ((line, size) in listOf(cardTitle to 12.8f, cardText to 12f)) {
+            line.setTextColor(Color.WHITE)
+            line.textSize = size * MiniPlayerGeometry.STACK_BACK_SCALE
+            line.isSingleLine = true
+            line.ellipsize = TextUtils.TruncateAt.END
+            line.includeFontPadding = false
+            line.setTypeface(line.typeface, android.graphics.Typeface.BOLD)
+            cardWords.addView(line, LinearLayout.LayoutParams(-1, -2))
+        }
+        cardText.alpha = 0.8f
+        addView(cardWords, LayoutParams(0, 0))
         isClickable = false
         isFocusable = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
@@ -114,6 +151,14 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         val l = (width - shapeW) / 2 + shapeDx
         val t = (height - shapeH) / 2
         element.layout(l, t, l + shapeW, t + shapeH)
+        if (cardWords.visibility == View.VISIBLE) {
+            val inset = (min(shapeW, shapeH) * (1f - ICON_SHARE) / 2f).toInt()
+            val textLeft = l + min(shapeW, shapeH) - inset + (4 * resources.displayMetrics.density).toInt()
+            val textWidth = (l + shapeW - inset - textLeft).coerceAtLeast(0)
+            cardWords.measure(MeasureSpec.makeMeasureSpec(textWidth, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(shapeH.coerceAtLeast(0), MeasureSpec.EXACTLY))
+            cardWords.layout(textLeft, t, textLeft + textWidth, t + shapeH)
+        }
         if (icon == null && live == null) return
         // Inset from the shape, round: an app icon or an album cover sits inside the glass.
         val side = (min(shapeW, shapeH) * ICON_SHARE).toInt()
@@ -204,6 +249,7 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
 
     /** The picture's alpha: it comes in last on a small island forming out of the pill. */
     fun setIconAlpha(alpha: Float) {
+        cardWords.alpha = alpha
         icon?.let { if (kotlin.math.abs(it.alpha - alpha) > 0.002f) it.alpha = alpha }
         live?.let { if (kotlin.math.abs(it.alpha - alpha) > 0.002f) it.alpha = alpha }
     }

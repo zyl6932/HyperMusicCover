@@ -13,6 +13,7 @@ internal data class MiniPlayerPresentationInput(
     val nativeSceneOverride: Boolean = false,
     val transitionActive: Boolean = false,
     val controlCenterOpen: Boolean = false,
+    val miniShowsMusic: Boolean = true,
 )
 
 internal data class MiniPlayerPresentation(
@@ -32,7 +33,8 @@ internal object MiniPlayerPresentationPolicy {
 
     fun evaluate(input: MiniPlayerPresentationInput): MiniPlayerPresentation {
         val available = input.enabled && input.sessionUsable
-        val miniSelected = !input.nativeRequested
+        val miniSelected = !input.nativeRequested &&
+            !(input.nativeSceneOverride && input.miniShowsMusic)
         val lockscreenSurfaceVisible = input.sceneVisible || input.controlCenterOpen
         return MiniPlayerPresentation(
             showMini = available &&

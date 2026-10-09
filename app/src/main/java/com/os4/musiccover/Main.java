@@ -170,6 +170,8 @@ public class Main extends XposedModule {
     static volatile float sLastSystemY = Float.NaN;
     /** Set while our own frame is inside setNotifY, so we don't read it back as the system's. */
     private static volatile boolean sSelfDriving;
+    /** Room re-evaluation uses the OEM's animation channel without replacing its source Y. */
+    private static boolean sRoomReasserting;
     /** Per-frame setNotifY logging floods logcat at 8ms intervals; off unless asked for. */
     private static volatile boolean sVerbose;
     /**
@@ -578,6 +580,23 @@ public class Main extends XposedModule {
      * different things - stop reserving the space, or reserve it even with no print enrolled.
      */
     private static volatile int sFpAvoid;
+    private static final NotificationSink sNotificationSink = new NotificationSink();
+    private static final Runnable REFRESH_NOTIFICATION_SINK = () -> {
+        try {
+            int mode = sFpAvoid;
+            boolean refreshed = sNotificationSink.refresh(mode);
+            Xp.log(TAG + "notification bound mode=" + mode
+                    + (refreshed ? " policy flow updated" : " waiting for system collection"));
+        } catch (Throwable t) {
+            Xp.log(TAG + "notification bound refresh failed: " + t);
+        }
+    };
+
+    private static void refreshNotificationSink() {
+        main().removeCallbacks(REFRESH_NOTIFICATION_SINK);
+        main().post(REFRESH_NOTIFICATION_SINK);
+    }
+
     /**
      * Every fingerprint icon view built since SystemUI started, weakly held. The alpha is set at
      * construction, but the switch can move afterwards, and a hidden icon has to be able to come
@@ -585,6 +604,8 @@ public class Main extends XposedModule {
      */
     private static final java.util.Map<View, Boolean> sFodIcons =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, Boolean>());
+    private static final FingerprintFrameRestore<Object> sFodFrames = new FingerprintFrameRestore<>();
+    private static int sFodFramesReplayed;
     /** resId -> is this one of the ring's frames, so the name lookup happens once per drawable. */
     private static final java.util.concurrent.ConcurrentHashMap<Integer, Boolean> sFodRing =
             new java.util.concurrent.ConcurrentHashMap<>();
@@ -1365,7 +1386,10 @@ public class Main extends XposedModule {
                     // Substituting the drawable rather than skipping the draw: the animation
                     // keeps its own timing and its own lifecycle, it just paints nothing. A
                     // skipped draw would leave whatever the OEM expects to be on that surface.
+                    sFodFrames.suppressed(chain.getThisObject(), (Integer) args[0]);
                     args[0] = android.R.color.transparent;
+                } else if (args.length == 1 && args[0] instanceof Integer) {
+                    sFodFrames.painted(chain.getThisObject());
                 }
                 return chain.proceed(args);
             });
@@ -1435,10 +1459,8 @@ public class Main extends XposedModule {
             Xp.w(TAG + "fingerprint print view hook failed: " + t);
         }
 
-        // Whether the notifications keep clear of that icon. Installed whatever the setting is,
-        // and the mode is read per call, but unlike everything else here a change does not show
-        // up immediately: this value is not one of the seven flows, so the bound is only
-        // recomputed when one of those moves.
+        // Both manual and automatic sinking use the OEM's fingerprint avoidance branch.
+        // Add our policy as an input so the system recomputes and emits on its own coroutine.
         try {
             // Fail on the panel rather than on the lambda: "no KeyguardPanelViewController" is a
             // different build, "no combine lambda" is a different R8 run, and the log should say
@@ -1452,33 +1474,89 @@ public class Main extends XposedModule {
                         + " - fingerprint avoidance cannot be overridden");
             } else {
                 Xp.hook(invoke, chain -> {
-                    if (sFpAvoid != 0) {
+                    Object[] args = chain.getArgs().toArray();
+                    if (args.length == 3 && args[1] instanceof Object[]) {
+                        Object[] vals = (Object[]) args[1];
+                        // Clone before overriding: combine retains its array across emissions.
+                        Object[] effective = NotificationSink.withAvoidance(vals, sFpAvoid);
+                        args[1] = effective;
+                        Object result = chain.proceed(args);
+                        String bound;
                         try {
-                            java.util.List<Object> a = chain.getArgs();
-                            Object second = a.size() > 1 ? a.get(1) : null;
-                            if (second instanceof Object[]) {
-                                Object[] vals = (Object[]) second;
-                                // Exactly seven, or the indices below mean something else. A
-                                // build that combines a different number of flows gets left
-                                // alone rather than having two unknown values overwritten.
-                                if (vals.length == 7) {
-                                    Boolean forced = sFpAvoid == 2;
-                                    // 5 is "fingerprint unlock is on", 6 is "a print is
-                                    // enrolled". Written in place: the array is the one the
-                                    // original will read, so proceed() needs no new arguments.
-                                    vals[5] = forced;
-                                    vals[6] = forced;
-                                }
-                            }
-                        } catch (Throwable ignored) {
+                            bound = String.valueOf(Xp.callMethod(args[0], "getValue"));
+                        } catch (Throwable t) {
+                            bound = args[0].getClass().getName() + ": " + t;
                         }
+                        sNotificationSink.record(vals, effective, bound);
+                        return result;
                     }
                     return chain.proceed();
                 });
+                try {
+                    Class<?> combineKt = Xp.findClass("kotlinx.coroutines.flow.internal.CombineKt", cl);
+                    Xp.hookAll(combineKt, "combineInternal", chain -> {
+                        Object[] args = chain.getArgs().toArray();
+                        // Only this panel's transform: other SystemUI combines keep their inputs.
+                        if (args.length == 5 && combine.isInstance(args[2])
+                                && args[4] instanceof Object[]) {
+                            try {
+                                args[4] = sNotificationSink.attachToCombine(
+                                        args[1], (Object[]) args[4], sFpAvoid);
+                                sNotificationSink.hookStatus("notification combine entered");
+                            } catch (Throwable t) {
+                                sNotificationSink.hookStatus("combine attachment failed: " + t);
+                            }
+                            return chain.proceed(args);
+                        }
+                        return chain.proceed();
+                    });
+                    // The transform is $1$3; its enclosing combined Flow is $1.
+                    Class<?> combinedFlow = Xp.findClass(combine.getName().substring(0,
+                            combine.getName().length() - 2), cl);
+                    Xp.hookAll(combinedFlow, "collect", chain -> {
+                        try {
+                            if (sNotificationSink.attach(chain.getThisObject(), sFpAvoid))
+                                Xp.log(TAG + "notification bound policy flow attached");
+                        } catch (Throwable t) {
+                            Xp.log(TAG + "notification bound policy flow unavailable: " + t);
+                        }
+                        return chain.proceed();
+                    });
+                    for (java.lang.reflect.Method method : combinedFlow.getDeclaredMethods())
+                        if ("collect".equals(method.getName())) Xp.api().deoptimize(method);
+                    // stateIn(Eagerly) starts collecting once. Attach when its sharing
+                    // coroutine executes, before collect can be inlined or started.
+                    Class<?> sharing = Xp.findClass(
+                            "kotlinx.coroutines.flow.FlowKt__ShareKt$launchSharing$1", cl);
+                    Xp.hookAll(sharing, "invokeSuspend", chain -> {
+                        try {
+                            Object upstream = Xp.getObjectField(chain.getThisObject(), "$upstream");
+                            if (combinedFlow.isInstance(upstream)
+                                    && sNotificationSink.attach(upstream, sFpAvoid))
+                                Xp.log(TAG + "notification bound policy flow attached before collection");
+                        } catch (Throwable t) {
+                            Xp.log(TAG + "notification bound sharing attachment failed: " + t);
+                        }
+                        return chain.proceed();
+                    });
+                    // ART may inline constructors and collect. Observe the running coroutine
+                    // before its first collection, and deoptimize callers of invokeSuspend.
+                    for (java.lang.reflect.Method method : sharing.getDeclaredMethods()) {
+                        if ("invoke".equals(method.getName()) || "create".equals(method.getName())
+                                || "invokeSuspend".equals(method.getName()))
+                            Xp.api().deoptimize(method);
+                    }
+                    sNotificationSink.hookStatus("sharing invokeSuspend installed");
+                    Xp.log(TAG + "notification bound sharing hook installed");
+                } catch (Throwable t) {
+                    sNotificationSink.hookStatus("collection failed: " + t);
+                    Xp.log(TAG + "notification bound collection hook failed: " + t);
+                }
                 Xp.log(TAG + "fingerprint avoidance hooked on " + combine.getName()
                         + " in " + (android.os.SystemClock.uptimeMillis() - t0) + "ms");
             }
         } catch (Throwable t) {
+            sNotificationSink.hookStatus("avoidance failed: " + t);
             Xp.w(TAG + "fingerprint avoidance hook failed: " + t);
         }
 
@@ -1678,7 +1756,7 @@ public class Main extends XposedModule {
                 // Not our own writes, which are not what the system asked for. The system's
                 // re-assertions while we hold ARE: they carry where the notifications start, and
                 // the small clock gives way to them off this number.
-                if (!sSelfDriving) sLastSystemY = requested;
+                if (!sSelfDriving && !sRoomReasserting) sLastSystemY = requested;
                 Float hold = sHoldY;
                 if (hold != null && requested != hold) args[0] = hold;
                 else if (hold == null) args[0] = roomForRows(requested);
@@ -1808,7 +1886,7 @@ public class Main extends XposedModule {
                 float requested = (Float) args[0];
                 // Only the system's own emissions tell us where the clock really
                 // belongs; our own frames must not be mistaken for that.
-                if (!sSelfDriving) sLastSystemY = requested;
+                if (!sSelfDriving && !sRoomReasserting) sLastSystemY = requested;
                 Float hold = sHoldY;
                 if (hold != null && requested != hold) args[0] = hold;
                 else if (hold == null && !sSelfDriving) args[0] = roomForRows(requested);
@@ -1918,8 +1996,8 @@ public class Main extends XposedModule {
                     // geometry is: a fresh SystemUI should not have to relearn it to use it.
                     + "\ncovergap=" + CoverPush.sCoverFadeGapMs
                     + "\nhidefp=" + (sHideFp ? 1 : 0)
-                    // aodsmall and lyrics are not written: both are fixed on, and loadState does
-                    // not read them. lyrichidden still is - the two-finger tap is the one way the
+                    // The lyrics master switch is not written: it is fixed on, and loadState does
+                    // not read it. lyrichidden still is - the two-finger tap is the one way the
                     // lock screen can be asked for the cover instead, and it has to survive.
                     + "\ncolon=" + (HyperTweaks.sForceColon ? 1 : 0)
                     + "\nseekglow=" + (HyperTweaks.sBarGlow ? 1 : 0)
@@ -1930,6 +2008,7 @@ public class Main extends XposedModule {
                     // the key did not exist before this setting did, and the lyrics are supposed
                     // to look the way they always have on a file that predates it.
                     + "\nlyrictrans=" + (LockLyrics.sTrans ? 1 : 0)
+                    + "\naodsmall=" + (sAodSmall ? 1 : 0)
                     // Off when absent, which is what every file from before it had.
                     + "\nlyricroma=" + (LockLyrics.sRoma ? 1 : 0)
                     // 0 left, 1 centre, 2 right, and left when the key is absent: a file from
@@ -2035,14 +2114,16 @@ public class Main extends XposedModule {
                         else if ("hidefp".equals(k)) sHideFp = "1".equals(v);
                         else if ("colon".equals(k)) HyperTweaks.sForceColon = "1".equals(v);
                         else if ("seekglow".equals(k)) HyperTweaks.sBarGlow = "1".equals(v);
-                        // aodsmall and lyrics are not read: cover mode keeps its small clock in
-                        // the AOD and the lock screen shows the lyrics, both unconditionally now.
+                        // The lyrics are not read: the lock screen shows them unconditionally now,
+                        // and in the AOD it is 息屏时显示大时钟 (aodsmall) that decides whether
+                        // there is a clock for them to sit under at all.
                         // lyrichidden still is - that is the two-finger tap, and it is how the
                         // lock screen is asked for the cover instead.
                         else if ("lyrickeep".equals(k)) LockLyrics.sKeepOn = "1".equals(v);
                         else if ("lyrichidden".equals(k)) LockLyrics.sTapHidden = "1".equals(v);
                         else if ("lyrichdr".equals(k)) LockLyrics.sHdr = "1".equals(v);
                         else if ("lyrictrans".equals(k)) LockLyrics.sTrans = "1".equals(v);
+                        else if ("aodsmall".equals(k)) sAodSmall = "1".equals(v);
                         else if ("lyricroma".equals(k)) LockLyrics.sRoma = "1".equals(v);
                         // Clamped in the setter; absent or unreadable means left, see saveState.
                         else if ("lyricalign".equals(k)) LockLyrics.setAlign(Integer.parseInt(v));
@@ -2057,7 +2138,9 @@ public class Main extends XposedModule {
                         else if ("transit".equals(k)) AmapTransitScene.sOn = "1".equals(v);
                         else if ("pickup".equals(k)) PickupCodeIsland.sOn = "1".equals(v);
                         else if ("card".equals(k)) PickupCodeIsland.sCard = "1".equals(v);
-                        else if ("minicfg".equals(k)) MiniPlayerRuntime.applyConfig(sAppCtx,
+                        // Not applyConfig: this file is migration data, and a config the user has
+                        // since changed must win over what was saved here (see restoreLegacyConfig).
+                        else if ("minicfg".equals(k)) MiniPlayerRuntime.restoreLegacyConfig(sAppCtx,
                                 new String(android.util.Base64.decode(v, android.util.Base64.DEFAULT),
                                         java.nio.charset.StandardCharsets.UTF_8));
                         // The whole shade settings page, in one prefix - the keys and their
@@ -2087,6 +2170,13 @@ public class Main extends XposedModule {
         } finally {
             sLoading = false;
         }
+        // The mode fpavoid has just come back to. A policy flow the OEM's combine already had
+        // attached was made with whatever this process started at - 0, "leave it to the system" -
+        // and NotificationSink.withAvoidance hands the decision to that flow whenever it carries
+        // one, so a phone restarted with 始终下沉 saved sank nothing until the setting was touched
+        // again. Nothing else refreshed this on the way up: 展开背景时下移通知 used to, by
+        // accident, on its scene changes and only while it was switched on (2026-10-09).
+        refreshNotificationSink();
         Xp.log(TAG + "state restored: cover=" + cover + " bias=" + sBias);
         if (cover) {
             enterCoverMode(false);
@@ -2122,6 +2212,7 @@ public class Main extends XposedModule {
                 Xp.d(TAG + "recv op=" + op + " extras=" + i.getExtras());
                 // An op answering later, through goAsync: the receipt is its to send.
                 boolean async = false;
+                boolean failed = false;
                 try {
                     if ("info".equals(op)) {
                         dumpInfo();
@@ -2197,6 +2288,12 @@ public class Main extends XposedModule {
                             else if ("stop".equals(what)) what = "disarm";
                         }
                         setResultData(LockHold.describe() + "\n" + ImmersiveHost.command(id, what));
+                    } else if ("notifsink".equals(op)) {
+                        setResultData("mode=" + sFpAvoid + "\nhideFp=" + sHideFp
+                                + " suppressedFrames=" + sFodFrames.pendingCount()
+                                + " replayedFrames=" + sFodFramesReplayed
+                                + "\n" + sNotificationSink.describe() + "\n"
+                                + MiniPlayerRuntime.describe() + "\n" + Xp.tail("notification bound", 30));
                     } else if ("aodprobe".equals(op)) {
                         setResultData(aodProbe());
                     } else if ("entries".equals(op)) {
@@ -2612,11 +2709,8 @@ public class Main extends XposedModule {
                     } else if ("fpavoid".equals(op)) {
                         sFpAvoid = i.getIntExtra("mode", 0);
                         saveState();
-                        // Nothing to re-apply: the bound is recomputed when one of the seven
-                        // flows changes and this flag is not one of them, so it lands on the
-                        // next recompute - in practice the next time the screen goes off.
-                        Xp.log(TAG + "fingerprint avoid mode=" + sFpAvoid
-                                + " (applies on the next recompute)");
+                        refreshNotificationSink();
+                        Xp.log(TAG + "fingerprint avoid mode=" + sFpAvoid);
                     } else if ("fadewp".equals(op)) {
                         sFadeWp = i.getBooleanExtra("on", !sFadeWp);
                         saveState();
@@ -2848,6 +2942,7 @@ public class Main extends XposedModule {
                         out.putBoolean("alive", true);
                         out.putBoolean("cover", sCoverMode);
                         out.putString("minicfg", MiniPlayerRuntime.configJson(c));
+                        out.putInt("minicfgschema", MiniPlayerConfig.SCHEMA_VERSION);
                         float[] shortcuts = MiniPlayerRuntime.shortcutGeometry();
                         if (shortcuts != null) out.putFloatArray("minishortcuts", shortcuts);
                         out.putBoolean("auto", sAuto);
@@ -3041,14 +3136,16 @@ public class Main extends XposedModule {
                         Xp.log(TAG + "unknown op " + op);
                     }
                 } catch (Throwable t) {
+                    failed = true;
                     Xp.w(TAG + "op failed: " + Log.getStackTraceString(t));
                 }
                 // The receipt. A setting sent while SystemUI is down, or before this receiver
                 // exists, goes nowhere and the broadcast still comes back - only with the code it
                 // was sent with. This is how the app tells the two apart and sends it again once
-                // there is someone here. An op that threw is acknowledged too: it was received,
-                // and sending it again would only throw again.
-                if (!async && isOrderedBroadcast()) setResultCode(OP_ACK);
+                // there is someone here. Config writes are the exception to acknowledging a
+                // failed op: the app must retain them for retry if durable storage failed.
+                if (!async && isOrderedBroadcast() && (!failed || !"minicfg".equals(op)))
+                    setResultCode(OP_ACK);
             }
         }
         // The app, the wallpaper process (its hello and first-frame signals) and 高德 (its map).
@@ -5403,11 +5500,16 @@ public class Main extends XposedModule {
      * reach up still push it as they always did.
      */
     static float roomForRows(float requested) {
-        return easeRoom(roomForRowsNow(requested));
+        float room = roomForRowsNow(requested);
+        // An empty stack must immediately give back the edited clock position. Easing from
+        // an old notification constraint across a doze can otherwise retain a squeezed pose.
+        if (sRoomUnobstructed) return resetClockRoom(room);
+        return easeRoom(room);
     }
 
     /** roomForRows at once, for a caller that eases its own way there (ClockCollapse.exitY). */
     static float roomForRowsNow(float requested) {
+        sRoomUnobstructed = requested >= Float.MAX_VALUE / 2f;
         if (Float.isNaN(requested) || requested >= Float.MAX_VALUE / 2f) return requested;
         float top;
         try {
@@ -5415,9 +5517,44 @@ public class Main extends XposedModule {
         } catch (Throwable t) {
             return requested;
         }
-        float out = Float.isNaN(top) || top <= requested ? requested : top;
+        boolean nativeEmpty = systemClockUnobstructed();
+        sRoomUnobstructed = nativeEmpty || top == Float.MAX_VALUE;
+        float out = nativeEmpty ? requested : ClockRoomPolicy.resolve(
+                requested, top, top == Float.MAX_VALUE ? unobstructedClockY() : Float.NaN);
         ClockMove.noteRoom(requested, top, out);
         return out;
+    }
+
+    private static boolean systemClockUnobstructed() {
+        try {
+            Object it = sContainer == null ? null : Xp.getObjectField(sContainer, "keyguardClockNotifInteractor");
+            return it != null && ((Number) Xp.getObjectField(it, "rawNotifY")).floatValue() == Float.MAX_VALUE;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** Same empty-notification boundary as the OEM's correctYValue, including edited clocks. */
+    private static float unobstructedClockY() {
+        try {
+            View v = sContainer;
+            if (v == null) return Float.NaN;
+            Object it = Xp.getObjectField(v, "keyguardClockNotifInteractor");
+            Rect rect = (Rect) Xp.getObjectField(it, "maxEditRect");
+            if (rect != null && rect.bottom > 0)
+                return (float) rect.bottom + ((Number) Xp.getObjectField(it, "clockNotificationMargin")).floatValue();
+            return v.getResources().getDisplayMetrics().heightPixels;
+        } catch (Throwable ignored) {
+            return Float.NaN;
+        }
+    }
+
+    private static float resetClockRoom(float y) {
+        if (sRoomEasing) android.view.Choreographer.getInstance().removeFrameCallback(ROOM_FRAME);
+        sRoomShown = sRoomRaw = y;
+        sRoomEasing = false;
+        sRoomSoft = 0f;
+        return y;
     }
 
     /**
@@ -5516,6 +5653,7 @@ public class Main extends XposedModule {
     }
 
     private static float sRoomShown = Float.NaN, sRoomRaw = Float.NaN;
+    private static boolean sRoomUnobstructed;
     private static long sRoomAt;
     private static boolean sRoomEasing;
     /** A change of room bigger than this in one go is a jump, eased (easeRoom). */
@@ -5534,20 +5672,22 @@ public class Main extends XposedModule {
                 return;
             }
             reassertClockRoom();
-            android.view.Choreographer.getInstance().postFrameCallback(this);
+            if (sRoomEasing) android.view.Choreographer.getInstance().postFrameCallback(this);
         }
     };
 
     /**
-     * The stack's rows have moved since the clock was last told: the OEM's own notification-Y
-     * flow is sent its value again, nudged a hair so it is a change, and the clock animates to
-     * it the way it does to any other (KeyguardClockNotifInteractor._notificationYState ->
-     * notifStateChange -> setNotifY, where roomForRows has its say).
+     * Re-evaluate room through the clock's animation channel, with the source Y left intact.
+     * A small nudge passes its equal-value early-out; roomForRows supplies the current boundary.
      */
     static void reassertClockRoom() {
         if (sHoldY != null) return;
+        if (systemClockUnobstructed()) {
+            resetClockRoom(sLastSystemY);
+            return;
+        }
         final View v = sContainer;
-        if (v == null) return;
+        if (v == null || sNotifStateChange == null) return;
         try {
             Object interactor = Xp.getObjectField(v, "keyguardClockNotifInteractor");
             Object flow = interactor == null ? null : Xp.getObjectField(interactor, "_notificationYState");
@@ -5562,9 +5702,15 @@ public class Main extends XposedModule {
             // last, which follows the stack's list scroll frame by frame and so says jump, the
             // clock cut from one size to the other on every switch between the stack island's
             // list and a card (2026-09-26). Ours is always a change of rows: animated.
-            Object next = triple.getClass().getConstructor(Object.class, Object.class, Object.class)
-                    .newInstance(y + sRoomNudge, Boolean.FALSE, Xp.callMethod(triple, "getThird"));
-            Xp.callMethod(flow, "setValue", next);
+            // Do not publish a fabricated notification position to the shared StateFlow.
+            // Its other consumers and the next sleep/wake must retain the system's own Y.
+            boolean wasReasserting = sRoomReasserting;
+            sRoomReasserting = true;
+            try {
+                sNotifStateChange.invoke(v, y + sRoomNudge, false, Xp.callMethod(triple, "getThird"));
+            } finally {
+                sRoomReasserting = wasReasserting;
+            }
             ClockMove.noteReassert(y, true);
         } catch (Throwable t) {
             ClockMove.noteReassert(Float.NaN, false);
@@ -6744,7 +6890,13 @@ public class Main extends XposedModule {
         // Taken before the entry moves anything: the lyrics grow out of the island as it is now.
         LockLyrics.notePopOrigin(MiniPlayerRuntime.musicIslandCentreOnScreen());
         if (!sAuto) {
-            CoverMorphLayer.cancel();
+            // A manual entry owns the same container transition as automatic cover mode.
+            // This also adopts an upward swipe still settling when its artwork is tapped.
+            if (MiniPlayerRuntime.prepareSceneEntry()) {
+                beginMiniMorph(true, !LockLyrics.willAttachOnEntry());
+            } else {
+                CoverMorphLayer.cancel();
+            }
             setCoverEnabled(true, true, false);
         } else {
             enterFromTap("mini player tapped");
@@ -7237,6 +7389,19 @@ public class Main extends XposedModule {
      */
     private static void applyHideFp() {
         adoptFodIcons();
+        if (!sHideFp) {
+            sFodFrames.restore((animation, resource) -> {
+                try {
+                    if (!fodForKeyguard(fodViewOf(animation))) return;
+                    // Surface frames are independent of View.invalidate(). Restore through
+                    // the OEM draw queue so rapid hide/show changes keep their original order.
+                    Xp.callMethod(animation, "draw", resource);
+                    sFodFramesReplayed++;
+                } catch (Throwable t) {
+                    Xp.log(TAG + "fingerprint frame restore failed: " + t);
+                }
+            });
+        }
         java.util.List<View> views;
         synchronized (sFodIcons) {
             views = new java.util.ArrayList<>(sFodIcons.keySet());
@@ -7719,6 +7884,12 @@ public class Main extends XposedModule {
      */
     private static float stepLyricArt(boolean want) {
         float to = want ? 1f : 0f;
+        if (MiniPlayerRuntime.aodContentPaused()) {
+            sLyricArtP = sLyricArtTo = to;
+            sLyricArtV = 0f;
+            sLyricArtAt = 0L;
+            return to;
+        }
         // A capture is the app asking what the settled card looks like (see shootCard), and the
         // frame it lands on is not a thing to keep. Everywhere else the motion IS the state.
         if (sCardForced) {
@@ -8217,6 +8388,7 @@ public class Main extends XposedModule {
      * notifications away under the same pull, as it did before there was a pill to go back to.
      */
     private static boolean sCardSwipeShared;
+    private static boolean sCardSwipeSpread;
     /** The swipe started on a notification's row that came out of the row of islands. */
     private static String sCardSwipeRow;
     private static float sCardSwipeX, sCardSwipeY;
@@ -8229,17 +8401,22 @@ public class Main extends XposedModule {
     private static int cardSwipe(MotionEvent ev) { android.os.Trace.beginSection("MC t.cardSwipe"); try {
         switch (ev.getActionMasked()) {
             case MotionEvent.ACTION_DOWN: {
+                if (sCardSwipeFired && sCardSwipeSpread) {
+                    MiniPlayerRuntime.endSpreadCollapse(ev, true);
+                }
                 sCardSwipeFired = false;
                 sCardSwipeShared = false;
+                sCardSwipeSpread = !sGestureOnCentre && !sGestureOnCharge
+                        && MiniPlayerRuntime.spreadCollapseAt(ev.getRawX(), ev.getRawY());
                 sCardSwipeRow = null;
                 sCardPinReleased = false;
                 boolean onCard = MiniPlayerRuntime.wantsNativeCardSwipe()
                         && !sGestureOnCentre && !sGestureOnCharge
                         && cardRectContains(ev.getRawX(), ev.getRawY());
-                if (!onCard && !sGestureOnCentre && !sGestureOnCharge) {
+                if (!onCard && !sCardSwipeSpread && !sGestureOnCentre && !sGestureOnCharge) {
                     sCardSwipeRow = MiniPlayerRuntime.releasedRowAt(ev.getRawX(), ev.getRawY());
                 }
-                sCardScrollTarget = onCard || sCardSwipeRow != null;
+                sCardScrollTarget = onCard || sCardSwipeSpread || sCardSwipeRow != null;
                 // A list scrolled away from its top is read back up by this gesture, not pulled
                 // home: the rest boundary is read here, once, for the whole of it.
                 boolean atTop = MiniPlayerRuntime.nativeStackAtTop(true);
@@ -8259,7 +8436,8 @@ public class Main extends XposedModule {
             }
             case MotionEvent.ACTION_MOVE: {
                 if (sCardSwipeFired) {
-                    MiniPlayerRuntime.dragMove(ev);
+                    if (sCardSwipeSpread) MiniPlayerRuntime.moveSpreadCollapse(ev);
+                    else MiniPlayerRuntime.dragMove(ev);
                     return sCardSwipeShared ? SWIPE_NONE : SWIPE_HELD;
                 }
                 if (!sCardScrollTarget) return SWIPE_NONE;
@@ -8278,6 +8456,13 @@ public class Main extends XposedModule {
                 }
                 sCardSwipeFired = true;
                 sArtSwallow = false;
+                if (sCardSwipeSpread) {
+                    if (!MiniPlayerRuntime.beginSpreadCollapse(ev, sCardSwipeY)) {
+                        sCardSwipeFired = false;
+                        return SWIPE_NONE;
+                    }
+                    return SWIPE_FIRED;
+                }
                 if (sCardSwipeRow != null) {
                     // A notification the row of islands let out goes back into it. Refused
                     // (a morph already going), the gesture is the list's.
@@ -8318,11 +8503,14 @@ public class Main extends XposedModule {
             case MotionEvent.ACTION_CANCEL: {
                 boolean held = sCardSwipeFired && !sCardSwipeShared;
                 if (sCardSwipeFired) {
-                    MiniPlayerRuntime.dragEnd(ev,
+                    if (sCardSwipeSpread) MiniPlayerRuntime.endSpreadCollapse(ev,
+                            ev.getActionMasked() == MotionEvent.ACTION_CANCEL);
+                    else MiniPlayerRuntime.dragEnd(ev,
                             ev.getActionMasked() == MotionEvent.ACTION_CANCEL);
                 }
                 sCardCollapse.reset();
                 sCardSwipeFired = sCardSwipeShared = false;
+                sCardSwipeSpread = false;
                 sCardScrollTarget = sCardPinReleased = false;
                 return held ? SWIPE_HELD : SWIPE_NONE;
             }
@@ -8782,7 +8970,7 @@ public class Main extends XposedModule {
         sTrackKey = "";
         Xp.log(TAG + why + ": expanding into cover mode");
         MotionTrace.start("toggle-in");
-        onMediaUpdate();
+        onMediaUpdate(true);
     }
 
     private static void guardCard(final View card) {
@@ -9525,6 +9713,11 @@ public class Main extends XposedModule {
      * card on the lockscreen, and still music mode.
      */
     private static void onMediaUpdate() {
+        onMediaUpdate(false);
+    }
+
+    /** A tap or pull can enter the cover even when new media defaults to a collapsed island. */
+    private static void onMediaUpdate(boolean explicitEntry) {
         MiniPlayerRuntime.refresh();
         if (!sAuto || !sCardShowing) return;
         // The user tapped the cover away and the card is still up. The one case where "there is
@@ -9553,6 +9746,7 @@ public class Main extends XposedModule {
             // against - each payload once, three per track. Cheap enough to reach from a path
             // that a title-in-the-metadata player runs on every sung line.
             LockLyrics.onTrack(key, sWatched);
+            CoverPush.retryMissingArt();
             return;
         }
         sTrackKey = key;
@@ -9587,7 +9781,8 @@ public class Main extends XposedModule {
             return;
         }
         if (sCoverMode) CoverPush.pushArtAsync(true, true);
-        else setCoverEnabled(true, true);
+        else if (explicitEntry || !MiniPlayerRuntime.mediaCollapsedByDefault(sAppCtx))
+            setCoverEnabled(true, true);
     }
 
     /**

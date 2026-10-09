@@ -15,8 +15,8 @@ import kotlinx.coroutines.flow.StateFlow
  * Two things come through it. The log level goes out to every process the module is loaded into,
  * as a remote preferences group they each read (LogLevel, Xp) - the module's own channels reach
  * SystemUI and the wallpaper only. And LSPosed says which processes the module is loaded into
- * right now and whether each runs the installed build, which is what 重启全部作用域 restarts and
- * what the home page's "still on the old version" row counts.
+ * right now and whether each runs the installed build, which is what 重启全部作用域 restarts,
+ * and what the home page's "模块已更新" card counts and restarts.
  *
  * Without the service - an older framework, or before it has bound - the level stays local and
  * the restart falls back to the scope the APK ships.
@@ -73,6 +73,17 @@ object LsposedService {
     fun runningTargets(): List<HookedTarget>? =
         bound.value?.let { runCatching { it.runningTargets }.getOrNull() }
 
+    /**
+     * Those of [runningTargets] still on a build older than the one installed; null without the
+     * service. The home page counts these and its restart kills these, so one definition serves
+     * both: the number the card shows cannot end up describing a different set from the one the
+     * tap acts on. Null and empty are not the same answer - null is no service, empty is nothing
+     * stale - which is what lets the restart tell them apart. See
+     * [ModuleBridge.restartStale].
+     */
+    fun staleTargets(): List<HookedTarget>? =
+        runningTargets()?.filter { it.state == HookedTarget.State.STALE }
+
     /** How many of those still run a build older than the one installed; 0 without the service. */
-    fun staleCount(): Int = runningTargets()?.count { it.state == HookedTarget.State.STALE } ?: 0
+    fun staleCount(): Int = staleTargets()?.size ?: 0
 }

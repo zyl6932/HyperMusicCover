@@ -93,6 +93,7 @@ internal object DateStatus {
         var extra = 0
         /** extra as of the last layout: a change between the two is ours to slide. */
         var laidExtra = 0
+        var layout: DateStatusLayout? = null
         /** The room there was for the segments, for drawing them as they were measured. */
         var room = Float.MAX_VALUE
         /**
@@ -124,6 +125,7 @@ internal object DateStatus {
             anim?.cancel()
             anim = null
             value = v
+            frame()
         }
 
         fun to(target: Float, response: Float, end: (() -> Unit)? = null) {
@@ -131,6 +133,7 @@ internal object DateStatus {
             anim = null
             val from = value
             if (from == target) {
+                frame()
                 end?.invoke()
                 return
             }
@@ -303,6 +306,17 @@ internal object DateStatus {
     @JvmStatic fun configChanged() {
         switchRead = false
         later()
+    }
+
+    /** A doze can stop animation frames before their final matrix cleanup. */
+    @JvmStatic fun onAodChanged() {
+        val reset = {
+            for (host in hosts.values) {
+                host.layout = null
+                host.offset.snap(0f)
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) reset() else main.post { reset() }
     }
 
     private fun later() {
@@ -515,15 +529,31 @@ internal object DateStatus {
         val host = hosts.getOrPut(v) {
             start(v.context)
             Host(v).also { h ->
-                v.addOnLayoutChangeListener { _, l, _, _, _, ol, _, or, _ ->
-                    if (h.extra == h.laidExtra) return@addOnLayoutChangeListener
+                v.addOnLayoutChangeListener { _, l, t, r, b, _, _, _, _ ->
+                    val previous = h.layout
+                    val current = DateStatusLayout(l, t, r - l, b - t,
+                        (v.parent as? View)?.width ?: 0, h.extra, MiniPlayerScene.aodActive)
+                    h.layout = current
                     h.laidExtra = h.extra
-                    // Where the date was drawn against where it is laid out now.
-                    if (or > ol && l != ol) {
-                        h.offset.snap(h.offset.value + (ol - l))
+                    val offset = DateStatusLayoutPolicy.offset(previous, current, h.offset.value)
+                    if (offset == null) h.offset.snap(0f)
+                    else if (previous?.extra != current.extra) {
+                        h.offset.snap(offset)
                         h.offset.to(0f, 0.42f)
                     }
                 }
+                v.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(view: View) {
+                        h.layout = null
+                        h.offset.snap(0f)
+                        later()
+                    }
+                    override fun onViewDetachedFromWindow(view: View) {
+                        h.layout = null
+                        h.offset.snap(0f)
+                        later()
+                    }
+                })
             }
         }
         if (hostAlive() != lastAlive) main.post(::update)
@@ -531,6 +561,9 @@ internal object DateStatus {
         val mode = View.MeasureSpec.getMode(wSpec)
         if (shown.isEmpty() || mode == View.MeasureSpec.EXACTLY || v.layoutDirection == View.LAYOUT_DIRECTION_RTL) {
             host.extra = 0
+            host.room = 0f
+            host.layout = null
+            host.offset.snap(0f)
             return
         }
         val limit = if (mode == View.MeasureSpec.AT_MOST) View.MeasureSpec.getSize(wSpec)

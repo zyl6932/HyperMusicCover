@@ -61,10 +61,11 @@ import kotlin.math.pow
  * artwork's flight is CoverMorphMotion's bowed path on its spring, and it only flies where the
  * phone flies it - see playTakeOver.
  *
- * Still a preview of this page's settings, the three that change what the phone shows: the
+ * Still a preview of this page's settings, the four that change what the phone shows: the
  * cover's style (the whole screen, or a square between the clock and the card), where a
- * full-screen cover sits, and how small the clock goes. They are read every frame, so a slider
- * moves the picture while it plays.
+ * full-screen cover sits, how small the clock goes, and whether the full-screen doze takes the
+ * big clock instead of keeping that small one. They are read every frame, so a control moves the
+ * picture while it plays.
  */
 /**
  * The picture's box, the camera fill inside it, and what that leaves empty under the phone. The
@@ -75,8 +76,11 @@ private const val PICTURE_FILL = 0.92f
 private val PICTURE_AIR = PICTURE_H * (1f - PICTURE_FILL) / 2f
 
 @Composable
-fun CoverDemo(coverStyle: Int, bias: Float, clockSize: Float, modifier: Modifier = Modifier) {
-    val look by rememberUpdatedState(Look(coverStyle, bias.coerceIn(0f, 1f), clockSize))
+fun CoverDemo(coverStyle: Int, bias: Float, clockSize: Float, aodBigClock: Boolean,
+              modifier: Modifier = Modifier) {
+    val look by rememberUpdatedState(
+        Look(coverStyle, bias.coerceIn(0f, 1f), clockSize, aodBigClock),
+    )
     DemoPager(COVER_PAGES, modifier, pictureAir = PICTURE_AIR) { page, playing, done ->
         val pal = skeuoPalette(isInDarkTheme())
         val measurer = rememberTextMeasurer()
@@ -105,8 +109,9 @@ fun CoverDemo(coverStyle: Int, bias: Float, clockSize: Float, modifier: Modifier
  *   opens into the card and the cover comes with it (Main.miniPlayerEnterCover); the card swiped
  *   down goes back into the pill and the cover goes with it;
  * - the two-finger tap is LockLyrics.toggleByTap - lyrics and cover, swapped;
- * - the AOD keeps the cover's small clock and the lyrics only in the full-screen AOD
- *   (ClockCollapse.aodHeld), which is an OEM setting, so the page shows it.
+ * - the full-screen AOD keeps the cover's small clock and its lyrics (ClockCollapse.aodHeld) -
+ *   unless 息屏时显示大时钟 is on, and then the clock is handed back to the OEM's own, which is
+ *   the big one, and the words go with it. The page plays whichever of the two is set.
  */
 private val COVER_PAGES = listOf(
     DemoText(R.string.demo_cover_takeover_title),
@@ -114,7 +119,7 @@ private val COVER_PAGES = listOf(
     DemoText(R.string.demo_cover_aod_title),
 )
 
-private class Look(val style: Int, val bias: Float, val clockSize: Float)
+private class Look(val style: Int, val bias: Float, val clockSize: Float, val aodBigClock: Boolean)
 
 // ---- the phone's lock screen, in SkeuoKit's units
 
@@ -404,18 +409,22 @@ private fun DrawScope.drawCover(sc: CoverScene, look: Look, pal: SkeuoPalette, m
                     drawRect(Color.Black.copy(alpha = 0.8f * dz), Offset(-10f, -10f), Size(PW + 20f, PH + 20f))
                 }
                 val lit = 1f - 0.3f * dz
+                // 息屏时显示大时钟: with the clock handed back the doze grows the cover's small clock
+                // into the OEM's own and the words go with it - handed back, there is nothing
+                // measured for them to sit under (LockLyrics.inHeldAod).
+                val handBack = if (look.aodBigClock) dz else 0f
                 val small = smallClockScale(look.clockSize)
-                val k = lerpF(1f, small, cc)
+                val k = lerpF(lerpF(1f, small, cc), 1f, handBack)
                 val ink = lerp(pal.frame, Color.White, bg.coerceAtLeast(dz)).copy(alpha = lit)
                 val clock = measurer.measure("09:41", TextStyle(color = ink, fontSize = clockSp, fontWeight = FontWeight.Bold))
-                val top = lerpF(CLOCK_TOP, CLOCK_TOP_SMALL, cc)
+                val top = lerpF(lerpF(CLOCK_TOP, CLOCK_TOP_SMALL, cc), CLOCK_TOP, handBack)
                 withTransform({ scale(k, k, Offset(PW / 2f, top)) }) {
                     drawText(clock, topLeft = Offset(PW / 2f - clock.size.width / 2f, top))
                 }
                 val dateY = top + clock.size.height * k + 2.5f
                 drawRoundRect(lerp(pal.pill, Color.White.copy(alpha = 0.55f), bg), Offset(PW / 2f - 12f, dateY),
                     Size(24f, 2.4f), CornerRadius(1.2f), alpha = lit)
-                drawLyrics(sc, lyr * lit)
+                drawLyrics(sc, lyr * lit * (1f - handBack))
             }
             sc.burst.draw(this, CARD.cx, CARD.y + 4f, 44f, 20f, 1.15f)
         }

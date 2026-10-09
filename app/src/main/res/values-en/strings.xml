@@ -17,10 +17,12 @@
     <string name="clock_size">Clock size</string>
     <string name="clock_force_colon">Always show the clock colon</string>
     <string name="clock_force_colon_summary">No effect on some styles</string>
+    <string name="clock_aod_big">Show the large clock in the AOD</string>
     <string name="restart_menu">Restart</string>
     <string name="restart_systemui">Restart System UI</string>
     <string name="restart_wallpaper">Restart wallpaper</string>
     <string name="restart_confirm_summary">Restart now?</string>
+    <string name="restart_stale">Restart the outdated apps</string>
 
     <string name="tab_home">Home</string>
     <string name="tab_settings">Settings</string>
@@ -107,7 +109,8 @@
     <string name="home_status_inactive">Module not active</string>
     <string name="home_status_inactive_hint">Enable it in LSPosed and restart System UI</string>
     <string name="home_stale_title">Module updated</string>
-    <string name="home_stale_summary">%1$d processes are still running the old version. Tap to restart them</string>
+    <string name="home_stale_summary">%1$d processes are still running the old version</string>
+    <string name="home_stale_action">Tap to restart them</string>
     <string name="home_device_name">Device name</string>
     <string name="home_device_model">Model</string>
     <string name="home_hyperos_version">HyperOS</string>
@@ -213,8 +216,21 @@
     <string name="mini_page_title">Lock screen super island</string>
     <string name="mini_enabled">Enable the lock screen super island</string>
     <string name="mini_enabled_waiting">Waiting for the SystemUI module to answer</string>
-    <string name="mini_widen">Widen when a shortcut is off</string>
-    <string name="mini_widen_summary">Takes the flashlight or camera space when it is off</string>
+    <string name="mini_enabled_update_required">Restart SystemUI from the home page before changing these settings</string>
+    <string name="mini_style">Island layout</string>
+    <string name="mini_style_row">Side by side</string>
+    <string name="mini_style_stack">Stacked</string>
+    <string name="mini_group_by_app">Group ordinary notifications by app</string>
+    <string name="mini_group_by_app_summary">In stacked layout, ordinary notifications from the same app share one layer. Tap to expand that app’s notifications</string>
+    <string name="mini_media_collapsed">Keep music artwork collapsed</string>
+    <string name="mini_media_collapsed_summary">Show the island when playback starts. Tap it to expand the music artwork</string>
+    <string name="mini_height">Island height</string>
+    <string name="mini_height_summary">Also resize the lock screen quick function icons on either side</string>
+    <string name="mini_marquee">Scroll long island text</string>
+    <string name="mini_marquee_summary">When off, shorten them with an ellipsis</string>
+    <string name="mini_widen">Widen when lock screen quick functions are off</string>
+    <string name="mini_widen_summary">The island fills the space left by disabled lock screen quick functions</string>
+    <string name="mini_normals_in_stack">Keep ordinary notifications off islands</string>
     <string name="mini_nav_keep_on">Keep the screen on while navigating</string>
     <string name="mini_fod_lift">Clear of the fingerprint sensor</string>
     <string name="mini_fod_lift_summary">On phones with a low optical sensor, lifts the pill above it</string>
@@ -230,6 +246,8 @@
     <string name="demo_transit_island_title">The super island when unlocked</string>
     <string name="demo_transit_ride_title">Stop by stop</string>
     <string name="demo_transit_alert_title">Transfers and arrival</string>
+    <string name="mini_reduce_aod_updates">Reduce content updates in AOD</string>
+    <string name="mini_reduce_aod_updates_summary">Refresh every 30 seconds, with the artwork in place of the lyrics</string>
     <string name="pickup_title">Pickup code</string>
     <string name="pickup_cloud_refresh">Refresh pickup cloud rules</string>
     <string name="pickup_cloud_date">Updated %1$s · %2$d mini programs</string>

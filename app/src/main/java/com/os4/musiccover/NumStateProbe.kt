@@ -50,7 +50,7 @@ object NumStateProbe {
             "unlayer" -> sb.append(" || unlayer: ").append(runCatching { unlayer(stack) }.getOrElse { "failed: $it" })
             "normals" -> {
                 val on = i.getBooleanExtra("on", true)
-                LockIslands.setProbeNormalsInStack(on)
+                LockIslands.setNormalsInStack(on)
                 sb.append(" || ordinary notifications ").append(if (on) "in the stack" else "back in the island")
                     .append(" (the list rebuilds on the next frame; read again)")
             }

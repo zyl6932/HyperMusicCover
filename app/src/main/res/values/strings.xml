@@ -17,10 +17,12 @@
     <string name="clock_size">时钟大小</string>
     <string name="clock_force_colon">时钟强制显示冒号</string>
     <string name="clock_force_colon_summary">部分样式不生效</string>
+    <string name="clock_aod_big">息屏时显示大时钟</string>
     <string name="restart_menu">重启</string>
     <string name="restart_systemui">重启系统界面</string>
     <string name="restart_wallpaper">重启壁纸</string>
     <string name="restart_confirm_summary">确认重启吗？</string>
+    <string name="restart_stale">重启更新的作用域</string>
 
     <string name="tab_home">主页</string>
     <string name="tab_settings">设置</string>
@@ -107,7 +109,8 @@
     <string name="home_status_inactive">模块未激活</string>
     <string name="home_status_inactive_hint">请在 LSPosed 中启用并重启系统界面</string>
     <string name="home_stale_title">模块已更新</string>
-    <string name="home_stale_summary">%1$d 个进程还在运行旧版本，点按重启生效</string>
+    <string name="home_stale_summary">%1$d 个进程还在运行旧版本</string>
+    <string name="home_stale_action">点击重启更新的作用域</string>
     <string name="home_device_name">设备名称</string>
     <string name="home_device_model">设备型号</string>
     <string name="home_hyperos_version">HyperOS 版本</string>
@@ -219,13 +222,25 @@
     <string name="shade_mode_restore">系统默认</string>
     <string name="shade_mode_keep">保持音乐封面</string>
 
-    <!-- The islands' page, which the features page opens. The two rows here are the only settings
-         it has left; everything else about the pill is fixed. -->
+    <!-- Settings for the lockscreen islands page. -->
     <string name="mini_page_title">锁屏超级岛</string>
     <string name="mini_enabled">启用锁屏超级岛</string>
     <string name="mini_enabled_waiting">等待 SystemUI 模块响应</string>
-    <string name="mini_widen">快捷方式关闭时加宽</string>
-    <string name="mini_widen_summary">手电筒或相机关闭后占用空位</string>
+    <string name="mini_enabled_update_required">请在首页重启 SystemUI 后再修改设置</string>
+    <string name="mini_style">锁屏岛排列方式</string>
+    <string name="mini_style_row">并排</string>
+    <string name="mini_style_stack">堆叠</string>
+    <string name="mini_group_by_app">按应用合并普通通知</string>
+    <string name="mini_group_by_app_summary">堆叠时，同一应用的普通通知放在同一层；点击展开该应用的通知</string>
+    <string name="mini_media_collapsed">播放音乐时不自动展开封面</string>
+    <string name="mini_media_collapsed_summary">开始播放时先显示锁屏岛，点击后再展开音乐封面</string>
+    <string name="mini_height">锁屏岛高度</string>
+    <string name="mini_height_summary">同时调整两侧锁屏快捷功能的图标大小</string>
+    <string name="mini_marquee">滚动显示锁屏岛长文字</string>
+    <string name="mini_marquee_summary">关闭后用省略号截断</string>
+    <string name="mini_widen">锁屏快捷功能关闭时加宽</string>
+    <string name="mini_widen_summary">锁屏快捷功能关闭后，锁屏岛占用空出的位置</string>
+    <string name="mini_normals_in_stack">普通通知不上岛</string>
     <string name="mini_nav_keep_on">导航时屏幕常亮</string>
     <string name="mini_fod_lift">避开屏下指纹</string>
     <string name="mini_fod_lift_summary">光学短焦指纹位置较低的机型，把胶囊抬到指纹区上方</string>
@@ -244,6 +259,8 @@
     <string name="demo_transit_island_title">解锁后的超级岛</string>
     <string name="demo_transit_ride_title">逐站提醒</string>
     <string name="demo_transit_alert_title">换乘与到站</string>
+    <string name="mini_reduce_aod_updates">息屏时减少内容刷新</string>
+    <string name="mini_reduce_aod_updates_summary">每 30 秒刷新一次，歌词改为封面</string>
     <string name="pickup_title">取餐码</string>
     <string name="pickup_cloud_refresh">刷新取餐码云端规则</string>
     <string name="pickup_cloud_date">更新于 %1$s · %2$d 个小程序</string>

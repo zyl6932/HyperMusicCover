@@ -108,11 +108,6 @@ object ModuleBridge {
         val mcArtInLyrics: Boolean = true,
         val mcTitleTap: Boolean = false,
         val hideFingerprint: Boolean = false,
-        /**
-         * Keep cover mode's small clock in the full-screen always-on display, instead of letting
-         * it grow back into the OEM's own AOD clock. On, and not a setting.
-         */
-        val aodSmall: Boolean = true,
         /** Draw the big clock's colon on the styles that drop it. */
         val forceColon: Boolean = false,
         /** Light the media card's progress bar the way the island's is lit (#49). On by default. */
@@ -128,6 +123,12 @@ object ModuleBridge {
         val lyricsHdr: Boolean = false,
         /** Draw each line's translation under it. On unless the user turns it off. */
         val lyricsTrans: Boolean = true,
+        /**
+         * The full-screen AOD shows the OEM's own clock instead of the cover's small one. The
+         * wire says it the other way round - `aodsmall`, "keep the small clock" - so this is the
+         * module's flag inverted, once, in the two places that name the key.
+         */
+        val aodBigClock: Boolean = false,
         /** Draw each line's romanisation under it, over the translation. Off by default. */
         val lyricsRoma: Boolean = false,
         /** Where the lines settle in their column: 0 left, 1 centre, 2 right. */
@@ -187,6 +188,7 @@ object ModuleBridge {
          */
         val shade: Map<String, Int> = emptyMap(),
         val miniConfig: String = MiniPlayerConfig.defaultJson(),
+        val miniConfigSchema: Int = 0,
         /** The lock screen's torch and camera, in px; see MiniPlayerRuntime.shortcutGeometry. */
         val miniShortcuts: FloatArray? = null,
         val geometry: Geometry = Geometry(),
@@ -462,6 +464,8 @@ object ModuleBridge {
     fun setLyricsTrans(context: Context, on: Boolean) =
         send(context, "lyrictrans") { putExtra("on", on) }
 
+    fun setAodBigClock(context: Context, on: Boolean) =
+        send(context, "aodclock") { putExtra("small", !on) }
     fun setLyricsRoma(context: Context, on: Boolean) =
         send(context, "lyricroma") { putExtra("on", on) }
 
@@ -525,10 +529,21 @@ object ModuleBridge {
      * module is not there - "not installed" is a normal thing for this screen to display.
      */
     suspend fun query(context: Context): State {
-        val b = ask(context, "query")
+        val before = sendSeq
+        var b = ask(context, "query")
+        // A page can resume while its last config broadcast is still being delivered. Its first
+        // query may run ahead of that broadcast; do not paint the older settings over the ones
+        // the user just changed. Re-read after the outstanding write has settled.
+        val miniInFlight = { inFlight.any { it.startsWith("minicfg|") } ||
+            queued.keys.any { it.startsWith("minicfg|") } }
+        val wasSendingMini = miniInFlight()
+        if (wasSendingMini) {
+            kotlinx.coroutines.withTimeoutOrNull(OP_TIMEOUT_MS + 500L) {
+                while (miniInFlight()) kotlinx.coroutines.delay(20L)
+            }
+        }
+        if (wasSendingMini || sendSeq != before) b = ask(context, "query")
         var state = fromBundle(b)
-        // Kept whether or not the module answered. A dead answer is an answer: it is what the
-        // next page to be built should draw instead of its own default, which is dead too.
         if (!state.alive) return state.also { lastQuery = it }
         moduleAcks = b?.getBoolean("acks", false) == true
         // Whatever was set while it was away goes first, and the answer is asked for again so
@@ -826,7 +841,6 @@ object ModuleBridge {
             mcArtInLyrics = b.getBoolean("mclyricart", true),
             mcTitleTap = b.getBoolean("mctap", false),
             hideFingerprint = b.getBoolean("hidefp", false),
-            aodSmall = b.getBoolean("aodsmall", true),
             forceColon = b.getBoolean("colon", false),
             mediaBarGlow = b.getBoolean("seekglow", true),
             lyrics = b.getBoolean("lyrics", true),
@@ -834,6 +848,9 @@ object ModuleBridge {
             lyricsHdr = b.getBoolean("lyrichdr", false),
             // Defaults the other way: this one is on for anyone whose module predates the key.
             lyricsTrans = b.getBoolean("lyrictrans", true),
+            // The module says whether it keeps its own clock; the row says whether the big one
+            // is wanted, so the answer is inverted here (see State.aodBigClock).
+            aodBigClock = !b.getBoolean("aodsmall", true),
             lyricsRoma = b.getBoolean("lyricroma", false),
             lyricsAlign = b.getInt("lyricalign", 0),
             lyricFill = b.getFloat("lyricfill", 1f),
@@ -853,6 +870,7 @@ object ModuleBridge {
                 .filter { it.startsWith("shade_") }
                 .associate { it.removePrefix("shade_") to b.getInt(it, 0) },
             miniConfig = MiniPlayerConfig.normalizedJson(b.getString("minicfg")),
+            miniConfigSchema = b.getInt("minicfgschema", 0),
             miniShortcuts = b.getFloatArray("minishortcuts")?.takeIf { it.size == 9 },
             geometry = Geometry(
                 screenW = b.getInt("sw", 0),
@@ -916,6 +934,28 @@ object ModuleBridge {
         var all = true
         for (pkg in scoped) if (!killTree(pkg)) all = false
         return all
+    }
+
+    /**
+     * Only the targets still on the old build - the set the home page's card counted when it
+     * offered this.
+     *
+     * [restartScope] takes everything the module is loaded into and stays for the top bar's own
+     * entry, but an update leaves most of those processes already up to date, and killing a
+     * player that was never stale costs the user its playback and reloads a build that has
+     * nothing wrong with it.
+     *
+     * Nothing is killed without the service: there are no pids then, and the shipped scope is no
+     * substitute - it would restart exactly the processes this exists to leave alone. False
+     * rather than true, so a caller does not clear a card that is still telling the truth. An
+     * empty stale list is the opposite case: there is nothing left to restart, so it is a
+     * success.
+     */
+    fun restartStale(): Boolean {
+        val stale = LsposedService.staleTargets() ?: return false
+        if (stale.isEmpty()) return true
+        restartingSince = SystemClock.elapsedRealtime()
+        return stale.map { killPid(it.pid) }.all { it }
     }
 
     /** The packages in the APK's own scope.list, one a line; null when it cannot be read. */

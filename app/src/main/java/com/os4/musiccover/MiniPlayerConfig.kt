@@ -7,6 +7,8 @@ import org.json.JSONObject
 
 /** Portable settings for the HyperChanger lockscreen mini player. */
 object MiniPlayerConfig {
+    /** Sent by SystemUI so the settings app can reject an older loaded module. */
+    const val SCHEMA_VERSION = 8
     const val ENABLED = "enabled"
     const val WIDTH = "widthDp"
     const val HEIGHT_RADIUS = "heightRadiusDp"
@@ -14,6 +16,26 @@ object MiniPlayerConfig {
 
     /** The row takes the room a switched-off torch or camera leaves (MiniPlayerRuntime.pillRest). */
     const val ADAPTIVE_WIDTH = "adaptiveWidth"
+    /**
+     * Hide the lock screen's quick functions in the full-screen AOD. Not a setting any more
+     * (2026-10-09): it is written true and the normalizer does not read the key, so the shortcuts
+     * always go with the doze.
+     */
+    const val HIDE_AOD_SHORTCUTS = "hideAodShortcuts"
+    const val REDUCE_AOD_UPDATES = "reduceAodUpdates"
+    const val MARQUEE = "marquee"
+    /** Always on and no longer a setting; see normalizedJson. */
+    const val NOTIFICATION_MATERIAL = "notificationMaterial"
+    const val MEDIA_COLLAPSED_DEFAULT = "mediaCollapsedDefault"
+    const val GROUP_NOTIFICATIONS_BY_APP = "groupNotificationsByApp"
+    /** Ordinary notifications stay in the OEM list; focus notifications still become islands. */
+    const val NORMALS_IN_STACK = "normalsInStack"
+    const val STYLE = "style"
+    const val STYLE_ROW = 0
+    const val STYLE_STACK = 1
+    const val MIN_HEIGHT_DP = 48f
+    const val MAX_HEIGHT_DP = 72f
+    const val DEFAULT_HEIGHT_DP = 54f
 
     /** 屏幕常亮 while a navigation page is up behind the lock screen (ImmersiveHost.holdScreen, #63). */
     const val NAV_KEEP_ON = "navKeepOn"
@@ -30,14 +52,23 @@ object MiniPlayerConfig {
     /** The row lifted off a low under-display fingerprint sensor (MiniPlayerRuntime.fingerprintArea, #66). */
     const val FOD_LIFT = "fodLift"
 
-    private val switches = setOf(ENABLED, ADAPTIVE_WIDTH, NAV_KEEP_ON, FOD_LIFT)
+    private val switches = setOf(ENABLED, ADAPTIVE_WIDTH, NAV_KEEP_ON, FOD_LIFT,
+        NORMALS_IN_STACK)
 
     private val defaults = linkedMapOf<String, Any>(
         ENABLED to false,
         WIDTH to 221f,
-        HEIGHT_RADIUS to 27f,
+        HEIGHT_RADIUS to DEFAULT_HEIGHT_DP / 2f,
         ART_RADIUS to 12f,
         ADAPTIVE_WIDTH to false,
+        HIDE_AOD_SHORTCUTS to true,
+        REDUCE_AOD_UPDATES to false,
+        MARQUEE to true,
+        NOTIFICATION_MATERIAL to true,
+        MEDIA_COLLAPSED_DEFAULT to false,
+        GROUP_NOTIFICATIONS_BY_APP to false,
+        NORMALS_IN_STACK to true,
+        STYLE to STYLE_ROW,
         NAV_KEEP_ON to false,
         STATUS_AT_DATE to true,
         FOD_LIFT to true,
@@ -47,28 +78,39 @@ object MiniPlayerConfig {
 
     /**
      * The config as the module will use it: the switches ([ENABLED], [ADAPTIVE_WIDTH],
-     * [NAV_KEEP_ON], [FOD_LIFT]) from the input, the three size keys and [STATUS_AT_DATE] always
-     * at the values above.
+     * [NAV_KEEP_ON], [FOD_LIFT], [NORMALS_IN_STACK]) and the height radius from the input, and the
+     * width, the artwork radius and [STATUS_AT_DATE] always at the values above. The height radius
+     * is shared by the island and both shortcut discs.
      *
-     * The sizes were sliders and are not settings any more - the app has no rows for them - so a
-     * config that still carries one is not obeyed, whoever wrote it. They stay in the JSON all
-     * the same: the module's runtime, `MiniPlayerGeometry` and the state file all read this map
-     * by key, and a missing key would be read as zero rather than as the default wherever a
-     * caller used `getDouble` directly.
-     *
-     * The values themselves were never arbitrary: 221dp is what fits between the two shortcut
-     * discs on this screen, and both of the others are held to the pill's own height. See
-     * MiniPlayerRuntime, which clamps them again against the room it actually has.
+     * 221dp is the requested pill width before the runtime fits it between the shortcuts.
      *
      * [ART_RADIUS] is not read at all: the picture is the small island's circle now, its share of
      * the height, and a corner setting has nothing left to say (2026-09-28). The key stays in the
      * JSON for the reason above.
+     *
+     * [NOTIFICATION_MATERIAL] is not read either, and is always on (2026-10-09): the islands take
+     * the ordinary notification's colours and soft glass, and the switch that could turn that off
+     * is gone from the islands' page. It stays in the JSON at true, so a module left over from
+     * before the switch went away reads the value the islands now have to have.
+     *
+     * [HIDE_AOD_SHORTCUTS] the same way, and for the same reason: the row no longer offers to
+     * keep the quick functions through the doze, so this is true and stays true.
      */
     @JvmStatic fun normalizedJson(raw: String?): String {
         val input = runCatching { JSONObject(raw.orEmpty()) }.getOrDefault(JSONObject())
         val out = JSONObject()
         defaults.forEach { (key, fallback) ->
-            out.put(key, if (key in switches) {
+            out.put(key, if (key == HEIGHT_RADIUS) {
+                val value = runCatching { input.getDouble(key).toFloat() }.getOrDefault(fallback as Float)
+                if (value.isFinite()) value.coerceIn(MIN_HEIGHT_DP / 2f, MAX_HEIGHT_DP / 2f)
+                else fallback
+            } else if (key == STYLE) {
+                runCatching { input.getInt(key) }.getOrDefault(STYLE_ROW)
+                    .takeIf { it == STYLE_ROW || it == STYLE_STACK } ?: STYLE_ROW
+            } else if (key == ENABLED || key == ADAPTIVE_WIDTH ||
+                key == REDUCE_AOD_UPDATES || key == MARQUEE ||
+                key == MEDIA_COLLAPSED_DEFAULT ||
+                key == GROUP_NOTIFICATIONS_BY_APP || key in switches) {
                 runCatching { input.getBoolean(key) }.getOrDefault(fallback)
             } else {
                 fallback
@@ -82,11 +124,15 @@ object MiniPlayerConfig {
 
     @JvmStatic fun apply(prefs: SharedPreferences, raw: String?): String {
         val normalized = normalizedJson(raw)
-        prefs.edit().putString("config", normalized).apply()
+        // SystemUI may be restarted immediately after a setting changes. Commit the small JSON
+        // before acknowledging the broadcast, so a pending async write cannot lose that change.
+        check(prefs.edit().putString("config", normalized).commit()) {
+            "Could not persist mini player settings"
+        }
         return normalized
     }
 
-    /** The original height setting is a shortcut radius, so the visible pill uses its diameter. */
+    /** The stored radius sets both the pill's height and the shortcut glass diameter. */
     @JvmStatic fun visibleHeightDp(raw: String?): Float =
         MiniPlayerGeometry.heightDp(JSONObject(normalizedJson(raw))
             .getDouble(HEIGHT_RADIUS).toFloat())

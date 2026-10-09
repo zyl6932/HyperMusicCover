@@ -256,6 +256,7 @@ final class LockLyrics {
 
     /** Whether the cover should be frosted right now, for a push to carry over. */
     static boolean blurWanted() {
+        if (MiniPlayerRuntime.aodContentPaused()) return false;
         return (sBlurSent & 1L) != 0L;
     }
 
@@ -358,6 +359,7 @@ final class LockLyrics {
 
     /** Whether the view belongs in the keyguard right now. */
     static boolean wantsAttached() {
+        if (MiniPlayerRuntime.aodContentPaused()) return false;
         return wanted() && Main.coverModeOn() && hasLyrics();
     }
 
@@ -597,9 +599,9 @@ final class LockLyrics {
      * out for the lyrics to sit between. Only that one doze: with the clock handed back to the
      * OEM there is nothing measured to sit under, and `inkBottomOnScreen()` says NaN.
      *
-     * No switch of its own. The one that decides this is "keep the small clock in the full-screen
-     * AOD", which is what makes the doze this lock screen; where that is on, carrying the lyrics
-     * through is what the lock screen was showing.
+     * Which of the two dozes this is, is 息屏时显示大时钟's business and not this reading's:
+     * whether the lyrics are drawn is wantsShown()'s, while layout and still-mode handling have
+     * to go on knowing that the display is dozing.
      */
     static boolean inHeldAod() {
         return ClockCollapse.aodHeld() && !Main.screenOnCached();
@@ -1258,7 +1260,25 @@ final class LockLyrics {
     }
 
     /** Anything that may change whether the view should be showing. */
+    static void onAodContentModeChanged(boolean paused) {
+        if (paused) {
+            cancelStillWake();
+            Main.main().removeCallbacks(TICK);
+            Main.main().removeCallbacks(WATCH);
+            Main.main().removeCallbacks(STILL_UP_FALLBACK);
+            Main.main().removeCallbacks(STILL_RELEASE);
+            if (sDrawLock != null && sDrawLock.isHeld()) sDrawLock.release();
+            if (sView != null) detach(sView);
+            updateBlur();
+            updateHdr();
+        } else {
+            refresh();
+            if (sView != null && sView.isAttachedToWindow()) startTick();
+        }
+    }
+
     static void refresh() {
+        if (MiniPlayerRuntime.aodContentPaused()) return;
         updateBlur();
         updateHdr();
         if (wantsAttached()) attach();
@@ -1458,7 +1478,7 @@ final class LockLyrics {
             setBlurSent(false);
             return;
         }
-        boolean on = wanted();
+        boolean on = wanted() && !MiniPlayerRuntime.aodContentPaused();
         boolean want = on && (!sLines.isEmpty() || (sLoading && blurWanted()));
         long cur = sBlurSent;
         boolean wasOn = (cur & 1L) != 0L;
@@ -1518,6 +1538,7 @@ final class LockLyrics {
      * view detached - with it stopped, a line-timed song never moves on to its next line.
      */
     static void startTick() {
+        if (MiniPlayerRuntime.aodContentPaused()) return;
         Main.main().removeCallbacks(TICK);
         Main.main().post(TICK);
     }
@@ -1765,6 +1786,7 @@ final class LockLyrics {
 
     /** One settled frame, with the display let up long enough to show it; then the next wake. */
     private static void drawStill() {
+        if (MiniPlayerRuntime.aodContentPaused()) return;
         if (sStillOff || !stillVisible()) return;
         LyricView v = sView;
         if (v == null || !v.isAttachedToWindow()) return;

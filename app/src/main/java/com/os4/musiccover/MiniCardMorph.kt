@@ -94,6 +94,7 @@ internal class MiniCardMorph(
     private class Piece(val view: View, val native: View?, val text: Boolean, val art: Boolean) {
         val baseTx = view.translationX
         val baseTy = view.translationY
+        val ownAlpha = if (text) view.alpha else 1f
         val nativeTransitionAlpha = native?.transitionAlpha ?: 1f
         var paired = false
         /** A line's own colour and words, given back when the morph ends. */
@@ -506,13 +507,14 @@ internal class MiniCardMorph(
                     val nt = n as TextView
                     val colour = androidx.core.graphics.ColorUtils.blendARGB(piece.ownColor, nt.currentTextColor, mix)
                     if (tv.currentTextColor != colour) tv.setTextColor(colour)
-                    if (mix >= 0.5f && !piece.textRefused &&
-                        !android.text.TextUtils.equals(tv.text, nt.text)) {
+                    // Restore the island's words at the blurred midpoint on the way back,
+                    // rather than switching visible text after the final animation frame.
+                    val words = if (mix >= 0.5f) nt.text else piece.ownText
+                    if (!piece.textRefused && !android.text.TextUtils.equals(tv.text, words)) {
                         // The words, not the card's text object: that is a PrecomputedText laid
                         // out for the card's size, typeface and hyphenation, and setText throws on
                         // a TextView whose own differ - from a frame callback, so the whole of
                         // SystemUI went down with it (issue #11, 2026-09-26).
-                        val words = nt.text
                         val copy = if (words is android.text.Spanned) android.text.SpannedString(words)
                             else words.toString()
                         try {
@@ -535,13 +537,16 @@ internal class MiniCardMorph(
             // The blur is on the two ends' whole content (blurCard, setMorphContentBlur), not the
             // pieces: per piece (2d269db, 2026-09-26) the unpaired buttons, rings and pictures
             // showed sharp through it, and it was taken out.
-            v.alpha = when {
+            val fade = when {
                 piece.art && bridged -> 0f
                 piece.art -> asPill
                 // Out of a circle, only the picture is there at first; the lines join it once
                 // the shape has room for them.
                 else -> lerp(asPill, if (piece.paired) circleIn(c) * pairedOut(c) else 0f, round)
             }
+            // Keep the subtitle's resting opacity, blending to the native line as it lands.
+            v.alpha = fade * if (piece.text)
+                lerp(piece.ownAlpha, piece.native?.alpha ?: piece.ownAlpha, mix) else 1f
             if (piece.art) {
                 artDrawn = CoverMorphMotion.Box(box.x + tx - ax * kx, box.y + ty - ay * ky,
                     v.width * kx, v.height * ky)
@@ -644,7 +649,7 @@ internal class MiniCardMorph(
             v.resetPivot()
             v.translationX = piece.baseTx
             v.translationY = piece.baseTy
-            v.alpha = 1f
+            v.alpha = piece.ownAlpha
             if (piece.paired && piece.text) piece.native?.transitionAlpha = piece.nativeTransitionAlpha
             (v as? TextView)?.let { tv ->
                 if (tv.currentTextColor != piece.ownColor) tv.setTextColor(piece.ownColor)
