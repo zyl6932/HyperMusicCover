@@ -560,6 +560,14 @@ internal object PickupCodeIsland {
         inFront = false
         Xp.log(TAG + "left the mini program: top=" + (top?.flattenToShortString() ?: "none") +
             ", reading task $taskId on")
+        // Whether the page is kept off-screen is the one thing about this path that the card cannot
+        // show, and it decides whether the order is read at all from here on: unparked, the task is
+        // let go after [LEFT] and the card freezes at whatever it last read - the state a drink that
+        // was still being made then never leaves (2026-10-10).
+        val parkable = top?.packageName != host && waiting() && observes() &&
+            SystemClock.uptimeMillis() >= noParkUntil
+        Xp.log(TAG + "left: park=" + parkable + " (waiting=" + waiting() + " observes=" + observes()
+            + " noParkFor=" + ((noParkUntil - SystemClock.uptimeMillis()).coerceAtLeast(0) / 1000) + "s)")
         // Out of the app altogether: the order is worth waiting on, so the task goes onto the hidden
         // display where the mini program keeps its own page current (PickupPark, §6). Not while the
         // app itself is in front: a mini program started from its own list would come back on a
@@ -568,8 +576,7 @@ internal object PickupCodeIsland {
         // front flickers through the launcher as they move about it - parking on that flicker took
         // the mini program away from them mid-use (2026-10-08). And not at all unless the rules ask
         // for it: `use_observer` is ColorOS's own switch for the polling this park is.
-        if (top?.packageName != host && waiting() && observes() &&
-            SystemClock.uptimeMillis() >= noParkUntil) {
+        if (parkable) {
             PickupPark.parkFrom(taskId)
             return
         }
