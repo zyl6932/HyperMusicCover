@@ -930,6 +930,12 @@ public class Main extends XposedModule {
             HyperTweaks.aod(param.getDefaultClassLoader());
             return;
         }
+        // The back screen's app. Its own allow-list decides what it draws, and SystemUI is not on
+        // it - see RearScreen.
+        if ("com.xiaomi.subscreencenter".equals(pkg)) {
+            RearScreen.handle(param.getDefaultClassLoader());
+            return;
+        }
         // The control centre plugin. Usually loaded into SystemUI's own loader, in which case
         // this never fires and the attempt below is the one that lands.
         if ("miui.systemui.plugin".equals(pkg)) {

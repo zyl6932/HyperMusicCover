@@ -71,6 +71,23 @@ internal object PickupCodeIsland {
     private const val PIC = "miui.focus.pic_mc_pickup"
     private const val PIC_AOD = "miui.focus.pic_mc_aod"
     private const val PIC_MODEL = "miui.focus.pic_mc_model"
+
+    /**
+     * What this card calls itself in the focus and rear params. Ours, not 小爱's (`memory`): the
+     * back screen's allow-list is keyed on it, and a business it does not know is one of the two
+     * things that can have this card dropped on the way there.
+     */
+    private const val BUSINESS = "pickup_code"
+
+    /**
+     * What the rear copy calls itself. 小爱's own pickup notification posts as `memory`, and the
+     * back screen only builds a widget for a business its list names - see where this is used.
+     */
+    private const val REAR_BUSINESS = "memory"
+
+    /** The display the back screen's launcher runs on, `displayId=1` in `dumpsys activity top`. */
+    private const val REAR_DISPLAY = 1
+
     private const val ACTION_OPEN = "com.os4.musiccover.PICKUP_OPEN"
     /** The island's own "back down" broadcast, which the plugin listens for and collapses on. */
     private const val ACTION_COLLAPSE_ISLAND = "com.miui.action.ACTION_COLLAPSE_ISLAND"
@@ -358,6 +375,18 @@ internal object PickupCodeIsland {
         val policy = runCatching { PickupRules.get(ctx).recognitionPolicy() }.getOrNull() ?: return null
         return if (policy.isMiniProgramActivity(top.packageName, top.className)) top.packageName else null
     }
+
+    /**
+     * The back screen, or null on a phone that has none.
+     *
+     * Asked before the rear card is built so that a phone without the second display posts nothing
+     * for it, and asked here rather than trusted from the rear card's own fallback, which exists
+     * only so its arithmetic cannot divide by a null.
+     */
+    private fun rearDisplay(c: Context): android.view.Display? = runCatching {
+        c.getSystemService(android.hardware.display.DisplayManager::class.java)
+            ?.getDisplay(REAR_DISPLAY)
+    }.getOrNull()
 
     /**
      * The mini program a page belongs to, out of the page's own launch intent: the appId, and the
@@ -1127,7 +1156,7 @@ internal object PickupCodeIsland {
                 .put("picInfo", JSONObject().put("type", 1).put("pic", PIC)))
         val param = JSONObject()
             .put("protocol", 1)
-            .put("business", "pickup_code")
+            .put("business", BUSINESS)
             .put("scene", "template_v2")
             .put("ticker", "${r.label} ${r.code}")
             .put("tickerPic", PIC)
@@ -1217,9 +1246,6 @@ internal object PickupCodeIsland {
         // when it was actually built: a RemoteViews that fails to inflate takes the whole island
         // with it, and a card with a missing layout is worse than the template.
         if (sCard) {
-            // Two cards, one per theme: the official card has no background of its own - SystemUI
-            // draws the backdrop behind it - so its text and its rule are picked against that
-            // backdrop, and the notification carries both rather than asking which is showing.
             runCatching {
                 PickupCard.build(c, oemRule, r.code, meal, r.temperature, store, brand, tap,
                     cardAlpha, false) to
@@ -1240,6 +1266,35 @@ internal object PickupCodeIsland {
                 n.extras.putParcelable("miui.focus.rv.fullAod", night)
                 n.extras.putParcelable("miui.focus.rv.island.expand", night)
             }.onFailure { Xp.log(TAG + "card not built: $it") }
+        }
+        // The back screen, if this phone has one (2026-10-09). Xiaomi's own pickup notification
+        // carries exactly these keys and nothing else does: `miui.rear.rv` is the card the back
+        // screen draws - our card, in the shape that screen's own card is cut to, so it brings our
+        // drink and its animation with it - and `miui.rear.param` is what names the business the
+        // back screen's allow-list is keyed on. 小爱's own notification (com.miui.voiceassist,
+        // business `memory`) is the shape being copied here.
+        //
+        // Its own card rather than the island's: the two screens are not the same shape, and the
+        // one above is drawn by SystemUI around the island while this one is the whole card.
+        if (rearDisplay(c) != null) {
+            runCatching {
+                PickupCard.rear(c, oemRule, r.code, meal, r.temperature, store, brand, tap)
+            }.onSuccess { card ->
+                // Both keys get the same card: the rear one is dark to begin with, and the screen
+                // it goes on is the one that is always at least a little dark.
+                n.extras.putParcelable("miui.rear.rv", card)
+                n.extras.putParcelable("miui.rear.rvAOD", card)
+                n.extras.putString("miui.rear.param", JSONObject()
+                    .put("rear_param_v1", JSONObject()
+                        // `memory`, which is what 小爱's own pickup notification calls itself, and
+                        // not `pickup_code`: the back screen builds a widget from a *business it
+                        // knows* (its list is the whitelist's - memory, foodDelivery, music, ...),
+                        // and one it does not know gets no widget at all, RemoteViews or no. The
+                        // card under it is still ours - `miui.rear.rv` above is what it draws.
+                        .put("business", REAR_BUSINESS)
+                        .put("index", 1))
+                    .toString())
+            }.onFailure { Xp.log(TAG + "rear card not built: $it") }
         }
         // A post that must float the island gets a notification key of its own. MIUI keeps per-key
         // state for a focus notification (FocusNotificationController's hasEverExpandedKeys and its

@@ -8,5 +8,6 @@
         <item>com.apple.android.music</item>
         <item>com.autonavi.minimap</item>
         <item>com.miui.personalassistant</item>
+        <item>com.xiaomi.subscreencenter</item>
     </string-array>
 </resources>
