@@ -19,11 +19,6 @@ internal object MiniPlayerScene {
     @Volatile var aodActive = false
         private set
     @Volatile private var fullScreenAod = false
-    @Volatile private var statusBarState: Int? = null
-
-    @JvmStatic fun backdropSinkVisible(): Boolean =
-        MiniPlayerPresentationPolicy.backdropSurfaceVisible(Main.keyguardLocked(),
-            Main.onKeyguardNow(), statusBarState, keyguardGoingAway, controlCenterActive)
 
     /**
      * The doze is the full-screen AOD, the one that keeps the row (holdButtonsThroughDoze).
@@ -61,19 +56,6 @@ internal object MiniPlayerScene {
         hook("com.android.systemui.statusbar.StatusBarStateControllerImpl", "setIsDozing") {
             setAodActive(it.firstOrNull() == true)
         }
-        runCatching {
-            Xp.hookAll(Xp.findClass("com.android.systemui.statusbar.StatusBarStateControllerImpl", cl),
-                "setState") { chain ->
-                val result = chain.proceed()
-                // Use the accepted state: SystemUI can reject a requested transition.
-                val state = runCatching { Xp.callMethod(chain.thisObject, "getState") as? Int }.getOrNull()
-                if (state != null && state != statusBarState) {
-                    statusBarState = state
-                    Main.onBackdropHoldChanged()
-                }
-                result
-            }
-        }.onFailure { Xp.log("MCMini: notification shade state hook unavailable: $it") }
         hook("com.android.keyguard.editor.KeyguardEditorHelper", "setEditorState") {
             setEditorActive(it.firstOrNull()?.toString() != "IDEL")
         }
@@ -101,7 +83,6 @@ internal object MiniPlayerScene {
     private fun setControlCenterActive(active: Boolean) {
         if (controlCenterActive == active) return
         controlCenterActive = active
-        Main.onBackdropHoldChanged()
         MiniPlayerRuntime.refresh()
     }
 
@@ -122,7 +103,6 @@ internal object MiniPlayerScene {
     private fun setKeyguardGoingAway(goingAway: Boolean) {
         if (keyguardGoingAway == goingAway) return
         keyguardGoingAway = goingAway
-        Main.onBackdropHoldChanged()
         if (goingAway) MiniPlayerRuntime.forgetRestoreScene()
         MiniPlayerRuntime.refresh()
     }

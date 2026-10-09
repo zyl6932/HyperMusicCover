@@ -133,11 +133,6 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                         checked = config.optBoolean(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT),
                         enabled = ready && config.optBoolean(MiniPlayerConfig.ENABLED),
                         onCheckedChange = { push(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT, it) })
-                    SwitchPreference(title = stringResource(R.string.mini_sink_background),
-                        summary = stringResource(R.string.mini_sink_background_summary),
-                        checked = config.optBoolean(MiniPlayerConfig.SINK_WITH_EXPANDED_BACKGROUND),
-                        enabled = ready && config.optBoolean(MiniPlayerConfig.ENABLED),
-                        onCheckedChange = { push(MiniPlayerConfig.SINK_WITH_EXPANDED_BACKGROUND, it) })
                     ValueSlider(
                         title = stringResource(R.string.mini_height),
                         summary = stringResource(R.string.mini_height_summary),

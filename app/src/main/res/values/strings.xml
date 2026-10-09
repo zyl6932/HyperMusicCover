@@ -235,8 +235,6 @@
     <string name="mini_group_by_app_summary">堆叠时，同一应用的普通通知放在同一层；点击展开该应用的通知</string>
     <string name="mini_media_collapsed">播放音乐时不自动展开封面</string>
     <string name="mini_media_collapsed_summary">开始播放时先显示锁屏岛，点击后再展开音乐封面</string>
-    <string name="mini_sink_background">展开背景时下移通知</string>
-    <string name="mini_sink_background_summary">展开音乐封面、导航或倒计时页面时，下移通知并隐藏指纹图标；收起后恢复</string>
     <string name="mini_height">锁屏岛高度</string>
     <string name="mini_height_summary">同时调整两侧锁屏快捷功能的图标大小</string>
     <string name="mini_hide_aod_shortcuts">息屏时隐藏锁屏快捷功能</string>

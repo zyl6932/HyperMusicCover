@@ -57,12 +57,6 @@ object MiniPlayerRuntime {
 
     @JvmStatic fun configJson(context: Context): String = MiniPlayerConfig.fromPreferences(prefs(context))
 
-    @JvmStatic fun sinkWithExpandedBackground(context: Context): Boolean {
-        val config = JSONObject(configJson(context))
-        return config.optBoolean(MiniPlayerConfig.ENABLED) &&
-            config.optBoolean(MiniPlayerConfig.SINK_WITH_EXPANDED_BACKGROUND)
-    }
-
     /** Only the automatic cover entry changes; an explicitly opened cover stays open. */
     @JvmStatic fun mediaCollapsedByDefault(context: Context?): Boolean {
         if (context == null) return false
@@ -95,7 +89,6 @@ object MiniPlayerRuntime {
             ImmersiveHost.navKeepOnChanged()
         }
         syncNotificationGrouping(context)
-        Main.onMiniBackdropSettingChanged(sinkWithExpandedBackground(context))
         lastRoot?.get()?.let { root -> root.post { attach(root, lastShortcutController?.get()) } }
         refresh()
     }
@@ -2102,7 +2095,6 @@ private class MiniPlayerController(
     private val preDraw = ViewTreeObserver.OnPreDrawListener { android.os.Trace.beginSection("MC islandsPreDraw"); try {
         holdKept()
         holdRows()
-        Main.onBackdropHoldChanged()
         // The rows can settle after the stack last told the clock where they are - a row let out
         // is laid out a frame or more after the list changed. The clock is asked again then.
         val top = stackContentTop()

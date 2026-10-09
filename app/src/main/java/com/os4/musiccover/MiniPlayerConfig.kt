@@ -22,7 +22,6 @@ object MiniPlayerConfig {
     /** Always on and no longer a setting; see normalizedJson. */
     const val NOTIFICATION_MATERIAL = "notificationMaterial"
     const val MEDIA_COLLAPSED_DEFAULT = "mediaCollapsedDefault"
-    const val SINK_WITH_EXPANDED_BACKGROUND = "sinkWithExpandedBackground"
     const val GROUP_NOTIFICATIONS_BY_APP = "groupNotificationsByApp"
     /** Ordinary notifications stay in the OEM list; focus notifications still become islands. */
     const val NORMALS_IN_STACK = "normalsInStack"
@@ -62,7 +61,6 @@ object MiniPlayerConfig {
         MARQUEE to true,
         NOTIFICATION_MATERIAL to true,
         MEDIA_COLLAPSED_DEFAULT to false,
-        SINK_WITH_EXPANDED_BACKGROUND to false,
         GROUP_NOTIFICATIONS_BY_APP to false,
         NORMALS_IN_STACK to true,
         STYLE to STYLE_ROW,
@@ -103,7 +101,7 @@ object MiniPlayerConfig {
                     .takeIf { it == STYLE_ROW || it == STYLE_STACK } ?: STYLE_ROW
             } else if (key == ENABLED || key == ADAPTIVE_WIDTH || key == HIDE_AOD_SHORTCUTS ||
                 key == REDUCE_AOD_UPDATES || key == MARQUEE ||
-                key == MEDIA_COLLAPSED_DEFAULT || key == SINK_WITH_EXPANDED_BACKGROUND ||
+                key == MEDIA_COLLAPSED_DEFAULT ||
                 key == GROUP_NOTIFICATIONS_BY_APP || key in switches) {
                 runCatching { input.getBoolean(key) }.getOrDefault(fallback)
             } else {

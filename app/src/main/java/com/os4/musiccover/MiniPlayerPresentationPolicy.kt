@@ -23,12 +23,6 @@ internal data class MiniPlayerPresentation(
 
 /** Keeps scene visibility separate from the user's selected media presentation. */
 internal object MiniPlayerPresentationPolicy {
-    /** A held cover survives unlock; its notification offset belongs only to KEYGUARD. */
-    fun backdropSurfaceVisible(locked: Boolean, shown: Boolean, statusBarState: Int?,
-                               goingAway: Boolean, controlCenterOpen: Boolean): Boolean =
-        locked && shown && !goingAway && !controlCenterOpen &&
-            (statusBarState == null || statusBarState == 1)
-
     /**
      * The music out as its card: the card there (a live session alone does not say so - it
      * outlives a dismissed card), out of the row, and asked for, or the cover being its card.

@@ -580,13 +580,10 @@ public class Main extends XposedModule {
      * different things - stop reserving the space, or reserve it even with no print enrolled.
      */
     private static volatile int sFpAvoid;
-    /** The island setting is stored in MiniPlayerConfig; the live hold decides when it applies. */
-    private static volatile boolean sMiniBackdropSinkEnabled;
-    private static volatile boolean sMiniBackdropSinkActive;
     private static final NotificationSink sNotificationSink = new NotificationSink();
     private static final Runnable REFRESH_NOTIFICATION_SINK = () -> {
         try {
-            int mode = fpAvoidNow();
+            int mode = sFpAvoid;
             boolean refreshed = sNotificationSink.refresh(mode);
             Xp.log(TAG + "notification bound mode=" + mode
                     + (refreshed ? " policy flow updated" : " waiting for system collection"));
@@ -600,29 +597,6 @@ public class Main extends XposedModule {
         main().post(REFRESH_NOTIFICATION_SINK);
     }
 
-    static void onMiniBackdropSettingChanged(boolean enabled) {
-        sMiniBackdropSinkEnabled = enabled;
-        onBackdropHoldChanged();
-    }
-
-    /** Cover art and immersive pages share LockHold, so both restore this policy together. */
-    static void onBackdropHoldChanged() {
-        boolean active = sMiniBackdropSinkEnabled && LockHold.clockHeld()
-                && MiniPlayerScene.backdropSinkVisible();
-        if (active == sMiniBackdropSinkActive) return;
-        sMiniBackdropSinkActive = active;
-        if (sAppCtx != null) applyHideFp();
-        refreshNotificationSink();
-        Xp.log(TAG + "expanded backdrop fingerprint policy " + (active ? "on" : "off"));
-    }
-
-    private static boolean hideFpNow() {
-        return sHideFp || sMiniBackdropSinkActive;
-    }
-
-    private static int fpAvoidNow() {
-        return sMiniBackdropSinkActive ? 1 : sFpAvoid;
-    }
     /**
      * Every fingerprint icon view built since SystemUI started, weakly held. The alpha is set at
      * construction, but the switch can move afterwards, and a hidden icon has to be able to come
@@ -1406,7 +1380,7 @@ public class Main extends XposedModule {
                 peekHideFp();
                 // draw(int resId) is the frame. Any other overload is not ours to touch, which
                 // the argument check below says without having to name the signature.
-                if (hideFpNow() && args.length == 1 && args[0] instanceof Integer
+                if (sHideFp && args.length == 1 && args[0] instanceof Integer
                         && isFodRing((Integer) args[0])
                         && fodForKeyguard(fodViewOf(chain.getThisObject()))) {
                     // Substituting the drawable rather than skipping the draw: the animation
@@ -1447,7 +1421,7 @@ public class Main extends XposedModule {
                 try {
                     Xp.hookAll(iconCls, name, chain -> {
                         peekHideFp();
-                        if (hideFpNow() && fodForKeyguard(chain.getThisObject())) return null;
+                        if (sHideFp && fodForKeyguard(chain.getThisObject())) return null;
                         return chain.proceed();
                     });
                     break;
@@ -1472,7 +1446,7 @@ public class Main extends XposedModule {
                         peekHideFp();
                         // Painting nothing, rather than dimming: the alpha on this view is the
                         // OEM's to animate, and a frame it never paints cannot be animated back.
-                        if (hideFpNow() && fodForKeyguard(chain.getThisObject())) return null;
+                        if (sHideFp && fodForKeyguard(chain.getThisObject())) return null;
                         return chain.proceed();
                     });
                     hooked++;
@@ -1504,7 +1478,7 @@ public class Main extends XposedModule {
                     if (args.length == 3 && args[1] instanceof Object[]) {
                         Object[] vals = (Object[]) args[1];
                         // Clone before overriding: combine retains its array across emissions.
-                        Object[] effective = NotificationSink.withAvoidance(vals, fpAvoidNow());
+                        Object[] effective = NotificationSink.withAvoidance(vals, sFpAvoid);
                         args[1] = effective;
                         Object result = chain.proceed(args);
                         String bound;
@@ -1527,7 +1501,7 @@ public class Main extends XposedModule {
                                 && args[4] instanceof Object[]) {
                             try {
                                 args[4] = sNotificationSink.attachToCombine(
-                                        args[1], (Object[]) args[4], fpAvoidNow());
+                                        args[1], (Object[]) args[4], sFpAvoid);
                                 sNotificationSink.hookStatus("notification combine entered");
                             } catch (Throwable t) {
                                 sNotificationSink.hookStatus("combine attachment failed: " + t);
@@ -1541,7 +1515,7 @@ public class Main extends XposedModule {
                             combine.getName().length() - 2), cl);
                     Xp.hookAll(combinedFlow, "collect", chain -> {
                         try {
-                            if (sNotificationSink.attach(chain.getThisObject(), fpAvoidNow()))
+                            if (sNotificationSink.attach(chain.getThisObject(), sFpAvoid))
                                 Xp.log(TAG + "notification bound policy flow attached");
                         } catch (Throwable t) {
                             Xp.log(TAG + "notification bound policy flow unavailable: " + t);
@@ -1558,7 +1532,7 @@ public class Main extends XposedModule {
                         try {
                             Object upstream = Xp.getObjectField(chain.getThisObject(), "$upstream");
                             if (combinedFlow.isInstance(upstream)
-                                    && sNotificationSink.attach(upstream, fpAvoidNow()))
+                                    && sNotificationSink.attach(upstream, sFpAvoid))
                                 Xp.log(TAG + "notification bound policy flow attached before collection");
                         } catch (Throwable t) {
                             Xp.log(TAG + "notification bound sharing attachment failed: " + t);
@@ -2307,9 +2281,7 @@ public class Main extends XposedModule {
                         }
                         setResultData(LockHold.describe() + "\n" + ImmersiveHost.command(id, what));
                     } else if ("notifsink".equals(op)) {
-                        setResultData("enabled=" + sMiniBackdropSinkEnabled + " active="
-                                + sMiniBackdropSinkActive + " manualMode=" + sFpAvoid + " effectiveMode="
-                                + fpAvoidNow() + "\nhideFp=" + hideFpNow()
+                        setResultData("mode=" + sFpAvoid + "\nhideFp=" + sHideFp
                                 + " suppressedFrames=" + sFodFrames.pendingCount()
                                 + " replayedFrames=" + sFodFramesReplayed
                                 + "\n" + sNotificationSink.describe() + "\n"
@@ -3190,7 +3162,6 @@ public class Main extends XposedModule {
             Xp.w(TAG + "hello to the wallpaper process failed: " + t);
         }
         loadState();
-        onMiniBackdropSettingChanged(MiniPlayerRuntime.sinkWithExpandedBackground(ctx));
         // 高德 running already has the 「高德公交地铁」 switch's default until it is told.
         AmapTransitScene.INSTANCE.tellAmap(ctx);
         // Again at startup, not only when the switch is touched: the flag the always-on display
@@ -3247,7 +3218,6 @@ public class Main extends XposedModule {
                     // is gone; whatever was going to cancel it cannot arrive now.
                     cancelPendingTap("screen off");
                 }
-                onBackdropHoldChanged();
                 if (Intent.ACTION_USER_PRESENT.equals(a)) {
                     CoverMorphLayer.cancel();
                     CoverCardLayer.hideNow();
@@ -7416,7 +7386,7 @@ public class Main extends XposedModule {
      */
     private static void applyHideFp() {
         adoptFodIcons();
-        if (!hideFpNow()) {
+        if (!sHideFp) {
             sFodFrames.restore((animation, resource) -> {
                 try {
                     if (!fodForKeyguard(fodViewOf(animation))) return;

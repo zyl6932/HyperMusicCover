@@ -225,8 +225,6 @@
     <string name="mini_group_by_app_summary">In stacked layout, ordinary notifications from the same app share one layer. Tap to expand that app’s notifications</string>
     <string name="mini_media_collapsed">Keep music artwork collapsed</string>
     <string name="mini_media_collapsed_summary">Show the island when playback starts. Tap it to expand the music artwork</string>
-    <string name="mini_sink_background">Move notifications down with an expanded background</string>
-    <string name="mini_sink_background_summary">Move notifications down and hide the fingerprint icon while music artwork, navigation or a countdown page is expanded. Restore them when it closes</string>
     <string name="mini_height">Island height</string>
     <string name="mini_height_summary">Also resize the lock screen quick function icons on either side</string>
     <string name="mini_hide_aod_shortcuts">Hide lock screen quick functions in AOD</string>

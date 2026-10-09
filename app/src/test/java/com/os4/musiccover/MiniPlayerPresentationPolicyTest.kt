@@ -6,28 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MiniPlayerPresentationPolicyTest {
-    @Test fun aHeldBackdropCannotSinkAnUnlockedNotificationCenter() {
-        assertFalse(MiniPlayerPresentationPolicy.backdropSurfaceVisible(false, true, 0, false, false))
-        assertFalse(MiniPlayerPresentationPolicy.backdropSurfaceVisible(false, true, null, false, false))
-    }
-
-    @Test fun notificationCenterOverALockedPhoneAlsoRestoresTheOffset() {
-        assertTrue(MiniPlayerPresentationPolicy.backdropSurfaceVisible(true, true, 1, false, false))
-        assertFalse(MiniPlayerPresentationPolicy.backdropSurfaceVisible(true, true, 0, false, false))
-        assertFalse(MiniPlayerPresentationPolicy.backdropSurfaceVisible(true, true, 2, false, false))
-    }
-
-    @Test fun leavingTheLockscreenOrOpeningControlCenterEndsTheBackdropOffset() {
-        assertFalse(MiniPlayerPresentationPolicy.backdropSurfaceVisible(true, true, 1, true, false))
-        assertFalse(MiniPlayerPresentationPolicy.backdropSurfaceVisible(true, true, 1, false, true))
-        assertFalse(MiniPlayerPresentationPolicy.backdropSurfaceVisible(true, false, 1, false, false))
-    }
-
-    @Test fun missingShadeStateFallsBackToActualKeyguardVisibility() {
-        assertTrue(MiniPlayerPresentationPolicy.backdropSurfaceVisible(true, true, null, false, false))
-        assertFalse(MiniPlayerPresentationPolicy.backdropSurfaceVisible(true, false, null, false, false))
-    }
-
     @Test fun dismissedMediaCannotBlockAWaitingNotificationExchange() {
         for (native in listOf(false, true)) for (cover in listOf(false, true)) {
             assertFalse(MiniPlayerPresentationPolicy.mediaExpanded(false, true, false, native, cover))
