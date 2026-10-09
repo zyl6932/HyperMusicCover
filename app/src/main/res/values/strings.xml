@@ -237,8 +237,6 @@
     <string name="mini_media_collapsed_summary">开始播放时先显示锁屏岛，点击后再展开音乐封面</string>
     <string name="mini_height">锁屏岛高度</string>
     <string name="mini_height_summary">同时调整两侧锁屏快捷功能的图标大小</string>
-    <string name="mini_hide_aod_shortcuts">息屏时隐藏锁屏快捷功能</string>
-    <string name="mini_hide_aod_shortcuts_summary">仅在全屏息屏显示时隐藏，点亮屏幕后恢复</string>
     <string name="mini_marquee">滚动显示锁屏岛长文字</string>
     <string name="mini_marquee_summary">标题或副标题显示不全时自动滚动；关闭后用省略号截断</string>
     <string name="mini_widen">锁屏快捷功能关闭时加宽</string>

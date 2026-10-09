@@ -227,8 +227,6 @@
     <string name="mini_media_collapsed_summary">Show the island when playback starts. Tap it to expand the music artwork</string>
     <string name="mini_height">Island height</string>
     <string name="mini_height_summary">Also resize the lock screen quick function icons on either side</string>
-    <string name="mini_hide_aod_shortcuts">Hide lock screen quick functions in AOD</string>
-    <string name="mini_hide_aod_shortcuts_summary">Hide them in full-screen AOD and show them again when the screen wakes</string>
     <string name="mini_marquee">Scroll long island text</string>
     <string name="mini_marquee_summary">Scroll titles and subtitles that do not fit. When off, shorten them with an ellipsis</string>
     <string name="mini_widen">Widen when lock screen quick functions are off</string>

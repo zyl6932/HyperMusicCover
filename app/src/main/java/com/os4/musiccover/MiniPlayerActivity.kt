@@ -155,11 +155,8 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                         checked = config.optBoolean(MiniPlayerConfig.ADAPTIVE_WIDTH),
                         enabled = ready && config.optBoolean(MiniPlayerConfig.ENABLED),
                         onCheckedChange = { push(MiniPlayerConfig.ADAPTIVE_WIDTH, it) })
-                    SwitchPreference(title = stringResource(R.string.mini_hide_aod_shortcuts),
-                        summary = stringResource(R.string.mini_hide_aod_shortcuts_summary),
-                        checked = config.optBoolean(MiniPlayerConfig.HIDE_AOD_SHORTCUTS),
-                        enabled = ready && config.optBoolean(MiniPlayerConfig.ENABLED),
-                        onCheckedChange = { push(MiniPlayerConfig.HIDE_AOD_SHORTCUTS, it) })
+                    // A switch was here and is gone: the shortcuts always go with the full-screen
+                    // doze now. See MiniPlayerConfig.HIDE_AOD_SHORTCUTS.
                     SwitchPreference(title = stringResource(R.string.mini_reduce_aod_updates),
                         summary = stringResource(R.string.mini_reduce_aod_updates_summary),
                         checked = config.optBoolean(MiniPlayerConfig.REDUCE_AOD_UPDATES),

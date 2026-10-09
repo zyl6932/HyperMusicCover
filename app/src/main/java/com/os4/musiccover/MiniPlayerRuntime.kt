@@ -2102,8 +2102,6 @@ private class MiniPlayerController(
             clockTopAsked = top
             Main.reassertClockRoom()
         }
-        // Restore the shortcuts before the pill chooses its wake position on this same frame.
-        syncAodShortcutVisibility()
         updateVisibility()
         if (player?.visibility == View.VISIBLE) {
             position()
@@ -8568,40 +8566,17 @@ private class MiniPlayerController(
      * After the wake it lets go only once the lock screen's own alpha has been back at full
      * for a moment: it can show a button whole for a frame and then start fading it in from
      * nothing, and let go on that frame the buttons would drop with it.
+     *
+     * None of that runs in the full-screen doze any more (2026-10-09): 息屏时隐藏锁屏快捷功能 is
+     * always on, so the shortcuts are left to the doze's own fade rather than held at full - the
+     * torch and the camera dim to a hundredth with the rest of the chain, and the discs follow
+     * them down (unheldInDoze). The row this holds for is the one the doze leaves alone.
      */
     private var holdButtons = false
     private var holdSince = 0L
     private var backSince = 0L
-    private val aodHiddenButtons = BooleanArray(2)
-
-    private fun restoreAodShortcuts() {
-        for (side in 0..1) {
-            if (!aodHiddenButtons[side]) continue
-            val button = button(side)
-            if (button.visibility == View.INVISIBLE) button.visibility = View.VISIBLE
-            aodHiddenButtons[side] = false
-        }
-    }
-
-    /** Keep the OEM's shortcut layout in place while the AOD hides its glyphs and our discs. */
-    private fun syncAodShortcutVisibility() {
-        val hide = config.optBoolean(MiniPlayerConfig.HIDE_AOD_SHORTCUTS) &&
-            MiniPlayerScene.fullScreenAodActive
-        if (hide) {
-            for (side in 0..1) {
-                val button = button(side)
-                if (button.visibility == View.VISIBLE) {
-                    button.visibility = View.INVISIBLE
-                    aodHiddenButtons[side] = true
-                }
-            }
-            holdButtons = false
-            backSince = 0L
-        } else restoreAodShortcuts()
-    }
 
     private fun holdButtonsThroughDoze() {
-        syncAodShortcutVisibility()
         if (config.optBoolean(MiniPlayerConfig.HIDE_AOD_SHORTCUTS) &&
             MiniPlayerScene.fullScreenAodActive) return
         val root = followRoot?.get()
@@ -8848,7 +8823,6 @@ private class MiniPlayerController(
 
     fun destroy() {
         destroyed = true
-        restoreAodShortcuts()
         prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
         runCatching { host.viewTreeObserver.removeOnPreDrawListener(preDraw) }
         runCatching { sessions?.removeOnActiveSessionsChangedListener(sessionListener) }

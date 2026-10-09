@@ -16,6 +16,11 @@ object MiniPlayerConfig {
 
     /** The row takes the room a switched-off torch or camera leaves (MiniPlayerRuntime.pillRest). */
     const val ADAPTIVE_WIDTH = "adaptiveWidth"
+    /**
+     * Hide the lock screen's quick functions in the full-screen AOD. Not a setting any more
+     * (2026-10-09): it is written true and the normalizer does not read the key, so the shortcuts
+     * always go with the doze.
+     */
     const val HIDE_AOD_SHORTCUTS = "hideAodShortcuts"
     const val REDUCE_AOD_UPDATES = "reduceAodUpdates"
     const val MARQUEE = "marquee"
@@ -56,7 +61,7 @@ object MiniPlayerConfig {
         HEIGHT_RADIUS to DEFAULT_HEIGHT_DP / 2f,
         ART_RADIUS to 12f,
         ADAPTIVE_WIDTH to false,
-        HIDE_AOD_SHORTCUTS to false,
+        HIDE_AOD_SHORTCUTS to true,
         REDUCE_AOD_UPDATES to false,
         MARQUEE to true,
         NOTIFICATION_MATERIAL to true,
@@ -87,6 +92,9 @@ object MiniPlayerConfig {
      * the ordinary notification's colours and soft glass, and the switch that could turn that off
      * is gone from the islands' page. It stays in the JSON at true, so a module left over from
      * before the switch went away reads the value the islands now have to have.
+     *
+     * [HIDE_AOD_SHORTCUTS] the same way, and for the same reason: the row no longer offers to
+     * keep the quick functions through the doze, so this is true and stays true.
      */
     @JvmStatic fun normalizedJson(raw: String?): String {
         val input = runCatching { JSONObject(raw.orEmpty()) }.getOrDefault(JSONObject())
@@ -99,7 +107,7 @@ object MiniPlayerConfig {
             } else if (key == STYLE) {
                 runCatching { input.getInt(key) }.getOrDefault(STYLE_ROW)
                     .takeIf { it == STYLE_ROW || it == STYLE_STACK } ?: STYLE_ROW
-            } else if (key == ENABLED || key == ADAPTIVE_WIDTH || key == HIDE_AOD_SHORTCUTS ||
+            } else if (key == ENABLED || key == ADAPTIVE_WIDTH ||
                 key == REDUCE_AOD_UPDATES || key == MARQUEE ||
                 key == MEDIA_COLLAPSED_DEFAULT ||
                 key == GROUP_NOTIFICATIONS_BY_APP || key in switches) {
