@@ -30,7 +30,7 @@ object SettingsBackup {
     private const val KEY_LYRICS_KEEP_ON = "lyricsKeepOn"
     private const val KEY_LYRICS_HDR = "lyricsHdr"
     private const val KEY_LYRICS_TRANS = "lyricsTranslation"
-    private const val KEY_LYRICS_HIDE_AOD = "lyricsHideAod"
+    private const val KEY_AOD_BIG_CLOCK = "aodBigClock"
     private const val KEY_LYRICS_ROMA = "lyricsRomanisation"
     private const val KEY_LYRICS_ALIGN = "lyricsAlignment"
     private const val KEY_FP_AVOID = "fingerprintAvoid"
@@ -63,7 +63,7 @@ object SettingsBackup {
             json.put(KEY_LYRICS_KEEP_ON, module.lyricsKeepOn)
             json.put(KEY_LYRICS_HDR, module.lyricsHdr)
             json.put(KEY_LYRICS_TRANS, module.lyricsTrans)
-            json.put(KEY_LYRICS_HIDE_AOD, module.lyricsHideAod)
+            json.put(KEY_AOD_BIG_CLOCK, module.aodBigClock)
             json.put(KEY_LYRICS_ROMA, module.lyricsRoma)
             json.put(KEY_LYRICS_ALIGN, module.lyricsAlign)
             json.put(KEY_FP_AVOID, module.fpAvoid)
@@ -116,8 +116,8 @@ object SettingsBackup {
             if (obj.has(KEY_LYRICS_TRANS)) {
                 ModuleBridge.setLyricsTrans(context, obj.getBoolean(KEY_LYRICS_TRANS))
             }
-            if (obj.has(KEY_LYRICS_HIDE_AOD)) {
-                ModuleBridge.setLyricsHideAod(context, obj.getBoolean(KEY_LYRICS_HIDE_AOD))
+            if (obj.has(KEY_AOD_BIG_CLOCK)) {
+                ModuleBridge.setAodBigClock(context, obj.getBoolean(KEY_AOD_BIG_CLOCK))
             }
             if (obj.has(KEY_LYRICS_ROMA)) {
                 ModuleBridge.setLyricsRoma(context, obj.getBoolean(KEY_LYRICS_ROMA))

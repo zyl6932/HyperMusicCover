@@ -506,13 +506,12 @@ private fun LyricsGroup(
             },
         )
         SwitchPreference(
-            title = stringResource(R.string.lyrics_hide_aod),
-            summary = stringResource(R.string.lyrics_hide_aod_summary),
-            checked = module.lyricsHideAod,
+            title = stringResource(R.string.clock_aod_big),
+            checked = module.aodBigClock,
             enabled = enabled,
             onCheckedChange = {
-                onChange(module.copy(lyricsHideAod = it))
-                ModuleBridge.setLyricsHideAod(context, it)
+                onChange(module.copy(aodBigClock = it))
+                ModuleBridge.setAodBigClock(context, it)
             },
         )
         SwitchPreference(

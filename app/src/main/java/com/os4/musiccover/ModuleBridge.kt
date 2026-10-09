@@ -108,11 +108,6 @@ object ModuleBridge {
         val mcArtInLyrics: Boolean = true,
         val mcTitleTap: Boolean = false,
         val hideFingerprint: Boolean = false,
-        /**
-         * Keep cover mode's small clock in the full-screen always-on display, instead of letting
-         * it grow back into the OEM's own AOD clock. On, and not a setting.
-         */
-        val aodSmall: Boolean = true,
         /** Draw the big clock's colon on the styles that drop it. */
         val forceColon: Boolean = false,
         /** Light the media card's progress bar the way the island's is lit (#49). On by default. */
@@ -128,7 +123,12 @@ object ModuleBridge {
         val lyricsHdr: Boolean = false,
         /** Draw each line's translation under it. On unless the user turns it off. */
         val lyricsTrans: Boolean = true,
-        val lyricsHideAod: Boolean = false,
+        /**
+         * The full-screen AOD shows the OEM's own clock instead of the cover's small one. The
+         * wire says it the other way round - `aodsmall`, "keep the small clock" - so this is the
+         * module's flag inverted, once, in the two places that name the key.
+         */
+        val aodBigClock: Boolean = false,
         /** Draw each line's romanisation under it, over the translation. Off by default. */
         val lyricsRoma: Boolean = false,
         /** Where the lines settle in their column: 0 left, 1 centre, 2 right. */
@@ -464,8 +464,8 @@ object ModuleBridge {
     fun setLyricsTrans(context: Context, on: Boolean) =
         send(context, "lyrictrans") { putExtra("on", on) }
 
-    fun setLyricsHideAod(context: Context, on: Boolean) =
-        send(context, "lyrichideaod") { putExtra("on", on) }
+    fun setAodBigClock(context: Context, on: Boolean) =
+        send(context, "aodclock") { putExtra("small", !on) }
     fun setLyricsRoma(context: Context, on: Boolean) =
         send(context, "lyricroma") { putExtra("on", on) }
 
@@ -841,7 +841,6 @@ object ModuleBridge {
             mcArtInLyrics = b.getBoolean("mclyricart", true),
             mcTitleTap = b.getBoolean("mctap", false),
             hideFingerprint = b.getBoolean("hidefp", false),
-            aodSmall = b.getBoolean("aodsmall", true),
             forceColon = b.getBoolean("colon", false),
             mediaBarGlow = b.getBoolean("seekglow", true),
             lyrics = b.getBoolean("lyrics", true),
@@ -849,7 +848,9 @@ object ModuleBridge {
             lyricsHdr = b.getBoolean("lyrichdr", false),
             // Defaults the other way: this one is on for anyone whose module predates the key.
             lyricsTrans = b.getBoolean("lyrictrans", true),
-            lyricsHideAod = b.getBoolean("lyrichideaod", false),
+            // The module says whether it keeps its own clock; the row says whether the big one
+            // is wanted, so the answer is inverted here (see State.aodBigClock).
+            aodBigClock = !b.getBoolean("aodsmall", true),
             lyricsRoma = b.getBoolean("lyricroma", false),
             lyricsAlign = b.getInt("lyricalign", 0),
             lyricFill = b.getFloat("lyricfill", 1f),

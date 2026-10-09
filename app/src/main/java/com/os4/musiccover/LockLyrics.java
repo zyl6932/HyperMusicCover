@@ -97,8 +97,6 @@ final class LockLyrics {
      * than leaving a gap where it was.
      */
     static volatile boolean sTrans = true;
-    /** Keep the lyric page attached through a full AOD, but draw it only while awake. */
-    static volatile boolean sHideInAod;
     /**
      * The fifth: whether a line's romanisation is drawn under it, over the translation. Off by
      * default and apart from the translation's switch - either can be shown alone (#64). Like
@@ -582,7 +580,6 @@ final class LockLyrics {
      */
     static boolean wantsShown() {
         if (!wantsWindow()) return false;
-        if (sHideInAod && inHeldAod()) return false;
         // Hold the band back until the cover's blur transition has settled, so it does not
         // land over an artwork that is still sharpening. blurSettled() answers true when there
         // is no blur pending, so the held-AOD path below still shows through untouched.
@@ -602,8 +599,9 @@ final class LockLyrics {
      * out for the lyrics to sit between. Only that one doze: with the clock handed back to the
      * OEM there is nothing measured to sit under, and `inkBottomOnScreen()` says NaN.
      *
-     * The user's hide-in-AOD switch changes visibility in wantsShown(), not this state reading:
-     * layout and still-mode handling must continue to know that the display is dozing.
+     * Which of the two dozes this is, is 息屏时显示大时钟's business and not this reading's:
+     * whether the lyrics are drawn is wantsShown()'s, while layout and still-mode handling have
+     * to go on knowing that the display is dozing.
      */
     static boolean inHeldAod() {
         return ClockCollapse.aodHeld() && !Main.screenOnCached();

@@ -17,6 +17,7 @@
     <string name="clock_size">Clock size</string>
     <string name="clock_force_colon">Always show the clock colon</string>
     <string name="clock_force_colon_summary">No effect on some styles</string>
+    <string name="clock_aod_big">Show the large clock in the AOD</string>
     <string name="restart_menu">Restart</string>
     <string name="restart_systemui">Restart System UI</string>
     <string name="restart_wallpaper">Restart wallpaper</string>
@@ -150,8 +151,6 @@
     <string name="lyrics_provider_got_it">Got it</string>
     <string name="lyrics_provider_got_it_wait">Got it (%1$d)</string>
     <string name="lyrics_trans">Show translations</string>
-    <string name="lyrics_hide_aod">Hide scrolling lyrics in AOD</string>
-    <string name="lyrics_hide_aod_summary">Hide them in full-screen AOD and show them again when the screen wakes</string>
     <string name="lyrics_roma">Show romanisations</string>
     <string name="lyrics_align">Lyric alignment</string>
     <string name="lyrics_align_left">Left</string>

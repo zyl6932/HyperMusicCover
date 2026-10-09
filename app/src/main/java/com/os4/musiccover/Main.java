@@ -1996,8 +1996,8 @@ public class Main extends XposedModule {
                     // geometry is: a fresh SystemUI should not have to relearn it to use it.
                     + "\ncovergap=" + CoverPush.sCoverFadeGapMs
                     + "\nhidefp=" + (sHideFp ? 1 : 0)
-                    // aodsmall and lyrics are not written: both are fixed on, and loadState does
-                    // not read them. lyrichidden still is - the two-finger tap is the one way the
+                    // The lyrics master switch is not written: it is fixed on, and loadState does
+                    // not read it. lyrichidden still is - the two-finger tap is the one way the
                     // lock screen can be asked for the cover instead, and it has to survive.
                     + "\ncolon=" + (HyperTweaks.sForceColon ? 1 : 0)
                     + "\nseekglow=" + (HyperTweaks.sBarGlow ? 1 : 0)
@@ -2008,7 +2008,7 @@ public class Main extends XposedModule {
                     // the key did not exist before this setting did, and the lyrics are supposed
                     // to look the way they always have on a file that predates it.
                     + "\nlyrictrans=" + (LockLyrics.sTrans ? 1 : 0)
-                    + "\nlyrichideaod=" + (LockLyrics.sHideInAod ? 1 : 0)
+                    + "\naodsmall=" + (sAodSmall ? 1 : 0)
                     // Off when absent, which is what every file from before it had.
                     + "\nlyricroma=" + (LockLyrics.sRoma ? 1 : 0)
                     // 0 left, 1 centre, 2 right, and left when the key is absent: a file from
@@ -2114,15 +2114,16 @@ public class Main extends XposedModule {
                         else if ("hidefp".equals(k)) sHideFp = "1".equals(v);
                         else if ("colon".equals(k)) HyperTweaks.sForceColon = "1".equals(v);
                         else if ("seekglow".equals(k)) HyperTweaks.sBarGlow = "1".equals(v);
-                        // aodsmall and lyrics are not read: cover mode keeps its small clock in
-                        // the AOD and the lock screen shows the lyrics, both unconditionally now.
+                        // The lyrics are not read: the lock screen shows them unconditionally now,
+                        // and in the AOD it is 息屏时显示大时钟 (aodsmall) that decides whether
+                        // there is a clock for them to sit under at all.
                         // lyrichidden still is - that is the two-finger tap, and it is how the
                         // lock screen is asked for the cover instead.
                         else if ("lyrickeep".equals(k)) LockLyrics.sKeepOn = "1".equals(v);
                         else if ("lyrichidden".equals(k)) LockLyrics.sTapHidden = "1".equals(v);
                         else if ("lyrichdr".equals(k)) LockLyrics.sHdr = "1".equals(v);
                         else if ("lyrictrans".equals(k)) LockLyrics.sTrans = "1".equals(v);
-                        else if ("lyrichideaod".equals(k)) LockLyrics.sHideInAod = "1".equals(v);
+                        else if ("aodsmall".equals(k)) sAodSmall = "1".equals(v);
                         else if ("lyricroma".equals(k)) LockLyrics.sRoma = "1".equals(v);
                         // Clamped in the setter; absent or unreadable means left, see saveState.
                         else if ("lyricalign".equals(k)) LockLyrics.setAlign(Integer.parseInt(v));
@@ -2450,10 +2451,6 @@ public class Main extends XposedModule {
                         Xp.log(TAG + "lyrics translations: " + LockLyrics.sTrans);
                         // The view notices the switch itself and lays the lines out again around
                         // it; refresh only has to start the frames that let it.
-                        LockLyrics.refresh();
-                        saveState();
-                    } else if ("lyrichideaod".equals(op)) {
-                        LockLyrics.sHideInAod = i.getBooleanExtra("on", !LockLyrics.sHideInAod);
                         LockLyrics.refresh();
                         saveState();
                     } else if ("lyricroma".equals(op)) {
@@ -2994,7 +2991,6 @@ public class Main extends XposedModule {
                         out.putBoolean("lyrickeep", LockLyrics.sKeepOn);
                         out.putBoolean("lyrichdr", LockLyrics.sHdr);
                         out.putBoolean("lyrictrans", LockLyrics.sTrans);
-                        out.putBoolean("lyrichideaod", LockLyrics.sHideInAod);
                         out.putBoolean("lyricroma", LockLyrics.sRoma);
                         out.putInt("lyricalign", LockLyrics.sAlign);
                         out.putFloat("lyricfill", LockLyrics.sStyle.fill);
