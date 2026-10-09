@@ -2,7 +2,6 @@ package com.os4.musiccover.ui.screen.features
 
 import android.content.Intent
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -232,10 +231,16 @@ internal fun CoverPageView(
         isBlurEnabled = isBlurEnabled,
         extraBottomPadding = extraBottomPadding,
         onBack = onBack,
-        pinned = {
-            Spacer(Modifier.height(8.dp))
+    ) {
+        item {
             // Framed as the islands' page frames its demonstration: a card, three plays in it.
-            Card(Modifier.padding(horizontal = 12.dp)) {
+            //
+            // An item of the list rather than something pinned above it, which is what this page
+            // used to do and what no other page does: pinned, it never moved, and the list could
+            // not reach the bar - so an upward swipe collapsed nothing, on the one page whose
+            // picture is the tallest thing on it. The tab row below it scrolls with it for the
+            // same reason, as DonatePage's does.
+            Card(Modifier.padding(horizontal = 12.dp).padding(top = 12.dp)) {
                 CoverDemo(
                     coverStyle = module.coverStyle,
                     bias = module.bias,
@@ -243,18 +248,18 @@ internal fun CoverPageView(
                     modifier = Modifier.padding(top = 16.dp),
                 )
             }
-            Spacer(Modifier.height(12.dp))
+        }
+        item {
             TabRow(
                 tabs = groups,
                 selectedTabIndex = group,
                 onTabSelected = { group = it },
-                modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp),
+                modifier = Modifier.padding(horizontal = 12.dp).padding(top = 12.dp),
             )
-        },
-    ) {
+        }
         item {
             Card(
-                modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)
             ) {
                 when (group) {
                     0 -> Column {

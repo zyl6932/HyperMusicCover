@@ -1,9 +1,6 @@
 package com.os4.musiccover.ui.util
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.ui.Alignment
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -11,7 +8,6 @@ import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -59,17 +55,6 @@ fun PageScaffold(
     extraBottomPadding: Dp = 0.dp,
     onBack: (() -> Unit)? = null,
     actions: @Composable () -> Unit = {},
-    /**
-     * Drawn above the list and OUTSIDE its scroll area.
-     *
-     * For the one page whose subject is the thing being adjusted: KernelSU puts its preview as
-     * the list's first item and lets it scroll away, which is fine when the controls are short
-     * but wrong when the preview is what the user is watching while they drag. Supplying this
-     * also moves the top inset onto the wrapping column, because a list that cannot reach the
-     * bar is exactly what has to happen when something is pinned above it - and that is the
-     * arrangement the other branch deliberately avoids.
-     */
-    pinned: (@Composable ColumnScope.() -> Unit)? = null,
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
@@ -95,32 +80,14 @@ fun PageScaffold(
     ) { innerPadding ->
         Box(modifier = if (blurActive) Modifier.layerBackdrop(backdrop) else Modifier) {
             val bottom = innerPadding.calculateBottomPadding() + extraBottomPadding
-            if (pinned == null) {
-                PageList(
-                    scrollBehavior = scrollBehavior,
-                    contentPadding = PaddingValues(
-                        top = innerPadding.calculateTopPadding(),
-                        bottom = bottom,
-                    ),
-                    content = content,
-                )
-            } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = innerPadding.calculateTopPadding()),
-                    // Centred, which is where a pinned preview goes: it is a picture of a phone,
-                    // and the page's own layout puts everything else around its middle.
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    pinned()
-                    PageList(
-                        scrollBehavior = scrollBehavior,
-                        contentPadding = PaddingValues(bottom = bottom),
-                        content = content,
-                    )
-                }
-            }
+            PageList(
+                scrollBehavior = scrollBehavior,
+                contentPadding = PaddingValues(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = bottom,
+                ),
+                content = content,
+            )
         }
     }
 }
