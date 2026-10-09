@@ -7,6 +7,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -121,13 +124,26 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                         checked = config.optBoolean(MiniPlayerConfig.NORMALS_IN_STACK, true),
                         enabled = ready && config.optBoolean(MiniPlayerConfig.ENABLED),
                         onCheckedChange = { push(MiniPlayerConfig.NORMALS_IN_STACK, it) })
-                    SwitchPreference(title = stringResource(R.string.mini_group_by_app),
-                        summary = stringResource(R.string.mini_group_by_app_summary),
-                        checked = config.optBoolean(MiniPlayerConfig.GROUP_NOTIFICATIONS_BY_APP),
-                        enabled = ready && config.optBoolean(MiniPlayerConfig.ENABLED) &&
+                    // Only while it can actually work. The module wants ordinary notifications on
+                    // the islands and the stacked style, and feeds LockIslands.setGroupByApp the
+                    // same three conditions, so outside them a row here could not be moved and
+                    // would not say why - which is the whole of what the user would see. It
+                    // expands in under the switch above rather than appearing, so the card's
+                    // height stays continuous and the rows below do not jump (as the theme page's
+                    // glass row does).
+                    AnimatedVisibility(
+                        visible = ready && config.optBoolean(MiniPlayerConfig.ENABLED) &&
                             !config.optBoolean(MiniPlayerConfig.NORMALS_IN_STACK, true) &&
                             config.optInt(MiniPlayerConfig.STYLE) == MiniPlayerConfig.STYLE_STACK,
-                        onCheckedChange = { push(MiniPlayerConfig.GROUP_NOTIFICATIONS_BY_APP, it) })
+                        enter = expandVertically(),
+                        exit = shrinkVertically(),
+                    ) {
+                        SwitchPreference(title = stringResource(R.string.mini_group_by_app),
+                            summary = stringResource(R.string.mini_group_by_app_summary),
+                            checked = config.optBoolean(MiniPlayerConfig.GROUP_NOTIFICATIONS_BY_APP),
+                            enabled = ready,
+                            onCheckedChange = { push(MiniPlayerConfig.GROUP_NOTIFICATIONS_BY_APP, it) })
+                    }
                     ValueSlider(
                         title = stringResource(R.string.mini_height),
                         summary = stringResource(R.string.mini_height_summary),
