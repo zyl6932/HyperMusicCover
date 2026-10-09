@@ -227,7 +227,7 @@
     <string name="mini_height">Island height</string>
     <string name="mini_height_summary">Also resize the lock screen quick function icons on either side</string>
     <string name="mini_marquee">Scroll long island text</string>
-    <string name="mini_marquee_summary">Scroll titles and subtitles that do not fit. When off, shorten them with an ellipsis</string>
+    <string name="mini_marquee_summary">When off, shorten them with an ellipsis</string>
     <string name="mini_widen">Widen when lock screen quick functions are off</string>
     <string name="mini_widen_summary">The island fills the space left by disabled lock screen quick functions</string>
     <string name="mini_normals_in_stack">Keep ordinary notifications off islands</string>
@@ -247,7 +247,7 @@
     <string name="demo_transit_ride_title">Stop by stop</string>
     <string name="demo_transit_alert_title">Transfers and arrival</string>
     <string name="mini_reduce_aod_updates">Reduce content updates in AOD</string>
-    <string name="mini_reduce_aod_updates_summary">Update islands only when media or notification state changes. Replace lyrics with album artwork and restore them when the screen wakes.</string>
+    <string name="mini_reduce_aod_updates_summary">Refresh every 30 seconds, with the artwork in place of the lyrics</string>
     <string name="pickup_title">Pickup code</string>
     <string name="pickup_cloud_refresh">Refresh pickup cloud rules</string>
     <string name="pickup_cloud_date">Updated %1$s · %2$d mini programs</string>

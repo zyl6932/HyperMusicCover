@@ -237,7 +237,7 @@
     <string name="mini_height">锁屏岛高度</string>
     <string name="mini_height_summary">同时调整两侧锁屏快捷功能的图标大小</string>
     <string name="mini_marquee">滚动显示锁屏岛长文字</string>
-    <string name="mini_marquee_summary">标题或副标题显示不全时自动滚动；关闭后用省略号截断</string>
+    <string name="mini_marquee_summary">关闭后用省略号截断</string>
     <string name="mini_widen">锁屏快捷功能关闭时加宽</string>
     <string name="mini_widen_summary">锁屏快捷功能关闭后，锁屏岛占用空出的位置</string>
     <string name="mini_normals_in_stack">普通通知不上岛</string>
@@ -260,7 +260,7 @@
     <string name="demo_transit_ride_title">逐站提醒</string>
     <string name="demo_transit_alert_title">换乘与到站</string>
     <string name="mini_reduce_aod_updates">息屏时减少内容刷新</string>
-    <string name="mini_reduce_aod_updates_summary">息屏时每 30 秒检查并更新有变化的锁屏岛内容，倒计时显示 --:--，歌词改为封面；亮屏后恢复</string>
+    <string name="mini_reduce_aod_updates_summary">每 30 秒刷新一次，歌词改为封面</string>
     <string name="pickup_title">取餐码</string>
     <string name="pickup_cloud_refresh">刷新取餐码云端规则</string>
     <string name="pickup_cloud_date">更新于 %1$s · %2$d 个小程序</string>
