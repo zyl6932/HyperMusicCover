@@ -227,8 +227,6 @@
     <string name="mini_sink_background_summary">Move notifications down and hide the fingerprint icon while music artwork, navigation or a countdown page is expanded. Restore them when it closes</string>
     <string name="mini_height">Island height</string>
     <string name="mini_height_summary">Also resize the lock screen quick function icons on either side</string>
-    <string name="mini_notification_material">Use notification glass for islands</string>
-    <string name="mini_notification_material_summary">Use ordinary notification colors and glass for islands, including while a Super Island notification is expanded</string>
     <string name="mini_hide_aod_shortcuts">Hide lock screen quick functions in AOD</string>
     <string name="mini_hide_aod_shortcuts_summary">Hide them in full-screen AOD and show them again when the screen wakes</string>
     <string name="mini_marquee">Scroll long island text</string>

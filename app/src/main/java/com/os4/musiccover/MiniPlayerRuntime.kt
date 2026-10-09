@@ -2372,8 +2372,8 @@ private class MiniPlayerController(
     /** The row's islands in order: MUSIC_ISLAND, then notification keys. Set by refreshUnsafe. */
     private var islandKeys: List<String> = emptyList()
 
-    private fun notificationMaterial(): Boolean =
-        config.optBoolean(MiniPlayerConfig.NOTIFICATION_MATERIAL)
+    /** The islands wear the ordinary notification's colours and soft glass, always (2026-10-09). */
+    private fun notificationMaterial(): Boolean = true
 
     private fun stackedStyle(): Boolean =
         config.optInt(MiniPlayerConfig.STYLE, MiniPlayerConfig.STYLE_ROW) == MiniPlayerConfig.STYLE_STACK

@@ -237,8 +237,6 @@
     <string name="mini_sink_background_summary">展开音乐封面、导航或倒计时页面时，下移通知并隐藏指纹图标；收起后恢复</string>
     <string name="mini_height">锁屏岛高度</string>
     <string name="mini_height_summary">同时调整两侧锁屏快捷功能的图标大小</string>
-    <string name="mini_notification_material">锁屏岛使用通知柔光玻璃</string>
-    <string name="mini_notification_material_summary">锁屏岛使用普通通知的颜色和柔光玻璃，展开超级岛通知时也保持不变</string>
     <string name="mini_hide_aod_shortcuts">息屏时隐藏锁屏快捷功能</string>
     <string name="mini_hide_aod_shortcuts_summary">仅在全屏息屏显示时隐藏，点亮屏幕后恢复</string>
     <string name="mini_marquee">滚动显示锁屏岛长文字</string>

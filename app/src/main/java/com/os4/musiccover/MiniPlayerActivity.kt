@@ -145,11 +145,9 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                             push(MiniPlayerConfig.HEIGHT_RADIUS, heightDraft.roundToInt() / 2f)
                         },
                     )
-                    SwitchPreference(title = stringResource(R.string.mini_notification_material),
-                        summary = stringResource(R.string.mini_notification_material_summary),
-                        checked = config.optBoolean(MiniPlayerConfig.NOTIFICATION_MATERIAL),
-                        enabled = ready && config.optBoolean(MiniPlayerConfig.ENABLED),
-                        onCheckedChange = { push(MiniPlayerConfig.NOTIFICATION_MATERIAL, it) })
+                    // A switch was here and is gone: the islands take the ordinary notification's
+                    // colours and soft glass and there is nothing to turn off. See
+                    // MiniPlayerConfig.NOTIFICATION_MATERIAL.
                     SwitchPreference(title = stringResource(R.string.mini_widen),
                         summary = stringResource(R.string.mini_widen_summary),
                         checked = config.optBoolean(MiniPlayerConfig.ADAPTIVE_WIDTH),

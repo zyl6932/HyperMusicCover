@@ -19,6 +19,7 @@ object MiniPlayerConfig {
     const val HIDE_AOD_SHORTCUTS = "hideAodShortcuts"
     const val REDUCE_AOD_UPDATES = "reduceAodUpdates"
     const val MARQUEE = "marquee"
+    /** Always on and no longer a setting; see normalizedJson. */
     const val NOTIFICATION_MATERIAL = "notificationMaterial"
     const val MEDIA_COLLAPSED_DEFAULT = "mediaCollapsedDefault"
     const val SINK_WITH_EXPANDED_BACKGROUND = "sinkWithExpandedBackground"
@@ -59,7 +60,7 @@ object MiniPlayerConfig {
         HIDE_AOD_SHORTCUTS to false,
         REDUCE_AOD_UPDATES to false,
         MARQUEE to true,
-        NOTIFICATION_MATERIAL to false,
+        NOTIFICATION_MATERIAL to true,
         MEDIA_COLLAPSED_DEFAULT to false,
         SINK_WITH_EXPANDED_BACKGROUND to false,
         GROUP_NOTIFICATIONS_BY_APP to false,
@@ -83,6 +84,11 @@ object MiniPlayerConfig {
      * [ART_RADIUS] is not read at all: the picture is the small island's circle now, its share of
      * the height, and a corner setting has nothing left to say (2026-09-28). The key stays in the
      * JSON for the reason above.
+     *
+     * [NOTIFICATION_MATERIAL] is not read either, and is always on (2026-10-09): the islands take
+     * the ordinary notification's colours and soft glass, and the switch that could turn that off
+     * is gone from the islands' page. It stays in the JSON at true, so a module left over from
+     * before the switch went away reads the value the islands now have to have.
      */
     @JvmStatic fun normalizedJson(raw: String?): String {
         val input = runCatching { JSONObject(raw.orEmpty()) }.getOrDefault(JSONObject())
@@ -95,8 +101,8 @@ object MiniPlayerConfig {
             } else if (key == STYLE) {
                 runCatching { input.getInt(key) }.getOrDefault(STYLE_ROW)
                     .takeIf { it == STYLE_ROW || it == STYLE_STACK } ?: STYLE_ROW
-            } else if (key == ENABLED || key == ADAPTIVE_WIDTH ||
-                key == HIDE_AOD_SHORTCUTS || key == REDUCE_AOD_UPDATES || key == MARQUEE || key == NOTIFICATION_MATERIAL ||
+            } else if (key == ENABLED || key == ADAPTIVE_WIDTH || key == HIDE_AOD_SHORTCUTS ||
+                key == REDUCE_AOD_UPDATES || key == MARQUEE ||
                 key == MEDIA_COLLAPSED_DEFAULT || key == SINK_WITH_EXPANDED_BACKGROUND ||
                 key == GROUP_NOTIFICATIONS_BY_APP || key in switches) {
                 runCatching { input.getBoolean(key) }.getOrDefault(fallback)
