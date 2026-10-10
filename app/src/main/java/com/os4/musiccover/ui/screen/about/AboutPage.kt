@@ -305,6 +305,41 @@ private fun AboutContent(
                             onDirectUpdate = { update.directUpdate(ctx) },
                         )
                     }
+                    // Credits has a card of its own, right under the update rows: it is the one
+                    // page here that names people instead of licences, and inside the licence card
+                    // it read as one more licence.
+                    Card(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .padding(top = 12.dp)
+                            .then(
+                                if (contentBackdrop != null) {
+                                    Modifier.textureBlur(
+                                        backdrop = contentBackdrop,
+                                        shape = RoundedCornerShape(16.dp),
+                                        blurRadius = blurRadius,
+                                        noiseCoefficient = noiseCoefficient,
+                                        colors = BlurDefaults.blurColors(
+                                            blendColors = cardBlend,
+                                            brightness = brightness,
+                                            contrast = contrast,
+                                            saturation = saturation,
+                                        ),
+                                    )
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                        colors = CardDefaults.defaultColors(
+                            if (contentBackdrop != null) Color.Transparent else colorScheme.surfaceContainer,
+                            Color.Transparent,
+                        ),
+                    ) {
+                        ArrowPreference(
+                            title = stringResource(R.string.about_credits),
+                            onClick = openCreditsPage,
+                        )
+                    }
                     Card(
                         modifier = Modifier
                             .padding(horizontal = 12.dp)
@@ -398,14 +433,6 @@ private fun AboutContent(
                         ArrowPreference(
                             title = stringResource(R.string.about_dependencies),
                             onClick = openLicensePage,
-                        )
-                        // Under the licence list, because it answers the question that one
-                        // raises: the licences say what this build is legally made of, the
-                        // credits say whose work it was learnt from.
-                        ArrowPreference(
-                            title = stringResource(R.string.about_credits),
-                            summary = stringResource(R.string.about_credits_summary),
-                            onClick = openCreditsPage,
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))

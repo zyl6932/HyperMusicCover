@@ -69,7 +69,6 @@
     <string name="license_agpl">GNU AGPL v3.0</string>
     <string name="third_party_licenses_title">第三方许可证</string>
     <string name="about_credits">致谢</string>
-    <string name="about_credits_summary">参考过的项目与模块</string>
     <string name="credits_intro">这个模块是站在下面这些项目的肩膀上做出来的。</string>
     <string name="credits_group_ui">界面</string>
     <string name="credits_group_lyrics">锁屏</string>
@@ -79,6 +78,10 @@
     <string name="credits_liquid_glass">液态玻璃的透镜、内阴影和鲜艳度</string>
     <string name="credits_markdown_css">更新日志的排版样式</string>
     <string name="credits_cialloum">方形封面卡片、小封面与大封面之间的形变动画，以及锁屏歌词的位置、字号和字重设置</string>
+    <string name="credits_takekazex">锁屏超级岛的通知交互、动画接管与自适应布局，以及之后岛位交换、居中与材质复用的改动</string>
+    <string name="credits_aritxonly">锁屏岛的堆叠样式、AOD 显示优化与自定义</string>
+    <string name="credits_daguduiyuan">锁屏歌词的左中右对齐，以及末词扫光不截断</string>
+    <string name="credits_oyuvaa">歌词来源与歌词解析的修复</string>
     <string name="credits_hyperchanger">锁屏超级岛（由 btm_m 移植），以及解除景深限制、锁屏搭配数量上限、时钟冒号、全局主题下的柔光玻璃</string>
     <string name="credits_leaf">视频壁纸和景深视频壁纸的支持</string>
     <string name="credits_hypertweak">隐藏锁屏指纹图案和指纹动画的做法</string>

@@ -69,7 +69,6 @@
     <string name="license_agpl">GNU AGPL v3.0</string>
     <string name="third_party_licenses_title">Third Party Licenses</string>
     <string name="about_credits">Credits</string>
-    <string name="about_credits_summary">The projects this one learnt from</string>
     <string name="credits_intro">This module stands on the projects below.</string>
     <string name="credits_group_ui">Interface</string>
     <string name="credits_group_lyrics">Lock screen</string>
@@ -79,6 +78,10 @@
     <string name="credits_liquid_glass">The lens, the inner shadow and the vibrancy behind the liquid glass</string>
     <string name="credits_markdown_css">How the release notes are typeset</string>
     <string name="credits_cialloum">The square cover card, the morph between the thumbnail and the cover, and the lock screen lyric position, size and weight settings</string>
+    <string name="credits_takekazex">The super island\'s notification interaction, its animation hand-over and its adaptive layout, and the island exchange, centring and material reuse that followed</string>
+    <string name="credits_aritxonly">The stacked lock screen islands, and the AOD updates and customisation around them</string>
+    <string name="credits_daguduiyuan">Left, centre and right lock screen lyric alignment, and sweeping the last word without cutting it</string>
+    <string name="credits_oyuvaa">Fixes to where the lyrics come from and how they are parsed</string>
     <string name="credits_hyperchanger">The lock screen super island (ported by btm_m), and lifting the depth, saved-lock-screen, clock colon and global-theme glass restrictions</string>
     <string name="credits_leaf">Video and depth video wallpaper support</string>
     <string name="credits_hypertweak">Hiding the lock screen\'s fingerprint print and its animation</string>

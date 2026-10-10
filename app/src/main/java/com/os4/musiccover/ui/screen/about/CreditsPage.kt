@@ -65,6 +65,14 @@ fun CreditsPageContent(
     )
 
     val lyricCredits = listOf(
+        // The people who wrote into this repository, against the projects that were read: their
+        // row opens their own page rather than a repository, because what they gave is the commits
+        // the summary names. Most of it is the island and the lyrics, which is why they sit here.
+        Credit(
+            "@TakeKazeX",
+            stringResource(R.string.credits_takekazex),
+            "https://github.com/TakeKazeX",
+        ),
         Credit(
             "@CialloUM",
             stringResource(R.string.credits_cialloum),
@@ -74,6 +82,11 @@ fun CreditsPageContent(
             "@Leaf-lsgtky",
             stringResource(R.string.credits_leaf),
             "https://github.com/Leaf-lsgtky",
+        ),
+        Credit(
+            "@AritxOnly",
+            stringResource(R.string.credits_aritxonly),
+            "https://github.com/AritxOnly",
         ),
         Credit(
             "HyperChanger",
@@ -109,6 +122,16 @@ fun CreditsPageContent(
             "HyperLyrics Enhanced",
             stringResource(R.string.credits_hle),
             "https://github.com/juren233/HyperLyrics-Enhanced",
+        ),
+        Credit(
+            "@DaguDuiyuan",
+            stringResource(R.string.credits_daguduiyuan),
+            "https://github.com/DaguDuiyuan",
+        ),
+        Credit(
+            "@OyUvaa",
+            stringResource(R.string.credits_oyuvaa),
+            "https://github.com/OyUvaa",
         ),
     )
 
