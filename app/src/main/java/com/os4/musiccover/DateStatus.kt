@@ -87,6 +87,24 @@ internal object DateStatus {
     private val shown = ArrayList<Seg>()
     private val scratch = TextPaint(Paint.ANTI_ALIAS_FLAG)
 
+    /**
+     * The last few layout decisions, for `op datestatus`. A hand-back is one frame wide and over
+     * in half a second, so a probe that only shows the current state cannot tell a compensated
+     * slide from a jump after the fact.
+     */
+    private val trail = java.util.ArrayDeque<String>()
+
+    private fun note(line: String) {
+        trail.addLast(line)
+        while (trail.size > 6) trail.removeFirst()
+    }
+
+    private fun brief(l: DateStatusLayout?): String {
+        if (l == null) return "none"
+        return "l" + l.left + " w" + l.width + "/x" + l.extra + " t" + l.top + " h" + l.height +
+                " p" + l.parentWidth + (if (l.aod) "/aod" else "")
+    }
+
     private class Host(val view: TextView) {
         /** The OEM's own width, and what was added to it, as last measured. */
         var base = 0
@@ -536,6 +554,8 @@ internal object DateStatus {
                     h.layout = current
                     h.laidExtra = h.extra
                     val offset = DateStatusLayoutPolicy.offset(previous, current, h.offset.value)
+                    note("layout off=" + h.offset.value + " -> " + (offset ?: "null")
+                            + " prev[" + brief(previous) + "] cur[" + brief(current) + "]")
                     if (offset == null) h.offset.snap(0f)
                     else if (previous?.extra != current.extra) {
                         h.offset.snap(offset)
@@ -559,7 +579,21 @@ internal object DateStatus {
         if (hostAlive() != lastAlive) main.post(::update)
         host.base = v.measuredWidth
         val mode = View.MeasureSpec.getMode(wSpec)
-        if (shown.isEmpty() || mode == View.MeasureSpec.EXACTLY || v.layoutDirection == View.LAYOUT_DIRECTION_RTL) {
+        if (shown.isEmpty()) {
+            // The last segment has gone and the width we added is leaving the layout: the pass
+            // that follows is the one the date is handed back on, and it is ours to animate. It
+            // needs the record of the width we were laid out with and the offset that cancels it
+            // (DateStatusLayoutPolicy takes `previous` and the live offset), so neither is cleared
+            // here - only the room to draw in, which is empty anyway. Clearing them made every
+            // unplug step the date straight to its narrower place (measured 2026-10-10: extra
+            // 201->0 on one frame, off stayed 0.0 the whole way through).
+            host.extra = 0
+            host.room = 0f
+            return
+        }
+        if (mode == View.MeasureSpec.EXACTLY || v.layoutDirection == View.LAYOUT_DIRECTION_RTL) {
+            // The OEM is sizing the view itself here and our width is not in this layout, so a
+            // remembered one would be compensation for something that never happened.
             host.extra = 0
             host.room = 0f
             host.layout = null
@@ -663,5 +697,6 @@ internal object DateStatus {
         "level=$level indications=${indications.mapValues { message(it.value) }} withheld=$withheld " +
         "shown=${shown.joinToString { "${it.key}:${it.text}@${"%.2f".format(it.alpha.value)}" + if (it.leaving) "-" else "" }} " +
         "hosts=${hosts.values.joinToString { "${it.view.isShown}/${it.base}+${it.extra}/off=${it.offset.value}" }} " +
-        "controller=${controllerRef?.get() != null} numState=${numStateRef?.get() != null}"
+        "controller=${controllerRef?.get() != null} numState=${numStateRef?.get() != null} " +
+        "trail=" + trail.joinToString(" | ")
 }
