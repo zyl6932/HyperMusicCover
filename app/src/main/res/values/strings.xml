@@ -215,6 +215,9 @@
     <string name="commute_route_via">%1$s 换乘 · %2$d 次</string>
     <string name="commute_forget">清除通勤记录</string>
     <string name="commute_forget_summary">已记下 %1$d 趟</string>
+    <string name="commute_forget_confirm">清除通勤记录？</string>
+    <string name="commute_forget_confirm_summary">已学的 %1$d 趟会一起删掉，要重新坐过才会再学回来</string>
+    <string name="commute_forget_do">清除</string>
 
     <string name="shade_enabled">启用流光效果</string>
     <string name="shade_section_behaviour">行为</string>

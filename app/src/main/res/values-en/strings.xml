@@ -205,6 +205,9 @@
     <string name="commute_route_via">Change at %1$s · %2$d trips</string>
     <string name="commute_forget">Forget commutes</string>
     <string name="commute_forget_summary">%1$d trips kept</string>
+    <string name="commute_forget_confirm">Forget the commutes?</string>
+    <string name="commute_forget_confirm_summary">All %1$d trips it has learned are deleted; they are learned again only by riding</string>
+    <string name="commute_forget_do">Forget</string>
 
     <string name="shade_enabled">Enable flowing light</string>
     <string name="shade_section_behaviour">Behaviour</string>

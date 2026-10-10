@@ -5,7 +5,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -24,15 +28,19 @@ import com.os4.musiccover.ui.theme.AppTheme
 import com.os4.musiccover.ui.util.PageScaffold
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
  * 高德's bus and subway trip - its island (AmapTransitIsland) and its lock screen page
@@ -185,6 +193,10 @@ private fun CommuteSection(refreshKey: Int) {
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf(ModuleBridge.Commute()) }
     var asked by remember { mutableStateOf(false) }
+    // The row is one tap from deleting everything learned, with nothing to undo it, so it asks
+    // first. The page's own resume refresh (refreshKey) does not close this: a dialog answered
+    // while the screen was away would be gone when it came back.
+    var confirming by remember { mutableStateOf(false) }
     LaunchedEffect(refreshKey) {
         state = ModuleBridge.commute(context)
         asked = true
@@ -213,7 +225,26 @@ private fun CommuteSection(refreshKey: Int) {
         if (state.reached && state.trips > 0) {
             BasicComponent(title = stringResource(R.string.commute_forget),
                 summary = stringResource(R.string.commute_forget_summary, state.trips),
-                onClick = { scope.launch { state = ModuleBridge.commute(context, "forget") } })
+                onClick = { confirming = true })
+        }
+    }
+    WindowDialog(show = confirming,
+        title = stringResource(R.string.commute_forget_confirm),
+        summary = stringResource(R.string.commute_forget_confirm_summary, state.trips),
+        onDismissRequest = { confirming = false }) {
+        val dismiss = LocalDismissState.current
+        Row(horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(modifier = Modifier.weight(1f),
+                text = stringResource(R.string.update_cancel),
+                onClick = { dismiss?.invoke() })
+            Spacer(Modifier.width(20.dp))
+            TextButton(modifier = Modifier.weight(1f),
+                text = stringResource(R.string.commute_forget_do),
+                onClick = {
+                    confirming = false
+                    scope.launch { state = ModuleBridge.commute(context, "forget") }
+                },
+                colors = ButtonDefaults.textButtonColorsPrimary())
         }
     }
 }
