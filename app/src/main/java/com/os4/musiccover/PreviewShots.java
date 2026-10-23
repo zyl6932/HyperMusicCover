@@ -214,6 +214,8 @@ final class PreviewShots {
         // after the file, a network lookup lands after that - and the row that names it is read
         // while the page is open.
         out.putString("lyricsrc", LockLyrics.sourceName());
+        out.putBoolean("lyricon", com.os4.musiccover.lyrics.LyriconSource.installed());
+        out.putString("lyriconstate", com.os4.musiccover.lyrics.LyriconSource.status());
         return cg;
     }
 

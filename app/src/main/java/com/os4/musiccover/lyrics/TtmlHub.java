@@ -96,7 +96,7 @@ final class TtmlHub {
         }
         long now = System.currentTimeMillis();
         if (sIndex != null && now - sCheckedAt < CHECK_INTERVAL_MS) return;
-        Http.Raw m = Http.request(MANIFEST, TAG, null, "Accept", "application/json");
+        Http.Raw m = LyricHttp.request(MANIFEST, TAG, null, "Accept", "application/json");
         sCheckedAt = now;
         if (!m.ok()) {
             writeMeta(metaFile);
@@ -111,7 +111,7 @@ final class TtmlHub {
         }
         String name = manifest.optString("index");
         if (name.isEmpty() || name.contains("..")) return;
-        Http.Raw idx = Http.request(BASE + "api/v1/" + name.replaceFirst("^/+", ""), TAG, null,
+        Http.Raw idx = LyricHttp.request(BASE + "api/v1/" + name.replaceFirst("^/+", ""), TAG, null,
                 "Accept", "application/json");
         if (!idx.ok() || idx.body.length > MAX_INDEX_BYTES
                 || !sha256(idx.body).equalsIgnoreCase(manifest.optString("indexSha256"))) {
@@ -165,7 +165,7 @@ final class TtmlHub {
         }
         String path = e.path.replaceFirst("^/+", "");
         if (!path.startsWith("lyrics/") || path.contains("..")) return null;
-        Http.Raw r = Http.request(BASE + path, TAG, null,
+        Http.Raw r = LyricHttp.request(BASE + path, TAG, null,
                 "Accept", "application/ttml+xml, application/xml, text/xml");
         if (!r.ok() || r.body.length > MAX_TTML_BYTES || !sha256(r.body).equalsIgnoreCase(e.sha256)) {
             return null;

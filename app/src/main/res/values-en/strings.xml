@@ -335,4 +335,27 @@
     <string name="fpquick_a_camera">Camera</string>
     <string name="fpquick_a_screenshot">Screenshot</string>
     <string name="fpquick_a_recorder">Recorder</string>
+    <string name="lyrics_network">Allow online lyric sources</string>
+    <string name="lyrics_network_summary">When on, use online sources in the configured priority order. When off, use only song metadata, companion files and Lyricon. Networking within Lyricon providers is independent.</string>
+    <string name="lyrics_priority">Lyric source priority</string>
+    <string name="lyrics_priority_summary">Drag the handles to reorder. Sources are tried from top to bottom until usable lyrics are found.</string>
+    <string name="lyrics_priority_metadata">Song metadata</string>
+    <string name="lyrics_priority_local">Companion lyric files</string>
+    <string name="lyrics_format_settings">Formats</string>
+    <string name="lyrics_format_priority">Same-directory format priority</string>
+    <string name="lyrics_format_summary">Only affects files next to the song. If the preferred format is missing, empty or invalid, try the other format.</string>
+    <string name="lyrics_priority_drag">Drag to change priority</string>
+    <string name="lyrics_priority_up">Increase priority</string>
+    <string name="lyrics_priority_down">Decrease priority</string>
+    <string name="lyrics_priority_reset">Restore default order</string>
+    <string name="lyrics_priority_done">Done</string>
+    <string name="lyrics_priority_skipped">Skipped while online sources are off</string>
+    <string name="lyrics_format_ttml">TTML first</string>
+    <string name="lyrics_format_lrc">LRC first</string>
+    <string name="lyricon_active">Framework connected; lyric provider active</string>
+    <string name="lyricon_connected">Framework connected; waiting for a lyric provider</string>
+    <string name="lyricon_disconnected">Framework previously detected; currently disconnected</string>
+    <string name="lyricon_unavailable">No framework response; check that the framework is enabled</string>
+    <string name="lyricon_failed">Connection failed; see diagnostics</string>
+    <string name="lyricon_waiting">Waiting for framework feedback</string>
 </resources>

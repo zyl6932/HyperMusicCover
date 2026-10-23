@@ -104,11 +104,8 @@ public final class LyricSource {
         if (info == null) {
             return false;
         }
-        // A payload that is only a TTML document - no lyric or rawLyric beside it - is still the
-        // song's lyric, and the richest form of it.
-        if (documentOfLyricInfo(info) != null) {
-            return true;
-        }
+        String doc = documentOfLyricInfo(info);
+        if (doc != null) return true;
         String raw = rawOfLyricInfo(info);
         if (raw != null) {
             return !placeholder(raw);
@@ -167,21 +164,12 @@ public final class LyricSource {
      */
     static String infoFor(MediaController c) {
         String session = sessionInfoFor(c);
-        if (usable(session)) {
-            return session;
-        }
-        // Players that put the lyric itself on the metadata, under the platform's key or one of
-        // their own, rather than in a lyricInfo payload. Taken only when it is a lyric with times
-        // in it: a few of these keys carry a plain text that cannot be followed.
+        if (usable(session)) return session;
         for (String key : METADATA_LYRIC_KEYS) {
             String body = metaOf(c, key);
-            if (body == null || body.isEmpty() || placeholder(body)) {
-                continue;
-            }
+            if (body == null || body.isEmpty() || placeholder(body)) continue;
             if (timedLines(body) < MIN_SESSION_LINES && !body.contains("<tt")
-                    && !WORD_TIMED.matcher(body).find()) {
-                continue;
-            }
+                    && !WORD_TIMED.matcher(body).find()) continue;
             try {
                 return new org.json.JSONObject().put("rawLyric", body).toString();
             } catch (Throwable ignored) {
@@ -193,7 +181,6 @@ public final class LyricSource {
     private static final String[] METADATA_LYRIC_KEYS = {
             "android.media.metadata.LYRICS", "lyrics", "LYRICS", "lyric", "ttml"
     };
-    /** A YRC/QRC line, [start,duration] then (start,duration,0) or <start,duration> words. */
     private static final java.util.regex.Pattern WORD_TIMED =
             java.util.regex.Pattern.compile("(?m)^\\[(?:[0-9]+,[0-9]+|[0-9]+)\\].*[<(][0-9]+,");
 
@@ -752,6 +739,11 @@ public final class LyricSource {
         return gen < 0 ? gen != sWarmGen : gen != sLoadGen;
     }
 
+    static void invalidateRequests() {
+        sLoadGen++;
+        sWarmGen--;
+    }
+
     /**
      * What a prefetch has already been told about a directory and id.
      *
@@ -782,7 +774,8 @@ public final class LyricSource {
      * anything, and the artwork prefetch shares neither the thread nor the wait.
      */
     public static void warm(String id, String dir, String title, String artist) {
-        if (!LockLyrics.sOnline) return;
+        final LyricSourcePolicy.Config policy = LyricSourcePolicy.current;
+        if (!policy.allowNetwork) return;
         final int gen = --sWarmGen;
         if (id != null && dir != null) {
             String key = dir + '/' + id;
@@ -805,7 +798,7 @@ public final class LyricSource {
         // Not the whole by-name lookup: choosing between the results needs the duration, which a
         // queue item does not carry, and a choice made without one can land on another recording
         // of the same song. The search does not need it, so the search is what is done early.
-        if (title != null) {
+        if (title != null && !superseded(gen) && policy == LyricSourcePolicy.current) {
             NcmLyrics.warmSearch(title, artist);
         }
     }
@@ -887,8 +880,7 @@ public final class LyricSource {
         // Held now, on the caller's thread, because the worker below has no way to reach one.
         final android.content.Context ctx = Main.sAppCtx;
         final MediaController controller = c;
-        // Read once: a switch flipped mid-lookup starts a lookup of its own (LockLyrics.setOnline).
-        final boolean online = LockLyrics.sOnline;
+        final LyricSourcePolicy.Config policy = LyricSourcePolicy.current;
         if (info == null && id == null && q == null && ctx == null) {
             Xp.log("[MCLyric] " + pkg + " publishes neither lyricInfo, a song id, nor a name");
             onMain(cb, java.util.Collections.<LyricLine>emptyList(),
@@ -898,73 +890,43 @@ public final class LyricSource {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                Rows r = new Rows();
-                // A player of files is playing a file on this phone, and its lyric is the one
-                // the person keeps with it: read first, and kept over whatever the session or a
-                // module has, word-timed or not (#64 - a module's lyric was taking Salt's place).
-                // A streaming player's song is its catalogue's recording, which a file of the
-                // same name need not be; it reads the file only once everything else is empty.
-                boolean files = !streaming(pkg);
-                if (files) {
-                    local(ctx, controller, r);
-                }
-                // The sources after it, best first, each one asked only because the one before
-                // it came up empty. Every step falls through rather than stopping, which is the
-                // whole shape of this: a source that is present but useless - a provider module
-                // that wrote a lyricInfo it could not fill, an id the database does not have -
-                // used to end the search, and the song played on with nothing on screen while a
-                // perfectly good answer sat one step further down.
-                if (r.lines.isEmpty() && info != null) {
-                    session(info, r);
-                }
-                // The bridge, when the session had nothing. Same standing as the session's own
-                // payload and for the same reason - both are the player's lyric, handed over by
-                // whoever managed to reach it.
-                if (r.lines.isEmpty()) {
-                    lyricon(controller, r);
-                }
-                // A placeholder from either of those two says only that whoever filled it had no
-                // lyric - MeiloX's bridge sends one line of "纯音乐" for a song it has none for -
-                // not that the song has no words. Dropped, and the search goes on: taken as a
-                // catalogue's verdict it stopped a streaming player's .lrc being read (花海,
-                // 2026-10-22). A file player's own file saying so is still believed, below.
-                if (r.source == SRC_LYRIC_INFO || r.source == SRC_LYRICON) {
-                    dropPlaceholder(r);
-                }
-                if (r.lines.isEmpty() && online && (id != null || q != null)) {
-                    race(gen, pkg, ctx, id, dir, q, r);
-                }
-                // A catalogue that places the song and answers that it is instrumental has
-                // answered: the song has no words, and the next catalogue is not asked for some.
-                boolean instrumental = dropPlaceholder(r);
-                // The other two catalogues, in order, and only for a song the first three could
-                // not place. Sequential rather than raced: this is the slow path by definition,
-                // nothing above it is still running by the time it starts, and a song that
-                // already works never reaches it, so what it costs is paid only by songs that
-                // would otherwise show nothing at all.
-                if (r.lines.isEmpty() && online && q != null && !instrumental) {
-                    web(pkg, q, r);
-                    instrumental = dropPlaceholder(r);
-                }
-                // The file, for a streaming player, when nothing else had the song - and not
-                // when a catalogue placed it and said it has no words.
-                if (r.lines.isEmpty() && !files && !instrumental) {
-                    local(ctx, controller, r);
-                }
+                Rows selected = LyricSourcePolicy.first(policy, source -> {
+                    Rows r = new Rows();
+                    try {
+                        switch (source) {
+                            case "metadata":
+                                if (info != null) session(info, r);
+                                if (r.lines.isEmpty()) {
+                                    takeLocal(LocalLyrics.loadEmbedded(ctx, controller), SRC_LYRIC_INFO, r);
+                                }
+                                break;
+                            case "local":
+                                takeLocal(LocalLyrics.loadSidecar(ctx, controller, policy.formats()), SRC_LOCAL, r);
+                                break;
+                            case "lyricon": lyricon(controller, r); break;
+                            case "amll": if (id != null) database(gen, id, dir, r); break;
+                            case "ttmlhub": if (id != null && TtmlHub.kindOf(dir) != null) hub(ctx, id, dir, r); break;
+                            default:
+                                if (q != null) {
+                                    OnlineLyrics.Found found = OnlineLyrics.ask(
+                                            OnlineLyrics.Src.valueOf(source.toUpperCase(java.util.Locale.ROOT)), q);
+                                    if (found != null) take(found, r, r.why);
+                                }
+                        }
+                    } catch (Throwable error) {
+                        Xp.w("[MCLyric] " + source + " failed: " + error);
+                    }
+                    return !dropPlaceholder(r) && !r.lines.isEmpty() ? r : null;
+                }, () -> !superseded(gen) && policy == LyricSourcePolicy.current);
+                final Rows r = selected != null ? selected : new Rows();
                 // A translation left on the line itself by its tag writer (#95) is hung on the
                 // line before anything reads it: borrow() must see it and not go and fetch a
                 // second one, and the layout must draw it as a translation.
                 r.lines = LyricParse.splitInlineTranslations(r.lines);
                 Xp.log("[MCLyric] " + pkg + " -> " + r.why);
-                onMain(cb, r.lines, r.why, r.source);
-                // Extra to the answer already sent, so nothing in it is worth a thread - and an
-                // uncaught throw on this one takes SystemUI with it.
-                if (!online) return;
-                try {
-                    borrow(gen, pkg, ctx, id, dir, q, r, cb);
-                } catch (Throwable t) {
-                    Xp.w("[MCLyric] borrowing a translation failed: " + t);
-                }
+                Main.main().post(() -> {
+                    if (!superseded(gen) && policy == LyricSourcePolicy.current) cb.onLines(r.lines, r.why, r.source);
+                });
             }
         }, "MCLyricSource").start();
     }
@@ -1370,7 +1332,7 @@ public final class LyricSource {
             // first and allowed to fail - if the document does not parse, the same lyric is
             // still sitting in the fields below.
             String used = "lyric";
-            if (doc != null) {
+            if (doc != null && !doc.isEmpty()) {
                 List<LyricLine> d = LyricParse.parse(doc, tr);
                 if (!d.isEmpty()) {
                     r.lines = d;
@@ -1393,8 +1355,6 @@ public final class LyricSource {
             if (r.lines.isEmpty() && text != null) {
                 r.lines = LyricParse.parse(text, tr);
             }
-            // A rawLyric with no word timing is still a lyric when there is no lyric field to
-            // prefer it to - which is how the metadata keys arrive (infoFor).
             if (r.lines.isEmpty() && !rawLines.isEmpty()) {
                 r.lines = rawLines;
                 used = "rawLyric";
@@ -1475,6 +1435,15 @@ public final class LyricSource {
         } catch (Throwable t) {
             Xp.w("[MCLyric] local lyric failed: " + t);
         }
+    }
+
+    private static void takeLocal(LocalLyrics.Found found, int source, Rows rows) {
+        if (found == null) return;
+        List<LyricLine> parsed = LyricParse.parse(found.body);
+        if (parsed.isEmpty()) return;
+        rows.lines = parsed;
+        rows.source = source;
+        rows.why = parsed.size() + " lines from " + found.how;
     }
 
     /** The AMLL database, by platform id, in the one directory that id can belong to. */
@@ -1695,6 +1664,7 @@ public final class LyricSource {
         long started = android.os.SystemClock.uptimeMillis();
         HttpURLConnection conn = null;
         try {
+            if (!LyricSourcePolicy.current.allowNetwork) return new Answer(UNREACHABLE, null);
             conn = (HttpURLConnection) new URL(url).openConnection();
             // Short on purpose. A lyric that arrives after the lock screen has been put away is
             // worth nothing, and four mirrors running at once means the slow one is never waited

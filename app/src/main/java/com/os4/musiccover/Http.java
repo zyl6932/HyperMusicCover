@@ -136,7 +136,7 @@ public final class Http {
         public final byte[] body;
         public final int code;
 
-        Raw(byte[] body, int code) {
+        public Raw(byte[] body, int code) {
             this.body = body;
             this.code = code;
         }

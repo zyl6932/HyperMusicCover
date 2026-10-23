@@ -114,7 +114,7 @@ final class KuwoLyrics {
 
     static List<LyricMatch.Candidate> search(String keyword, boolean[] answered) throws Exception {
         List<LyricMatch.Candidate> out = new ArrayList<>();
-        Http.Raw r = Http.request(SEARCH_URL + "?key=" + java.net.URLEncoder.encode(keyword, "UTF-8")
+        Http.Raw r = LyricHttp.request(SEARCH_URL + "?key=" + java.net.URLEncoder.encode(keyword, "UTF-8")
                 + "&pn=1&rn=20&httpsStatus=1", TAG, null, WEB_HEADERS);
         String text = r.text();
         if (text == null) return out;
@@ -141,7 +141,7 @@ final class KuwoLyrics {
         } catch (Throwable t) {
             Xp.w("[" + TAG + "] lrcx failed: " + t);
         }
-        Http.Raw r = Http.request(OPEN_LYRIC_URL + "?musicId=" + rid + "&httpsStatus=1", TAG, null,
+        Http.Raw r = LyricHttp.request(OPEN_LYRIC_URL + "?musicId=" + rid + "&httpsStatus=1", TAG, null,
                 WEB_HEADERS);
         String text = r.text();
         if (text == null) return "";
@@ -171,7 +171,7 @@ final class KuwoLyrics {
                 + "&lrcx=1";
         String query = java.util.Base64.getEncoder().encodeToString(xor(request.getBytes(
                 StandardCharsets.UTF_8)));
-        Http.Raw r = Http.request(LRCX_URL + "?" + query, TAG, null, "User-Agent",
+        Http.Raw r = LyricHttp.request(LRCX_URL + "?" + query, TAG, null, "User-Agent",
                 "okhttp/3.10.0", "Referer", "https://www.kuwo.cn/", "Accept-Encoding", "identity");
         return r.ok() ? decode(r.body) : null;
     }

@@ -960,7 +960,7 @@ public final class NcmLyrics {
      * without lyrics. See load().
      */
     private static String get(String url) throws Exception {
-        Http.Reply r = Http.get(url, "MCNcm");
+        Http.Reply r = LyricHttp.get(url, "MCNcm");
         if (!r.ok()) {
             networkFailed = true;
         }

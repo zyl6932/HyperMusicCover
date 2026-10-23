@@ -199,7 +199,7 @@ public final class WebLyrics {
                 ranOut = true;
                 return SKIPPED;
             }
-            Http.Reply r = Http.get(url, "MCWeb");
+            Http.Reply r = LyricHttp.get(url, "MCWeb");
             answered |= r.ok() || r.code == 404;
             failed |= !r.ok() && r.code != 404;
             return r;
