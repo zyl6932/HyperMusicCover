@@ -192,9 +192,59 @@ internal object LockIslands {
      */
     private var sceneKey: String? = null
     private var scene: ImmersiveScene? = null
+    private val sceneRetention = CapsuleSceneRetention()
 
     /** The open page's notification: its row is in the stack while the page is up. */
     fun openSceneKey(): String? = sceneKey
+
+
+    /** Toggle only the module's immersive content. The real navigation session is untouched. */
+    fun toggleScene(key: String): Boolean? {
+        val target = sceneOf(key) ?: return null
+        if (sceneKey == key) {
+            val closing = scene ?: target
+            sceneRetention.closed(key)
+            sceneKey = null
+            scene = null
+            sceneMissingSince = 0L
+            ImmersiveHost.close(closing)
+            return false
+        }
+        if (!target.ready()) return null
+        scene?.let { ImmersiveHost.close(it) }
+        // Publish the request before opening: synchronous readiness/content callbacks may
+        // invalidate it. Writing it afterwards would resurrect a page those callbacks closed.
+        sceneKey = key
+        scene = target
+        sceneRetention.opened(key, target.isNavigation(), fromBody = true)
+        sceneMissingSince = 0L
+        try {
+            ImmersiveHost.open(target)
+        } catch (error: Throwable) {
+            if (sceneKey == key && scene === target) {
+                sceneRetention.closed(key)
+                sceneKey = null
+                scene = null
+            }
+            runCatching { ImmersiveHost.close(target) }
+            Xp.w("MCIsland: ${target.id()} open failed: $error")
+            return null
+        }
+        // Keep its capsule available for the next tap; release() is reserved for swipe-to-panel.
+        return true.takeIf { sceneOpenRequested(key) }
+    }
+
+    /** The scene request may still be loading. It is not a claim that its page is visible. */
+    fun sceneOpenRequested(key: String): Boolean =
+        sceneKey == key && scene?.let(ImmersiveHost::isOpenRequested) == true
+
+    fun sceneIsPresented(key: String): Boolean =
+        sceneKey == key && scene?.let(ImmersiveHost::isPresented) == true
+
+    fun scenePresentationState(key: String): String =
+        ImmersiveHost.presentationState(if (sceneKey == key) scene else sceneOf(key))
+
+
 
     private fun sceneOf(key: String): ImmersiveScene? =
         noteFor(key)?.let { runCatching { ImmersiveHost.sceneFor(it.pkg, it.focus, key) }.getOrNull() }
@@ -231,6 +281,7 @@ internal object LockIslands {
         if (now - sceneMissingSince < SCENE_GONE_MS) return
         sceneMissingSince = 0L
         val closed = scene ?: return
+        sceneRetention.closed(key)
         Xp.log("MCIsland: ${closed.id()}'s notification is gone; closing its page")
         sceneKey = null
         scene = null
@@ -249,6 +300,8 @@ internal object LockIslands {
      */
     fun closeSceneForList(): String? {
         val key = sceneKey ?: return null
+        if (sceneRetention.keeps(key)) return key
+        sceneRetention.closed(key)
         val closed = scene
         sceneKey = null
         scene = null
@@ -567,7 +620,8 @@ internal object LockIslands {
             return
         }
         if (released.remove(key)) invalidate("island $key recaptured")
-        if (key == sceneKey) {
+        if (key == sceneKey && !sceneRetention.keeps(key)) {
+            sceneRetention.closed(key)
             val closed = scene
             sceneKey = null
             scene = null

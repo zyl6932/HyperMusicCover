@@ -145,6 +145,37 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     /** A picture that moves (a focus template's Lottie), shown over whatever bitmap is bound. */
     private var artworkOverride: android.graphics.drawable.Drawable? = null
     private var lastPlaying: Boolean? = null
+    private var statusIdentity: String? = null
+    private var normalTitle: CharSequence? = null
+    private var normalArtist: CharSequence? = null
+    private var textAlpha = 1f
+    private val statusFeedback = CapsuleTextFeedback { renderText() }
+    fun bindStatusIdentity(key: String) {
+        if (statusIdentity == key) return
+        statusIdentity = key
+        statusFeedback.clear()
+    }
+    fun showStatus(text: String) {
+        statusFeedback.show(text)
+        announceForAccessibility(text)
+    }
+    private fun renderText() {
+        val message = statusFeedback.text
+        val shownTitle = message ?: normalTitle
+        val shownArtist = if (message != null) null else normalArtist
+        if (!TextUtils.equals(title.text, shownTitle)) {
+            title.text = shownTitle
+            if (message == null) scrollOnce(title) else rest(title)
+        } else if (!titleScrolls) rest(title)
+        if (!TextUtils.equals(artist.text, shownArtist)) {
+            artist.text = shownArtist
+            if (message == null) scrollOnce(artist) else rest(artist)
+        }
+        title.visibility = if (shownTitle.isNullOrBlank()) View.GONE else View.VISIBLE
+        artist.visibility = if (shownArtist.isNullOrBlank()) View.GONE else View.VISIBLE
+        textColumn.alpha = textAlpha * statusFeedback.alpha
+    }
+
 
     /**
      * The colour of the words and the play button: the system's own card's (MiniPlayerController
@@ -301,15 +332,9 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
             updateGeometry(config.getDouble(MiniPlayerConfig.HEIGHT_RADIUS).toFloat())
         }
         // Equal by their words, so a line the row rewrote as a span is not set again every frame.
-        if (!TextUtils.equals(title.text, trackTitle)) { title.text = trackTitle; scrollOnce(title) }
-        else if (!titleScrolls) rest(title)
-        if (!TextUtils.equals(artist.text, trackArtist)) { artist.text = trackArtist; scrollOnce(artist) }
-        // A line with no words in it takes no room, and the column centres what is left: an island
-        // whose template gives it only a timer (the recorder's, its param_v2 an animTextInfo and
-        // nothing else) drew that one line on the upper one and read off centre (the user,
-        // 2026-09-28). Both lines have words, the layout is the one it always was.
-        title.visibility = if (trackTitle.isNullOrBlank()) View.GONE else View.VISIBLE
-        artist.visibility = if (trackArtist.isNullOrBlank()) View.GONE else View.VISIBLE
+        normalTitle = trackTitle
+        normalArtist = trackArtist
+        renderText()
         if (lastArtwork !== cover) {
             lastArtwork = cover
             if (artworkOverride == null) artwork.setImageBitmap(cover)
@@ -680,6 +705,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     }
 
     override fun onDetachedFromWindow() {
+        statusFeedback.clear()
         finish()
         context.getSystemService(android.hardware.display.DisplayManager::class.java)
             ?.unregisterDisplayListener(displayListener)
@@ -976,7 +1002,8 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         val a = alpha.coerceIn(0f, 1f)
         contentAlpha = a
         slot.alpha = if (artworkHidden) 0f else a
-        textColumn.alpha = a
+        textAlpha = a
+        textColumn.alpha = a * statusFeedback.alpha
         toggle.alpha = a
         toggle2.alpha = a * secondShown
     }
@@ -1005,7 +1032,8 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     /** The text and the button alone: an island shrinking to its circle keeps its picture. */
     fun setTextAlpha(alpha: Float) {
         val a = alpha.coerceIn(0f, 1f)
-        textColumn.alpha = a
+        textAlpha = a
+        textColumn.alpha = a * statusFeedback.alpha
         toggle.alpha = a
         toggle2.alpha = a * secondShown
     }

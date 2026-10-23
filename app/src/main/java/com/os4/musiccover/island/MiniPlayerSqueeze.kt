@@ -32,6 +32,27 @@ import kotlin.math.sqrt
 internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     private val element = MaterialElement(context)
 
+    private var normalTitle: CharSequence? = null
+    private var normalText: CharSequence? = null
+    private var contentAlpha = 1f
+    private var renderedStatus = false
+    private var renderedWidth = -1
+    private var renderedHeight = -1
+    private var statusIdentity: String? = null
+    private val statusFeedback = CapsuleTextFeedback { renderCardText() }
+    fun bindStatusIdentity(key: String) {
+        if (statusIdentity == key) return
+        statusIdentity = key
+        statusFeedback.clear()
+    }
+    fun showStatus(text: String) {
+        statusFeedback.show(text)
+        announceForAccessibility(text)
+    }
+    override fun onDetachedFromWindow() {
+        statusFeedback.clear()
+        super.onDetachedFromWindow()
+    }
     private val cardTitle = TextView(context)
     private val cardText = TextView(context)
     private val cardWords = LinearLayout(context).apply {
@@ -42,7 +63,7 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
 
     fun copyCardTextFrom(other: ShortcutDisc?) {
         if (other == null || other.cardWords.visibility != View.VISIBLE) setCardText(null, null)
-        else setCardText(other.cardTitle.text, other.cardText.text)
+        else setCardText(other.normalTitle, other.normalText)
     }
 
     /** The pill's ink (MiniPlayerView.setInk), for the rear card's two lines. */
@@ -54,11 +75,68 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
 
     /** The rear stacked island has the same two lines as the front card. */
     fun setCardText(title: CharSequence?, text: CharSequence?) {
+        normalTitle = title
+        normalText = text
+        iconAtStart = title != null || text != null
+        renderCardText()
+    }
+
+    private fun renderCardText() {
+        val message = statusFeedback.text
+        val title = if (message != null && shapeW <= shapeH * 2)
+            CapsuleStatusContent.compact(message) else message ?: normalTitle
+        val text = if (message != null) null else normalText
+        val titleChanged = !TextUtils.equals(cardTitle.text, title)
+        val textChanged = !TextUtils.equals(cardText.text, text)
+        val statusChanged = renderedStatus != (message != null)
+        val shapeChanged = renderedWidth != shapeW || renderedHeight != shapeH
+        val wordsWereVisible = cardWords.visibility == View.VISIBLE
+        if (statusChanged) {
+            // TextView.setSingleLine changes layout and horizontal scrolling. Doing this on
+            // every animation frame repeatedly resets the text while the disc is squeezed.
+            renderedStatus = message != null
+            cardTitle.isSingleLine = !renderedStatus
+            cardTitle.maxLines = if (renderedStatus) 2 else 1
+            cardTitle.gravity = if (renderedStatus) Gravity.CENTER else Gravity.START
+        }
+        if (titleChanged || shapeChanged || statusChanged) {
+            val baseTextPx = 12.8f * MiniPlayerGeometry.STACK_BACK_SCALE * resources.displayMetrics.scaledDensity
+            val inset = min(shapeW, shapeH) * (1f - ICON_SHARE) / 2f
+            val room = (shapeW - 2f * inset).coerceAtLeast(1f)
+            val lines = title?.toString().orEmpty().lines()
+            val perPx = cardTitle.textSize.coerceAtLeast(1f)
+            val widest = lines.maxOfOrNull { cardTitle.paint.measureText(it) / perPx } ?: 0f
+            val metrics = cardTitle.paint.fontMetrics
+            val lineHeight = (metrics.descent - metrics.ascent) / perPx
+            val size = if (message != null && widest > 0f) minOf(baseTextPx, room / widest,
+                shapeH.coerceAtLeast(1) * 0.78f / (lineHeight * lines.size).coerceAtLeast(0.01f))
+                else baseTextPx
+            if (abs(cardTitle.textSize - size) > 0.1f)
+                cardTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, size)
+        }
+        renderedWidth = shapeW
+        renderedHeight = shapeH
         cardWords.visibility = if (title == null && text == null) View.GONE else View.VISIBLE
-        if (!TextUtils.equals(cardTitle.text, title)) cardTitle.text = title
-        if (!TextUtils.equals(cardText.text, text)) cardText.text = text
-        iconAtStart = cardWords.visibility == View.VISIBLE
-        placeElement()
+        if (titleChanged) cardTitle.text = title
+        if (textChanged) cardText.text = text
+        cardText.visibility = if (text.isNullOrBlank()) View.GONE else View.VISIBLE
+        renderContent()
+        if (titleChanged || textChanged || statusChanged || shapeChanged ||
+            wordsWereVisible != (cardWords.visibility == View.VISIBLE)) placeElement()
+    }
+
+    private fun renderContent() {
+        val layers = CapsuleStatusContent.layers(statusFeedback.frame, contentAlpha)
+        cardWords.alpha = layers.wordsAlpha
+        icon?.let {
+            it.visibility = if (layers.message || live != null) View.INVISIBLE
+                else if (it.drawable == null) View.GONE else View.VISIBLE
+            it.alpha = layers.artworkAlpha
+        }
+        live?.let {
+            it.visibility = if (layers.message) View.INVISIBLE else View.VISIBLE
+            it.alpha = layers.artworkAlpha
+        }
     }
 
     private var dressWith: ((ImageView) -> Unit)? = null
@@ -135,6 +213,7 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         val first = shapeW <= 1 || shapeH <= 1
         shapeW = w
         shapeH = h
+        renderCardText()
         shapeDx = dx
         placeElement()
         invalidateOutline()
@@ -192,11 +271,10 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         if (view != null) {
             (view.parent as? android.view.ViewGroup)?.removeView(view)
             addView(view, LayoutParams(0, 0))
-            view.alpha = icon?.alpha ?: 1f
             view.clipToOutline = false
             view.transitionAlpha = if (iconHidden) 0f else 1f
         }
-        icon?.let { it.visibility = if (view != null) View.INVISIBLE else if (it.drawable == null) View.GONE else View.VISIBLE }
+        renderContent()
         // Its glow past its box, as in the pill (MiniPlayerView.showArtworkView).
         clipChildren = view == null
         placeElement()
@@ -228,7 +306,7 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
             addView(this, LayoutParams(0, 0))
         }
         if (view.drawable !== drawable) view.setImageDrawable(drawable)
-        view.visibility = if (live != null) View.INVISIBLE else if (drawable == null) View.GONE else View.VISIBLE
+        renderContent()
         view.transitionAlpha = if (iconHidden) 0f else 1f
         placeElement()
     }
@@ -256,9 +334,8 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
 
     /** The picture's alpha: it comes in last on a small island forming out of the pill. */
     fun setIconAlpha(alpha: Float) {
-        cardWords.alpha = alpha
-        icon?.let { if (kotlin.math.abs(it.alpha - alpha) > 0.002f) it.alpha = alpha }
-        live?.let { if (kotlin.math.abs(it.alpha - alpha) > 0.002f) it.alpha = alpha }
+        contentAlpha = alpha.coerceIn(0f, 1f)
+        renderContent()
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) =
