@@ -516,8 +516,11 @@ internal object LockIslands {
         if (nativeStack) {
             // On for good once the islands have shown (off only with the feature: stopFolding).
             if (value) {
+                val startingFolding = !NumState.folding
                 NumState.setFolding(true)
-                NumState.foldIfPiled("row showing")
+                // A navigation refresh can hide/show this row without a new lock-screen
+                // session. Reappearing must not revoke the user's expanded stack.
+                if (startingFolding) NumState.foldIfPiled("row first showing")
             }
             followStack("row ${if (value) "showing" else "gone"}")
         }
@@ -984,9 +987,10 @@ internal object LockIslands {
         if (nativeStack) {
             // The stack said nothing yet this lock screen: read where it is.
             stackOut = !stackFolded()
-            // Not the spread's own run (its focus rows coming in): the stack is on its way to
-            // the list, and read as a pile on the way it was folded back (2026-09-30).
-            if (active && !spreading && members.isNotEmpty()) NumState.foldIfPiled("notifications changed")
+            // Content updates (notably navigation's repeated posts) are not collapse
+            // gestures. STACK can be an expanded/transitional OEM state: scheduling a
+            // NUMBER transition here retracts the user's stack on the next update.
+            // Initial activation and explicit gesture completion own folding instead.
         }
         publish()
     }
