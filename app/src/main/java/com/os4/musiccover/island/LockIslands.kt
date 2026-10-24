@@ -50,6 +50,7 @@ internal object LockIslands {
         val focus: Boolean,
         val time: Long,
         val intent: PendingIntent?,
+        val category: String? = null,
         val group: String?,
         val summary: Boolean,
         /** Shown as the lock screen shows it: the public version. */
@@ -1222,6 +1223,7 @@ internal object LockIslands {
             focus = focus,
             time = if (n.`when` > 0) n.`when` else sbn.postTime,
             intent = n.contentIntent,
+            category = n.category,
             group = if (sbn.isGroup) sbn.groupKey else null,
             summary = n.flags and Notification.FLAG_GROUP_SUMMARY != 0,
             redacted = redacted,
