@@ -4,14 +4,12 @@ final class LyricTransition {
     private float[] positions = new float[0];
     private float[] alpha = new float[0];
     boolean moving;
-    float fit = 1f;
 
     void reset(float[] base) {
         positions = base.clone();
         alpha = new float[base.length];
         java.util.Arrays.fill(alpha, 1f);
         moving = false;
-        fit = 1f;
     }
 
     void rebase(LyricFocus focus, float[] base, float[] scroll, float[] aim, float[] nextAim) {
@@ -60,7 +58,7 @@ final class LyricTransition {
     }
 
     boolean update(LyricFocus focus, float[] base, int dots, float aboveAlpha,
-                   float fitTarget, float dt, boolean snap) {
+                   float dt, boolean snap) {
         if (positions.length != base.length) reset(base);
         moving = false;
         boolean changed = false;
@@ -77,10 +75,6 @@ final class LyricTransition {
             positions[index] = nextPosition;
             moving |= nextAlpha != targetAlpha;
         }
-        float nextFit = snap ? fitTarget : ease(fit, fitTarget, dt, 0.20f, 0.0005f);
-        changed |= nextFit != fit;
-        fit = nextFit;
-        moving |= fit != fitTarget;
         return changed;
     }
 

@@ -29,9 +29,56 @@ import kotlin.math.sqrt
  * (MiniPlayerRuntime.material): this frame is the blur container, [element] replays the card's
  * recorded calls. It never takes a touch - the button above it keeps its own.
  */
-internal class ShortcutDisc(context: Context) : FrameLayout(context) {
+internal class ShortcutDisc(context: Context) : FrameLayout(context), CapsuleFeedback {
     private val element = MaterialElement(context)
 
+    private var feedbackIdentity: String? = null
+    private var bindingVersion = 0L
+    private val statusFeedback = CapsuleTextFeedback { renderCardText() }
+
+    fun bindIdentity(key: String) {
+        if (feedbackIdentity == key) return
+        feedbackIdentity = key
+        bindingVersion++
+        statusFeedback.clear()
+        (icon as? PressFeedbackButton)?.clearLabel()
+    }
+
+    override fun feedbackBindingVersion(): Long = bindingVersion
+
+    override fun clearLyricFeedback() {
+        (icon as? PressFeedbackButton)?.clearLabel()
+    }
+
+    override fun showLyricStatus(enabled: Boolean) {
+        (icon as? PressFeedbackButton)?.showLyricStatus(enabled, cardTitle.currentTextColor)
+    }
+
+    override fun showLyricUnavailable() {
+        (icon as? PressFeedbackButton)?.showLyricUnavailable(cardTitle.currentTextColor)
+    }
+
+    override fun showLyricPending() {
+        (icon as? PressFeedbackButton)?.showLyricPending(cardTitle.currentTextColor)
+    }
+
+    override fun showStatus(text: String) {
+        statusFeedback.show(text)
+        announceForAccessibility(text)
+    }
+
+    override fun onDetachedFromWindow() {
+        statusFeedback.clear()
+        (icon as? PressFeedbackButton)?.clearLabel()
+        super.onDetachedFromWindow()
+    }
+
+    private var normalTitle: CharSequence? = null
+    private var normalText: CharSequence? = null
+    private var contentAlpha = 1f
+    private var renderedStatus = false
+    private var renderedWidth = -1
+    private var renderedHeight = -1
     private val cardTitle = TextView(context)
     private val cardText = TextView(context)
     private val cardWords = LinearLayout(context).apply {
@@ -42,23 +89,82 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
 
     fun copyCardTextFrom(other: ShortcutDisc?) {
         if (other == null || other.cardWords.visibility != View.VISIBLE) setCardText(null, null)
-        else setCardText(other.cardTitle.text, other.cardText.text)
+        else setCardText(other.normalTitle, other.normalText)
     }
 
     /** The pill's ink (MiniPlayerView.setInk), for the rear card's two lines. */
     fun setInk(color: Int) {
         if (cardTitle.currentTextColor == color) return
+        (icon as? PressFeedbackButton)?.setFeedbackInk(color)
         cardTitle.setTextColor(color)
         cardText.setTextColor(color)
     }
 
     /** The rear stacked island has the same two lines as the front card. */
     fun setCardText(title: CharSequence?, text: CharSequence?) {
+        normalTitle = title
+        normalText = text
+        iconAtStart = title != null || text != null
+        renderCardText()
+    }
+
+    private fun renderCardText() {
+        val message = statusFeedback.text
+        val title = if (message != null && shapeW <= shapeH * 2)
+            CapsuleStatusContent.compact(message) else message ?: normalTitle
+        val text = if (message != null) null else normalText
+        val titleChanged = !TextUtils.equals(cardTitle.text, title)
+        val textChanged = !TextUtils.equals(cardText.text, text)
+        val statusChanged = renderedStatus != (message != null)
+        val shapeChanged = renderedWidth != shapeW || renderedHeight != shapeH
+        val wordsWereVisible = cardWords.visibility == View.VISIBLE
+        if (statusChanged) {
+            // TextView.setSingleLine changes layout and horizontal scrolling. Doing this on
+            // every animation frame repeatedly resets the text while the disc is squeezed.
+            renderedStatus = message != null
+            cardTitle.isSingleLine = !renderedStatus
+            cardTitle.maxLines = if (renderedStatus) 2 else 1
+            cardTitle.gravity = if (renderedStatus) Gravity.CENTER else Gravity.START
+        }
+        if (titleChanged || shapeChanged || statusChanged) {
+            val baseTextPx = 12.8f * MiniPlayerGeometry.STACK_BACK_SCALE * resources.displayMetrics.scaledDensity
+            val inset = min(shapeW, shapeH) * (1f - ICON_SHARE) / 2f
+            val room = (shapeW - 2f * inset).coerceAtLeast(1f)
+            val lines = title?.toString().orEmpty().lines()
+            val perPx = cardTitle.textSize.coerceAtLeast(1f)
+            val widest = lines.maxOfOrNull { cardTitle.paint.measureText(it) / perPx } ?: 0f
+            val metrics = cardTitle.paint.fontMetrics
+            val lineHeight = (metrics.descent - metrics.ascent) / perPx
+            val size = if (message != null && widest > 0f) minOf(baseTextPx, room / widest,
+                shapeH.coerceAtLeast(1) * 0.78f / (lineHeight * lines.size).coerceAtLeast(0.01f))
+                else baseTextPx
+            if (abs(cardTitle.textSize - size) > 0.1f)
+                cardTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, size)
+        }
+        renderedWidth = shapeW
+        renderedHeight = shapeH
         cardWords.visibility = if (title == null && text == null) View.GONE else View.VISIBLE
-        if (!TextUtils.equals(cardTitle.text, title)) cardTitle.text = title
-        if (!TextUtils.equals(cardText.text, text)) cardText.text = text
-        iconAtStart = cardWords.visibility == View.VISIBLE
-        placeElement()
+        if (titleChanged) cardTitle.text = title
+        if (textChanged) cardText.text = text
+        cardText.visibility = if (text.isNullOrBlank()) View.GONE else View.VISIBLE
+        renderContent()
+        if (titleChanged || textChanged || statusChanged || shapeChanged ||
+            wordsWereVisible != (cardWords.visibility == View.VISIBLE)) placeElement()
+    }
+
+    /** Both bind/shape updates and the feedback animator use this one presentation decision. */
+    private fun renderContent() {
+        val layers = CapsuleStatusContent.layers(statusFeedback.frame, contentAlpha)
+        cardWords.alpha = layers.wordsAlpha
+        icon?.let {
+            it.visibility = if (layers.message || live != null) View.INVISIBLE
+                else if (it.drawable == null) View.GONE else View.VISIBLE
+            it.alpha = layers.artworkAlpha
+        }
+        live?.let {
+            it.visibility = if (layers.message) View.INVISIBLE else View.VISIBLE
+            it.alpha = layers.artworkAlpha
+        }
     }
 
     private var dressWith: ((ImageView) -> Unit)? = null
@@ -87,6 +193,13 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     }
 
     init {
+        // The icon is already selected for the glass surface. HyperOS's force-dark pass can
+        // otherwise darken a light notification glyph while the mini island is attached to
+        // SystemUI's lock-screen tree.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            setForceDarkAllowed(false)
+            element.setForceDarkAllowed(false)
+        }
         // In keyguard_root_view it is a ConstraintLayout's child, and every child there needs an
         // id: the OEM's ConstraintSet.clone of that view, on each change of the lock screen's
         // blueprint, threw for one without and took SystemUI down - nine times on 2026-09-29.
@@ -130,12 +243,26 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     /** The width setShape last gave it: what it is drawn as, whatever its frame. */
     val shapeWidth: Int get() = shapeW
 
+    /** The actual glass outline in local pixels; the larger host frame is empty squeeze room. */
+    fun drawnShapeBounds(out: android.graphics.RectF): Boolean {
+        if (shapeW <= 0 || shapeH <= 0 || width <= 0 || height <= 0) {
+            out.setEmpty()
+            return false
+        }
+        val left = (width - shapeW) / 2 + shapeDx
+        val top = (height - shapeH) / 2
+        out.set(left.toFloat(), top.toFloat(), (left + shapeW).toFloat(), (top + shapeH).toFloat())
+        return true
+    }
+
     fun setShape(w: Int, h: Int, dx: Int = 0) {
         if (w == shapeW && h == shapeH && dx == shapeDx) return
         val first = shapeW <= 1 || shapeH <= 1
         shapeW = w
         shapeH = h
         shapeDx = dx
+        renderCardText()
+        // A changed offset does not change text metrics, but still moves the whole shape.
         placeElement()
         invalidateOutline()
         element.invalidateOutline()
@@ -160,7 +287,8 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         element.layout(l, t, l + shapeW, t + shapeH)
         if (cardWords.visibility == View.VISIBLE) {
             val inset = (min(shapeW, shapeH) * (1f - ICON_SHARE) / 2f).toInt()
-            val textLeft = l + min(shapeW, shapeH) - inset + (4 * resources.displayMetrics.density).toInt()
+            val textLeft = if (statusFeedback.text != null) l + inset
+                else l + min(shapeW, shapeH) - inset + (4 * resources.displayMetrics.density).toInt()
             val textWidth = (l + shapeW - inset - textLeft).coerceAtLeast(0)
             cardWords.measure(MeasureSpec.makeMeasureSpec(textWidth, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(shapeH.coerceAtLeast(0), MeasureSpec.EXACTLY))
@@ -192,11 +320,10 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
         if (view != null) {
             (view.parent as? android.view.ViewGroup)?.removeView(view)
             addView(view, LayoutParams(0, 0))
-            view.alpha = icon?.alpha ?: 1f
             view.clipToOutline = false
             view.transitionAlpha = if (iconHidden) 0f else 1f
         }
-        icon?.let { it.visibility = if (view != null) View.INVISIBLE else if (it.drawable == null) View.GONE else View.VISIBLE }
+        renderContent()
         // Its glow past its box, as in the pill (MiniPlayerView.showArtworkView).
         clipChildren = view == null
         placeElement()
@@ -220,18 +347,31 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
 
     /** What a small island shows on its glass: the island's picture, or nothing. */
     fun setIcon(drawable: Drawable?) {
-        val view = icon ?: ImageView(context).apply {
+        val view = icon ?: PressFeedbackButton(context).apply {
+            background = null
+            setPadding(0, 0, 0, 0)
+            isClickable = false
+            isFocusable = false
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                setForceDarkAllowed(false)
+            }
             scaleType = if (iconBare) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
             clipToOutline = !iconBare
             outlineProvider = elementShape
             icon = this
             addView(this, LayoutParams(0, 0))
         }
-        if (view.drawable !== drawable) view.setImageDrawable(drawable)
-        view.visibility = if (live != null) View.INVISIBLE else if (drawable == null) View.GONE else View.VISIBLE
+        if (view.drawable !== drawable) {
+            view.imageTintList = null
+            view.clearColorFilter()
+            view.setImageDrawable(drawable)
+        }
+        renderContent()
         view.transitionAlpha = if (iconHidden) 0f else 1f
         placeElement()
     }
+
+
 
     /**
      * The picture out of sight whatever its alpha is doing: a copy of it is flying in from the
@@ -256,9 +396,8 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
 
     /** The picture's alpha: it comes in last on a small island forming out of the pill. */
     fun setIconAlpha(alpha: Float) {
-        cardWords.alpha = alpha
-        icon?.let { if (kotlin.math.abs(it.alpha - alpha) > 0.002f) it.alpha = alpha }
-        live?.let { if (kotlin.math.abs(it.alpha - alpha) > 0.002f) it.alpha = alpha }
+        contentAlpha = alpha.coerceIn(0f, 1f)
+        renderContent()
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) =

@@ -7,6 +7,7 @@ import com.os4.musiccover.immersive.ImmersiveHost;
 import com.os4.musiccover.immersive.ImmersiveScene;
 import com.os4.musiccover.island.LockIslands;
 import com.os4.musiccover.Main;
+import com.os4.musiccover.lyrics.LockLyrics;
 import com.os4.musiccover.island.MiniPlayerRuntime;
 import com.os4.musiccover.PageSpring;
 import com.os4.musiccover.ProbeGuard;
@@ -176,7 +177,7 @@ public final class AmapTransitScene implements ImmersiveScene {
     }
 
     /** Whether 高德 has a trip on the card now. Main thread. */
-    boolean tripUp() {
+    public boolean tripUp() {
         return mTrip != null;
     }
 
@@ -187,6 +188,7 @@ public final class AmapTransitScene implements ImmersiveScene {
             return;
         }
         boolean was = ready();
+        boolean tripWasUp = tripUp();
         mShares++;
         mTrip = t;
         mTripAt = SystemClock.uptimeMillis();
@@ -208,6 +210,7 @@ public final class AmapTransitScene implements ImmersiveScene {
             if (mDozing) ImmersiveHost.lift(mView);
         }
         if (was != ready()) ImmersiveHost.readyChanged(this);
+        else if (!tripWasUp) LockLyrics.refresh();
     }
 
     private final Runnable mStale = () -> end("silence");
@@ -223,6 +226,7 @@ public final class AmapTransitScene implements ImmersiveScene {
         mEndedBy = by;
         Xp.log(TAG + "ended by " + by);
         if (was) ImmersiveHost.readyChanged(this);
+        else LockLyrics.refresh();
     }
 
     /** The pictures for the card they were asked for, once they are here; main thread. */

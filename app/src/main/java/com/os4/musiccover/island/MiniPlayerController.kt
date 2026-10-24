@@ -11,6 +11,10 @@ import com.os4.musiccover.ClockRoomPolicy
 import com.os4.musiccover.CoverMorphMotion
 import com.os4.musiccover.Main
 import com.os4.musiccover.lyrics.TrackName
+import com.os4.musiccover.lyrics.LockLyrics
+import com.os4.musiccover.lyrics.LyricBandGeometry
+import com.os4.musiccover.lyrics.LyricAvailability
+import com.os4.musiccover.lyrics.LyricFeedbackRequest
 import com.os4.musiccover.Xp
 import com.os4.musiccover.immersive.ImmersiveHost
 import android.content.Context
@@ -235,6 +239,7 @@ internal class MiniPlayerController(
         }
         updateDiscs()
         lottiesFollowSight()
+        updateSceneFeedback()
         true
     } finally { android.os.Trace.endSection() } }
 
@@ -542,6 +547,11 @@ internal class MiniPlayerController(
 
     fun selectedIsMusic(): Boolean = selectedIsland == MUSIC_ISLAND
 
+    /** A small place or an in-flight view may hold a different island from the main pill. */
+    fun lyricGestureIsMusic(small: Boolean, catchingMorph: Boolean): Boolean =
+        if (catchingMorph) noteMorphKey == null || noteMorphKey == MUSIC_ISLAND
+        else (if (small) smallKey else selectedIsland) == MUSIC_ISLAND
+
     fun allowsSideSwitch(): Boolean = !stackedStyle()
 
     fun allowsStackSwitch(): Boolean = stackedStyle() && islandCount() >= 2 &&
@@ -669,20 +679,8 @@ internal class MiniPlayerController(
      */
     fun selectSmallIsland() { android.os.Trace.beginSection("MC t.selectSmall"); try {
         val key = smallKey ?: return
-        // The music opens the cover from the small island as from the pill.
-        if (key == MUSIC_ISLAND && config.getBoolean(MiniPlayerConfig.ENABLED)) {
-            tapIsland(key)
-            return
-        }
-        // With one island out as its card, a tap on another opens it in that one's stead.
-        if (key != MUSIC_ISLAND || expandedKey() != null) {
-            expandNote(key)
-            return
-        }
-        val oldBig = selectedIsland
-        selectedIsland = key
-        refresh()
-        startSwap(oldBig, key)
+        tapIsland(key, smallIsland)
+        return
     } finally { android.os.Trace.endSection() } }
 
     /**
@@ -767,6 +765,8 @@ internal class MiniPlayerController(
         // while it still showed, took it anyway on the next refresh, mid-shrink. It takes the
         // flight's picture once the flight is landing on it (flightLanding).
         if (key == held && !flightLanding) return
+        view.bindIdentity(if (key == MUSIC_ISLAND && music != null)
+            "$key:${music.sessionToken}:${TrackName.songKey(music)}" else key)
         val showing = view.visibility == View.VISIBLE && !(smallGrowing && smallGrow.target == 0f)
         val note = if (key == MUSIC_ISLAND) null
             else notes.firstOrNull { it.key == key } ?: LockIslands.noteFor(key)
@@ -1507,7 +1507,7 @@ internal class MiniPlayerController(
         schedulePosition()
         pendingExpand?.let { key ->
             pendingExpand = null
-            if (selectedIsland == key) expandNote(key)
+            if (selectedIsland == key) tapIsland(key)
         }
     }
 
@@ -1819,7 +1819,7 @@ internal class MiniPlayerController(
     private var growHeldSince = 0L
 
     /** The clock going into the cover or out of it: the row is put away or brought back by that, not by its islands. */
-    private fun coverMoving(): Boolean = Main.coverSceneActive() && ClockCollapse.phase().let {
+    private fun coverMoving(): Boolean = Main.coverNeedsNativeCard() && ClockCollapse.phase().let {
         // The cover's clock only: 高德's map moves the same clock and puts nothing away.
         it == ClockCollapse.Phase.ENTER || it == ClockCollapse.Phase.EXIT
     }
@@ -1927,7 +1927,7 @@ internal class MiniPlayerController(
      * in a frame (2026-09-29, `op mini`: CUT sel=music cover=true after each).
      */
     private fun musicCarded(music: MediaController?): Boolean =
-        music != null && (MiniPlayerRuntime.nativeRequested(music.sessionToken) || Main.coverModeOn())
+        music != null && (MiniPlayerRuntime.nativeRequested(music.sessionToken) || Main.coverNeedsNativeCard())
 
     private fun startDisappear() {
         val view = player ?: return
@@ -2190,8 +2190,13 @@ internal class MiniPlayerController(
     /** Whether the small island shows while a group runs; null with no group running. */
     private fun groupShowsSmall(): Boolean? {
         val g = group ?: return null
-        val drawnByView = g.musicSmall || g.otherSmall && g.follower != null
-        return if (drawnByView) g.smallLanding else g.otherSmall
+        // A music-only morph does not own the neighbouring navigation/notification island.
+        // g.other is intentionally null since other islands stopped expanding with the music.
+        return MiniPlayerPresentationPolicy.smallIslandDuringMorph(
+            musicOwnsSmall = g.musicSmall,
+            followerOwnsSmall = g.otherSmall && g.follower != null,
+            landing = g.smallLanding,
+        )
     }
 
     /** The small island [selected] would have beside it, as updateSmallIsland picks it. */
@@ -3176,7 +3181,7 @@ internal class MiniPlayerController(
      * goes out and comes back as a flight, as a notification does, and they keep the row.
      * Alone it has the media card's own morph, the pill and the card one or the other.
      */
-    private fun musicFlies(): Boolean = !Main.coverSceneActive() && othersBesideMusic()
+    private fun musicFlies(): Boolean = !Main.coverNeedsNativeCard() && othersBesideMusic()
 
     /** There are islands other than the music's, in the row or out as their rows. */
     private fun othersBesideMusic(): Boolean {
@@ -3274,7 +3279,7 @@ internal class MiniPlayerController(
         sessionUsable = controller?.let(::isUsable) == true,
         musicInRow = MUSIC_ISLAND in islandKeys,
         nativeRequested = MiniPlayerRuntime.nativeRequested(controller?.sessionToken),
-        coverActive = includeCover && Main.coverModeOn(),
+        coverActive = includeCover && Main.coverNeedsNativeCard(),
     )
 
     /** The music is out as the media card, the row holding the others. */
@@ -3850,7 +3855,10 @@ internal class MiniPlayerController(
             return
         }
         val token = controller?.sessionToken ?: return
-        MiniPlayerRuntime.chooseNative(token)
+        // A music flight needs the native card laid out before the finger commits. Keep
+        // the capsule lyric request during that preview, so cancellation can return to it.
+        val preview = noteDrag?.let { it.key == key && it.opening && !it.ended } == true
+        MiniPlayerRuntime.chooseNative(token, commitScene = !preview)
         updateVisibility()
         transitionHeader()?.let(::hideRow)
     } finally { android.os.Trace.endSection() } }
@@ -4394,7 +4402,7 @@ internal class MiniPlayerController(
             }
             val m = Mover(out, view, native)
             m.fromCard = true
-            m.cover = out == MUSIC_ISLAND && Main.coverModeOn()
+            m.cover = out == MUSIC_ISLAND && Main.coverNeedsNativeCard()
             // Leaves from where it is drawn and stays there: the row going up into the stack moves
             // it on the stack's side (the stack is laid out from the bottom up), and the pin may
             // still be holding it lower than the stack has it.
@@ -4586,25 +4594,91 @@ internal class MiniPlayerController(
         }
         val seats = x.seats ?: return
         val key = (if (small) seats.small else seats.big) ?: return
-        if (key == x.expanded) return
-        if (key == STACK_ISLAND && LockIslands.foldsNatively()) {
-            if (!openSingleApp("tap during a switch")) openSpread("tap during a switch")
-            return
-        }
-        trace("switch tap ${key.takeLast(6)} small=$small")
-        val wasOut = x.movers[key]?.morph != null
-        requestUp(x, key, fromPill = !small, cover = key == MUSIC_ISLAND)
-        // The music opens the cover from any place, as from the pill (tapIsland).
-        if (key == MUSIC_ISLAND && !wasOut) {
-            MiniPlayerRuntime.forgetRestoreScene()
-            Main.miniPlayerEnterCover()
+        tapIsland(key, if (small) smallIsland else player)
+    }
+
+    private data class PendingSceneFeedback(val key: String, val view: CapsuleFeedback,
+                                          val navigation: Boolean)
+    private var pendingSceneFeedback: PendingSceneFeedback? = null
+    private data class PendingLyricFeedback(val request: LyricFeedbackRequest, val view: CapsuleFeedback,
+                                           var waitingShown: Boolean = false)
+    private var pendingLyricFeedback: PendingLyricFeedback? = null
+
+    fun cancelSceneFeedback() {
+        pendingSceneFeedback = null
+        cancelLyricFeedback()
+    }
+
+    private fun cancelLyricFeedback() {
+        val pending = pendingLyricFeedback ?: return
+        pendingLyricFeedback = null
+        if (pending.request.sameBinding(pending.view, pending.view.feedbackBindingVersion()))
+            pending.view.clearLyricFeedback()
+    }
+
+    private fun feedbackSongKey(music: MediaController?): String = music?.let {
+        // This also runs from pre-draw while pending: use the metadata callback's snapshot,
+        // never add a binder metadata read to every feedback animation frame.
+        if (liveFor == it.sessionToken) TrackName.songKey(it.packageName, liveMetadata)
+        else lastTrack
+    }.orEmpty()
+
+    fun onLyricAvailabilityChanged() { updateLyricFeedback() }
+
+    private fun updateLyricFeedback() {
+        val pending = pendingLyricFeedback ?: return
+        val music = controller ?: Main.miniPlayerSession()
+        val bound = if (pending.view === player) selectedIsland == MUSIC_ISLAND
+            else pending.view === smallIsland && smallKey == MUSIC_ISLAND ||
+                exchange?.movers?.get(MUSIC_ISLAND)?.view === pending.view
+        val key = LockLyrics.feedbackTrackKey()
+        val current = bound && Main.screenOnCached() && host.isAttachedToWindow &&
+            pending.request.owns(LockLyrics.feedbackRequestId(), music?.sessionToken,
+                feedbackSongKey(music), key, pending.view, pending.view.feedbackBindingVersion(),
+                LockLyrics.capsulePageRequested() && !LockLyrics.sTapHidden && LockLyrics.sEnabled)
+        if (!current) { cancelLyricFeedback(); return }
+        val feedback = LockLyrics.feedbackAvailability(key, music?.sessionToken).feedbackFor(true)
+        when (feedback) {
+            LyricAvailability.Feedback.PENDING -> if (!pending.waitingShown) {
+                pending.waitingShown = true
+                pending.view.showLyricPending()
+            }
+            LyricAvailability.Feedback.ENABLED, LyricAvailability.Feedback.DISABLED -> {
+                pendingLyricFeedback = null
+                pending.view.showLyricStatus(feedback == LyricAvailability.Feedback.ENABLED)
+            }
+            LyricAvailability.Feedback.UNAVAILABLE -> {
+                pendingLyricFeedback = null
+                pending.view.showLyricUnavailable()
+            }
         }
     }
 
-    /** What a tap on an island does: the music opens the cover, a notification its row. */
-    private fun tapIsland(key: String) {
-        if (key == MUSIC_ISLAND) openCover() else expandNote(key)
-    }
+    /** Use the existing frame observer: no delayed success callback can overwrite a later tap. */
+    private fun updateSceneFeedback() { updateLyricFeedback() }
+
+    /** Resolve special actions before the generic notification expansion path. Swipes are separate. */
+    private fun tapIsland(key: String, tapped: CapsuleFeedback? = null) {
+        cancelLyricFeedback()
+        val view: CapsuleFeedback? = tapped ?: if (key == smallKey) smallIsland else player
+        if (key != MUSIC_ISLAND) { expandNote(key); return }
+
+                val music = controller ?: Main.miniPlayerSession()
+                Main.miniPlayerToggleLyrics(music)?.let { enabled ->
+                    if (!enabled) {
+                        val feedback = LockLyrics.feedbackAvailability(LockLyrics.feedbackTrackKey(),
+                            music?.sessionToken).feedbackFor(false)
+                        if (feedback == LyricAvailability.Feedback.UNAVAILABLE) view?.showLyricUnavailable()
+                        else view?.showLyricStatus(false)
+                    }
+                    else if (view != null && music != null) {
+                        pendingLyricFeedback = PendingLyricFeedback(LyricFeedbackRequest(
+                            LockLyrics.feedbackRequestId(), music.sessionToken, feedbackSongKey(music),
+                            LockLyrics.feedbackTrackKey(), view, view.feedbackBindingVersion()), view)
+                        updateLyricFeedback()
+                    }
+                }
+                }
 
     /**
      * The music into its cover. With another island out as its card, that one comes down into
@@ -4612,6 +4686,10 @@ internal class MiniPlayerController(
      * cover's card before (2026-09-25).
      */
     private fun openCover() {
+        if (LockLyrics.capsulePageRequested()) {
+            Main.miniPlayerEnterCover()
+            return
+        }
         MiniPlayerRuntime.forgetRestoreScene()
         // A notification still on its way - opening, or springing back out after a pull too
         // short to collapse it - is not "out" yet to expandedKey, and the cover came up over it
@@ -4790,7 +4868,10 @@ internal class MiniPlayerController(
         /** Frames the scroll has stood still, nothing moving it. */
         var still = 0
         var lastY = Int.MIN_VALUE
-        var progress = 0f
+        val motion = MiniPlayerSpreadMotion()
+        var progress: Float
+            get() = motion.progress
+            set(value) { motion.progress = value }
         var rawProgress = 0f
         /** The stacked cards may need to catch up when the OEM scroll jumps to its end. */
         var visualAt = 0L
@@ -4806,6 +4887,7 @@ internal class MiniPlayerController(
         /** Pulled open by a finger still on the island: it scrolls the stack (followFinger). */
         var finger: SpreadFinger? = null
         var collapseFinger: SpreadCollapseFinger? = null
+        val releaseSpring: MiniPlayerSpreadSpring? get() = motion.spring
     }
 
     private class SpreadCollapseFinger(val startY: Float, val startProgress: Float, val range: Float) {
@@ -4827,8 +4909,10 @@ internal class MiniPlayerController(
         var y = startY
         /** The pull at the moment the stack started to follow: its scroll's zero. */
         var base = Float.NaN
+        var range = 1f
         var ended = false
         var toList = false
+        var velocityY = 0f
         fun pulled() = startY - y
     }
 
@@ -4856,6 +4940,7 @@ internal class MiniPlayerController(
             s.phase = SPREAD_CLOSING
         }
         s.collapseFinger = SpreadCollapseFinger(startY, s.progress, collapseRange(s))
+        s.motion.takeOver()
         s.since = android.os.SystemClock.uptimeMillis()
         s.visualAt = s.since
         s.still = 0
@@ -4895,6 +4980,8 @@ internal class MiniPlayerController(
         finger.target = if (MiniPlayerStackGesture.commits(
                 finger.y - finger.startY, velocityY, density(), cancelled)) 0f else 1f
         finger.ended = true
+        releaseSpread(s, finger.target == 1f,
+            if (cancelled) 0f else -velocityY / finger.range.coerceAtLeast(1f))
         s.still = 0
         NumState.goTo(if (finger.target == 0f) "NUMBER" else "LIST", why = "island collapse released")
     }
@@ -4972,12 +5059,15 @@ internal class MiniPlayerController(
         // flow, whose collector dropped it for a row folded away: tapped, nothing happened
         // (2026-10-07). NotificationClicker, which the flow ends in, is the injector's
         // clickListener (NotificationRowBinderImpl): called straight, as the flow would.
-        val clicker = runCatching {
-            Xp.getObjectField(Xp.callMethod(row, "getInjector"), "clickListener") as? View.OnClickListener
-        }.getOrNull()
+        val clicker = notificationClicker(row)
         if (clicker != null) clicker.onClick(row) else row.performClick()
         return true
     }
+
+    /** The OEM's real content entry, shared by stack and clock capsules. */
+    private fun notificationClicker(row: View): View.OnClickListener? = runCatching {
+        Xp.getObjectField(Xp.callMethod(row, "getInjector"), "clickListener") as? View.OnClickListener
+    }.getOrNull()
 
     /**
      * The stack island tapped or pulled open: the whole row out. With another motion under way -
@@ -5102,11 +5192,18 @@ internal class MiniPlayerController(
         s.lastY = Int.MIN_VALUE
         // Under a finger the stack goes where it takes it (followFinger), from where it is now.
         LockIslands.openStack("spread", scroll = held == null)
-        if (held != null) held.base = held.pulled()
+        val travel = if (s.stacked) dp(220f).toFloat() else
+            (s.items.firstOrNull { it.lead } ?: s.items.firstOrNull { it.morph != null })
+                ?.morph?.openingTravel() ?: dp(220f).toFloat()
+        if (held != null) {
+            held.base = held.pulled()
+            held.range = travel
+        }
         // A short or unavailable scroll range can read as fully open on this first frame.
         // The visible islands still begin at their folded pose and catch up over real frames.
         s.rawProgress = spreadProgress(s, NumState.position() ?: s.islandsY)
-        applySpread(s, if (s.stacked) 0f else s.rawProgress)
+        applySpread(s, if (s.stacked || finger != null) 0f else s.rawProgress)
+        if (finger?.ended == true) releaseSpread(s, true, -finger.velocityY / travel.coerceAtLeast(1f))
         spreadTrace("spread out after ${waited}ms ready=$ready measured=$measured: " + describeSpread())
     }
 
@@ -5175,6 +5272,9 @@ internal class MiniPlayerController(
 
     /** 0 at the islands' end, 1 at the cards'. */
     private fun spreadProgress(s: Spread, y: Int): Float {
+        s.finger?.takeIf { !it.ended && !it.base.isNaN() }?.let {
+            return MiniPlayerStackGesture.openingProgress(it.pulled() - it.base, it.range)
+        }
         val span = (s.cardsY - s.islandsY).toFloat()
         if (s.stacked && kotlin.math.abs(span) < dp(72f)) {
             s.finger?.takeIf { !it.ended && !it.base.isNaN() }?.let { finger ->
@@ -5187,11 +5287,12 @@ internal class MiniPlayerController(
 
     /** Bound abrupt list-scroll updates while leaving a held finger directly in control. */
     private fun visibleSpreadProgress(s: Spread, target: Float): Float {
-        if (!s.stacked) return target
         val now = android.os.SystemClock.uptimeMillis()
         val elapsed = (now - s.visualAt).coerceIn(0L, 50L).toFloat()
         s.visualAt = now
         if (s.finger?.ended == false || s.collapseFinger?.ended == false) return target
+        s.releaseSpring?.let { return it.step(elapsed / 1000f) }
+        if (!s.stacked) return target
         if (elapsed <= 0f) return s.progress
         val eased = (target - s.progress) * (1f - kotlin.math.exp(-elapsed / 80f))
         val maxStep = elapsed / 220f
@@ -5223,7 +5324,7 @@ internal class MiniPlayerController(
             // No morph: its card fades in with the list, its place fades out, and back.
             item.native?.takeIf { it.isAttachedToWindow }?.let {
                 if (kotlin.math.abs(it.transitionAlpha - itemProgress) > 0.002f)
-                    it.transitionAlpha = itemProgress
+                    it.transitionAlpha = itemProgress.coerceIn(0f, 1f)
             }
             fadeSeat(item.seat, 1f - itemProgress)
         }
@@ -5247,21 +5348,26 @@ internal class MiniPlayerController(
         if (held != null && held.first === row) return
         if (held != null) {
             held.first.viewTreeObserver.takeIf { it.isAlive }?.removeOnPreDrawListener(held.second)
-            setFoldAlpha(held.first, if (NumState.inNumber == true) 0f else 1f)
+            restoreFoldAlpha(held.first)
         }
         leadHeld = null
         if (row == null) return
-        val l = ViewTreeObserver.OnPreDrawListener { setFoldAlpha(row, 1f); true }
+        // Own only the final rendered alpha. Leave SystemUI's fold animator its own state
+        // so it can keep settling independently, ready for the final handoff.
+        val l = ViewTreeObserver.OnPreDrawListener { holdFoldAlpha(row); true }
         row.viewTreeObserver.addOnPreDrawListener(l)
         leadHeld = row to l
-        setFoldAlpha(row, 1f)
+        holdFoldAlpha(row)
     }
 
-    private fun setFoldAlpha(row: View, a: Float) {
+    private fun holdFoldAlpha(row: View) {
+        runCatching { Xp.callMethod(row, "setExtAlpha", 1f) }
+    }
+
+    private fun restoreFoldAlpha(row: View) {
         runCatching {
             val injector = Xp.callMethod(row, "getInjector")
-            if (Xp.getObjectField(injector, "numStateAlpha") as Float == a) return
-            Xp.setObjectField(injector, "numStateAlpha", a)
+            val a = Xp.getObjectField(injector, "numStateAlpha") as Float
             val folme = Xp.getObjectField(Xp.getObjectField(Xp.callMethod(row, "getViewState"),
                 "mInjector"), "folmeAlpha") as Float
             Xp.callMethod(row, "setExtAlpha", folme * a)
@@ -5274,8 +5380,8 @@ internal class MiniPlayerController(
             SEAT_SMALL -> smallIsland
             else -> null
         } ?: return
-        val alpha = if (seat == SEAT_SMALL && stackedStyle())
-            a * MiniPlayerGeometry.STACK_BACK_ALPHA else a
+        val alpha = (if (seat == SEAT_SMALL && stackedStyle())
+            a * MiniPlayerGeometry.STACK_BACK_ALPHA else a).coerceIn(0f, 1f)
         if (alpha > 0f && v.visibility != View.VISIBLE) v.visibility = View.VISIBLE
         if (kotlin.math.abs(v.alpha - alpha) > 0.002f) v.alpha = alpha
     }
@@ -5295,6 +5401,13 @@ internal class MiniPlayerController(
         if (y != s.lastY) spreadFrameLog(s, y, p)
         // Held by the finger, it rests where the finger does; the let-go sends it to an end.
         if (s.finger?.ended == false || s.collapseFinger?.ended == false) {
+            s.lastY = y
+            s.still = 0
+            return
+        }
+        // Even if SystemUI already snapped its scroll to an end, keep the visible release
+        // alive through its small overshoot and return before handing the rows back.
+        if (s.releaseSpring?.atRest == false) {
             s.lastY = y
             s.still = 0
             return
@@ -5332,7 +5445,7 @@ internal class MiniPlayerController(
         s.lastY = y
         // The native scroll can finish in one frame. Keep drawing the morph until its visible
         // progress reaches that end instead of handing all cards to SystemUI at once.
-        if (s.stacked && kotlin.math.abs(s.progress - p) > 0.005f) {
+        if (s.releaseSpring == null && s.stacked && kotlin.math.abs(s.progress - p) > 0.005f) {
             s.still = 0
             return
         }
@@ -5393,8 +5506,8 @@ internal class MiniPlayerController(
     private fun followFinger(s: Spread, f: SpreadFinger) {
         if (f.base.isNaN()) return
         val span = s.cardsY - s.islandsY
-        val d = (f.pulled() - f.base).coerceAtLeast(0f).coerceAtMost(kotlin.math.abs(span).toFloat())
-        NumState.setScroll(s.islandsY + (if (span >= 0) d else -d).toInt())
+        val progress = MiniPlayerStackGesture.openingProgress(f.pulled() - f.base, f.range)
+        NumState.setScroll(s.islandsY + (span * progress).roundToInt())
     }
 
     /** The finger on a pulled-open spread moved (the pill's route, as noteDragMove). */
@@ -5413,6 +5526,7 @@ internal class MiniPlayerController(
         val s = spread ?: return false
         val f = s.finger?.takeIf { !it.ended } ?: return false
         f.ended = true
+        f.velocityY = if (cancelled) 0f else velocityY
         val fling = SPREAD_FLING_DP * density()
         f.toList = !cancelled && when {
             velocityY < -fling -> true
@@ -5420,6 +5534,8 @@ internal class MiniPlayerController(
             s.phase == SPREAD_WAIT -> true
             else -> s.progress >= SPREAD_OPEN_AT
         }
+        if (s.phase == SPREAD_OPENING) releaseSpread(s, f.toList,
+            if (cancelled) 0f else -velocityY / f.range.coerceAtLeast(1f))
         spreadTrace("spread let go p=${"%.2f".format(s.progress)} v=${velocityY.toInt()} list=${f.toList}")
         // Still waiting for the rows: waitSpread takes the decision when they are in.
         if (s.phase != SPREAD_OPENING) return true
@@ -5430,9 +5546,17 @@ internal class MiniPlayerController(
         return true
     }
 
+    private fun releaseSpread(s: Spread, toList: Boolean, speed: Float) {
+        s.motion.release(toList, speed)
+        s.visualAt = android.os.SystemClock.uptimeMillis()
+    }
+
     /** The list is open: the cards are the lock screen's own, the row's views put away. */
     private fun finishOpen(s: Spread, y: Int) {
+        s.motion.finish(toList = true)
+        s.finger = null
         s.collapseFinger = null
+        applySpread(s, 1f)
         holdLeadThroughFold(null)
         for (item in s.items) {
             item.morph?.cancel()
@@ -5480,6 +5604,9 @@ internal class MiniPlayerController(
         val folded = NumState.inNumber == true
         if (folded || listPulled() && toward > dp(SPREAD_PULL_DP)) {
             s.islandsY = islandsY
+            s.motion.takeOver()
+            s.finger = null
+            s.collapseFinger = null
             startSpreadMorphs(s, toCards = false)
             s.phase = SPREAD_CLOSING
             s.since = android.os.SystemClock.uptimeMillis()
@@ -5886,6 +6013,7 @@ internal class MiniPlayerController(
         if (key == MUSIC_ISLAND) MiniCardMorph.Landing.mediaCard(native) else rowLanding(native)
 
     private fun startNoteMorph(key: String, row: View, toRow: Boolean): Boolean {
+        if (key == MUSIC_ISLAND) captureCapsuleLyricGeometry()
         val useFlight = flight != null
         val view = (if (useFlight) flight else player) ?: return false
         val landing = landingFor(key, row)
@@ -5934,7 +6062,7 @@ internal class MiniPlayerController(
             noteMorphKey = null
             noteDrag = null
             dropFlight()
-            if (!toRow) takeIn(key)
+            if (!toRow || key == MUSIC_ISLAND && Main.capsuleKeepsMini()) takeIn(key)
             refresh()
             return false
         }
@@ -5942,6 +6070,7 @@ internal class MiniPlayerController(
             if (drag.ended) {
                 // The finger already let go, committed: it opens from where the pull left it.
                 noteDrag = null
+                if (drag.toRow && key == MUSIC_ISLAND) Main.handCapsuleSceneToNative()
                 val (p, nudge) = notePose(drag)
                 next.drag(p, nudge, drag.nudgeX)
                 next.release(drag.toRow, noteVelocity(drag))
@@ -6153,6 +6282,7 @@ internal class MiniPlayerController(
 
     /** A notification's morph, let go by a finger that caught it: to its row or its island. */
     private fun releaseNote(toRow: Boolean, velocity: Float) {
+        if (toRow && noteMorphKey == MUSIC_ISLAND) Main.handCapsuleSceneToNative()
         morph?.release(toRow, velocity)
         noteMorphKey?.let { turnTo(it, toRow) }
         if (toRow && noteMorphKey == STACK_ISLAND) showStackAsList("turned out")
@@ -6232,6 +6362,8 @@ internal class MiniPlayerController(
             spanOf(drag), cancelled)
         drag.toRow = toRow
         drag.speed = if (drag.pulled() > drag.threshold) speed else 0f
+        // If the row is not ready yet, startNoteMorph performs the handoff only after a
+        // successful start. A timeout must still be able to return to the capsule page.
         // Flung open short of the threshold: the list now, not once the card is there.
         if (toRow && drag.opening && drag.key == STACK_ISLAND && !drag.listAsked) {
             drag.listAsked = true
@@ -7121,7 +7253,10 @@ internal class MiniPlayerController(
     }
 
     fun destroy() {
+        MiniPlayerRuntime.cancelLyricGesture()
         destroyed = true
+        capsuleLyricGeometry = false
+        pendingSceneFeedback = null
         prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
         runCatching { host.viewTreeObserver.removeOnPreDrawListener(preDraw) }
         runCatching { sessions?.removeOnActiveSessionsChangedListener(sessionListener) }
@@ -7330,6 +7465,9 @@ internal class MiniPlayerController(
             Xp.log("MCMini: container morph ${if (completed) "landed" else "cancelled"} " +
                 "at ${if (toNative) "native" else "mini"}")
             endGroup(toNative)
+            // musicMoving kept the music in the row throughout the drag. Rebind the stable
+            // seats before deciding visibility, or nativeRequested hides its neighbour too.
+            refresh()
             position()
             updateVisibility()
         }
@@ -7424,6 +7562,80 @@ internal class MiniPlayerController(
     }
 
     fun pill(): MiniPlayerView? = player
+
+    private val lyricObstacleMatrix = Matrix()
+    private val lyricObstacleRect = android.graphics.RectF()
+    private var capsuleLyricGeometry = false
+
+    /** A new music gesture starts with its current origin, never a previous page's residue. */
+    private fun captureCapsuleLyricGeometry() {
+        capsuleLyricGeometry = LockLyrics.capsuleLayoutOrigin() ||
+            LockLyrics.capsulePageRequested() || Main.capsuleKeepsMini()
+    }
+
+    /**
+     * The surface that really presses against the lyrics, not the invisible native card's
+     * reserved layout slot. The morph's drawn box remains authoritative after a swipe commits
+     * and clears the capsule request, through its final spring frames and in either direction.
+     */
+    fun lyricObstacleTopOnScreen(): Float {
+        if (destroyed || !onScreen(host)) {
+            capsuleLyricGeometry = false
+            return Float.NaN
+        }
+        val musicMoving = ((noteMorphKey == null || noteMorphKey == MUSIC_ISLAND) &&
+            morph?.containerBox() != null) ||
+            exchange?.movers?.get(MUSIC_ISLAND)?.morph?.containerBox() != null ||
+            spread?.items?.any { it.key == MUSIC_ISLAND && it.morph?.containerBox() != null } == true
+        capsuleLyricGeometry = LyricBandGeometry.usesCapsuleSpace(
+            LockLyrics.capsuleLayoutOrigin() || LockLyrics.capsulePageRequested(),
+            Main.capsuleKeepsMini(), musicMoving, capsuleLyricGeometry)
+        if (!capsuleLyricGeometry) return Float.NaN
+
+        val screenWidth = context.resources.displayMetrics.widthPixels.toFloat()
+        val bottomInset = host.rootWindowInsets?.getInsets(
+            android.view.WindowInsets.Type.navigationBars() or
+                android.view.WindowInsets.Type.displayCutout())?.bottom?.toFloat() ?: 0f
+        val bottom = LyricBandGeometry.usableBottom(Main.screenHeight().toFloat(), bottomInset)
+        var nearest = Float.NaN
+        fun box(b: CoverMorphMotion.Box?) {
+            if (b == null) return
+            nearest = LyricBandGeometry.include(nearest, true, b.x, b.y, b.w, b.h,
+                screenWidth, bottom)
+        }
+        fun view(v: View?) {
+            if (v == null || !onScreen(v) || v.width <= 0 || v.height <= 0) return
+            lyricObstacleMatrix.reset()
+            v.transformMatrixToGlobal(lyricObstacleMatrix)
+            if (v is ShortcutDisc) {
+                // The disc's touch/animation frame has spare room around the glass. Only its
+                // actual clipped shape takes space away from the lyrics, including a squeeze.
+                if (!v.drawnShapeBounds(lyricObstacleRect)) return
+            } else lyricObstacleRect.set(0f, 0f, v.width.toFloat(), v.height.toFloat())
+            // transformMatrixToGlobal already includes ViewRootImpl's window-on-screen offset.
+            lyricObstacleMatrix.mapRect(lyricObstacleRect)
+            nearest = LyricBandGeometry.include(nearest, true, lyricObstacleRect.left,
+                lyricObstacleRect.top, lyricObstacleRect.width(), lyricObstacleRect.height(),
+                screenWidth, bottom)
+        }
+        view(player)
+        view(smallIsland)
+        view(group?.smallView)
+        view(flight)
+        // Use the geometry being rendered even while the OEM view is suppressed for the morph.
+        box(morph?.containerBox())
+        box(group?.follower?.containerBox())
+        exchange?.movers?.values?.forEach { box(it.morph?.containerBox()) }
+        spread?.items?.forEach { item ->
+            val moving = item.morph?.containerBox()
+            if (moving != null) box(moving) else view(item.native)
+        }
+        // Another capsule may already have its notification card open. Its visible surface
+        // still limits the band, but never read the music header's hidden reserved slot.
+        if (morph == null && exchange?.movers?.isNotEmpty() != true && spread == null)
+            expandedKey()?.let { view(nativeFor(it)) }
+        return nearest
+    }
 
     /** The music's island - the pill or the small island, whichever holds it - drawn centre. */
     fun musicIslandCentreOnScreen(): FloatArray? {
@@ -7586,6 +7798,7 @@ internal class MiniPlayerController(
     }
 
     fun beginDragMorph(fromNative: Boolean): Boolean { android.os.Trace.beginSection("MC beginDragMorph"); try {
+        captureCapsuleLyricGeometry()
         if (player == null) return MiniPlayerRuntime.refused("drag", "no pill")
         val native = transitionHeader() ?: return MiniPlayerRuntime.refused("drag", "no card")
         // Starts at the end it was pulled from; release() aims it once the lift decides.
@@ -7637,7 +7850,7 @@ internal class MiniPlayerController(
         if (spread != null) return false
         val current = controller ?: return false
         if (!isUsable(current)) return false
-        return Main.coverModeOn() || wantsNativeArtworkGesture()
+        return Main.coverNeedsNativeCard() || wantsNativeArtworkGesture()
     }
 
     fun sessionToken(): Any? = controller?.sessionToken
@@ -7776,6 +7989,10 @@ internal class MiniPlayerController(
     fun refresh() {
         if (Looper.myLooper() != Looper.getMainLooper()) { scheduleRefresh(); return }
         if (destroyed) return
+        // A hidden lyric view no longer samples geometry. Release its origin here as well so
+        // a later ordinary cover animation cannot inherit that old capsule page's space.
+        if (LockLyrics.sTapHidden || !LockLyrics.sEnabled || !Main.keyguardLocked())
+            capsuleLyricGeometry = false
         runCatching { refreshUnsafe() }.onFailure { Xp.w("MCMini: refresh failed: $it") }
         // The lift switched on or off in the settings comes here, not to position().
         runCatching { MiniPlayerRuntime.checkStackFloor() }
@@ -7844,7 +8061,7 @@ internal class MiniPlayerController(
         // the two it keeps its place until it lands.
         // The cover is the music's card as much as the media card is.
         val carded = music != null &&
-            (MiniPlayerRuntime.nativeRequested(music.sessionToken) || Main.coverModeOn())
+            (MiniPlayerRuntime.nativeRequested(music.sessionToken) || Main.coverNeedsNativeCard())
         val others = notes.isNotEmpty() || returning.isNotEmpty() || exchange != null ||
             noteMorphKey.let { it != null && it != MUSIC_ISLAND }
         val musicInRow = music != null && (!carded || !others || musicMoving)
@@ -7935,17 +8152,12 @@ internal class MiniPlayerController(
         prewarmSpares()
     } finally { android.os.Trace.endSection() } }
 
-    /**
-     * The colour the system gives the words on its own card, for the material it is in now: the
-     * media card's title, or a lock screen notification's when there is no card. The pill and
-     * the discs wear the card's material, so its words are the ones that can be read on them -
-     * white on the glass and on the dark frost, near black on the frost in light mode. Opaque:
-     * the pill's own alphas say how strong each line is.
-     */
+    /** Monochrome control/text color follows the capsule material, not an expanded notification. */
     private fun ink(): Int {
-        val card = Main.miniPairTitle() as? TextView
-        val color = card?.takeIf { it.isAttachedToWindow }?.currentTextColor ?: rowInk() ?: materialInk()
-        return color or 0xFF000000.toInt()
+        // Notification titles may belong to a light expanded card while this capsule wears
+        // glass. Their black tint must not leak into our monochrome controls. App artwork is
+        // drawn separately and retains its colors and themed resource selection.
+        return materialInk() or 0xFF000000.toInt()
     }
 
     private var materialInkAt = 0L
@@ -7970,16 +8182,6 @@ internal class MiniPlayerController(
             android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
         materialInkCached = if (frost && !night) 0xE5000000.toInt() else android.graphics.Color.WHITE
         return materialInkCached
-    }
-
-    private fun rowInk(): Int? {
-        fun find(v: View): TextView? {
-            if (v is TextView && v.isShown &&
-                runCatching { v.resources.getResourceEntryName(v.id) }.getOrNull() == "title") return v
-            if (v is ViewGroup) for (i in 0 until v.childCount) find(v.getChildAt(i))?.let { return it }
-            return null
-        }
-        return notificationStack()?.let(::find)?.currentTextColor
     }
 
     /** What applyInk last tinted the buttons with; null while they are the OEM's own. */
@@ -8044,6 +8246,7 @@ internal class MiniPlayerController(
     }
 
     private fun bindMusic(view: MiniPlayerView, current: MediaController, config: JSONObject) {
+        view.bindIdentity("$MUSIC_ISLAND:${current.sessionToken}:${TrackName.songKey(current)}")
         view.setArtworkBare(false)
         view.setToggleFace(null)
         view.setSecondFace(null)
@@ -8072,16 +8275,16 @@ internal class MiniPlayerController(
                 if (MiniPlayerRuntime.takeRestoreScene()) Main.miniPlayerEnterCover()
                 else MiniPlayerRuntime.selectNative(current.sessionToken)
             },
-            { openCover() },
+            { tapIsland(MUSIC_ISLAND, view) },
         )
     }
 
     /**
-     * A notification in the pill: its picture, title and newest line, no play button. A tap
-     * puts it back in the stack as the OEM's own row for now; the morph into that row is to
-     * come.
+     * A notification in the pill: its own actions stay on the buttons; body taps go through
+     * the shared priority policy before falling back to the OEM notification row.
      */
     private fun bindNote(view: MiniPlayerView, note: LockIslands.Note, config: JSONObject) {
+        view.bindIdentity(note.key)
         // A focus notification shown in full is its template: its picture bare, as its row has
         // it, and its main button where the music's play button is.
         val template = note.focus && !note.redacted
@@ -8114,7 +8317,7 @@ internal class MiniPlayerController(
             {},
             {},
             {},
-            { expandNote(note.key) },
+            { tapIsland(note.key, view) },
         )
         showTimer(view, note.timer)
         showFocusAnim(view, note.anim, note.live)
@@ -8945,6 +9148,7 @@ internal class MiniPlayerController(
                 keyguardOwned = keyguardOwned,
                 sceneVisible = sceneVisible,
                 nativeSceneOverride = keyguardOwned && Main.coverSceneActive(),
+                capsuleKeepsMini = Main.capsuleKeepsMini(),
                 transitionActive = transition,
                 controlCenterOpen = controlCenterOpen,
                 miniShowsMusic = pillShowsMusic,
@@ -9033,7 +9237,7 @@ internal class MiniPlayerController(
                 // music and has just gone up into its card - that has already gone, as its morph.
                 val rowGone = target == View.GONE && !pillShowsMusic &&
                     islandKeys.none { it != MUSIC_ISLAND } &&
-                    (islandKeys.isEmpty() || nativeRequested || Main.coverModeOn()) && enabled &&
+                    (islandKeys.isEmpty() || nativeRequested || Main.coverNeedsNativeCard()) && enabled &&
                     Main.keyguardLocked() && !coverMoving() && !MiniPlayerScene.blocksMiniPlayer &&
                     !controlCenterOpen && !frameTaken()
                 // Only a pill on screen goes back where it can be seen. The power key takes the
@@ -9086,11 +9290,11 @@ internal class MiniPlayerController(
         }
         updateNativeSuppression(suppressCard && musicSettled)
         if (morph == null && keyguardOwned &&
-            (nativeRequested || Main.coverSceneActive())) ensureNativeHeaderVisible()
+            (nativeRequested || Main.coverNeedsNativeCard())) ensureNativeHeaderVisible()
         val log = "nativeRequested=$nativeRequested " +
             "showMini=${presentation.showMini} suppressNative=${presentation.suppressNative} " +
             "keyguardOwned=$keyguardOwned sceneVisible=$sceneVisible center=$controlCenterOpen " +
-            "sceneOverride=${Main.coverSceneActive()} transition=${morph != null}"
+            "sceneOverride=${Main.coverSceneActive()} foldedScene=${Main.capsuleKeepsMini()} transition=${morph != null}"
         if (log != lastPresentationLog) {
             lastPresentationLog = log
             Xp.d("MCMini: presentation $log")

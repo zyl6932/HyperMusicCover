@@ -31,9 +31,20 @@ import kotlin.math.roundToInt
 import org.json.JSONObject
 
 /** HyperChanger's compact card, hosted in SystemUI's shortcut area. */
-internal class MiniPlayerView(context: Context) : FrameLayout(context) {
+internal class MiniPlayerView(context: Context) : FrameLayout(context), CapsuleFeedback {
     private var materialLayer = MaterialElement(context)
     private val artwork = ImageView(context)
+
+    init {
+        // HyperOS may apply its force-dark pass to notification content hosted by SystemUI.
+        // The island already chooses ink from its material and night mode; a second implicit
+        // transform may darken light navigation glyphs over glass. Opt this host out while
+        // preserving the notification drawable's own colors.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            setForceDarkAllowed(false)
+            artwork.setForceDarkAllowed(false)
+        }
+    }
 
     /**
      * The artwork's place: [artwork], or a live view over it (showArtworkView). Everything that
@@ -55,13 +66,13 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     private val title = EdgeBlurText(context)
     private val artist = EdgeBlurText(context)
     private val textColumn = LinearLayout(context)
-    private val toggle = ImageButton(context)
+    private val toggle = PressFeedbackButton(context)
 
     /**
      * A focus notification's second button, left of the first: shown while the pill is the big
      * island, the row's only one; gone as the small island comes in beside it (setSecondShown).
      */
-    private val toggle2 = ImageButton(context)
+    private val toggle2 = PressFeedbackButton(context)
     private val density = resources.displayMetrics.density
     private var lastAppearance: String? = null
     private var lastMaterial: String? = null
@@ -145,6 +156,60 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     /** A picture that moves (a focus template's Lottie), shown over whatever bitmap is bound. */
     private var artworkOverride: android.graphics.drawable.Drawable? = null
     private var lastPlaying: Boolean? = null
+    private var boundIdentity: String? = null
+    private var bindingVersion = 0L
+    private var normalTitle: CharSequence? = null
+    private var normalArtist: CharSequence? = null
+    private val statusFeedback = CapsuleTextFeedback { renderText() }
+
+    fun bindIdentity(key: String) {
+        if (boundIdentity == key) return
+        boundIdentity = key
+        bindingVersion++
+        clearStatus()
+        toggle.clearLabel()
+    }
+
+    override fun feedbackBindingVersion(): Long = bindingVersion
+
+    override fun clearLyricFeedback() = toggle.clearLabel()
+
+    override fun showLyricStatus(enabled: Boolean) {
+        toggle.showLyricStatus(enabled, ink)
+    }
+
+    override fun showLyricUnavailable() {
+        toggle.showLyricUnavailable(ink)
+    }
+
+    override fun showLyricPending() {
+        toggle.showLyricPending(ink)
+    }
+
+    override fun showStatus(text: String) {
+        statusFeedback.show(text)
+        announceForAccessibility(text)
+    }
+
+    private fun clearStatus() = statusFeedback.clear()
+
+    private fun renderText() {
+        val message = statusFeedback.text
+        val shownTitle = message ?: normalTitle
+        val shownArtist = if (message != null) null else normalArtist
+        if (!TextUtils.equals(title.text, shownTitle)) {
+            title.text = shownTitle
+            if (message == null) scrollOnce(title) else rest(title)
+        } else if (!titleScrolls) rest(title)
+        if (!TextUtils.equals(artist.text, shownArtist)) {
+            artist.text = shownArtist
+            if (message == null) scrollOnce(artist) else rest(artist)
+        }
+        title.visibility = if (shownTitle.isNullOrBlank()) View.GONE else View.VISIBLE
+        artist.visibility = if (shownArtist.isNullOrBlank()) View.GONE else View.VISIBLE
+        textColumn.alpha = textAlpha * statusFeedback.alpha
+    }
+
 
     /**
      * The colour of the words and the play button: the system's own card's (MiniPlayerController
@@ -154,6 +219,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     private var ink = Color.WHITE
 
     fun setInk(color: Int) {
+        toggle.setFeedbackInk(color)
         if (ink == color) return
         ink = color
         title.setTextColor(color)
@@ -178,11 +244,12 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     private var onNext: (() -> Unit)? = null
     private var onShowNative: (() -> Unit)? = null
     private var onOpenCover: (() -> Unit)? = null
-    private var tracking = false
+    private val bodyTouch = CapsuleBodyTouch()
     private var toggleShown = true
     private var lastHeightRadiusDp = 27f
 
     init {
+        isClickable = true
         clipToOutline = true
         outlineAmbientShadowColor = Color.TRANSPARENT
         outlineSpotShadowColor = Color.TRANSPARENT
@@ -300,19 +367,16 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
             materialLayer.clipToOutline = true
             updateGeometry(config.getDouble(MiniPlayerConfig.HEIGHT_RADIUS).toFloat())
         }
-        // Equal by their words, so a line the row rewrote as a span is not set again every frame.
-        if (!TextUtils.equals(title.text, trackTitle)) { title.text = trackTitle; scrollOnce(title) }
-        else if (!titleScrolls) rest(title)
-        if (!TextUtils.equals(artist.text, trackArtist)) { artist.text = trackArtist; scrollOnce(artist) }
-        // A line with no words in it takes no room, and the column centres what is left: an island
-        // whose template gives it only a timer (the recorder's, its param_v2 an animTextInfo and
-        // nothing else) drew that one line on the upper one and read off centre (the user,
-        // 2026-09-28). Both lines have words, the layout is the one it always was.
-        title.visibility = if (trackTitle.isNullOrBlank()) View.GONE else View.VISIBLE
-        artist.visibility = if (trackArtist.isNullOrBlank()) View.GONE else View.VISIBLE
+        normalTitle = trackTitle
+        normalArtist = trackArtist
+        renderText()
         if (lastArtwork !== cover) {
             lastArtwork = cover
-            if (artworkOverride == null) artwork.setImageBitmap(cover)
+            if (artworkOverride == null) {
+                artwork.imageTintList = null
+                artwork.clearColorFilter()
+                artwork.setImageBitmap(cover)
+            }
         }
         if (lastPlaying != playing) {
             lastPlaying = playing
@@ -349,15 +413,29 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean { android.os.Trace.beginSection("MC pillTouch"); try {
         if (!acceptsTouch()) return false
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> tracking = true
+            MotionEvent.ACTION_DOWN -> bodyTouch.down()
             MotionEvent.ACTION_UP -> {
-                if (tracking) onOpenCover?.invoke()
-                tracking = false
+                if (bodyTouch.up(event.x, event.y, width, height)) performClick()
             }
-            MotionEvent.ACTION_CANCEL -> tracking = false
+            MotionEvent.ACTION_MOVE -> bodyTouch.move(event.x, event.y, width, height)
+            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> bodyTouch.cancel()
         }
         return true
     } finally { android.os.Trace.endSection() } }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        if (!acceptsTouch()) return false
+        onOpenCover?.invoke()
+        return true
+    }
+
+    /** At DOWN only; this keeps an exchange from interpreting a playback press as a body tap. */
+    fun controlAt(x: Float, y: Float): Boolean = listOf(toggle, toggle2).any { button ->
+        val rect = android.graphics.Rect()
+        button.visibility == View.VISIBLE && button.isEnabled && button.getGlobalVisibleRect(rect) &&
+            rect.contains(x.toInt(), y.toInt())
+    }
 
     /**
      * A skip turns the artwork once round, the way the swipe went - left for the next track,
@@ -374,6 +452,8 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         artworkOverride = drawable
         artwork.setImageDrawable(drawable)
     }
+
+
 
     /**
      * [view] in the artwork's place - one of the plugin's own, running itself once in a window
@@ -670,7 +750,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     }
 
     private fun finish() {
-        tracking = false
+        bodyTouch.cancel()
     }
 
     override fun onAttachedToWindow() {
@@ -680,11 +760,13 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     }
 
     override fun onDetachedFromWindow() {
+        bodyTouch.cancel()
         finish()
         context.getSystemService(android.hardware.display.DisplayManager::class.java)
             ?.unregisterDisplayListener(displayListener)
         rest(title)
         rest(artist)
+        clearStatus()
         super.onDetachedFromWindow()
     }
 
@@ -951,6 +1033,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
      */
     /** The content's alpha a switch last set, for the artwork coming back from a cover flight. */
     private var contentAlpha = 1f
+    private var textAlpha = 1f
 
     /** For `op mini`: the content's alpha as drawn (the text column's). */
     fun contentAlphaNow(): Float = textColumn.alpha
@@ -975,8 +1058,9 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     fun setContentAlpha(alpha: Float) {
         val a = alpha.coerceIn(0f, 1f)
         contentAlpha = a
+        textAlpha = a
         slot.alpha = if (artworkHidden) 0f else a
-        textColumn.alpha = a
+        textColumn.alpha = a * statusFeedback.alpha
         toggle.alpha = a
         toggle2.alpha = a * secondShown
     }
@@ -1005,7 +1089,8 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     /** The text and the button alone: an island shrinking to its circle keeps its picture. */
     fun setTextAlpha(alpha: Float) {
         val a = alpha.coerceIn(0f, 1f)
-        textColumn.alpha = a
+        textAlpha = a
+        textColumn.alpha = a * statusFeedback.alpha
         toggle.alpha = a
         toggle2.alpha = a * secondShown
     }

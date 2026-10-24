@@ -348,4 +348,6 @@
     <string name="fpquick_a_camera">相机</string>
     <string name="fpquick_a_screenshot">截屏</string>
     <string name="fpquick_a_recorder">录音</string>
+    <string name="lyrics_clock_independent">歌词动画不受时钟遮挡</string>
+    <string name="lyrics_clock_independent_summary">胶囊歌词整组动画不随时钟移动而被裁切</string>
 </resources>

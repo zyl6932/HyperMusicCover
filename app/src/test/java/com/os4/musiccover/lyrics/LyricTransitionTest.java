@@ -74,19 +74,33 @@ public class LyricTransitionTest {
         LyricTransition transition = new LyricTransition();
         transition.reset(base);
         LyricFocus compact = focusAt(150, base, heights);
-        transition.update(compact, base, -1, 0.6f, 0.5f, 0.016f, false);
+        transition.update(compact, base, -1, 0.6f, 0.016f, false);
         assertTrue(transition.alpha(1) > 0 && transition.alpha(1) < 1);
-        assertTrue(transition.fit > 0.5f && transition.fit < 1);
         float previousAlpha = transition.alpha(1);
         LyricFocus expanded = focusAt(75, base, heights);
-        transition.update(expanded, base, -1, 0.6f, 1, 0, false);
+        transition.update(expanded, base, -1, 0.6f, 0, false);
         assertEquals(previousAlpha, transition.alpha(1), 0);
         for (int frame = 0; frame < 200; frame++) {
-            transition.update(expanded, base, -1, 0.6f, 1, 0.016f, false);
+            transition.update(expanded, base, -1, 0.6f, 0.016f, false);
         }
         assertEquals(1, transition.alpha(1), 0);
-        assertEquals(1, transition.fit, 0);
         assertFalse(transition.moving);
+    }
+
+    @Test public void tallWrappedRowsKeepTheirFullLayoutDuringEntryAndRetarget() {
+        for (float height : new float[]{400f, 4000f, 40000f}) {
+            float[] base = {0, height + 20, 2 * (height + 20)};
+            float[] heights = {height, height, height};
+            LyricFocus focus = focusAt(75, base, heights);
+            LyricTransition transition = new LyricTransition();
+            transition.reset(base);
+            transition.update(focus, base, -1, 0.6f, 0f, true);
+            for (int frame = 0; frame < 120; frame++) {
+                transition.update(focus, base, -1, 0.6f, 1f / 120f, false);
+                assertEquals(height + 20, transition.position(1) - transition.position(0), 0f);
+                assertEquals(1f, transition.alpha(0), 0f);
+            }
+        }
     }
 
     @Test public void departingOverlapRemainsVisibleDuringFade() {
@@ -95,11 +109,11 @@ public class LyricTransitionTest {
         transition.reset(base);
         LyricFocus compact = focusAt(150, base, heights);
         for (int frame = 0; frame < 15; frame++) {
-            transition.update(compact, base, -1, 0.6f, 1, 0.016f, false);
+            transition.update(compact, base, -1, 0.6f, 0.016f, false);
         }
         assertTrue(transition.alpha(1) > 0.15f && transition.alpha(1) < 0.9f);
         for (int frame = 0; frame < 200; frame++) {
-            transition.update(compact, base, -1, 0.6f, 1, 0.016f, false);
+            transition.update(compact, base, -1, 0.6f, 0.016f, false);
         }
         assertEquals(0, transition.alpha(1), 0);
         assertFalse(transition.moving);
@@ -109,9 +123,8 @@ public class LyricTransitionTest {
         float[] base = {0, 120, 240}, heights = {100, 100, 100};
         LyricTransition transition = new LyricTransition();
         transition.reset(base);
-        transition.update(focusAt(150, base, heights), base, -1, 0.6f, 0.5f, 0, true);
+        transition.update(focusAt(150, base, heights), base, -1, 0.6f, 0, true);
         assertEquals(0, transition.alpha(1), 0);
-        assertEquals(0.5f, transition.fit, 0);
         assertFalse(transition.moving);
     }
 

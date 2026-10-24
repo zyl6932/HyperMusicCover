@@ -2,6 +2,7 @@ package com.os4.musiccover.immersive;
 import com.os4.musiccover.ClockCollapse;
 import com.os4.musiccover.EdgeBlurView;
 import com.os4.musiccover.island.LockIslands;
+import com.os4.musiccover.lyrics.LockLyrics;
 import com.os4.musiccover.Main;
 import com.os4.musiccover.island.MiniPlayerRuntime;
 import com.os4.musiccover.Xp;
@@ -252,6 +253,42 @@ public final class ImmersiveHost {
         return sHolding;
     }
 
+    /** The navigation framework is armed, even while its map yields to a music cover. */
+    public static boolean navigationRunning() {
+        for (ImmersiveScene scene : SCENES) {
+            if (scene.isNavigation() && scene.ready()) return true;
+        }
+        // The transit page is deliberately disabled upstream. Its framework trip still
+        // runs and must not lose contrast merely because that page cannot be presented.
+        return AmapTransitScene.sOn && AmapTransitScene.INSTANCE.tripUp();
+    }
+
+    /** A remote navigation page is actually in front; readiness alone is not visibility. */
+    public static String presentedNavigationKey() {
+        ImmersiveScene scene = sOpen;
+        return scene != null && scene.isNavigation() && isPresented(scene) ? scene.id() : null;
+    }
+
+    /** A map waiting for its surface still owns the background choice; never sample a cover. */
+    public static String requestedNavigationKey() {
+        ImmersiveScene scene = sOpen;
+        return scene != null && scene.isNavigation() && isOpenRequested(scene) ? scene.id() : null;
+    }
+
+    /** No map text/location: explains why a requested map cannot yet supply a pixel sample. */
+    public static String navigationContrastState() {
+        ImmersiveScene scene = sOpen;
+        return presentationState(scene) + (scene instanceof LiveAlertScene
+                ? " surface=" + ((LiveAlertScene) scene).contrastSurfaceState() : " surface=not-remote");
+    }
+
+    /** Read-only remote subtree, available only for the navigation page actually presented. */
+    public static LiveAlertScene.ContrastSurface presentedNavigationSurface() {
+        ImmersiveScene scene = sOpen;
+        return scene instanceof LiveAlertScene && scene.isNavigation() && isPresented(scene)
+                ? ((LiveAlertScene) scene).contrastSurface() : null;
+    }
+
     /** The scene a tap on this focus island opens; null for an island that has none. */
     public static ImmersiveScene sceneFor(String pkg, boolean focus, String key) {
         for (ImmersiveScene s : SCENES) {
@@ -436,7 +473,16 @@ public final class ImmersiveHost {
 
     /** From LockIslands: the scene's island was tapped open. */
     public static void open(ImmersiveScene scene) {
-        if (sOpen == scene && !sYield) return;
+        // Direct capsule actions keep the notification folded, so opening no longer guarantees
+        // a notification-list traversal. Restore the page's window and request its normal
+        // pre-draw preparation explicitly, including a retry after a window was rebuilt.
+        if (scene.ready()) ensureSlot();
+        if (sSlot != null) sSlot.invalidate();
+        if (sOpen == scene && !sYield) {
+            apply();
+            Xp.log(TAG + "open retry " + scene.id() + ": " + presentationState(scene));
+            return;
+        }
         // Another page on the lit lock screen - just closed for this one, or still open: the one
         // dips out and the other in (SWAP_OUT_SHARE). The new one appears from nothing - or, when it is
         // the one still fading out of the last crossfade, from where it has got to: a run of
@@ -454,12 +500,40 @@ public final class ImmersiveHost {
         sOpen = scene;
         // Opened after the cover: the page is the later one now.
         sYield = false;
+        if (scene.isNavigation()) {
+            try { Main.onNavigationPageOpened(scene.id()); }
+            catch (Throwable failure) { Xp.w(TAG + "music background suspended: " + failure); }
+        }
         // Opened again while its close is still fading: it turns round from where it is.
         if (sLeaving == scene) sLeaving = null;
         sFadeInNext = litNow();
         Xp.log(TAG + "open " + scene.id() + " (ready=" + scene.ready()
                 + " page=" + scene.hasContent() + ")");
         apply();
+        Xp.log(TAG + "open result " + scene.id() + ": " + presentationState(scene));
+    }
+
+    /** The current request, which can still be waiting for a remote page to arrive. */
+    public static boolean isOpenRequested(ImmersiveScene scene) {
+        return scene != null && sOpen == scene && !sYield;
+    }
+
+    /** A request is not a visible page. Used by capsule feedback after the real open action. */
+    public static boolean isPresented(ImmersiveScene scene) {
+        return isOpenRequested(scene) && sHolding && sShown && sFade > 0f
+                && sSlot != null && sSlot.isAttachedToWindow() && sPrepared.contains(scene)
+                && scene.hasContent() && mayShow();
+    }
+
+    /** Bounded diagnostics for one open attempt; no notification text or location data. */
+    public static String presentationState(ImmersiveScene scene) {
+        return "requested=" + isOpenRequested(scene)
+                + " ready=" + (scene != null && scene.ready())
+                + " prepared=" + sPrepared.contains(scene)
+                + " content=" + (scene != null && scene.hasContent())
+                + " slot=" + (sSlot != null && sSlot.isAttachedToWindow())
+                + " holding=" + sHolding + " shown=" + sShown + " fade=" + sFade
+                + " locked=" + onLockScreen();
     }
 
     /** From LockIslands: the scene's island was pulled back in. */
@@ -472,6 +546,7 @@ public final class ImmersiveHost {
         // Already out of sight under the cover, or on its way there: nothing more to fade.
         if (wasYielding) {
             Xp.log(TAG + "close " + scene.id() + " (had yielded to the cover)");
+            restoreNavigationBackground(scene);
             apply();
             return;
         }
@@ -486,7 +561,16 @@ public final class ImmersiveHost {
             sMain.postDelayed(LEAVE_CHECK, COVER_DECIDE_MS);
         }
         Xp.log(TAG + "close " + scene.id() + (sLeaving == scene ? ", fading out" : ""));
+        // Claim the configured music background before releasing the immersive clock/slot.
+        // LEAVE_CHECK already waits for this cover's usual wallpaper acknowledgement.
+        restoreNavigationBackground(scene);
         apply();
+    }
+
+    private static void restoreNavigationBackground(ImmersiveScene scene) {
+        if (!scene.isNavigation()) return;
+        try { Main.onNavigationPageClosed(scene.id()); }
+        catch (Throwable failure) { Xp.w(TAG + "music background handoff failed: " + failure); }
     }
 
     /** From a scene: it has become ready, or stopped being. */
@@ -500,9 +584,14 @@ public final class ImmersiveHost {
             if (sSlot != null) sSlot.invalidate();
         } else {
             sLetGo.remove(scene);
-            if (sPrepared.remove(scene)) scene.release();
-            if (sOpen == scene) {
+            boolean closing = sOpen == scene;
+            if (closing) {
                 sOpen = null;
+                sYield = false;
+                restoreNavigationBackground(scene);
+            }
+            if (sPrepared.remove(scene)) scene.release();
+            if (closing) {
                 try {
                     LockIslands.INSTANCE.forgetScene(scene);
                 } catch (Throwable t) {
@@ -512,6 +601,7 @@ public final class ImmersiveHost {
             if (!anyReady()) dropSlot();
         }
         apply();
+        if (scene.isNavigation()) LockLyrics.refresh();
     }
 
     /** From a scene: its page arrived, or went. */
@@ -531,6 +621,7 @@ public final class ImmersiveHost {
 
     /** The phone was unlocked (ACTION_USER_PRESENT). Main thread. */
     public static void onUnlocked() {
+        MiniPlayerRuntime.cancelSceneFeedback();
         armRelease("user present");
     }
 
@@ -563,6 +654,7 @@ public final class ImmersiveHost {
      * is asked to draw, so the doze's first frame prepares it.
      */
     public static void onScreenOff() {
+        MiniPlayerRuntime.cancelSceneFeedback();
         cancelRelease("screen off");
         if (sSlot != null) sSlot.invalidate();
     }

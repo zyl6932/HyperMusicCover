@@ -335,4 +335,6 @@
     <string name="fpquick_a_camera">Camera</string>
     <string name="fpquick_a_screenshot">Screenshot</string>
     <string name="fpquick_a_recorder">Recorder</string>
+    <string name="lyrics_clock_independent">Animate lyrics independently of the clock</string>
+    <string name="lyrics_clock_independent_summary">Keep clock movement from clipping the capsule lyric animation</string>
 </resources>

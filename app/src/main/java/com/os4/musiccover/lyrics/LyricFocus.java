@@ -85,10 +85,6 @@ final class LyricFocus {
         return position(last, base) - position(first, base) + heights[last];
     }
 
-    static float fit(float height, float available) {
-        return height > 0f && available > 0f ? Math.min(1f, available / height) : 1f;
-    }
-
     void reset() {
         count = 0;
         first = last = -1;

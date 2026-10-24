@@ -380,20 +380,17 @@ public final class LockTaps {
                         ChargeAnim.sGestureOnCharge = ChargeAnim.chargeAnimUp();
                         if (ChargeAnim.sGestureOnCharge) cancelPendingTap("gesture began on the charging animation");
                     }
-                    // A tap on the open immersive page's own target in its row - 高德's turn
-                    // arrow - is the page's, and the row must not see it. See
-                    // ImmersiveHost.routeTouch.
-                    try {
-                        if (ImmersiveHost.routeTouch(ev)) return Boolean.TRUE;
-                    } catch (Throwable ignored) {
-                    }
-                    // The one case this hook does more than watch. Returning true without
-                    // proceeding takes the gesture out of the dispatch entirely, which is the
-                    // only way the artwork can mean something other than "open the player".
-                    // A gesture that starts on the mini player is the mini player's alone: its
-                    // swipe up would otherwise also be swipe-to-unlock.
+                    // Visible capsules own their whole gesture before any underlying row/page.
+                    // Their body policy and child playback controls must not fall into the
+                    // notification or immersive-page tap handler underneath them.
                     try {
                         if (MiniPlayerRuntime.routeTouch(ev)) return Boolean.TRUE;
+                    } catch (Throwable error) {
+                        Xp.w(Main.TAG + "capsule touch failed: " + error);
+                        if (MiniPlayerRuntime.cancelOwnedTouch()) return Boolean.TRUE;
+                    }
+                    try {
+                        if (ImmersiveHost.routeTouch(ev)) return Boolean.TRUE;
                     } catch (Throwable ignored) {
                     }
                     // A downward swipe on the media card folds it back into the mini player. Seen

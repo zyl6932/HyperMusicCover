@@ -146,6 +146,9 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             boolean on = i.getBooleanExtra("on", !LockLyrics.sEnabled);
             LockLyrics.setEnabled(on, Main.sTrackKey, Main.sWatched);
             ModuleState.saveState();
+        } else if ("lyricclockindependent".equals(op)) {
+            LockLyrics.setClockIndependentMotion(i.getBooleanExtra("on", true));
+            ModuleState.saveState();
         } else if ("lyrichdr".equals(op)) {
             LockLyrics.sHdr = i.getBooleanExtra("on", !LockLyrics.sHdr);
             Xp.log(Main.TAG + "lyrics HDR highlight: " + LockLyrics.sHdr);
@@ -421,6 +424,7 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             out.putString("lyricsrc", LockLyrics.sourceName());
             out.putBoolean("lyricon", LyriconSource.installed());
             out.putBoolean("lyrickeep", LockLyrics.sKeepOn);
+            out.putBoolean("lyricclockindependent", LockLyrics.sClockIndependentMotion);
             out.putBoolean("lyrichdr", LockLyrics.sHdr);
             out.putBoolean("lyrictrans", LockLyrics.sTrans);
             out.putBoolean("lyricroma", LockLyrics.sRoma);

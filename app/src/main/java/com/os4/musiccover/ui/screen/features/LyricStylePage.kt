@@ -171,6 +171,16 @@ internal fun LyricStylePageView(
                         },
                     )
                     SwitchPreference(
+                        title = stringResource(R.string.lyrics_clock_independent),
+                        summary = stringResource(R.string.lyrics_clock_independent_summary),
+                        checked = module.lyricClockIndependent,
+                        enabled = enabled,
+                        onCheckedChange = {
+                            module = module.copy(lyricClockIndependent = it)
+                            ModuleBridge.setLyricClockIndependent(context, it)
+                        },
+                    )
+                    SwitchPreference(
                         title = stringResource(R.string.lyrics_trans),
                         checked = module.lyricsTrans,
                         enabled = enabled,

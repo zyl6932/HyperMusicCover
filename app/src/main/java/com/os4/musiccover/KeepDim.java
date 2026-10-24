@@ -81,7 +81,7 @@ final class KeepDim {
      * does it, but a clock that was already held draws no entry frames to ride.
      */
     static void resume() {
-        if (Main.keepsWallpaper() && Main.coverHoldsClock()) {
+        if (Main.lyricsDimWanted()) {
             apply(MediaCard.cardProgress());
         }
     }

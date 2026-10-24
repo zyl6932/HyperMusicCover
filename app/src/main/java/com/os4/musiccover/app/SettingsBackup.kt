@@ -88,6 +88,7 @@ object SettingsBackup {
             if (module.shade.isNotEmpty()) {
                 json.put(KEY_SHADE, JSONObject(module.shade as Map<*, *>))
             }
+            json.put("lyricClockIndependent", module.lyricClockIndependent)
             json.put(KEY_MINI, JSONObject(module.miniConfig))
         }
         return json.toString(2)
@@ -98,6 +99,7 @@ object SettingsBackup {
         val settings = AppSettings.importFromJson(context, json)
         try {
             val obj = JSONObject(json)
+            if (obj.has("lyricClockIndependent")) ModuleBridge.setLyricClockIndependent(context, obj.getBoolean("lyricClockIndependent"))
             if (obj.has(KEY_BIAS)) ModuleBridge.setBias(context, obj.getDouble(KEY_BIAS).toFloat())
             // Only the mode. The square's size, place and corners are fixed, so a file that still
             // carries coverCardFill, coverCardPos, coverCardCorner or the dp coverCardSizeDp from

@@ -91,7 +91,7 @@ public final class MediaCard {
     /** One frame of the card fade, from ClockCollapse's progress. */
     static void setCardProgressFrom(float p) {
         // 保留壁纸's veil rides the same number, and only while the clock is the cover's.
-        KeepDim.apply(Main.keepsWallpaper() && Main.coverHoldsClock() ? p : 0f);
+        KeepDim.apply(Main.lyricsDimWanted() ? p : 0f);
         // The clock can be held for an immersive page alone, and the card is not part of that
         // look. The cover's exit is let through: that is its card fading back.
         if (!Main.sCoverMode && !LockHold.exitingFor(LockHold.Owner.COVER)) p = 0f;

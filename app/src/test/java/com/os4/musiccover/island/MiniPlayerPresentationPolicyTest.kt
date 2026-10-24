@@ -1,5 +1,7 @@
 package com.os4.musiccover.island
 
+import com.os4.musiccover.*
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -25,6 +27,7 @@ class MiniPlayerPresentationPolicyTest {
         transitionActive: Boolean = false,
         controlCenterOpen: Boolean = false,
         miniShowsMusic: Boolean = true,
+        capsuleKeepsMini: Boolean = false,
     ) = MiniPlayerPresentationPolicy.evaluate(
         MiniPlayerPresentationInput(
             enabled,
@@ -36,6 +39,7 @@ class MiniPlayerPresentationPolicyTest {
             transitionActive,
             controlCenterOpen,
             miniShowsMusic,
+            capsuleKeepsMini,
         ),
     )
 
@@ -93,6 +97,65 @@ class MiniPlayerPresentationPolicyTest {
         ))
     }
 
+    @Test fun bodyTapKeepsTheMusicTouchableOverTheExistingCoverScene() {
+        assertEquals(MiniPlayerPresentation(true, true), presentation(
+            nativeSceneOverride = true, capsuleKeepsMini = true))
+        // The control centre keeps the same ownership; it does not reveal a second player.
+        assertEquals(MiniPlayerPresentation(true, true), presentation(
+            sceneVisible = false, controlCenterOpen = true,
+            nativeSceneOverride = true, capsuleKeepsMini = true))
+    }
+
+    @Test fun closingAndReopeningALyricSceneDoesNotDropTheIslandDuringClockExit() {
+        for (scene in listOf(true, false, true)) {
+            assertEquals(MiniPlayerPresentation(true, true), presentation(
+                nativeSceneOverride = scene, capsuleKeepsMini = true))
+        }
+    }
+
+    @Test fun committedUpwardGestureHandsTheSameSceneToTheNativeCard() {
+        val selection = MiniPlayerSessionSelection()
+        val token = Any()
+        selection.observe(token)
+        assertEquals(MiniPlayerPresentation(true, true), presentation(
+            nativeRequested = selection.nativeRequestedFor(token),
+            nativeSceneOverride = true, capsuleKeepsMini = true))
+        selection.requestNative(token)
+        assertEquals(MiniPlayerPresentation(true, false), presentation(
+            nativeRequested = selection.nativeRequestedFor(token), nativeSceneOverride = true,
+            transitionActive = true, capsuleKeepsMini = false))
+        assertEquals(MiniPlayerPresentation(false, false), presentation(
+            nativeRequested = selection.nativeRequestedFor(token), nativeSceneOverride = true))
+    }
+
+    @Test fun cancelledSwipeKeepsTheRequestedLyricsSceneFolded() {
+        assertEquals(MiniPlayerPresentation(true, false), presentation(
+            nativeSceneOverride = true, transitionActive = true, capsuleKeepsMini = true))
+        assertEquals(MiniPlayerPresentation(true, true), presentation(
+            nativeSceneOverride = true, capsuleKeepsMini = true))
+    }
+
+    @Test fun cancellingAMultiIslandNativePreviewRestoresTheCapsuleOverItsCover() {
+        val selection = MiniPlayerSessionSelection()
+        val token = Any()
+        selection.observe(token)
+        // beginNoteDrag prepares native geometry before there is a committed upward lift.
+        selection.requestNative(token)
+        assertEquals(MiniPlayerPresentation(true, false), presentation(
+            nativeRequested = selection.nativeRequestedFor(token), transitionActive = true,
+            nativeSceneOverride = true, capsuleKeepsMini = true))
+        // Both a cancelled lift and rowWait timing out take the music back into the row.
+        selection.requestMini(token)
+        assertEquals(MiniPlayerPresentation(true, true), presentation(
+            nativeRequested = selection.nativeRequestedFor(token),
+            nativeSceneOverride = true, capsuleKeepsMini = true))
+        // A second attempted swipe can still complete and hand ownership to the media card.
+        selection.requestNative(token)
+        assertEquals(MiniPlayerPresentation(false, false), presentation(
+            nativeRequested = selection.nativeRequestedFor(token),
+            nativeSceneOverride = true, capsuleKeepsMini = false))
+    }
+
     @Test fun manuallyOpenedCoverHidesMusicEvenIfTheLockscreenStillReportsTheRowVisible() {
         assertEquals(MiniPlayerPresentation(false, false), presentation(
             sceneVisible = true, nativeSceneOverride = true))
@@ -131,6 +194,28 @@ class MiniPlayerPresentationPolicyTest {
     @Test fun leavingTheKeyguardRestoresNativeWithoutChangingTheChoice() {
         assertEquals(MiniPlayerPresentation(false, false),
             presentation(keyguardOwned = false, sceneVisible = false))
+    }
+
+    @Test fun navigationSmallIslandSurvivesMusicDragAndReversal() {
+        // The big music capsule becomes a card; navigation never gets a replacement morph.
+        for (landing in listOf(false, true, false)) {
+            assertTrue(MiniPlayerPresentationPolicy.smallIslandDuringMorph(
+                musicOwnsSmall = false, followerOwnsSmall = false, landing = landing))
+        }
+    }
+
+    @Test fun aSmallMusicIslandIsHiddenOnlyWhileItsReplacementIsAway() {
+        assertFalse(MiniPlayerPresentationPolicy.smallIslandDuringMorph(true, false, false))
+        assertTrue(MiniPlayerPresentationPolicy.smallIslandDuringMorph(true, false, true))
+        // Reversing before the landing completes gives drawing back to the morph.
+        assertFalse(MiniPlayerPresentationPolicy.smallIslandDuringMorph(true, false, false))
+    }
+
+    @Test fun anActualNotificationFollowerStillOwnsItsSmallIslandUntilLanding() {
+        assertFalse(MiniPlayerPresentationPolicy.smallIslandDuringMorph(false, true, false))
+        assertTrue(MiniPlayerPresentationPolicy.smallIslandDuringMorph(false, true, true))
+        // A cancelled/missing follower cannot keep the real notification hidden.
+        assertTrue(MiniPlayerPresentationPolicy.smallIslandDuringMorph(false, false, false))
     }
 
     @Test fun disabledOrEndedSessionRestoresNative() {

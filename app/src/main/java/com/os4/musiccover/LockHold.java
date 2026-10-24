@@ -30,7 +30,9 @@ final class LockHold {
         /** The album cover. Its entry fades the card on the clock's spring. */
         COVER(true),
         /** A full-screen immersive page: ImmersiveHost. */
-        IMMERSIVE(false);
+        IMMERSIVE(false),
+        /** Lyrics with the cover master off still need room below the clock. */
+        LYRICS(false);
 
         /**
          * Taking the lock screen re-runs the clock's entry even when another owner already has

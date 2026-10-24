@@ -71,13 +71,11 @@ public class LyricFocusTest {
         assertEquals(-1, focus.first);
     }
 
-    @Test public void layoutIncludesBackingAndTranslationHeightAndFitsBand() {
+    @Test public void layoutIncludesFullBackingAndTranslationHeight() {
         LyricFocus focus = new LyricFocus();
         focus.update(Arrays.asList(line(0, 100), line(0, 100)), 50, 4, 1);
         float[] base = {0, 320};
         focus.layout(base, new float[]{300, 200}, 20);
         assertEquals(520, focus.height(base, new float[]{300, 200}), 0);
-        assertEquals(0.5f, LyricFocus.fit(520, 260), 0);
-        assertEquals(1f, LyricFocus.fit(100, 260), 0);
     }
 }

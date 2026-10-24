@@ -50,6 +50,14 @@ public final class LockLyrics {
      * session.
      */
     public static volatile boolean sEnabled = true;
+    /** Keep lyric motion independent of the system clock's entrance transform. */
+    public static volatile boolean sClockIndependentMotion = true;
+
+    public static void setClockIndependentMotion(boolean on) {
+        sClockIndependentMotion = on;
+        refresh();
+        ModuleState.saveState();
+    }
 
     /**
      * Whether the lock screen's two-finger tap has taken the lyrics away.
@@ -65,8 +73,109 @@ public final class LockLyrics {
      * cover. Written by setEnabled, toggleByTap and the state file, and nowhere else.
      */
     public static volatile boolean sTapHidden;
+    /** A capsule's page request. The background still belongs to the configured cover scene. */
+    private static boolean sCapsulePage;
+    /** The current page began in a capsule, including its subsequent native-card handoff. */
+    private static boolean sCapsuleLayoutOrigin;
+
+    public static boolean capsuleLayoutOrigin() { return sCapsuleLayoutOrigin; }
+
+    /** Actual scene destruction/new non-capsule entry, not a card presentation handoff. */
+    public static void resetCapsuleLayoutOrigin() { sCapsuleLayoutOrigin = false; }
+    /** A new ordinary entry must not inherit the previous capsule's closing presentation. */
+    public static void prepareStandardPresentation() {
+        resetCapsuleLayoutOrigin();
+        sCapsuleFadeOnly = false;
+    }
+    /** A new visibility request re-evaluates temporary navigation contrast once. */
+    private static long sContrastRequestId;
+
+    static long contrastRequestId() { return sContrastRequestId; }
+    /** Capsule taps/pulls use one bounded group slide, retained through closing frames. */
+    private static boolean sCapsuleFadeOnly;
+
+    static boolean capsuleUsesFade() { return sCapsuleFadeOnly; }
+
+    /** A capsule pull keeps the user's lyric choice, but shares the body's stable presentation. */
+    public static void prepareCapsulePresentation() {
+        if (!sCapsuleLayoutOrigin) sContrastRequestId++;
+        sCapsuleLayoutOrigin = true;
+        sCapsuleFadeOnly = true;
+        notePopOrigin(null);
+        notePopTarget(null);
+        capsuleLayoutBottomOnScreen();
+    }
+
+    /** Includes a request still loading, so a second tap can cancel it immediately. */
+    public static boolean capsulePageRequested() {
+        return sCapsulePage;
+    }
+
+    /** Prepare the lyric request/cache before Main enters the chosen background scene. */
+    public static void setCapsuleVisible(boolean visible, String key, MediaController controller) {
+        sCapsulePage = visible;
+        sCapsuleLayoutOrigin = visible;
+        sTapHidden = !visible;
+        sCapsuleFadeOnly = true;
+        notePopOrigin(null);
+        notePopTarget(null);
+        if (!visible) Main.clearCapsuleNavigationOverlay();
+        show(visible, key, controller, "hidden by capsule");
+        if (visible) capsuleLayoutBottomOnScreen();
+        ModuleState.saveState();
+        startCapsuleDiagnostics(visible);
+    }
+
+    /** End the explicit page request when its media session is destroyed. */
+    public static void clearCapsulePage() {
+        sCapsulePage = false;
+        Main.cancelCapsuleNavigationBackground();
+        notifyAvailabilitySoon();
+        Main.main().removeCallbacks(CAPSULE_DIAGNOSTIC);
+        refresh();
+    }
+
+    // A request/animation is not proof of drawing. Three bounded follow-ups capture the
+    // missing-data, host, clock, layout and alpha gates without recording song/lyric contents.
+    // New requests and handoffs cancel this one callback; there is no permanent retry loop.
+    private static int sCapsuleDiagnosticStep;
+    private static final Runnable CAPSULE_DIAGNOSTIC = new Runnable() {
+        @Override public void run() {
+            if (!sCapsulePage) return;
+            logCapsuleVisibility();
+            if (++sCapsuleDiagnosticStep < 3) {
+                Main.main().postDelayed(this, sCapsuleDiagnosticStep == 1 ? 1250L : 3500L);
+            }
+        }
+    };
+
+    private static void startCapsuleDiagnostics(boolean visible) {
+        Main.main().removeCallbacks(CAPSULE_DIAGNOSTIC);
+        sCapsuleDiagnosticStep = 0;
+        logCapsuleVisibility();
+        if (visible) Main.main().postDelayed(CAPSULE_DIAGNOSTIC, 250L);
+    }
+
+    private static void logCapsuleVisibility() {
+        View anchor = Main.sContainer;
+        LyricView view = sView;
+        Xp.log(TAG + "capsule visibility requested=" + sCapsulePage + " hidden=" + sTapHidden
+                + " keyReady=" + !sKey.isEmpty() + " source=" + srcName(sSource)
+                + " loading=" + sLoading + " lines=" + sLines.size()
+                + " cover=" + Main.coverModeOn() + " hdr=" + hdr() + " window=" + wantsWindow()
+                + " shown=" + wantsShown() + " phase=" + ClockCollapse.phase()
+                + " clockMeasured=" + !Float.isNaN(ClockCollapse.contentBottomOnScreen())
+                + " pageProgress=" + pageProgress()
+                + " container=" + (anchor == null ? "none" : "attached="
+                    + anchor.isAttachedToWindow() + "/shown=" + anchor.isShown()
+                    + "/alpha=" + anchor.getAlpha())
+                + " view={" + (view == null ? "none" : view.renderStatus()) + "}");
+    }
+
 
     private static String sKey = "";
+    /** Only settle() can declare that every source for this key has finished without lines. */
+    private static String sSettledKey;
     private static List<LyricLine> sLines = Collections.emptyList();
     private static int sVersion;
     /** Bumped per lookup, so an answer overtaken by the next song is dropped. */
@@ -120,19 +229,7 @@ public final class LockLyrics {
      * the translation it is laid out, not fetched: switching it redraws what is already there.
      */
     public static volatile boolean sRoma = false;
-    /**
-     * Whether a lyric may come off the network (PR #103): the database, the TTML Hub, the
-     * catalogues, the queue's read-ahead and the translations borrowed from any of them. Off,
-     * only the player's own session, its file and the Lyricon bridge are read. On by default.
-     */
     public static volatile boolean sOnline = true;
-
-    /**
-     * Switches sOnline and looks the song on screen up again: off, a lyric that came off the
-     * network goes - with nothing local to replace it the song has none; on, a song with no
-     * lyric, or no translation, gets the chance of one. The cache goes either way, since it
-     * holds answers found under the other setting.
-     */
     public static boolean setOnline(boolean on) {
         if (on == sOnline) return false;
         sOnline = on;
@@ -146,6 +243,17 @@ public final class LockLyrics {
             lookup(sKey, sController, on && !sLines.isEmpty());
         });
         return true;
+    }
+    static void onProviderLyrics() {
+        Main.main().post(() -> {
+            if (!sEnabled || sDemo || sKey.isEmpty() || sController == null) return;
+            if (!sLines.isEmpty() && (sSource == LyricSource.SRC_LYRIC_INFO
+                    || sSource == LyricSource.SRC_LOCAL || sSource == LyricSource.SRC_LYRICON)) {
+                return;
+            }
+            CACHE.remove(sKey);
+            lookup(sKey, sController, !sLines.isEmpty());
+        });
     }
     /** The two switches together, as LyricLine.under() and the layout read them. */
     static final int BELOW_TRANS = 1, BELOW_ROMA = 2;
@@ -166,14 +274,7 @@ public final class LockLyrics {
     public static volatile int sAlign = ALIGN_LEFT;
     /** Immutable snapshot: the UI, renderer and state loader all use the same validated values. */
     public static volatile LyricStyle sStyle = LyricStyle.DEFAULT;
-    /** Colours and opacity of the lead and the backing vocal; the default is the official look. */
     public static volatile LyricAppearance sAppearance = LyricAppearance.DEFAULT;
-    /**
-     * The most lines sung at the same time that are lit together (LyricFocus), 1..4. Not saved:
-     * every overlapping line is lit, up to the ceiling; `op lyricmaxlines` lowers it for the
-     * session.
-     */
-    public static volatile int sMaxLines = LyricFocus.DEFAULT_LIMIT;
 
     public static void setAppearance(String json) {
         LyricAppearance next = LyricAppearance.parse(json);
@@ -185,6 +286,15 @@ public final class LockLyrics {
             view.kick();
         }
     }
+    public static volatile int sMaxLines = LyricFocus.DEFAULT_LIMIT;
+
+
+
+
+
+
+
+
 
     public static boolean setMaxLines(int value) {
         int next = LyricFocus.clampLimit(value);
@@ -295,6 +405,9 @@ public final class LockLyrics {
     private static final long STILL_BLUR_WAIT_MS = 1200L;
 
     static boolean blurSettled() {
+        // A body tap already prepared lyrics before the initial cover request. Fade them
+        // with that entry, rather than append a second arrival after the cover's blur ack.
+        if (sCapsulePage) return true;
         if (!blurWanted()) return true;
         long now = SystemClock.uptimeMillis();
         if (!Main.sVideoWallpaper) {
@@ -425,12 +538,41 @@ public final class LockLyrics {
                 || (sLoading && sHadLyrics);
     }
 
+    public static String feedbackTrackKey() { return sKey; }
+    public static long feedbackRequestId() { return sContrastRequestId; }
+
+    /** Does not start a lookup or count sHadLyrics (which belongs to the previous song). */
+    public static LyricAvailability feedbackAvailability(String expectedKey, Object sessionToken) {
+        if (sController == null || sessionToken == null
+                || !sessionToken.equals(sController.getSessionToken())) return LyricAvailability.PENDING;
+        Cached cached = CACHE.get(sKey);
+        return LyricAvailability.resolve(expectedKey, sKey, !sLines.isEmpty(),
+                cached != null && !cached.lines.isEmpty(), sLoading, sParked != null, sSettledKey);
+    }
+
+    private static boolean sAvailabilityPosted;
+    private static final Runnable AVAILABILITY_CHANGED = () -> {
+        sAvailabilityPosted = false;
+        com.os4.musiccover.island.MiniPlayerRuntime.lyricAvailabilityChanged();
+    };
+
+    private static void notifyAvailabilitySoon() {
+        // setLines may immediately discover a new provider payload and restart lookup. Let
+        // that stack finish before announcing an empty result to the capsule.
+        if (!sAvailabilityPosted) sAvailabilityPosted = Main.main().post(AVAILABILITY_CHANGED);
+    }
+
     /** Whether the last settled answer - not one still loading - had lines. See hasLyrics(). */
     private static boolean sHadLyrics;
 
     /** Whether the view belongs in the keyguard right now. */
     public static boolean wantsAttached() {
-        return wanted() && Main.coverModeOn() && hasLyrics();
+        return wanted() && (sCapsulePage || Main.coverModeOn()) && hasLyrics();
+    }
+
+    /** Visual progress after the window, clock and lyric-data gates have admitted the page. */
+    static float pageProgress() {
+        return LyricPageVisibility.progress(sCapsulePage, Main.coverModeOn(), MediaCard.cardProgress());
     }
 
     /**
@@ -592,6 +734,7 @@ public final class LockLyrics {
             sPopAt = 0L;
             return;
         }
+        if (!sCapsulePage) sCapsuleFadeOnly = false;
         sPopX = centre[0];
         sPopY = centre[1];
         sPopAt = SystemClock.uptimeMillis();
@@ -708,19 +851,26 @@ public final class LockLyrics {
     private static final int BAND_RECORDED = 1;
     /** ... off the card fraction LockPreview.kt carries for a phone nothing was measured on. */
     private static final int BAND_DEFAULT = 2;
+    /** ... above the capsule or the moving card actually visible this frame. */
+    private static final int BAND_CAPSULE = 3;
     /**
      * The card's own share of the screen - the same fraction the app's preview falls back to
      * (LockPreview.kt's SAMPLE_CARD_T), so that a phone which has never had a card measured puts
      * the module's band and the app's preview in the same place.
      */
     private static final float CARD_TOP_FRACTION = 1700f / 2608f;
-    /** Which of the three answered last; -1 until one has. */
+    private static final LyricBandGeometry.Reference sCapsuleLayoutReference =
+            new LyricBandGeometry.Reference();
+    /** Which geometry route answered last; -1 until one has. */
     private static volatile int sBandSrc = -1;
 
     /**
-     * Where the band's lower edge sits on screen, in pixels: the media card's own top edge.
+     * Where the band's lower edge sits on screen, in pixels. Capsule pages stop at the actual
+     * capsule row, following a pulled-up card's moving surface until it lands. A folded media
+     * card's reserved slot must not shorten that larger band.
      *
-     * All three routes answer that same edge, and the sameness is the point. The band is the room
+     * For a native media card (or unavailable capsule geometry), the three legacy routes below
+     * answer that same card edge, and the sameness is the point. The band is the room
      * between the clock and the card and the block is centred in it, so an answer that moves by a
      * card's height moves the lyrics by half of one. The other two routes used to answer the
      * card's BOTTOM, deliberately: with no card drawn the band took the whole block the card would
@@ -751,9 +901,17 @@ public final class LockLyrics {
      * edge: a phone that has never measured a card does not move when the first one arrives.
      */
     static float bandBottomOnScreen() {
+        float capsule = com.os4.musiccover.island.MiniPlayerRuntime.lyricObstacleTopOnScreen();
+        if (Float.isFinite(capsule)) {
+            setBandSource(BAND_CAPSULE);
+            return capsule;
+        }
         View c = card();
         int y = Integer.MIN_VALUE;
-        if (c != null && c.isShown() && c.isAttachedToWindow()) {
+        // A folded/rebuilt card may be attached before its first layout. Its zero-size
+        // rectangle is not an edge to clip against; use the recorded/default band until ready.
+        if (c != null && c.isShown() && c.isAttachedToWindow()
+                && c.getWidth() > 0 && c.getHeight() > 0) {
             int[] loc = new int[2];
             c.getLocationOnScreen(loc);
             y = loc[1];
@@ -779,6 +937,20 @@ public final class LockLyrics {
     }
 
     /**
+     * Capsule pages keep the ordinary card area's layout anchor, adding only visible rows
+     * below it. Read the recorded resting card before any drag and retain that reference for
+     * this visibility request: moving/folding the card must not re-centre or rescale the text.
+     * Kept outside LyricView so rebuilding its window does not pick a new mid-swipe anchor.
+     */
+    static float capsuleLayoutBottomOnScreen() {
+        float screen = Main.screenHeight();
+        float recorded = MediaCard.sampledCardTop();
+        float candidate = Float.isFinite(recorded) && recorded >= screen / 3f && recorded < screen
+                ? recorded : screen * CARD_TOP_FRACTION;
+        return sCapsuleLayoutReference.floor(sContrastRequestId, screen, candidate);
+    }
+
+    /**
      * PROBE: the last few times the band lost the live card, and why - no view, a hidden one (and
      * which ancestor hides it), no height, or one found above the clock - with the phase and the
      * screen at that moment. For `op lyricstate`'s bandMiss=; this phone keeps no log.
@@ -798,6 +970,7 @@ public final class LockLyrics {
         String id = " view@" + Integer.toHexString(System.identityHashCode(c))
                 + " h=" + c.getHeight();
         if (!c.isAttachedToWindow()) return "detached" + id;
+        if (c.getWidth() <= 0 || c.getHeight() <= 0) return "not laid out" + id;
         if (!c.isShown()) {
             String by = c.getVisibility() != View.VISIBLE ? "itself" : "?";
             for (android.view.ViewParent p = c.getParent(); p instanceof View; p = p.getParent()) {
@@ -828,6 +1001,8 @@ public final class LockLyrics {
                 return "recorded";
             case BAND_DEFAULT:
                 return "default";
+            case BAND_CAPSULE:
+                return "capsule/morph";
             default:
                 return "?";
         }
@@ -840,7 +1015,7 @@ public final class LockLyrics {
     private static void setBandSource(int src) {
         if (src == sBandSrc) return;
         sBandSrc = src;
-        Xp.log(TAG + "band anchored to the " + bandSource() + " card position");
+        Xp.log(TAG + "band anchored to the " + bandSource() + " boundary");
     }
 
     /** Where the singing is, extrapolated from the last position the session reported. */
@@ -871,6 +1046,7 @@ public final class LockLyrics {
     public static void onTrack(String key, MediaController c) {
         key = lyricKey(key, c);
         sController = c;
+        notifyAvailabilitySoon();
         readState(true);
         if (sDemo) {
             if (verbose) Xp.log(TAG + "demo is held, not looking " + key + " up");
@@ -897,6 +1073,7 @@ public final class LockLyrics {
         }
         String lastKey = sKey;
         sKey = key;
+        sSettledKey = null;
         long lastChange = sTrackAt;
         sTrackChangedAt = SystemClock.uptimeMillis();
         sTrackAt = sTrackChangedAt;
@@ -926,6 +1103,7 @@ public final class LockLyrics {
             sLoading = false;
             sSource = hit.source;
             setLines(hit.lines, "cached");
+            rereadIfNewPayload(key, c);
             return;
         }
         // What the lookup about to start will read the session as, so a payload that turns up
@@ -981,6 +1159,7 @@ public final class LockLyrics {
                 sLoading = false;
                 sSource = hit.source;
                 setLines(hit.lines, "cached");
+                rereadIfNewPayload(key, c);
                 return;
             }
             sInfoSeen = LyricSource.infoFor(c);
@@ -1042,25 +1221,6 @@ public final class LockLyrics {
     private static int sInfoTries;
 
     /**
-     * The bridge has just published a song with lyrics (PR #103). Its answer often lands after the
-     * lookup for the track has already gone past it and settled on a catalogue, or on nothing; the
-     * lookup is run again, in its usual order, so the bridge's lyric takes its place. Not when
-     * what is up already came from the player's own session, its file, or the bridge itself:
-     * a re-run would only find that again.
-     */
-    static void onProviderLyrics() {
-        Main.main().post(() -> {
-            if (!sEnabled || sDemo || sKey.isEmpty() || sController == null) return;
-            if (!sLines.isEmpty() && (sSource == LyricSource.SRC_LYRIC_INFO
-                    || sSource == LyricSource.SRC_LOCAL || sSource == LyricSource.SRC_LYRICON)) {
-                return;
-            }
-            CACHE.remove(sKey);
-            lookup(sKey, sController, !sLines.isEmpty());
-        });
-    }
-
-    /**
      * Starts the lookup for `key` and puts whatever it finds on screen.
      *
      * `keepCurrent` is the whole difference between the two callers. A track change has already
@@ -1071,7 +1231,9 @@ public final class LockLyrics {
      */
     private static void lookup(final String want, MediaController c, final boolean keepCurrent) {
         final int gen = ++sGen;
+        sSettledKey = null;
         sLoading = true;
+        notifyAvailabilitySoon();
         LyricSource.load(c, new LyricSource.Callback() {
             @Override
             public void onLines(List<LyricLine> lines, String why, int source) {
@@ -1121,6 +1283,7 @@ public final class LockLyrics {
     /** Puts a lookup's answer up: the one place lines found for `want` reach the screen. */
     private static void settle(String want, List<LyricLine> lines, String why, int source) {
         sLoading = false;
+        sSettledKey = want;
         sSource = source;
         // What the LAST lookup found, not what any lookup ever found.
         //
@@ -1240,7 +1403,7 @@ public final class LockLyrics {
      */
     private static String lyricKey(String cardKey, MediaController c) {
         String fallback = cardKey == null ? "" : cardKey;
-        if (c == null || fallback.isEmpty()) return fallback;
+        if (c == null) return fallback;
         try {
             android.media.MediaMetadata md = c.getMetadata();
             if (md == null) return fallback;
@@ -1248,8 +1411,8 @@ public final class LockLyrics {
             String artist = TrackName.singer(c.getPackageName(),
                     md.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST), album);
             long dur = md.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION);
-            if (artist == null && album == null && dur <= 0) return fallback;
-            return c.getPackageName() + "|" + artist + "|" + album + "|" + dur;
+            return LyricTrackKey.fromMetadata(fallback, c.getPackageName(),
+                    md.getString(android.media.MediaMetadata.METADATA_KEY_TITLE), artist, album, dur);
         } catch (Throwable t) {
             return fallback;
         }
@@ -1260,6 +1423,12 @@ public final class LockLyrics {
         sStateReadAt = SystemClock.uptimeMillis();
         LyricView v = sView;
         if (v != null) v.kick();
+    }
+
+    /** Touch feedback wakes only drawing; it never reattaches windows or refreshes the cover. */
+    public static void onGestureFeedback() {
+        LyricView view = sView;
+        if (view != null) view.kick();
     }
 
     /**
@@ -1358,6 +1527,10 @@ public final class LockLyrics {
     }
 
     public static void refresh() {
+        // A configured cover already owns the clock. Only the cover-master-off fallback
+        // needs a lyric-only owner; it must not introduce a different wallpaper treatment.
+        Main.syncCapsuleLyricsHold(LyricPageVisibility.needsIndependentClock(
+                sCapsulePage, Main.coverModeOn(), wanted(), hasLyrics()));
         // 保留壁纸 hangs the clock on the lyric page, and this is where the page comes and goes.
         Main.syncCoverHold(Main.screenOnCached());
         updateBlur();
@@ -1373,6 +1546,12 @@ public final class LockLyrics {
     /** The app's switch. The setting: it is written to the state file and the app reads it back. */
     public static void setEnabled(boolean on, String key, MediaController c) {
         sEnabled = on;
+        if (!on) {
+            sCapsulePage = false;
+            resetCapsuleLayoutOrigin();
+            Main.cancelCapsuleNavigationBackground();
+            Main.main().removeCallbacks(CAPSULE_DIAGNOSTIC);
+        }
         // The switch is the master, so it takes the tap's answer with it. Switching the lyrics
         // off and on again brings them back; without this, turning them on while a previous tap
         // had hidden them would leave the lock screen on the cover with the switch saying on.
@@ -1391,6 +1570,10 @@ public final class LockLyrics {
      */
     public static void toggleByTap(String key, MediaController c) {
         if (!sEnabled) return;
+        if (!sCapsulePage) {
+            resetCapsuleLayoutOrigin();
+            sCapsuleFadeOnly = false;
+        }
         sTapHidden = !sTapHidden;
         Xp.log(TAG + "two-finger tap: lyrics " + (sTapHidden ? "hidden" : "shown"));
         show(!sTapHidden, key, c, "hidden by the two-finger tap");
@@ -1404,6 +1587,9 @@ public final class LockLyrics {
      */
     private static void show(boolean on, String key, MediaController c, String why) {
         if (on) {
+            // Closing keeps the current ink through its fade; only a new display request
+            // reselects contrast and captures a fresh layout reference.
+            sContrastRequestId++;
             sKey = "";
             onTrack(key, c);
         } else if (!sDemo) {
@@ -1500,7 +1686,7 @@ public final class LockLyrics {
                 + " (" + sWhy + ") src=" + srcName(sSource)
                 + " sessionHasLyric=" + LyricSource.hasLyricInfo(sController)
                 + " pos=" + positionMs() + " playing=" + playing()
-                + " cover=" + Main.coverModeOn() + " screen=" + Main.screenOnCached()
+                + " capsule=" + sCapsulePage + " cover=" + Main.coverModeOn() + " screen=" + Main.screenOnCached()
                 // What the wallpaper process was last told, and when: the other side prints the
                 // answer it holds and when it was decided, so the two readings side by side say
                 // whether a switch was lost on the way rather than guessing at the cover.
@@ -1510,6 +1696,7 @@ public final class LockLyrics {
                 + " still=" + sStill + " display=" + displayState()
                 + " stillLog=[" + sStillLog + "]"
                 + " cardP=" + MediaCard.cardProgress()
+                + " pageP=" + pageProgress()
                 + " container=" + (c == null ? "none" : c.getAlpha() + "/shown=" + c.isShown())
                 + " card=" + (card == null ? "none" : "shown=" + card.isShown())
                 // Where the band's lower edge came from: live is the card's own top this frame,
@@ -1555,6 +1742,9 @@ public final class LockLyrics {
 
     /** again = tell the other side even when the answer has not changed. */
     private static void updateBlur(boolean again) {
+        // Navigation owns the currently presented background. Changing a lyric overlay
+        // must not frost/unfrost an album cover still retained underneath that page.
+        if (Main.capsuleLyricsOverNavigation()) return;
         if (!Main.coverModeOn()) {
             setBlurSent(false);
             return;
@@ -1594,6 +1784,7 @@ public final class LockLyrics {
         if (!sLoading) sHadLyrics = !sLines.isEmpty();
         sVersion++;
         sWhy = why;
+        notifyAvailabilitySoon();
         Xp.log(TAG + sLines.size() + " lines: " + why);
         refresh();
     }

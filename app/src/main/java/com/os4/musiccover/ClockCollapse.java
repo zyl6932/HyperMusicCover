@@ -230,6 +230,9 @@ public final class ClockCollapse {
 
     /** The bottom of the clock's ink as last placed, in screen pixels. */
     private static volatile float sInkBottom = Float.NaN;
+    /** Same frame's final cover pose, independent of the entry spring's current position. */
+    private static final com.os4.musiccover.lyrics.LyricBandGeometry.ClockTarget COVER_CONTENT =
+            new com.os4.musiccover.lyrics.LyricBandGeometry.ClockTarget();
 
     // ------------------------------------------------------------------ public surface
 
@@ -337,6 +340,22 @@ public final class ClockCollapse {
      */
     public static float contentBottomFor(View v) {
         float pose = contentBottomOnScreen();
+        return contentPoseFor(v, pose);
+    }
+
+    /**
+     * Capsule text rises into its reading position while the clock shrinks. Lay it out against
+     * the very destination that frame() computed, not the moving clock. A new entry has no
+     * answer until that calculation runs; reusing the previous entry would show a stale band
+     * for one frame. Landed navigation/wallpaper pages publish through the same cache after
+     * writing their pose, so ENTER -> ON alone cannot switch back to the preceding moving ink.
+     */
+    public static float coverContentBottomFor(View v) {
+        if (sPhase != Phase.ENTER && sPhase != Phase.ON) return contentBottomFor(v);
+        return contentPoseFor(v, COVER_CONTENT.read(firstTarget(), Main.screenWidth(), Main.screenHeight()));
+    }
+
+    private static float contentPoseFor(View v, float pose) {
         if (Float.isNaN(pose)) return Float.NaN;
         View g = firstTarget();
         if (g == null || !(g.getParent() instanceof View)) return pose;
@@ -443,6 +462,7 @@ public final class ClockCollapse {
             return;
         }
         Phase was = sPhase;
+        COVER_CONTENT.clear();
         if (wake) {
             sWaking = false;
             Main.noteAwake();
@@ -695,6 +715,7 @@ public final class ClockCollapse {
     /** A setting that changes the destination moved; the next frame picks it up. */
     static void refresh() {
         if (!active()) return;
+        COVER_CONTENT.clear();
         prepareGlass();
         // A new size can mean a different y: the OEM draws its own glyphs at that height.
         if (sPhase == Phase.ON && !Float.isNaN(sFloor)) hold(targetY(sFloor, naturalY()));
@@ -703,6 +724,7 @@ public final class ClockCollapse {
 
     /** The keyguard was rebuilt: new views, same phase. */
     static void onAttached() {
+        COVER_CONTENT.clear();
         if (sPhase == Phase.OFF) return;
         install();
         if (sPhase == Phase.ON) {
@@ -715,6 +737,7 @@ public final class ClockCollapse {
     }
 
     static void onDetached() {
+        COVER_CONTENT.clear();
         uninstall();
         // A transition that was running has lost its views; land it where it was going.
         if (sPhase == Phase.ENTER) {
@@ -1605,6 +1628,7 @@ public final class ClockCollapse {
         boolean was = sPhase != Phase.OFF || Main.sHoldY != null;
         stopFrame();
         sPhase = Phase.OFF;
+        COVER_CONTENT.clear();
         sExitToAod = false;
         sAodHeld = false;
         sAodFullScreen = false;
@@ -2424,6 +2448,13 @@ public final class ClockCollapse {
             }
         }
 
+        // Read-only destination geometry for capsule lyrics. layoutCompanions fills scratch
+        // positions only; writePose below still places the actual clock at its animated pose.
+        if (phase == Phase.ENTER && com.os4.musiccover.lyrics.LockLyrics.capsuleLayoutOrigin()) {
+            COVER_CONTENT.record(firstTarget(), Main.screenWidth(), Main.screenHeight(),
+                    contentBottomAt(m, coverTop, coverUnit));
+        }
+
         float top, unit, date, card, glass;
         if (phase == Phase.ON) {
             top = coverTop;
@@ -2486,6 +2517,9 @@ public final class ClockCollapse {
                 : sCenterFrom + (sCenterTo - sCenterFrom) * Math.max(0f, Math.min(1f, sT));
 
         android.os.Trace.beginSection("MC c.write"); try { writePose(m, top, unit, date, phase == Phase.ENTER && sGlyphTail); } finally { android.os.Trace.endSection(); }
+        if (phase == Phase.ON) {
+            COVER_CONTENT.record(firstTarget(), Main.screenWidth(), Main.screenHeight(), contentBottomOnScreen());
+        }
         // The pose the lock screen is showing, for a sleep taken while it is not drawing. See
         // sDrawnTop. Kept through a hidden keyguard on purpose: the transforms stay on the views
         // and are still what the lock screen comes back to. An EXIT is on its way to the OEM's
@@ -2515,6 +2549,26 @@ public final class ClockCollapse {
         android.os.Trace.beginSection("MC c.glass"); try { ClockGlass.applyGlassMorph(glass); } finally { android.os.Trace.endSection(); }
         // The colour band describes the lock screen; the AOD's layout is not that.
         if (!(phase == Phase.EXIT && sExitToAod)) { android.os.Trace.beginSection("MC c.band"); try { Main.updateColorBand(); } finally { android.os.Trace.endSection(); } }
+    }
+
+    /** Same content extent as contentBottomOnScreen(), without changing any view transforms. */
+    private static float contentBottomAt(Live m, float top, float unit) {
+        if (!Float.isFinite(top) || !Float.isFinite(unit) || m.unit <= 0f) return Float.NaN;
+        float scale = unit / m.unit;
+        float ink = top + m.box.height() * scale;
+        float bottom = ink;
+        for (int i = 0; i < m.sigN; i++) {
+            Sig s = m.sig[i];
+            if (s.v != null) bottom = Math.max(bottom, ink + s.gap + s.v.getHeight());
+        }
+        if (!m.anchored) {
+            layoutCompanions(m, top, scale);
+            for (int i = 0; i < m.compN; i++) {
+                Comp c = m.comp[i];
+                if (c.v != null) bottom = Math.max(bottom, c.y + (c.inkB - c.inkT) * c.s);
+            }
+        }
+        return bottom;
     }
 
     /**
