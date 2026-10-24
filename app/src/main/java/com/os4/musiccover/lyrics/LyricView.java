@@ -283,8 +283,8 @@ final class LyricView extends View {
     private int layoutWidth = -1;
     private StaticLayout[] main = new StaticLayout[0];
     private StaticLayout[] trans = new StaticLayout[0];
-    private StaticLayout[] bgLay = new StaticLayout[0];
-    private float[][] charXBg = new float[0][];
+    private StaticLayout[][] bgLay = new StaticLayout[0][];
+    private float[][][] charXBg = new float[0][][];
     /** Top of each line in content coordinates, and its full height with translation. */
     private float[] base = new float[0];
     private float[] height = new float[0];
@@ -1485,9 +1485,9 @@ final class LyricView extends View {
                     && ms < l.end + Math.max(LIFT_MIN_MS, GLOW_TAIL_MS)) {
                 return true;
             }
-            if (l.bg != null && l.bg.hasWords() && emph[i] > 0f && ms >= l.bg.start
-                    && ms < l.bg.end + Math.max(LIFT_MIN_MS, GLOW_TAIL_MS)) {
-                return true;
+            for (LyricLine bg : l.backgrounds()) {
+                if (bg.hasWords() && emph[i] > 0f && ms >= bg.start
+                        && (long) ms < (long) bg.end + Math.max(LIFT_MIN_MS, GLOW_TAIL_MS)) return true;
             }
         }
         return false;
@@ -1498,7 +1498,9 @@ final class LyricView extends View {
      * a bridge can time the backing vocal of a line it times by the line alone (issue #102).
      */
     private static boolean wordTimed(LyricLine l) {
-        return l.hasWords() || (l.bg != null && l.bg.hasWords());
+        if (l.hasWords()) return true;
+        for (LyricLine bg : l.backgrounds()) if (bg.hasWords()) return true;
+        return false;
     }
 
     private static float approach(float v, float to, float dt, float tau) {
@@ -1619,9 +1621,11 @@ final class LyricView extends View {
         /** The alignment pref this layout was made under; see LockLyrics.sAlign. */
         int align;
         List<LyricLine> lines;
-        StaticLayout[] main, trans, bgLay;
+        StaticLayout[] main, trans;
+        StaticLayout[][] bgLay;
         float[] base, height, dotsTop;
-        float[][] charX, charXBg;
+        float[][] charX;
+        float[][][] charXBg;
         long tookMs;
     }
 
@@ -1655,12 +1659,12 @@ final class LyricView extends View {
         b.w = w;
         b.main = new StaticLayout[n];
         b.trans = new StaticLayout[n];
-        b.bgLay = new StaticLayout[n];
+        b.bgLay = new StaticLayout[n][];
         b.base = new float[n];
         b.height = new float[n];
         b.dotsTop = new float[n];
         b.charX = new float[n][];
-        b.charXBg = new float[n][];
+        b.charXBg = new float[n][][];
         float y = 0f;
         float gap = GAP_DP * buildTextPx / TEXT_SP;
         for (int i = 0; i < n; i++) {
@@ -1683,14 +1687,16 @@ final class LyricView extends View {
             // The characters' places too, which the first draw of a word-timed line used to
             // measure one getPrimaryHorizontal at a time on the UI thread.
             if (l.hasWords()) b.charX[i] = charXOf(b.main[i], l);
-            if (l.bg != null) {
-                b.bgLay[i] = StaticLayout.Builder.obtain(l.bg.text, 0, l.bg.text.length(), bp, w)
-                        .setAlignment(align)
-                        .setIncludePad(false)
-                        .setBreakStrategy(android.graphics.text.LineBreaker.BREAK_STRATEGY_BALANCED)
-                        .build();
-                h += BG_GAP_DP * density + b.bgLay[i].getHeight();
-                if (l.bg.hasWords()) b.charXBg[i] = charXOf(b.bgLay[i], l.bg);
+            LyricLine[] backing = l.backgrounds();
+            b.bgLay[i] = new StaticLayout[backing.length];
+            b.charXBg[i] = new float[backing.length][];
+            for (int k = 0; k < backing.length; k++) {
+                LyricLine bg = backing[k];
+                b.bgLay[i][k] = StaticLayout.Builder.obtain(bg.text, 0, bg.text.length(), bp, w)
+                        .setAlignment(align).setIncludePad(false)
+                        .setBreakStrategy(android.graphics.text.LineBreaker.BREAK_STRATEGY_BALANCED).build();
+                h += BG_GAP_DP * density + b.bgLay[i][k].getHeight();
+                if (bg.hasWords()) b.charXBg[i][k] = charXOf(b.bgLay[i][k], bg);
             }
             // Left out of the layout entirely when the switch is off, rather than laid out and
             // skipped in the draw: the rows it would have taken are most of a line's height, and
@@ -2442,10 +2448,10 @@ final class LyricView extends View {
                     .build();
             lay.draw(c);
             float below = lay.getHeight();
-            if (l.bg != null) {
+            for (LyricLine bg : l.backgrounds()) {
                 bp.setShader(null);
                 bp.setMaskFilter(mf);
-                StaticLayout bl = StaticLayout.Builder.obtain(l.bg.text, 0, l.bg.text.length(),
+                StaticLayout bl = StaticLayout.Builder.obtain(bg.text, 0, bg.text.length(),
                                 bp, width)
                         .setAlignment(align)
                         .setIncludePad(false)
@@ -2553,14 +2559,15 @@ final class LyricView extends View {
         lay.getPaint().setColor(ink(a, whiteness));
         lay.draw(c);
         lay.getPaint().setColor(0xFFFFFFFF);
-        StaticLayout b = bgLay[i];
-        if (b != null) {
+        float below = lay.getHeight();
+        for (StaticLayout b : bgLay[i]) {
             int save = c.save();
-            c.translate(0f, lay.getHeight() + lyricGap(BG_GAP_DP));
+            c.translate(0f, below + lyricGap(BG_GAP_DP));
             b.getPaint().setColor(ink(a, whiteness, true));
             b.draw(c);
             b.getPaint().setColor(0xFFFFFFFF);
             c.restoreToCount(save);
+            below += lyricGap(BG_GAP_DP) + b.getHeight();
         }
         drawTranslation(c, i, a);
     }
@@ -2568,7 +2575,7 @@ final class LyricView extends View {
     /** How far down the translation starts: under the line and its background vocal. */
     private float transTop(int i) {
         float y = main[i].getHeight();
-        if (bgLay[i] != null) y += lyricGap(BG_GAP_DP) + bgLay[i].getHeight();
+        for (StaticLayout bg : bgLay[i]) y += lyricGap(BG_GAP_DP) + bg.getHeight();
         return y + lyricGap(TRANS_GAP_DP);
     }
 
@@ -2621,12 +2628,15 @@ final class LyricView extends View {
             lay.draw(c);
             lay.getPaint().setColor(0xFFFFFFFF);
         }
-        StaticLayout bl = bgLay[i];
-        if (bl != null && l.bg != null) {
+        float below = lay.getHeight();
+        LyricLine[] backing = l.backgrounds();
+        for (int k = 0; k < backing.length; k++) {
+            StaticLayout bl = bgLay[i][k];
+            LyricLine bg = backing[k];
             int save = c.save();
-            c.translate(0f, lay.getHeight() + lyricGap(BG_GAP_DP));
-            if (l.bg.hasWords()) {
-                drawWordRows(c, i, l.bg, bl, bgPaint, charXFor(i, bl, l.bg, charXBg), e,
+            c.translate(0f, below + lyricGap(BG_GAP_DP));
+            if (bg.hasWords()) {
+                drawWordRows(c, i, bg, bl, bgPaint, charXFor(k, bl, bg, charXBg[i]), e,
                         a * level,
                         a * (INACTIVE + (1f - INACTIVE) * e * UNSUNG),
                         BG_LIFT, false, 1);
@@ -2640,6 +2650,7 @@ final class LyricView extends View {
                 bl.getPaint().setColor(0xFFFFFFFF);
             }
             c.restoreToCount(save);
+            below += lyricGap(BG_GAP_DP) + bl.getHeight();
         }
         drawTranslation(c, i, a * level);
     }

@@ -3,14 +3,9 @@ package com.os4.musiccover.lyrics
 import io.github.proify.lyricon.lyric.model.LyricWord
 import io.github.proify.lyricon.lyric.model.RichLyricLine
 import kotlinx.serialization.json.Json
-import org.junit.Assert.assertArrayEquals
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
+import org.junit.Assert.*
 import org.junit.Test
 
-/** The bridge's backing vocal as LyriconSource.background builds it (from PR #103's suite). */
 class LyriconBackgroundTest {
     private fun word(text: String, begin: Long, end: Long) =
         LyricWord(text = text, begin = begin, end = end)
@@ -20,112 +15,115 @@ class LyriconBackgroundTest {
         secondaryWords = words.toList())
 
     private fun convert(line: RichLyricLine): LyricLine =
-        requireNotNull(LyriconSource.background(line, 6000))
+        requireNotNull(LyriconBackground.convert(line, 6000))
 
-    private fun assertTimed(bg: LyricLine, text: String, starts: IntArray, ends: IntArray) {
-        assertEquals(text, bg.text)
-        assertTrue(bg.hasWords())
-        assertArrayEquals(starts, bg.sylStart)
-        assertArrayEquals(ends, bg.sylEnd)
-        assertEquals(text.length, bg.charEnd.last())
-        assertTrue(bg.charEnd.toList().zipWithNext().all { (a, b) -> a < b })
-        assertEquals(0f, bg.sungChars(starts.first() - 1), 0f)
-        assertEquals(text.length.toFloat(), bg.sungChars(ends.last()), 0f)
+    private fun assertTimed(background: LyricLine, text: String, starts: IntArray, ends: IntArray) {
+        assertEquals(text, background.text)
+        assertTrue(background.hasWords())
+        assertArrayEquals(starts, background.sylStart)
+        assertArrayEquals(ends, background.sylEnd)
+        assertEquals(text.length, background.charEnd.last())
+        assertTrue(background.charEnd.toList().zipWithNext().all { (first, second) -> first < second })
+        assertEquals(0f, background.sungChars(starts.first() - 1), 0f)
+        assertEquals(text.length.toFloat(), background.sungChars(ends.last()), 0f)
     }
 
     @Test
-    fun bracketsAroundThePublishedTextKeepTheWordTimes() {
+    fun parenthesesInFullTextDoNotDiscardWordTimes() {
         val source = line("(为什么 还相信)", word("为什么", 1200, 1500), word("还相信", 1500, 2400))
-        val bg = convert(source)
-        assertTimed(bg, "为什么 还相信", intArrayOf(1200, 1500), intArrayOf(1500, 2400))
+        val background = convert(source)
+        assertTimed(background, "为什么 还相信", intArrayOf(1200, 1500), intArrayOf(1500, 2400))
         assertEquals("(为什么 还相信)", source.secondary)
-        assertEquals(1200, bg.start)
-        // Past the lead's 2000: the line stays lit until the backing vocal is sung.
-        assertEquals(2400, bg.end)
+        assertEquals(1200, background.start)
+        assertEquals(2400, background.end)
     }
 
     @Test
-    fun bracketsOnTheTimedWordsComeOffWithoutMovingTheTimes() {
-        val bg = convert(line("(为什么 还相信)",
+    fun parenthesesOnTimedWordsAreHiddenWithoutShiftingTime() {
+        val background = convert(line("(为什么 还相信)",
             word("(为什么 ", 1200, 1500), word("还相信)", 1500, 2400)))
-        assertTimed(bg, "为什么 还相信", intArrayOf(1200, 1500), intArrayOf(1500, 2400))
+        assertTimed(background, "为什么 还相信", intArrayOf(1200, 1500), intArrayOf(1500, 2400))
     }
 
     @Test
-    fun bracketsSentAsWordsOfTheirOwnAreNotSyllables() {
-        val bg = convert(line("（ 啊 ）", word("（", 1000, 1100),
+    fun separateBracketTokensDoNotBecomeSyllables() {
+        val background = convert(line("（ 啊 ）", word("（", 1000, 1100),
             word(" 啊 ", 1200, 2400), word("）", 2500, 2600)))
-        assertTimed(bg, "啊", intArrayOf(1200), intArrayOf(2400))
+        assertTimed(background, "啊", intArrayOf(1200), intArrayOf(2400))
     }
 
     @Test
-    fun flamingosDoubledTextUsesTheWordsOnce() {
-        val bg = convert(line("(为什么 还相信)为什么 还相信",
+    fun duplicatedFlamingoTextUsesTimedWordsOnce() {
+        val background = convert(line("(为什么 还相信)为什么 还相信",
             word("为什么 ", 1200, 1500), word("还相信", 1500, 2400)))
-        assertTimed(bg, "为什么 还相信", intArrayOf(1200, 1500), intArrayOf(1500, 2400))
+        assertTimed(background, "为什么 还相信", intArrayOf(1200, 1500), intArrayOf(1500, 2400))
     }
 
     @Test
-    fun wordsWithNoPublishedTextAreStillDrawn() {
-        val bg = convert(line(null, word("(啊)", 900, 3200)))
-        assertTimed(bg, "啊", intArrayOf(900), intArrayOf(3200))
+    fun missingFullTextStillUsesSecondaryWords() {
+        val background = convert(line(null, word("(啊)", 900, 3200)))
+        assertTimed(background, "啊", intArrayOf(900), intArrayOf(3200))
     }
 
     @Test
-    fun englishKeepsTheSpacesTheWordsLeaveOut() {
-        val bg = convert(line("(Fifty, fifty feet up underground)",
+    fun englishSpacesArePreservedWhenWordTokensOmitThem() {
+        val background = convert(line("(Fifty, fifty feet up underground)",
             word("Fifty,", 1200, 1400), word("fifty", 1400, 1600),
             word("feet", 1600, 1800), word("up", 1800, 2000), word("underground", 2000, 3200)))
-        assertEquals("Fifty, fifty feet up underground", bg.text)
-        assertTrue(bg.hasWords())
-        assertEquals(bg.text.length, bg.charEnd.last())
+        assertEquals("Fifty, fifty feet up underground", background.text)
+        assertTrue(background.hasWords())
+        assertEquals(background.text.length, background.charEnd.last())
     }
 
     @Test
-    fun innerBracketsAndRepeatsStay() {
-        val bg = convert(line("(Oh (echo) Oh)",
+    fun legitimateRepetitionsAndInternalParenthesesRemain() {
+        val background = convert(line("(Oh (echo) Oh)",
             word("Oh ", 1200, 1500), word("(echo) ", 1500, 1900), word("Oh", 1900, 2400)))
-        assertTimed(bg, "Oh (echo) Oh", intArrayOf(1200, 1500, 1900), intArrayOf(1500, 1900, 2400))
+        assertTimed(background, "Oh (echo) Oh", intArrayOf(1200, 1500, 1900), intArrayOf(1500, 1900, 2400))
         val separate = convert(line("(Oh) (Oh)", word("(Oh) ", 1200, 1500), word("(Oh)", 1500, 2400)))
         assertEquals("(Oh) (Oh)", separate.text)
     }
 
     @Test
-    fun anUnclosedBracketStays() {
+    fun unbalancedPunctuationIsNotBlindlyRemoved() {
         assertEquals("(Oh", convert(line("(Oh", word("(Oh", 1200, 2400))).text)
     }
 
     @Test
-    fun aLineTimedOneLosesItsBracketsToo() {
-        val bg = convert(line("(和声)"))
-        assertEquals("和声", bg.text)
-        assertFalse(bg.hasWords())
-        assertNull(bg.sylStart)
-        assertNull(LyriconSource.background(line(null), 6000))
+    fun plainBackgroundStaysSafeAndHidesOuterBrackets() {
+        val background = convert(line("(和声)"))
+        assertEquals("和声", background.text)
+        assertFalse(background.hasWords())
+        assertNull(background.sylStart)
+        assertNull(LyriconBackground.convert(line("()"), 6000))
     }
 
     @Test
-    fun timesPastAnIntLeaveItLineTimed() {
-        val bg = convert(line("(和声)", word("和声", Int.MAX_VALUE.toLong() + 1, 9000000000)))
-        assertEquals("和声", bg.text)
-        assertFalse(bg.hasWords())
+    fun invalidTimestampsAreNotNarrowedIntoNegativeIntegers() {
+        val background = convert(line("(和声)", word("和声", Int.MAX_VALUE.toLong() + 1, 9000000000)))
+        assertEquals("和声", background.text)
+        assertFalse(background.hasWords())
     }
 
     @Test
-    fun wordsGoingBackwardsLeaveItLineTimed() {
-        val bg = convert(line(null, word("和", 1800, 2400), word("声", 1200, 1800)))
-        assertEquals("和声", bg.text)
-        assertFalse(bg.hasWords())
+    fun missingWordEndUsesTheExistingTailPolicy() {
+        val background = convert(line("(啊)", word("啊", 1200, 0)))
+        assertTimed(background, "啊", intArrayOf(1200), intArrayOf(2000))
     }
 
     @Test
-    fun aWordWithNoEndIsClosedByTheLine() {
-        val bg = convert(line("(啊)", word("啊", 1200, 0)))
-        assertTimed(bg, "啊", intArrayOf(1200), intArrayOf(2000))
+    fun ownerRemainsActiveUntilBackgroundFinishes() {
+        val source = line("(和声)", word("和声", 2200, 4200))
+        val owner = LyricLine("主唱", null, 1000, 2000, false, null, null, null)
+        LyriconBackground.attach(owner, source, 6000)
+        assertEquals(4200, owner.end)
+        assertEquals(2200, owner.bg.start)
+        assertTrue(owner.bg.hasWords())
+        assertFalse(owner.hasWords())
     }
 
     @Test
-    fun theProtocolModelKeepsTheWordsThroughSerialisation() {
+    fun realProtocolModelPreservesSecondaryWordsThroughSerialization() {
         val source = line("(和声)", word("和", 1200, 1800), word("声", 1800, 2400))
         val encoded = Json.encodeToString(RichLyricLine.serializer(), source)
         val received = Json.decodeFromString(RichLyricLine.serializer(), encoded)

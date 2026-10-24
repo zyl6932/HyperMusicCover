@@ -321,7 +321,7 @@ object LyricParse {
     private fun withTranslation(line: LyricLine, text: String): LyricLine {
         val copy = LyricLine(line.text, text, line.roma, line.start, line.end, line.opposite,
             line.sylStart, line.sylEnd, line.charEnd)
-        copy.bg = line.bg
+        copy.copyBackgrounds(line)
         return copy
     }
 
@@ -329,7 +329,7 @@ object LyricParse {
     private fun withRoma(line: LyricLine, roma: String): LyricLine {
         val copy = LyricLine(line.text, line.translation, roma, line.start, line.end,
             line.opposite, line.sylStart, line.sylEnd, line.charEnd)
-        copy.bg = line.bg
+        copy.copyBackgrounds(line)
         return copy
     }
 
@@ -357,47 +357,46 @@ object LyricParse {
         // the last word down to the few milliseconds before the echo.
         val mains = src.filter { it !is KaraokeLine.AccompanimentKaraokeLine }
             .map { it.start }.sorted().toIntArray()
-        for (line in src) {
-            val nextStart = nextAfter(mains, line.start, line.end)
-            when (line) {
-                // Background vocals overlap the main line in time, so they are not lines of their
-                // own - the renderer finds the singing line by start time, and one would steal
-                // the focus for the length of an echo. They hang under the main line they belong
-                // to (the last one started by then), and stretch it if they outlast it.
-                is KaraokeLine.AccompanimentKaraokeLine -> {
-                    val b = karaoke(line, nextStart)?.let { unwrapBackground(it) } ?: continue
-                    val owner = out.lastOrNull { it.start <= b.start } ?: continue
-                    if (owner.bg == null) {
-                        owner.bg = b
-                        if (b.end > owner.end) owner.end = b.end
+        for (line in src.sortedBy { it.start }) {
+            try {
+                val nextStart = nextAfter(mains, line.start, line.end)
+                when (line) {
+                    // Background vocals overlap the main line in time, so they are not lines of their
+                    // own - the renderer finds the singing line by start time, and one would steal
+                    // the focus for the length of an echo. They hang under the main line they belong
+                    // to (the last one started by then), and stretch it if they outlast it.
+                    is KaraokeLine.AccompanimentKaraokeLine -> {
+                        val b = karaoke(line, nextStart)?.let { unwrapBackground(it) } ?: continue
+                        val owner = out.lastOrNull { it.start <= b.start } ?: continue
+                        owner.addBackground(b)
                     }
-                }
-                is KaraokeLine -> {
-                    val main = karaoke(line, nextStart)
-                    if (main != null) {
-                        out.add(main)
-                        // Where the accompaniment actually arrives. The branch above is written
-                        // for a parser that hands background vocals back as lines of their own,
-                        // and lyrics-core 0.4.7 does not: it hangs them on the main line as a
-                        // property, so that branch never fires and every background vocal was
-                        // being dropped. Both are kept - which shape comes back is the library's
-                        // business, and a version that goes back to separate lines still works.
-                        val acc = (line as? KaraokeLine.MainKaraokeLine)
-                            ?.accompanimentLines?.firstOrNull()
-                        val b = acc?.let { karaoke(it, nextStart) }?.let { unwrapBackground(it) }
-                        if (b != null) {
-                            main.bg = b
-                            if (b.end > main.end) main.end = b.end
+                    is KaraokeLine -> {
+                        val main = karaoke(line, nextStart) ?: if (
+                            (line as? KaraokeLine.MainKaraokeLine)?.accompanimentLines.isNullOrEmpty()
+                        ) null else LyricLine("", null, line.start, line.end, false, null, null, null)
+                        if (main != null) {
+                            out.add(main)
+                            // Where the accompaniment actually arrives. The branch above is written
+                            // for a parser that hands background vocals back as lines of their own,
+                            // and lyrics-core 0.4.7 does not: it hangs them on the main line as a
+                            // property, so that branch never fires and every background vocal was
+                            // being dropped. Both are kept - which shape comes back is the library's
+                            // business, and a version that goes back to separate lines still works.
+                            for (acc in (line as? KaraokeLine.MainKaraokeLine)?.accompanimentLines.orEmpty()) {
+                                karaoke(acc, nextStart)?.let { main.addBackground(unwrapBackground(it)) }
+                            }
                         }
                     }
+                    is SyncedLine -> {
+                        // Instrumental breaks arrive as empty lines; a row of nothing would take a
+                        // slot in the stack for its whole duration.
+                        if (line.content.isBlank()) continue
+                        out.add(LyricLine(line.content.trim(), line.translation,
+                            line.start, line.end, false, null, null, null))
+                    }
                 }
-                is SyncedLine -> {
-                    // Instrumental breaks arrive as empty lines; a row of nothing would take a
-                    // slot in the stack for its whole duration.
-                    if (line.content.isBlank()) continue
-                    out.add(LyricLine(line.content.trim(), line.translation,
-                        line.start, line.end, false, null, null, null))
-                }
+            } catch (error: Exception) {
+                runCatching { Xp.w("[MCLyric] invalid row skipped: $error") }
             }
         }
         out.sortBy { it.start }
@@ -464,7 +463,7 @@ object LyricParse {
         if (starts == null || ends == null || chars == null) {
             val copy = LyricLine(head, translation, line.roma, line.start, line.end,
                 line.opposite, null, null, null)
-            copy.bg = line.bg
+            copy.copyBackgrounds(line)
             return copy
         }
         // The syllables wholly inside the head stay; the one the separator falls in is cut
@@ -488,7 +487,7 @@ object LyricParse {
         if (charsOut.isEmpty()) return null
         val copy = LyricLine(head, translation, line.roma, line.start, line.end,
             line.opposite, startsOut.toIntArray(), endsOut.toIntArray(), charsOut.toIntArray())
-        copy.bg = line.bg
+        copy.copyBackgrounds(line)
         return copy
     }
 
@@ -766,6 +765,7 @@ object LyricParse {
      * by another. The last line of a song has nothing after it, and gets the fallback.
      */
     internal fun nextAfter(sorted: IntArray, t: Int, fallback: Int): Int {
+        if (t == Int.MAX_VALUE) return fallback
         val i = sorted.binarySearch(t + 1)
         val at = if (i >= 0) i else -i - 1
         return if (at < sorted.size) sorted[at] else fallback
@@ -1003,7 +1003,7 @@ object LyricParse {
             LyricLine(text, line.translation, line.roma, line.start, line.end, opposite,
                 starts.toIntArray(), ends.toIntArray(), chars.toIntArray())
         }
-        result.bg = line.bg
+        result.copyBackgrounds(line)
         return result
     }
 }

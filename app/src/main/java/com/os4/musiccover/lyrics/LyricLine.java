@@ -34,6 +34,25 @@ public final class LyricLine {
      * with its own word timing. Null for most lines.
      */
     LyricLine bg;
+    private LyricLine[] backing = new LyricLine[0];
+
+    LyricLine[] backgrounds() {
+        if (bg != null && (backing.length == 0 || backing[0] != bg)) backing = new LyricLine[]{bg};
+        return backing;
+    }
+
+    void addBackground(LyricLine line) {
+        LyricLine[] previous = backgrounds();
+        backing = java.util.Arrays.copyOf(previous, previous.length + 1);
+        backing[previous.length] = line;
+        bg = backing[0];
+        end = Math.max(end, line.end);
+    }
+
+    void copyBackgrounds(LyricLine other) {
+        bg = other.bg;
+        backing = other.backgrounds().clone();
+    }
 
     public LyricLine(String text, String translation, int start, int end, boolean opposite,
                      int[] sylStart, int[] sylEnd, int[] charEnd) {
@@ -42,21 +61,35 @@ public final class LyricLine {
 
     public LyricLine(String text, String translation, String roma, int start, int end,
                      boolean opposite, int[] sylStart, int[] sylEnd, int[] charEnd) {
-        this.text = text;
+        this.text = text == null ? "" : text;
         this.translation = translation == null || translation.trim().isEmpty()
                 ? null : translation.trim();
         this.roma = roma == null || roma.trim().isEmpty() ? null : roma.trim();
-        this.start = start;
-        // A database file is edited by hand; a line that ends before it starts is clamped here
-        // rather than trusted into a negative duration later.
-        this.end = Math.max(end, start);
         this.opposite = opposite;
         boolean words = sylStart != null && sylStart.length > 0
                 && sylEnd != null && sylEnd.length == sylStart.length
                 && charEnd != null && charEnd.length == sylStart.length;
-        this.sylStart = words ? sylStart : null;
-        this.sylEnd = words ? sylEnd : null;
-        this.charEnd = words ? charEnd : null;
+        // Validate the renderer contract once, before any Canvas/StaticLayout work. A bad
+        // word map falls back to its intact line text; other lines and backing vocals survive.
+        if (words) {
+            int previousChar = 0;
+            int previousStart = -1;
+            for (int k = 0; k < sylStart.length; k++) {
+                if (sylStart[k] < previousStart || sylStart[k] < 0 || sylEnd[k] < sylStart[k]
+                        || charEnd[k] < previousChar || charEnd[k] > this.text.length()) {
+                    words = false;
+                    break;
+                }
+                previousStart = sylStart[k];
+                previousChar = charEnd[k];
+            }
+        }
+        // Valid word timing may begin before the enclosing line's declared boundary.
+        this.start = words ? Math.min(Math.max(0, start), sylStart[0]) : Math.max(0, start);
+        this.end = Math.max(end, this.start);
+        this.sylStart = words ? sylStart.clone() : null;
+        this.sylEnd = words ? sylEnd.clone() : null;
+        this.charEnd = words ? charEnd.clone() : null;
         // A word-timed line is not over while its last word is still being sung, whatever end
         // the file reported. Most word-timed files give a line no end of its own - enhanced LRC
         // is a timestamp per word and nothing else - and lyrics-core reads the line's end off
@@ -65,7 +98,7 @@ public final class LyricLine {
         // this end and stops drawing the word path at it, so an end ahead of the last syllable
         // cuts its fill off mid-sweep: on a line whose next one starts within a second, the
         // last word gets no sweep at all and the line leaves just as it begins.
-        if (words) this.end = Math.max(this.end, sylEnd[sylEnd.length - 1]);
+        if (words) for (int wordEnd : sylEnd) this.end = Math.max(this.end, wordEnd);
     }
 
     /**

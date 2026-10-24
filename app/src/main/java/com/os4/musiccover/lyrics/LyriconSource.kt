@@ -309,51 +309,8 @@ object LyriconSource {
      * A line whose words are missing or unusable stays line-timed, which draws correctly and
      * simply does not fill word by word.
      */
-    private fun convert(line: RichLyricLine, nextStart: Int): LyricLine? {
-        val text = line.text?.trim().orEmpty()
-        val words = line.words
-        var built: LyricLine? = null
-        if (!words.isNullOrEmpty()) {
-            val sb = StringBuilder()
-            val starts = ArrayList<Int>(words.size)
-            val ends = ArrayList<Int>(words.size)
-            val chars = ArrayList<Int>(words.size)
-            for (w in words) {
-                val t = w.text ?: continue
-                if (t.isEmpty()) continue
-                sb.append(t)
-                starts.add(w.begin.toInt())
-                // A word with no end of its own is left to the tail-closing pass below, which is
-                // the same thing every other word-timed source here needs.
-                ends.add(if (w.end > w.begin) w.end.toInt() else w.begin.toInt())
-                chars.add(sb.length)
-            }
-            var n = sb.length
-            while (n > 0 && sb[n - 1].isWhitespace()) n--
-            if (n > 0 && starts.isNotEmpty()) {
-                for (k in chars.indices) if (chars[k] > n) chars[k] = n
-                val s = starts.toIntArray()
-                val e = ends.toIntArray()
-                LyricParse.closeUntimedTail(s, e, line.end.toInt(), nextStart)
-                built = LyricLine(sb.substring(0, n), line.translation,
-                    LyricParse.romaOf(line.roma, sb.substring(0, n)), line.begin.toInt(),
-                    line.end.toInt(), line.isAlignedRight, s, e, chars.toIntArray())
-            }
-        }
-        if (built == null) {
-            if (text.isEmpty()) return null
-            built = LyricLine(text, line.translation, LyricParse.romaOf(line.roma, text),
-                line.begin.toInt(), line.end.toInt(), line.isAlignedRight, null, null, null)
-        }
-        // The background vocal, which the renderer hangs under the line rather than beside it.
-        // It stretches the line if it outlasts it, as it does from a file (LyricParse.parse).
-        val bg = background(line, nextStart)
-        if (bg != null) {
-            built.bg = bg
-            if (bg.end > built.end) built.end = bg.end
-        }
-        return built
-    }
+    private fun convert(line: RichLyricLine, nextStart: Int): LyricLine? =
+        LyriconConverter.convert(line, nextStart)
 
     /**
      * The backing vocal as a line of its own, with the bridge's own word timings when it
@@ -382,84 +339,8 @@ object LyriconSource {
      * keeps the line lit until it is sung (PR #103). Word times that do not fit an Int, or that
      * go backwards, are not word times the renderer can follow: the line stays line-timed.
      */
-    internal fun background(line: RichLyricLine, nextStart: Int): LyricLine? {
-        val published = line.secondary?.trim().orEmpty()
-        val words = line.secondaryWords.orEmpty().filter { !it.text.isNullOrBlank() }
-        var built: LyricLine? = null
-        if (words.isNotEmpty() && timesFit(words)) {
-            var text = published
-            var chars = if (published.isEmpty()) null else placed(published, words)
-            if (chars == null) {
-                val sb = StringBuilder()
-                val cut = IntArray(words.size)
-                for ((k, w) in words.withIndex()) {
-                    sb.append(w.text)
-                    cut[k] = sb.length
-                }
-                var n = sb.length
-                while (n > 0 && sb[n - 1].isWhitespace()) n--
-                for (k in cut.indices) if (cut[k] > n) cut[k] = n
-                text = sb.substring(0, n)
-                chars = cut
-            }
-            if (text.isNotEmpty()) {
-                val s = IntArray(words.size) { words[it].begin.toInt() }
-                // A word with no end of its own is left to the tail-closing pass, as on the lead.
-                val e = IntArray(words.size) {
-                    val w = words[it]
-                    if (w.end > w.begin) w.end.toInt() else w.begin.toInt()
-                }
-                LyricParse.closeUntimedTail(s, e, line.end.toInt(), nextStart)
-                built = LyricLine(text, null, s[0], maxOf(line.end.toInt(), e.max()),
-                    line.isAlignedRight, s, e, chars)
-            }
-        }
-        if (built == null) {
-            // Words whose times could not be used still say what is sung.
-            val shown = published.ifEmpty { words.joinToString("") { it.text.orEmpty() }.trim() }
-            if (shown.isEmpty()) return null
-            built = LyricLine(shown, null, line.begin.toInt(), line.end.toInt(),
-                line.isAlignedRight, null, null, null)
-        }
-        return LyricParse.unwrapBackground(built)
-    }
-
-    /** Every time inside an Int, and the words in the order they are sung. */
-    private fun timesFit(words: List<LyricWord>): Boolean {
-        val fits = 0L..Int.MAX_VALUE.toLong()
-        var last = 0L
-        for (w in words) {
-            if (w.begin !in fits || w.end !in fits || w.begin < last) return false
-            last = w.begin
-        }
-        return true
-    }
-
-    /**
-     * Where each word ends in text, found in order, or null when one is not there or text goes on
-     * past the last one with anything but spaces and closing brackets - characters the word path
-     * would draw with no syllable of their own.
-     */
-    private fun placed(text: String, words: List<LyricWord>): IntArray? {
-        val chars = IntArray(words.size)
-        var at = 0
-        for ((k, w) in words.withIndex()) {
-            // Trimmed for the search only: the published line is trimmed too, so a word carrying
-            // a trailing space would otherwise not be found in it. The space then sits at the
-            // start of the next syllable's range and is still drawn.
-            val t = w.text.orEmpty().trim()
-            val i = text.indexOf(t, at)
-            if (i < 0) return null
-            at = i + t.length
-            chars[k] = at
-        }
-        for (k in at until text.length) {
-            val c = text[k]
-            if (!c.isWhitespace() && c != ')' && c != '）') return null
-        }
-        chars[chars.size - 1] = text.length
-        return chars
-    }
+    internal fun background(line: RichLyricLine, nextStart: Int): LyricLine? =
+        LyriconBackground.convert(line, nextStart)
 
     /** Diagnostics: what the bridge is doing, for the probe. Never throws. */
     @JvmStatic
