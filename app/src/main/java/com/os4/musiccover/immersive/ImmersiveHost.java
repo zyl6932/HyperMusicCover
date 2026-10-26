@@ -436,7 +436,16 @@ public final class ImmersiveHost {
 
     /** From LockIslands: the scene's island was tapped open. */
     public static void open(ImmersiveScene scene) {
-        if (sOpen == scene && !sYield) return;
+        // Direct capsule actions keep the notification folded, so opening no longer guarantees
+        // a notification-list traversal. Restore the page's window and request its normal
+        // pre-draw preparation explicitly, including a retry after a window was rebuilt.
+        if (scene.ready()) ensureSlot();
+        if (sSlot != null) sSlot.invalidate();
+        if (sOpen == scene && !sYield) {
+            apply();
+            Xp.log(TAG + "open retry " + scene.id() + ": " + presentationState(scene));
+            return;
+        }
         // Another page on the lit lock screen - just closed for this one, or still open: the one
         // dips out and the other in (SWAP_OUT_SHARE). The new one appears from nothing - or, when it is
         // the one still fading out of the last crossfade, from where it has got to: a run of
@@ -460,9 +469,30 @@ public final class ImmersiveHost {
         Xp.log(TAG + "open " + scene.id() + " (ready=" + scene.ready()
                 + " page=" + scene.hasContent() + ")");
         apply();
+        Xp.log(TAG + "open result " + scene.id() + ": " + presentationState(scene));
     }
 
     /** From LockIslands: the scene's island was pulled back in. */
+    public static boolean isOpenRequested(ImmersiveScene scene) {
+        return scene != null && sOpen == scene && !sYield;
+    }
+
+    public static boolean isPresented(ImmersiveScene scene) {
+        return isOpenRequested(scene) && sHolding && sShown && sFade > 0f
+                && sSlot != null && sSlot.isAttachedToWindow() && sPrepared.contains(scene)
+                && scene.hasContent() && mayShow();
+    }
+
+    public static String presentationState(ImmersiveScene scene) {
+        return "requested=" + isOpenRequested(scene)
+                + " ready=" + (scene != null && scene.ready())
+                + " prepared=" + sPrepared.contains(scene)
+                + " content=" + (scene != null && scene.hasContent())
+                + " slot=" + (sSlot != null && sSlot.isAttachedToWindow())
+                + " holding=" + sHolding + " shown=" + sShown + " fade=" + sFade
+                + " locked=" + onLockScreen();
+    }
+
     public static void close(ImmersiveScene scene) {
         if (sOpen != scene) return;
         sLetGo.remove(scene);

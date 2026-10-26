@@ -676,7 +676,7 @@ internal class MiniPlayerController(
         }
         // With one island out as its card, a tap on another opens it in that one's stead.
         if (key != MUSIC_ISLAND || expandedKey() != null) {
-            expandNote(key)
+            tapIsland(key)
             return
         }
         val oldBig = selectedIsland
@@ -767,6 +767,7 @@ internal class MiniPlayerController(
         // while it still showed, took it anyway on the next refresh, mid-shrink. It takes the
         // flight's picture once the flight is landing on it (flightLanding).
         if (key == held && !flightLanding) return
+        view.bindStatusIdentity(key)
         val showing = view.visibility == View.VISIBLE && !(smallGrowing && smallGrow.target == 0f)
         val note = if (key == MUSIC_ISLAND) null
             else notes.firstOrNull { it.key == key } ?: LockIslands.noteFor(key)
@@ -1507,7 +1508,7 @@ internal class MiniPlayerController(
         schedulePosition()
         pendingExpand?.let { key ->
             pendingExpand = null
-            if (selectedIsland == key) expandNote(key)
+            if (selectedIsland == key) tapIsland(key)
         }
     }
 
@@ -4628,23 +4629,41 @@ internal class MiniPlayerController(
         }
         val seats = x.seats ?: return
         val key = (if (small) seats.small else seats.big) ?: return
-        if (key == x.expanded) return
-        if (key == STACK_ISLAND && LockIslands.foldsNatively()) {
-            if (!openSingleApp("tap during a switch")) openSpread("tap during a switch")
-            return
-        }
-        trace("switch tap ${key.takeLast(6)} small=$small")
-        val wasOut = x.movers[key]?.morph != null
-        requestUp(x, key, fromPill = !small, cover = key == MUSIC_ISLAND)
-        // The music opens the cover from any place, as from the pill (tapIsland).
-        if (key == MUSIC_ISLAND && !wasOut) {
-            MiniPlayerRuntime.forgetRestoreScene()
-            Main.miniPlayerEnterCover()
-        }
+        tapIsland(key)
     }
 
-    /** What a tap on an island does: the music opens the cover, a notification its row. */
+    private var pendingNavigationFeedback: String? = null
+    private fun navigationStatus(key: String, message: String) {
+        if (selectedIsland == key) player?.showStatus(message)
+        if (smallKey == key) smallIsland?.showStatus(message)
+    }
+    private fun checkNavigationFeedback() {
+        val key = pendingNavigationFeedback ?: return
+        if (!Main.screenOnCached() || !LockIslands.sceneOpenRequested(key) ||
+            key != selectedIsland && key != smallKey) { pendingNavigationFeedback = null; return }
+        if (LockIslands.sceneIsPresented(key)) {
+            pendingNavigationFeedback = null
+            navigationStatus(key, "已进入导航界面")
+        }
+    }
     private fun tapIsland(key: String) {
+        pendingNavigationFeedback = null
+        val note = LockIslands.noteFor(key)
+        val scene = note?.takeUnless { it.redacted }?.let {
+            com.os4.musiccover.immersive.ImmersiveHost.sceneFor(it.pkg, it.focus, key)
+        }
+        if (scene?.isNavigation() == true) {
+            val entered = runCatching { LockIslands.toggleScene(key) }.getOrNull()
+            val presented = entered == true && LockIslands.sceneIsPresented(key)
+            navigationStatus(key, when {
+                entered == null -> "内容尚未就绪"
+                !entered -> "已退出导航界面"
+                presented -> "已进入导航界面"
+                else -> "正在打开导航界面"
+            })
+            if (entered == true && !presented) pendingNavigationFeedback = key
+            return
+        }
         if (key == MUSIC_ISLAND) openCover() else expandNote(key)
     }
 
@@ -8238,6 +8257,7 @@ internal class MiniPlayerController(
      * come.
      */
     private fun bindNote(view: MiniPlayerView, note: LockIslands.Note, config: JSONObject) {
+        view.bindStatusIdentity(note.key)
         // A focus notification shown in full is its template: its picture bare, as its row has
         // it, and its main button where the music's play button is.
         val template = note.focus && !note.redacted
@@ -8270,7 +8290,7 @@ internal class MiniPlayerController(
             {},
             {},
             {},
-            { expandNote(note.key) },
+            { tapIsland(note.key) },
         )
         showTimer(view, note.timer)
         showFocusAnim(view, note.anim, note.live)
@@ -9519,6 +9539,7 @@ internal class MiniPlayerController(
     }
 
     private fun position() {
+        checkNavigationFeedback()
         // The buttons laid out again may have moved the floor; the pill need not be up for it.
         runCatching { MiniPlayerRuntime.checkStackFloor() }
         val view = player ?: return
