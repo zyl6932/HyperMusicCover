@@ -586,12 +586,13 @@ private fun LyricsGroup(
                     enabled = enabled,
                     onClick = { context.startActivity(Intent(context, LyricStyleActivity::class.java)) },
                 )
+                LyricSourceSettings(enabled, module, onChange)
                 SwitchPreference(
                     title = stringResource(R.string.lyrics_online),
                     checked = module.lyricsOnline,
                     enabled = enabled,
                     onCheckedChange = {
-                        onChange(module.copy(lyricsOnline = it))
+                        onChange(module.copy(lyricsOnline = it, lyricNetwork = it))
                         ModuleBridge.setLyricsOnline(context, it)
                     },
                 )

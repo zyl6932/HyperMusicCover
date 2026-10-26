@@ -74,6 +74,28 @@ public final class LocalLyrics {
         }
     }
 
+    static Found loadEmbedded(Context ctx, MediaController controller) {
+        if (ctx == null || controller == null) return null;
+        try {
+            String path = pathOf(ctx, controller);
+            return path == null ? null : embedded(path);
+        } catch (Throwable error) {
+            Xp.w("[MCLocal] embedded lookup failed: " + error);
+            return null;
+        }
+    }
+
+    static Found loadSidecar(Context ctx, MediaController controller, String[] formats) {
+        if (ctx == null || controller == null) return null;
+        try {
+            String path = pathOf(ctx, controller);
+            return path == null ? null : sidecar(path, formats);
+        } catch (Throwable error) {
+            Xp.w("[MCLocal] sidecar lookup failed: " + error);
+            return null;
+        }
+    }
+
     /**
      * Every step of the lookup, for `op local`.
      *
@@ -370,7 +392,7 @@ public final class LocalLyrics {
     // ---------------------------------------------------------------- reading the lyric
 
     /** How much of a lyric file or tag is worth reading. Larger than any real one by far. */
-    private static final int MAX_LYRIC_BYTES = 512 * 1024;
+    private static final int MAX_LYRIC_BYTES = LocalLyricFiles.MAX_BYTES;
 
     /**
      * The lyric file sitting beside the audio, if there is one.
@@ -389,32 +411,17 @@ public final class LocalLyrics {
      * (PR #103): most songs have no file beside them, and a large folder costs more to list.
      */
     private static Found sidecar(String audio) {
-        int dot = audio.lastIndexOf('.');
-        String stem = dot <= 0 ? audio : audio.substring(0, dot);
-        java.util.Set<String> tried = new java.util.HashSet<>();
-        for (String ext : SIDECAR_FORMATS) {
-            for (String p : new String[] {stem + "." + ext, stem + "." + ext.toUpperCase()}) {
-                tried.add(p);
-                Found f = sidecarAt(p, ext);
-                if (f != null) return f;
-            }
-        }
-        File dir = new File(stem).getParentFile();
-        String[] names = dir == null ? null : dir.list();
-        if (names == null) return null;
-        java.util.Arrays.sort(names);
-        String base = new File(stem).getName();
-        for (String ext : SIDECAR_FORMATS) {
-            String want = base + "." + ext;
-            for (String name : names) {
-                if (!name.equalsIgnoreCase(want)) continue;
-                String p = new File(dir, name).getPath();
-                if (!tried.add(p)) continue;
-                Found f = sidecarAt(p, ext);
-                if (f != null) return f;
-            }
-        }
-        return null;
+        return sidecar(audio, LyricSourcePolicy.current.formats());
+    }
+
+    static Found sidecar(String audio, String[] formats) {
+        return LocalLyricFiles.first(audio, formats, file -> {
+            String body = decode(readAll(file));
+            if (!usable(body)) return null;
+            String name = file.getName();
+            String format = name.substring(name.lastIndexOf('.') + 1).toLowerCase(java.util.Locale.ROOT);
+            return new Found(body, "a ." + format + " beside it", file.getPath());
+        });
     }
 
     /** The file at p as a lyric of the given format, or null when it is absent or unusable. */

@@ -1,4 +1,5 @@
 package com.os4.musiccover;
+import com.os4.musiccover.lyrics.LyricSourcePolicy;
 
 import com.os4.musiccover.lyrics.LockLyrics;
 import com.os4.musiccover.island.MiniPlayerRuntime;
@@ -89,6 +90,9 @@ public final class ModuleState {
                     + "\nlyriconline=" + (LockLyrics.sOnline ? 1 : 0)
                     // 0 left, 1 centre, 2 right, and left when the key is absent: a file from
                     // before this setting is one where the lyrics always sat left.
+                    + "\nlyricsourcecustom=" + (LyricSourcePolicy.current.custom ? 1 : 0)
+                    + "\nlyricsourceorder=" + LyricSourcePolicy.current.sourceOrder
+                    + "\nlyriclocalformat=" + LyricSourcePolicy.current.localFormat
                     + "\nlyricalign=" + LockLyrics.sAlign
                     // The two sizes are the user's again (the 歌词外观 page, 2026-10-22); the
                     // band's other four values are still fixed and not written, see LyricStyle.
@@ -159,6 +163,17 @@ public final class ModuleState {
         sLoading = true;
         try {
             String body = new String(f.readFully()).trim();
+                String localFormat = null, legacyFormats = null;
+            for (String line : body.split("\n")) {
+                int eq = line.indexOf('=');
+                if (eq <= 0) continue;
+                String key = line.substring(0, eq).trim();
+                if ("lyriclocalformat".equals(key)) localFormat = line.substring(eq + 1).trim();
+                if ("lyricformatorder".equals(key)) legacyFormats = line.substring(eq + 1).trim();
+            }
+            LyricSourcePolicy.Config policy = LyricSourcePolicy.current;
+            LyricSourcePolicy.current = new LyricSourcePolicy.Config(policy.custom, policy.allowNetwork,
+                    policy.sourceOrder, com.os4.musiccover.lyrics.LocalLyricFormat.migrate(localFormat, legacyFormats));
             // The first version of this file was a bare "1"/"0"; keep reading those so an
             // upgrade does not silently drop a cover that is still on the phone.
             if (body.length() <= 1) {
@@ -211,7 +226,14 @@ public final class ModuleState {
                         else if ("lyrictrans".equals(k)) LockLyrics.sTrans = "1".equals(v);
                         else if ("aodsmall".equals(k)) Main.sAodSmall = "1".equals(v);
                         else if ("lyricroma".equals(k)) LockLyrics.sRoma = "1".equals(v);
-                        else if ("lyriconline".equals(k)) LockLyrics.sOnline = "1".equals(v);
+                        else if ("lyriconline".equals(k) || "lyricnetwork".equals(k)) LockLyrics.sOnline = "1".equals(v);
+                        else if ("lyricsourcecustom".equals(k)) {
+                            LyricSourcePolicy.Config p = LyricSourcePolicy.current;
+                            LyricSourcePolicy.current = new LyricSourcePolicy.Config("1".equals(v), p.allowNetwork, p.sourceOrder, p.localFormat);
+                        } else if ("lyricsourceorder".equals(k)) {
+                            LyricSourcePolicy.Config p = LyricSourcePolicy.current;
+                            LyricSourcePolicy.current = new LyricSourcePolicy.Config(p.custom, p.allowNetwork, v, p.localFormat);
+                        }
                         // Clamped in the setter; absent or unreadable means left, see saveState.
                         else if ("lyricalign".equals(k)) LockLyrics.setAlign(Integer.parseInt(v));
                         // lyricmaxlines is not read: every overlapping line is lit, see LyricFocus.
@@ -281,5 +303,8 @@ public final class ModuleState {
         }
         // Always follow the card, whatever the file said.
         Main.setAuto(true);
+        LyricSourcePolicy.Config policy = LyricSourcePolicy.current;
+        LyricSourcePolicy.current = new LyricSourcePolicy.Config(policy.custom, LockLyrics.sOnline, policy.sourceOrder, policy.localFormat);
+
     }
 }

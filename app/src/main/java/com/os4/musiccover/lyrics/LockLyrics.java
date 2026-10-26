@@ -134,17 +134,9 @@ public final class LockLyrics {
      * holds answers found under the other setting.
      */
     public static boolean setOnline(boolean on) {
-        if (on == sOnline) return false;
-        sOnline = on;
-        Main.main().post(() -> {
-            CACHE.clear();
-            if (!sEnabled || sDemo || sKey.isEmpty() || sController == null) return;
-            if (!on && sLines.isEmpty() && !sLoading) return;
-            Main.main().removeCallbacks(SETTLED_LOOKUP);
-            unpark();
-            sInfoSeen = LyricSource.infoFor(sController);
-            lookup(sKey, sController, on && !sLines.isEmpty());
-        });
+        LyricSourcePolicy.Config policy = LyricSourcePolicy.current;
+        if (on == policy.allowNetwork && on == sOnline) return false;
+        setSourcePolicy(policy.custom, on, policy.sourceOrder, policy.localFormat);
         return true;
     }
     /** The two switches together, as LyricLine.under() and the layout read them. */
@@ -184,6 +176,48 @@ public final class LockLyrics {
             view.invalidate();
             view.kick();
         }
+    }
+    public static void setSourcePolicy(boolean custom, boolean network, String sources, String formats) {
+        LyricSourcePolicy.Config previous = LyricSourcePolicy.current;
+        LyricSourcePolicy.Config next = new LyricSourcePolicy.Config(custom, network, sources, formats);
+        if (previous.custom == next.custom && previous.allowNetwork == next.allowNetwork
+                && previous.sourceOrder.equals(next.sourceOrder) && previous.localFormat.equals(next.localFormat)) return;
+        LyricSourcePolicy.current = next;
+        sOnline = network;
+        LyricSource.invalidateRequests();
+        CACHE.clear();
+        Main.main().removeCallbacks(SETTLED_LOOKUP);
+        unpark();
+        sGen++;
+        sInfoSeen = null;
+        sInfoTries = 0;
+        sSource = LyricSource.SRC_NONE;
+        if (sEnabled && !sDemo && !sKey.isEmpty()) lookup(sKey, sController, false);
+    }
+
+    static void onProviderLyrics() {
+        Main.main().post(() -> {
+            if (!sEnabled || sDemo || sKey.isEmpty() || sController == null) return;
+            if (!sLines.isEmpty() && !LyricSourcePolicy.current.mayReplace(policySource(sSource), "lyricon")) return;
+            CACHE.remove(sKey);
+            lookup(sKey, sController, !sLines.isEmpty());
+        });
+    }
+
+    static void onProviderUnavailable() {
+        Main.main().post(() -> {
+            CACHE.entrySet().removeIf(entry -> entry.getValue().source == LyricSource.SRC_LYRICON);
+            if (sDemo || !sEnabled || sKey.isEmpty()) return;
+            if (!sLoading && sSource != LyricSource.SRC_LYRICON) return;
+            LyricSource.invalidateRequests();
+            sGen++;
+            sSource = LyricSource.SRC_NONE;
+            lookup(sKey, sController, false);
+        });
+    }
+
+    private static String policySource(int source) {
+        return source == LyricSource.SRC_LYRIC_INFO ? "metadata" : srcName(source);
     }
 
     public static boolean setMaxLines(int value) {
@@ -926,6 +960,7 @@ public final class LockLyrics {
             sLoading = false;
             sSource = hit.source;
             setLines(hit.lines, "cached");
+            rereadIfNewPayload(key, c);
             return;
         }
         // What the lookup about to start will read the session as, so a payload that turns up
@@ -981,6 +1016,7 @@ public final class LockLyrics {
                 sLoading = false;
                 sSource = hit.source;
                 setLines(hit.lines, "cached");
+                rereadIfNewPayload(key, c);
                 return;
             }
             sInfoSeen = LyricSource.infoFor(c);
@@ -1013,6 +1049,7 @@ public final class LockLyrics {
         // away, Apple's lyric - on the session 0.55s after the track change - waited out ten
         // seconds of catalogues that had nothing (2026-10-06, Here's to Never Growing Up).
         if (!sEnabled || key.isEmpty() || sDemo) return;
+        if (!sLines.isEmpty() && !LyricSourcePolicy.current.mayReplace(policySource(sSource), "metadata")) return;
         if (sLoading && sParked == null && !sLines.isEmpty()) return;
         if (sParked != null && sParked.rereading) return;
         String info = LyricSource.infoFor(c);
@@ -1042,25 +1079,6 @@ public final class LockLyrics {
     private static int sInfoTries;
 
     /**
-     * The bridge has just published a song with lyrics (PR #103). Its answer often lands after the
-     * lookup for the track has already gone past it and settled on a catalogue, or on nothing; the
-     * lookup is run again, in its usual order, so the bridge's lyric takes its place. Not when
-     * what is up already came from the player's own session, its file, or the bridge itself:
-     * a re-run would only find that again.
-     */
-    static void onProviderLyrics() {
-        Main.main().post(() -> {
-            if (!sEnabled || sDemo || sKey.isEmpty() || sController == null) return;
-            if (!sLines.isEmpty() && (sSource == LyricSource.SRC_LYRIC_INFO
-                    || sSource == LyricSource.SRC_LOCAL || sSource == LyricSource.SRC_LYRICON)) {
-                return;
-            }
-            CACHE.remove(sKey);
-            lookup(sKey, sController, !sLines.isEmpty());
-        });
-    }
-
-    /**
      * Starts the lookup for `key` and puts whatever it finds on screen.
      *
      * `keepCurrent` is the whole difference between the two callers. A track change has already
@@ -1077,6 +1095,12 @@ public final class LockLyrics {
             public void onLines(List<LyricLine> lines, String why, int source) {
                 if (gen != sGen || !want.equals(sKey) || sDemo) {
                     Xp.log(TAG + "lyrics for " + want + " arrived after the track changed");
+                    return;
+                }
+                if (keepCurrent && !sLines.isEmpty() && !lines.isEmpty()
+                        && !LyricSourcePolicy.current.mayReplace(policySource(sSource), policySource(source))) {
+                    sLoading = false;
+                    refresh();
                     return;
                 }
                 Parked parked = sParked;
@@ -1104,6 +1128,7 @@ public final class LockLyrics {
                     return;
                 }
                 if (!keepCurrent && source != LyricSource.SRC_LYRIC_INFO
+                        && LyricSourcePolicy.current.mayReplace(policySource(source), "metadata")
                         && pkgOf(want).equals(sSessionPkg)) {
                     long left = sTrackAt + SESSION_WAIT_MS - SystemClock.uptimeMillis();
                     if (left > 0L) {

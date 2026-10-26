@@ -154,7 +154,7 @@ final class QqLyrics {
         org.json.JSONObject body = new org.json.JSONObject();
         body.put("comm", comm());
         body.put("req_0", req);
-        Http.Raw r = Http.request(URL, TAG, body.toString(),
+        Http.Raw r = LyricHttp.request(URL, TAG, body.toString(),
                 "User-Agent", "okhttp/3.14.9", "Referer", "https://y.qq.com/",
                 "Content-Type", "application/json");
         String text = r.text();

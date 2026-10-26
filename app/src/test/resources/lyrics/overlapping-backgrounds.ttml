@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+<body><div>
+<p begin="00:01.000" end="00:05.000"><span begin="00:01.000" end="00:02.000">Lead </span><span begin="00:02.000" end="00:05.000">tail</span><span ttm:role="x-bg" begin="00:01.500" end="00:06.000"><span begin="00:01.500" end="00:06.000">(echo one)</span></span><span ttm:role="x-bg" begin="00:02.000" end="00:07.000"><span begin="00:02.000" end="00:07.000">(echo two)</span></span></p>
+<p begin="00:03.000" end="00:04.000"><span begin="00:03.000" end="00:04.000">Overlap</span></p>
+<p begin="00:07.000" end="00:08.000"> </p>
+<p begin="00:08.000" end="00:09.000"><span begin="00:08.000" end="00:09.000">Final</span></p>
+</div></body></tt>

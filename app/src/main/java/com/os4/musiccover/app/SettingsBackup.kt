@@ -89,6 +89,9 @@ object SettingsBackup {
                 json.put(KEY_SHADE, JSONObject(module.shade as Map<*, *>))
             }
             json.put(KEY_MINI, JSONObject(module.miniConfig))
+            json.put("lyricSourcePolicy", JSONObject()
+                .put("custom", module.lyricSourceCustom).put("network", module.lyricNetwork)
+                .put("sources", module.lyricSourceOrder).put("localFormat", module.lyricLocalFormat))
         }
         return json.toString(2)
     }
@@ -98,6 +101,17 @@ object SettingsBackup {
         val settings = AppSettings.importFromJson(context, json)
         try {
             val obj = JSONObject(json)
+            obj.optJSONObject("lyricSourcePolicy")?.let { policy ->
+                ModuleBridge.setLyricSourcePolicy(context, ModuleBridge.State(
+                    lyricSourceCustom = policy.optBoolean("custom", false),
+                    lyricNetwork = policy.optBoolean("network", true),
+                    lyricSourceOrder = com.os4.musiccover.lyrics.LyricSourcePolicy.normalizeSources(policy.optString("sources")),
+                    lyricLocalFormat = com.os4.musiccover.lyrics.LocalLyricFormat.migrate(
+                        if (policy.has("localFormat")) policy.optString("localFormat") else null,
+                        policy.optString("formats")),
+                ))
+            }
+
             if (obj.has(KEY_BIAS)) ModuleBridge.setBias(context, obj.getDouble(KEY_BIAS).toFloat())
             // Only the mode. The square's size, place and corners are fixed, so a file that still
             // carries coverCardFill, coverCardPos, coverCardCorner or the dp coverCardSizeDp from

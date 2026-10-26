@@ -143,6 +143,10 @@ object ModuleBridge {
         val lyricsRoma: Boolean = false,
         /** Whether lyrics may be looked up on the network. On by default. */
         val lyricsOnline: Boolean = true,
+        val lyricSourceCustom: Boolean = false,
+        val lyricNetwork: Boolean = true,
+        val lyricSourceOrder: String = com.os4.musiccover.lyrics.LyricSourcePolicy.DEFAULT_SOURCES,
+        val lyricLocalFormat: String = com.os4.musiccover.lyrics.LocalLyricFormat.TTML,
         /** Where the lines settle in their column: 0 left, 1 centre, 2 right. */
         val lyricsAlign: Int = 0,
         /** The lyric band's height as a share of the room between the clock and the card. */
@@ -181,6 +185,7 @@ object ModuleBridge {
          * installed, there is nothing on the phone that reads a player's lyric.
          */
         val lyriconInstalled: Boolean = false,
+        val lyriconState: String = "not started",
         /** 0 system default, 1 never avoid the fingerprint icon, 2 always avoid it. */
         val fpAvoid: Int = 0,
         /** 「高德公交地铁」: the trip's island and lock screen page (AmapTransitScene.sOn). */
@@ -502,6 +507,17 @@ object ModuleBridge {
         send(context, "aodclock") { putExtra("small", !on) }
     fun setLyricsRoma(context: Context, on: Boolean) =
         send(context, "lyricroma") { putExtra("on", on) }
+    fun setLyricSourcePolicy(context: Context, state: State) =
+        send(context, "lyricsourcepolicy") {
+            putExtra("custom", state.lyricSourceCustom)
+            putExtra("network", state.lyricNetwork)
+            putExtra("sources", state.lyricSourceOrder)
+            putExtra("localformat", state.lyricLocalFormat)
+        }
+
+    /**
+     * The module validates every value, including imported settings and adb broadcasts.
+     */
     fun setLyricsOnline(context: Context, on: Boolean) =
         send(context, "lyriconline") { putExtra("on", on) }
 
@@ -723,6 +739,8 @@ object ModuleBridge {
         val clockSize: Float = 0f,
         /** See State.lyricSource. Carried with the pictures so the row keeps up mid-track. */
         val lyricSource: String = "",
+        val lyriconInstalled: Boolean = false,
+        val lyriconState: String = "",
         val left: Shot? = null,
         val right: Shot? = null,
     )
@@ -766,6 +784,8 @@ object ModuleBridge {
             clockHasGlass = b.getBoolean("clockglass", false),
             clockSize = sizeOf(b),
             lyricSource = b.getString("lyricsrc") ?: "",
+            lyriconInstalled = b.getBoolean("lyricon", false),
+            lyriconState = b.getString("lyriconstate") ?: "",
         )
     }
 
@@ -933,6 +953,11 @@ object ModuleBridge {
             aodBigClock = !b.getBoolean("aodsmall", true),
             lyricsRoma = b.getBoolean("lyricroma", false),
             lyricsOnline = b.getBoolean("lyriconline", true),
+            lyricSourceCustom = b.getBoolean("lyricsourcecustom", false),
+            lyricNetwork = b.getBoolean("lyricnetwork", true),
+            lyricSourceOrder = com.os4.musiccover.lyrics.LyricSourcePolicy.normalizeSources(b.getString("lyricsourceorder")),
+            lyricLocalFormat = com.os4.musiccover.lyrics.LocalLyricFormat.normalize(b.getString("lyriclocalformat")),
+
             lyricsAlign = b.getInt("lyricalign", 0),
             lyricFill = b.getFloat("lyricfill", 1f),
             lyricPos = b.getFloat("lyricpos", 0.5f),
@@ -944,6 +969,7 @@ object ModuleBridge {
             sessionLyric = b.getBoolean("sessionlyric", false),
             lyricSource = b.getString("lyricsrc") ?: "none",
             lyriconInstalled = b.getBoolean("lyricon", false),
+            lyriconState = b.getString("lyriconstate") ?: "not started",
             fpAvoid = b.getInt("fpavoid", 0),
             transit = b.getBoolean("transit", true),
             fpQuick = b.getString("fpquick") ?: "{}",

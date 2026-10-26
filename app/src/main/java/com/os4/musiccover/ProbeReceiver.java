@@ -1,4 +1,5 @@
 package com.os4.musiccover;
+import com.os4.musiccover.lyrics.LyricSourcePolicy;
 
 import com.os4.musiccover.lyrics.LocalLyrics;
 import com.os4.musiccover.lyrics.LockLyrics;
@@ -188,6 +189,13 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
                 LockLyrics.refresh();
                 ModuleState.saveStateSoon();
             }
+        } else if ("lyricsourcepolicy".equals(op)) {
+            LyricSourcePolicy.Config current = LyricSourcePolicy.current;
+            LockLyrics.setSourcePolicy(i.getBooleanExtra("custom", current.custom),
+                    i.getBooleanExtra("network", current.allowNetwork),
+                    i.hasExtra("sources") ? i.getStringExtra("sources") : current.sourceOrder,
+                    i.hasExtra("localformat") ? i.getStringExtra("localformat") : current.localFormat);
+            ModuleState.saveState();
         } else if ("lyriconline".equals(op)) {
             if (LockLyrics.setOnline(i.getBooleanExtra("on", !LockLyrics.sOnline))) {
                 Xp.log(Main.TAG + "lyrics from the network: " + LockLyrics.sOnline);
@@ -425,6 +433,11 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             out.putBoolean("lyrictrans", LockLyrics.sTrans);
             out.putBoolean("lyricroma", LockLyrics.sRoma);
             out.putBoolean("lyriconline", LockLyrics.sOnline);
+            out.putBoolean("lyricsourcecustom", LyricSourcePolicy.current.custom);
+            out.putBoolean("lyricnetwork", LyricSourcePolicy.current.allowNetwork);
+            out.putString("lyricsourceorder", LyricSourcePolicy.current.sourceOrder);
+            out.putString("lyriclocalformat", LyricSourcePolicy.current.localFormat);
+            out.putString("lyriconstate", LyriconSource.status());
             out.putInt("lyricalign", LockLyrics.sAlign);
             out.putInt("lyricmaxlines", LockLyrics.sMaxLines);
             out.putFloat("lyricbgsize", LockLyrics.sStyle.bgSizeSp);

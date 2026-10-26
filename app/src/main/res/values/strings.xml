@@ -348,4 +348,27 @@
     <string name="fpquick_a_camera">相机</string>
     <string name="fpquick_a_screenshot">截屏</string>
     <string name="fpquick_a_recorder">录音</string>
+    <string name="lyrics_network">允许从网络源获取歌词</string>
+    <string name="lyrics_network_summary">开启后按歌词来源优先级使用网络歌词源；关闭后仅使用歌曲元数据、歌曲目录文件和词幕。词幕提供者自身的联网不受此开关控制。</string>
+    <string name="lyrics_priority">全局歌词来源优先级</string>
+    <string name="lyrics_priority_summary">拖动右侧手柄调整顺序，越靠上越优先。无可用歌词时依次尝试下一来源。</string>
+    <string name="lyrics_priority_metadata">歌曲元数据</string>
+    <string name="lyrics_priority_local">歌曲目录文件</string>
+    <string name="lyrics_format_settings">格式设置</string>
+    <string name="lyrics_format_priority">歌曲目录文件优先级</string>
+    <string name="lyrics_format_summary">只调整同目录歌词文件的格式顺序；首选文件不存在、为空或解析失败时尝试另一格式。</string>
+    <string name="lyrics_priority_drag">拖动调整优先级</string>
+    <string name="lyrics_priority_up">提高优先级</string>
+    <string name="lyrics_priority_down">降低优先级</string>
+    <string name="lyrics_priority_reset">恢复默认顺序</string>
+    <string name="lyrics_priority_done">完成</string>
+    <string name="lyrics_priority_skipped">网络关闭，暂不使用</string>
+    <string name="lyrics_format_ttml">TTML 优先</string>
+    <string name="lyrics_format_lrc">LRC 优先</string>
+    <string name="lyricon_active">框架已连接，歌词提供方正在运行</string>
+    <string name="lyricon_connected">框架已连接，等待歌词提供方</string>
+    <string name="lyricon_disconnected">曾检测到词幕框架，当前连接已断开</string>
+    <string name="lyricon_unavailable">未收到词幕框架响应；请检查框架是否启用</string>
+    <string name="lyricon_failed">连接失败，请查看诊断日志</string>
+    <string name="lyricon_waiting">等待词幕框架反馈</string>
 </resources>
