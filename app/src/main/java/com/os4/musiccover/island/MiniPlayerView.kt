@@ -33,7 +33,7 @@ import org.json.JSONObject
 /** HyperChanger's compact card, hosted in SystemUI's shortcut area. */
 internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     private var materialLayer = MaterialElement(context)
-    private val artwork = ImageView(context)
+    private val artwork = ImageView(context).apply { setForceDarkAllowed(false) }
 
     /**
      * The artwork's place: [artwork], or a live view over it (showArtworkView). Everything that
@@ -372,7 +372,10 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     fun showArtworkDrawable(drawable: android.graphics.drawable.Drawable) {
         if (artworkOverride === drawable && artwork.drawable === drawable) return
         artworkOverride = drawable
+        artwork.imageTintList = null
+        artwork.clearColorFilter()
         artwork.setImageDrawable(drawable)
+        NavigationIconRenderer.finalView(artwork, "pill")
     }
 
     /**

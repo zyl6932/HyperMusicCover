@@ -221,13 +221,19 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     /** What a small island shows on its glass: the island's picture, or nothing. */
     fun setIcon(drawable: Drawable?) {
         val view = icon ?: ImageView(context).apply {
+            setForceDarkAllowed(false)
             scaleType = if (iconBare) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
             clipToOutline = !iconBare
             outlineProvider = elementShape
             icon = this
             addView(this, LayoutParams(0, 0))
         }
-        if (view.drawable !== drawable) view.setImageDrawable(drawable)
+        if (view.drawable !== drawable) {
+            view.imageTintList = null
+            view.clearColorFilter()
+            view.setImageDrawable(drawable)
+            NavigationIconRenderer.finalView(view, "small")
+        }
         view.visibility = if (live != null) View.INVISIBLE else if (drawable == null) View.GONE else View.VISIBLE
         view.transitionAlpha = if (iconHidden) 0f else 1f
         placeElement()
