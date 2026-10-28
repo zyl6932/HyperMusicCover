@@ -19,6 +19,15 @@ public class LyricAppearanceTest {
         assertEquals(a.toJson(), b.toJson());
         assertEquals(0xffabcdef, b.bgColor);
     }
+    @Test public void systemColorsAndIndependentFontBoundsSurviveConfiguration() {
+        LyricAppearance system = new LyricAppearance(LyricAppearance.SYSTEM, LyricAppearance.CUSTOM,
+                0x123456, 0xabcdef, 1f, .72f);
+        assertEquals(LyricAppearance.SYSTEM, LyricAppearance.parse(system.toJson()).mainMode);
+        LyricStyle style = LyricStyle.DEFAULT.with("size", 99f).with("bgsize", -1f);
+        assertEquals(36f, style.sizeSp, 0f);
+        assertEquals(10f, style.bgSizeSp, 0f);
+        assertSame(style, style.with("bgsize", Float.NaN));
+    }
     @Test public void invalidSettingsHaveSafeDefaults() {
         assertSame(LyricAppearance.DEFAULT, LyricAppearance.parse("invalid"));
         LyricAppearance a = new LyricAppearance(-1, 9, -1, -1, Float.NaN, 5f);

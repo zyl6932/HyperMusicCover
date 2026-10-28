@@ -272,6 +272,7 @@ internal fun LyricStylePageView(
                                 stringResource(R.string.lyrics_color_official),
                                 stringResource(R.string.lyrics_color_cover),
                                 stringResource(R.string.lyrics_color_custom),
+                                stringResource(R.string.lyrics_color_system),
                             ),
                             selectedIndex = mode,
                             enabled = enabled,

@@ -2221,6 +2221,12 @@ final class LyricView extends View {
      * through the unlit words (on a plum cover they read pink-grey, not grey). Sung text stays
      * white. Refreshed per frame from the tint the clock already samples; cheap when unchanged.
      */
+    @Override protected void onConfigurationChanged(android.content.res.Configuration config) {
+        super.onConfigurationChanged(config);
+        appearance = null;
+        invalidate();
+    }
+
     private void updateTint() {
         int src = Main.coverTint();
         LyricAppearance next = LockLyrics.sAppearance;
@@ -2294,6 +2300,14 @@ final class LyricView extends View {
 
     private int resolveColor(int mode, int custom, int official,
                                     boolean backing, boolean active) {
+        if (mode == LyricAppearance.SYSTEM) {
+            try {
+                return getResources().getColor(active ? android.R.color.system_accent1_100
+                        : android.R.color.system_accent1_200, null);
+            } catch (android.content.res.Resources.NotFoundException ignored) {
+                return official;
+            }
+        }
         if (mode == LyricAppearance.CUSTOM) return custom;
         if (mode == LyricAppearance.COVER && coverPalette != null) {
             return backing ? (active ? coverPalette.bgLit : coverPalette.bgDim)
