@@ -8122,7 +8122,13 @@ internal class MiniPlayerController(
     private fun ink(): Int {
         val card = Main.miniPairTitle() as? TextView
         val color = card?.takeIf { it.isAttachedToWindow }?.currentTextColor ?: rowInk() ?: materialInk()
-        return color or 0xFF000000.toInt()
+        // The AOD darkens the plate under the light frost, and the frost's near black, kept on
+        // it, could not be read on the lock screen (2026-10-24). Toward white as deep as the
+        // plate has gone, so the words turn with it rather than at once.
+        val dim = MiniPlayerRuntime.aodDimFraction
+        val base = color or 0xFF000000.toInt()
+        return if (dim <= 0f) base
+        else androidx.core.graphics.ColorUtils.blendARGB(base, android.graphics.Color.WHITE, dim)
     }
 
     private var materialInkAt = 0L

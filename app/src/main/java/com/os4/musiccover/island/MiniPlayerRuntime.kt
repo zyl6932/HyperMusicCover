@@ -869,6 +869,16 @@ object MiniPlayerRuntime {
     private var aodDimArgs: Array<Any?>? = null
 
     /**
+     * How far the AOD's colours are on the views, 0 the lock screen's plate and 1 the AOD's dark
+     * one; a frame whose depth could not be read counts as all the way.
+     */
+    internal val aodDimFraction: Float get() = when {
+        aodDimArgs == null -> 0f
+        aodDimDepth < 0f -> 1f
+        else -> aodDimDepth.coerceIn(0f, 1f)
+    }
+
+    /**
      * The last frame as the views take it: the card's own blend and glass eased toward the AOD's
      * by the frame's depth ([dimDepth]). Null to put the frame's own values on as they come.
      */
