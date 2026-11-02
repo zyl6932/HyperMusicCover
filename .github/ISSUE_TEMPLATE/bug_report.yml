@@ -11,7 +11,7 @@ body:
         > [!IMPORTANT]
         > 1. **先搜索再提交**：请先在 [Issues](https://github.com/zyl6932/HyperMusicCover/issues) 中搜索，确认没有相同或相似的问题。
         > 2. **更新后必须重启生效范围**：安装或更新模块后，需要重启系统界面（SystemUI）与 MiWallpaper，否则测到的仍是旧版本。
-        > 3. **请用 nightly 或正式版复测**
+        > 3. **反馈前请用最新 nightly 版或者最新正式版复测**
 
   - type: dropdown
     id: category

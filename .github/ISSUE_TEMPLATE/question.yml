@@ -19,7 +19,7 @@ body:
         > A：请检查歌词来源设置，以及当前播放器是否在支持范围内。
         >
         > **Q4：和其他模块冲突？**
-        > A：请先排除 HyperSystemUIHook 等会打包旧版 MusicCover 的模块。
+        > A：请先排除 HyperChanger 等会打包旧版 MusicCover 的模块。
         >
         > **Q5：怎么提供日志？**
         > A：LSPosed 管理器 → 日志 → 导出；logcat 请复现后立即抓取。
