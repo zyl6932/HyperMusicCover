@@ -1,0 +1,142 @@
+name: 🐛 缺陷反馈 (Bug Report)
+description: 提交封面、时钟、歌词、锁屏岛、壁纸或系统界面相关的问题
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈问题！提交前请确认：
+
+        > [!IMPORTANT]
+        > 1. **先搜索再提交**：请先在 [Issues](https://github.com/zyl6932/HyperMusicCover/issues) 中搜索，确认没有相同或相似的问题。
+        > 2. **更新后必须重启生效范围**：安装或更新模块后，需要重启系统界面（SystemUI）与 MiWallpaper，否则测到的仍是旧版本。
+        > 3. **请用 nightly 或正式版复测**
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: 问题分类
+      description: 请选择问题涉及的功能模块
+      options:
+        - 🖼️ 锁屏封面与时钟（全屏封面、方块卡片、保留壁纸、时钟缩放）
+        - 📝 歌词（逐字歌词、翻译、歌词来源、锁屏歌词样式）
+        - 🔔 通知与锁屏岛（普通通知、聚合岛、通知下沉）
+        - 💊 胶囊与超级岛（音乐胶囊、展开/收起、形变）
+        - 🖼️ 壁纸与材质（锁屏壁纸、轮播、磨砂/玻璃、压暗）
+        - ⚙️ 设置界面（开关无效、排版、滑块）
+        - 💥 崩溃 / 黑屏 / SystemUI 重启
+        - ⚡ 性能与耗电（掉帧、卡顿、发热）
+        - ❓ 其它
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 模块版本
+      description: 请填写「设置 → 关于」显示的版本号，不要只写「最新版」
+      placeholder: 例如：v0.9.47
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: 设备与系统版本
+      description: 请提供机型、HyperOS 版本与 Android 版本
+      placeholder: 例如：小米 17（HyperOS 4.0.0 / Android 17）
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: LSPosed 作用域
+      description: 模块在 LSPosed 中勾选了哪些作用域
+      options:
+        - 已勾选 SystemUI
+        - 已勾选 MiWallpaper
+        - 两者都勾选
+        - 不确定 / 未检查
+    validations:
+      required: true
+
+  - type: textarea
+    id: other_modules
+    attributes:
+      label: 同时启用的其他模块（可选）
+      description: 若安装了 HyperChanger 等会打包旧版 MusicCover 的模块，请务必注明，便于排除冲突
+      placeholder: 例如：HyperChanger、其他 SystemUI 类模块
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 详细描述在什么场景下发生了什么异常
+      placeholder: 请清晰描述异常现象、出现频率与触发时机...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请按顺序列出可以稳定复现的操作
+      placeholder: |
+        1. 锁屏并点亮屏幕
+        2. 播放音乐，等待封面出现
+        3. 观察到「...」
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: 期望行为与实际行为
+      placeholder: |
+        - 期望行为：
+        - 实际行为：
+
+  - type: textarea
+    id: settings_state
+    attributes:
+      label: 相关开关状态（可选）
+      description: 涉及界面渲染时请说明以下设置
+      placeholder: |
+        - 封面模式：全屏封面 / 方块卡片 / 保留壁纸
+        - 锁屏岛 / 胶囊：开启 / 关闭
+        - 歌词来源：
+        - 动态封面：开启 / 关闭
+        - 材质样式：磨砂 / 玻璃
+
+  - type: textarea
+    id: media
+    attributes:
+      label: 截图或录屏（可选）
+      description: 直接拖入图片或视频，可以极大提高排查效率
+      placeholder: 拖入附件或粘贴链接
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 崩溃堆栈（强烈建议）
+      description: |
+        日志对定位问题非常关键。
+        - **模块日志**：LSPosed 管理器 → 日志 → 导出。
+        - **系统日志**：复现后立即抓取 `adb logcat -b main -d > logcat.txt`，日志可能被系统刷掉，越早越好。
+      placeholder: 粘贴关键日志，或直接拖入日志文件附件
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 确认清单
+      options:
+        - label: 我已在 Issues 中搜索过，确认没有相同或相似的未解决问题
+          required: true
+        - label: 我使用的是 nightly 或正式版（两者都是 release 构建；本地 debug 构建存在已知卡顿）
+          required: true
+        - label: 更新模块后我已重启系统界面（SystemUI）与 MiWallpaper，问题仍然存在
+          required: true
+        - label: 我已尽量提供完整的版本、机型与复现步骤
+          required: true

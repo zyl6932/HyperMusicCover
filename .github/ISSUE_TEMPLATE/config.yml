@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📦 下载正式版本 (Releases)
+    url: https://github.com/zyl6932/HyperMusicCover/releases
+    about: 获取最新 release 版本与更新说明
+  - name: 📖 安装与使用说明
+    url: https://github.com/zyl6932/HyperMusicCover#readme
+    about: 查看安装步骤、LSPosed 作用域与功能说明
