@@ -236,8 +236,12 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             // changed in place - lit as applyBarGlow lights a new one, or put back to
             // the flat bar it was built as (HyperTweaks.clearBarGlow).
             View bar = Main.findLockScreenView("media_progress_bar");
-            String r = bar == null ? "no card up" : HyperTweaks.sBarGlow
-                    ? HyperTweaks.applyBarGlow(bar) : HyperTweaks.clearBarGlow(bar);
+            // With advanced material off the stock flat bar stays (#121); the switch is
+            // kept, and the bar lights when the material comes back on.
+            String r = bar == null ? "no card up" : !HyperTweaks.sBarGlow
+                    ? HyperTweaks.clearBarGlow(bar)
+                    : HyperTweaks.materialOn(bar.getContext())
+                            ? HyperTweaks.applyBarGlow(bar) : "advanced material off, left flat";
             Xp.log(Main.TAG + "media bar glow " + (HyperTweaks.sBarGlow ? "on" : "off")
                     + " - " + r);
             setResultData((HyperTweaks.sBarGlow ? "on " : "off ") + r);

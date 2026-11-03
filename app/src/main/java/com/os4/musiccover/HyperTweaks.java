@@ -215,7 +215,8 @@ final class HyperTweaks {
             Class<?> cls = Xp.findClass(CLS_MEDIA_BAR, cl);
             Xp.hookAllConstructors("sysui.media_bar.ctor", cls, chain -> {
                 Object result = chain.proceed();
-                if (wanted.getAsBoolean()) {
+                if (wanted.getAsBoolean()
+                        && materialOn(((android.view.View) chain.getThisObject()).getContext())) {
                     try {
                         applyBarGlow((android.view.View) chain.getThisObject());
                     } catch (Throwable t) {
@@ -249,6 +250,105 @@ final class HyperTweaks {
             ok(what);
         } catch (Throwable t) {
             failed(what, t);
+        }
+        // Its own install: without it the switch still holds for every card built after it was
+        // flipped, only the bar already up waits for the next one.
+        String follow = "media-bar-glow-material";
+        try {
+            Class<?> config = Xp.findClass(CLS_CONFIG_CONTROLLER, cl);
+            Xp.hookAll("sysui.media_bar.material", config, "onConfigurationChanged", chain -> {
+                Object result = chain.proceed();
+                try {
+                    Object arg = chain.getArgs().isEmpty() ? null : chain.getArgs().get(0);
+                    if (arg instanceof android.content.res.Configuration) {
+                        int blur = blurOf((android.content.res.Configuration) arg);
+                        // Configuration changes come for rotation, night mode and the rest;
+                        // only a change of this one value is worth a look at the card.
+                        if (blur != sLastBlur) {
+                            sLastBlur = blur;
+                            followMaterial(wanted.getAsBoolean() && materialOn(blur));
+                        }
+                    }
+                } catch (Throwable t) {
+                    Xp.log(TAG + "media bar did not follow the material switch: " + t);
+                }
+                return result;
+            });
+            ok(follow);
+        } catch (Throwable t) {
+            failed(follow, t);
+        }
+    }
+
+    /** The last Configuration.blur seen by the hook above; MIN_VALUE before the first. */
+    private static volatile int sLastBlur = Integer.MIN_VALUE;
+
+    private static volatile Field sBlurField;
+    private static volatile boolean sBlurFieldTried;
+
+    /**
+     * Configuration.blur, the user's advanced material switch: 1 on, 2 off - not 0, measured on
+     * OS4.0.6 (2026-11-04), and the OEM's own MiBlurCompat likewise asks only "== 1". -1 when
+     * this build has no such field, which is taken as on - the glow as it was before the switch
+     * was heeded.
+     */
+    private static int blurOf(android.content.res.Configuration config) {
+        if (!sBlurFieldTried) {
+            try {
+                Field f = android.content.res.Configuration.class.getDeclaredField("blur");
+                f.setAccessible(true);
+                sBlurField = f;
+            } catch (Throwable ignored) {
+                // Not on this build.
+            }
+            sBlurFieldTried = true;
+        }
+        Field f = sBlurField;
+        int blur;
+        try {
+            blur = f == null ? -1 : f.getInt(config);
+        } catch (Throwable t) {
+            blur = -1;
+        }
+        if (blur != sLoggedBlur) {
+            sLoggedBlur = blur;
+            Xp.log(TAG + "Configuration.blur = " + blur + (f == null ? " (no such field)" : ""));
+        }
+        return blur;
+    }
+
+    /** The last value blurOf logged, so a value is written once per change, not per card. */
+    private static volatile int sLoggedBlur = Integer.MIN_VALUE;
+
+    /**
+     * Whether the card's bar may glow. With advanced material off the card is a flat white one,
+     * and the shader draws a white bar on it: the bar is simply gone (#121). The stock flat bar is
+     * what the OEM made for that card, so it is left alone.
+     */
+    static boolean materialOn(android.content.Context ctx) {
+        return materialOn(blurOf(ctx.getResources().getConfiguration()));
+    }
+
+    private static boolean materialOn(int blur) {
+        return blur == 1 || blur == -1;
+    }
+
+    /**
+     * The material switch flipped with a card up: the bars this lit go back to flat, or the one on
+     * screen is lit. A copy of the set is walked, because clearing a bar takes it out of the set.
+     */
+    private static void followMaterial(boolean glow) {
+        if (glow) {
+            android.view.View bar = Main.findLockScreenView("media_progress_bar");
+            if (bar != null) Xp.log(TAG + "media bar glow back with the material: " + applyBarGlow(bar));
+            return;
+        }
+        java.util.List<android.view.View> lit;
+        synchronized (sGlowBars) {
+            lit = new java.util.ArrayList<>(sGlowBars.keySet());
+        }
+        for (android.view.View bar : lit) {
+            Xp.log(TAG + "media bar glow off with the material: " + clearBarGlow(bar));
         }
     }
 
@@ -1076,8 +1176,31 @@ final class HyperTweaks {
     private static void pluginMaterialGuards(ClassLoader cl, String idPrefix) {
         try {
             Class<?> blurCompat = Xp.findClass(CLS_MI_BLUR_COMPAT, cl);
+            // The stock answer is "material supported AND the user's advanced material switch is
+            // on (getBlurCompat == 1) AND the default theme". Only the theme half is ours to lift.
+            // Answering true outright also overrode the switch: with advanced material off, the
+            // control centre took the material path anyway, skipped its plain card backgrounds,
+            // and drew no blur either - a media card with no backdrop at all (#121). Without the
+            // switch's own reader there is nothing safe to say, so the hook is left out.
+            final java.lang.reflect.Method blurOf = blurCompat.getDeclaredMethod(
+                    "getBlurCompat", android.content.res.Configuration.class);
+            blurOf.setAccessible(true);
             Xp.hookAll(idPrefix + ".glass.blur_compat",
-                    blurCompat, "getBackgroundMaterialOpenedInDefaultTheme", chain -> Boolean.TRUE);
+                    blurCompat, "getBackgroundMaterialOpenedInDefaultTheme", chain -> {
+                        Object stock = chain.proceed();
+                        if (Boolean.TRUE.equals(stock)) return stock;
+                        try {
+                            Object arg = chain.getArgs().isEmpty() ? null : chain.getArgs().get(0);
+                            if (!(arg instanceof android.content.Context)) return stock;
+                            android.content.res.Configuration config =
+                                    ((android.content.Context) arg).getResources().getConfiguration();
+                            Object blur = blurOf.invoke(null, config);
+                            return (blur instanceof Integer && (Integer) blur == 1) ? Boolean.TRUE : stock;
+                        } catch (Throwable t) {
+                            // Unreadable switch: the stock answer, not glass the user turned off.
+                            return stock;
+                        }
+                    });
         } catch (Throwable t) {
             failed("glass-blur-compat", t);
         }
