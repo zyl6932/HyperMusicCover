@@ -507,6 +507,20 @@ object MiniPlayerRuntime {
     private var notificationBackground: android.graphics.drawable.Drawable.ConstantState? = null
     private var notificationSignature: Any? = null
     private var notificationSource: WeakReference<View>? = null
+
+    /**
+     * The rest of an ordinary row's dressing, by method, as last given: its blur mode, outline
+     * switches, material type and its glass's maximum size. Only the blend and the glass were
+     * taken (#73), the rest left to the media card's recipe, which sets none of them - and the
+     * glass's size comes on its own, with the row's size, not in the dressing at all. Replayed
+     * so the pill is dressed as the row is (#122). They are not what made its glass darker and
+     * greener than the row's - that was the container (matchRowContainer) - but without them
+     * the two were still not the same material.
+     */
+    private val notificationExtras = java.util.concurrent.ConcurrentHashMap<String, Recorded>()
+
+    private val NOTIFICATION_EXTRAS = setOf("setBlurOutlineEnable", "setGlassOutlineEnable",
+        "setMiViewBlurModeCompat", "setMiViewMaterialTypeCompat", "setMiGlassSdfMaxSizeCompat")
     private var notificationFocusCheck: Method? = null
     private var recording: ArrayList<Recorded>? = null
     private var recordTarget: View? = null
@@ -657,8 +671,11 @@ object MiniPlayerRuntime {
     /** Only ordinary rows supply the glass; expanded focus cards have their own darker material. */
     private fun recordNotificationMaterial(method: Method, args: Array<Any?>) {
         if (!Main.keyguardLocked() || MiniPlayerScene.aodActive) return
-        if (method.name != "applyElementViewBlend" && method.name != "setMiGlassCompat") return
+        val extra = method.name in NOTIFICATION_EXTRAS
+        if (method.name != "applyElementViewBlend" && method.name != "setMiGlassCompat" && !extra) return
         val element = args.firstOrNull { it is View } as? View ?: return
+        // The background's own, not anything else in the row (its children are dressed too).
+        if (extra && !element.javaClass.name.contains("NotificationBackgroundView")) return
         if (element is MaterialElement) return
         var ancestor: View? = element
         var row: View? = null
@@ -684,6 +701,21 @@ object MiniPlayerRuntime {
         val previousSource = notificationSource?.get()
         if (previousSource != null && previousSource !== source && previousSource.isAttachedToWindow) return
         notificationSource = WeakReference(source)
+        if (extra) {
+            // Kept for the next dressing, not a re-dress of every island now: the glass's size
+            // comes again with every change of the row's height.
+            val at = args.indexOfFirst { it === element }
+            if (at < 0) return
+            val first = notificationExtras.put(method.name,
+                Recorded(method, Array(args.size) { i -> copyArray(args[i]) }, at)) == null
+            // Type 1 and the size come after the blend and glass that re-dress the islands: the
+            // first of each re-dresses them once more, or they would wait for the next change.
+            if (first && notificationBlend != null && notificationGlass != null) {
+                materialGeneration++
+                refresh()
+            }
+            return
+        }
         when (method.name) {
             "applyElementViewBlend" -> {
                 // An ordinary row blends two layers (NotificationRowBlurEffect: the int overload,
@@ -1905,7 +1937,9 @@ object MiniPlayerRuntime {
         }
         return "nlook=${arg(notificationBlend)}/${arg(notificationGlass)} nsrc=${notificationSource?.get() != null} " +
             "fallback=${notificationLook()?.let { arg(it.first) + "/" + arg(it.second) }} " +
-            "cardBg=${bg(cardBackground)} notifBg=${bg(notificationBackground)} recipe={$recipe}"
+            "cardBg=${bg(cardBackground)} notifBg=${bg(notificationBackground)} recipe={$recipe}" +
+            " nextra={" + notificationExtras.values.joinToString(" ; ") { c ->
+                c.method.name + c.args.joinToString(",", "(", ")") { arg(it) } } + "}"
     }
 
     /** For `op mini`: the pill, the card, and the torch button's chain as they are right now. */
@@ -2028,6 +2062,13 @@ object MiniPlayerRuntime {
         return true
     } finally { android.os.Trace.endSection() } }
 
+    /** A spread's visible progress (0 islands, 1 list) while one moves, else NaN: for the clock. */
+    @JvmStatic fun spreadClockProgress(): Float =
+        live().firstNotNullOfOrNull { it.spreadClockProgress() } ?: Float.NaN
+
+    /** A spread stands open as the lock screen's list. */
+    @JvmStatic fun spreadListShown(): Boolean = live().any { it.spreadListShown() }
+
     /**
      * The top of visible stack content, MAX_VALUE with no visible rows, or NaN when unavailable.
      * The clock is given this rather than the stack's
@@ -2140,6 +2181,42 @@ object MiniPlayerRuntime {
     }
 
     /**
+     * A notification pill's blur container set as the rows' own is (#122): the stack's container
+     * (SharedNotificationContainer, the first view above the rows blurring the window) blurs at
+     * 120 with forceSDFT; applyContainerViewBlur left the pill's at its default 300 without it.
+     * The same blend and glass over that drew darker and greener at the card's size and lighter
+     * smaller - the pill's container is only the pill, and a radius of 300 in it reached past
+     * its edges - and the morph's hand-over to the row switched between the two in a frame.
+     * Matched, the two are close but still not the same glass: the stack's container is the
+     * whole screen and the pill's only the pill, which no setting changes - so a morph crosses
+     * them over where the row is at rest (MiniCardMorph.CROSS_MS) rather than switching.
+     * Read from the live container rather than written in, as the OEM's own value may change.
+     */
+    private fun matchRowContainer(container: View) {
+        val row = notificationSource?.get() ?: return
+        var v: View? = row.parent as? View
+        var source: View? = null
+        while (v != null) {
+            val radius = runCatching { View::class.java.getMethod("getMiBackgroundBlurRadius").invoke(v) as Int }
+                .getOrDefault(0)
+            if (radius > 0) {
+                source = v
+                break
+            }
+            v = v.parent as? View
+        }
+        val from = source ?: return
+        runCatching {
+            val radius = View::class.java.getMethod("getMiBackgroundBlurRadius").invoke(from) as Int
+            View::class.java.getMethod("setMiBackgroundBlurRadius", Int::class.javaPrimitiveType).invoke(container, radius)
+        }.onFailure { Xp.log("MCMini: container blur radius not matched: $it") }
+        runCatching {
+            val sdft = View::class.java.getMethod("getForceSDFT").invoke(from) as Boolean
+            View::class.java.getMethod("setForceSDFT", Boolean::class.javaPrimitiveType).invoke(container, sdft)
+        }.onFailure { Xp.log("MCMini: container SDFT not matched: $it") }
+    }
+
+    /**
      * The pill's material: the card's recorded calls replayed on the pill's layer, with the
      * pill itself made the blur container they expect above them.
      *
@@ -2175,6 +2252,7 @@ object MiniPlayerRuntime {
                     Class.forName("miuix.core.util.MiuiBlurUtils", false, classLoader)
                         .getMethod("setMiBlurWinType", View::class.java).invoke(null, container)
                 }
+                if (notificationStyle) matchRowContainer(container)
             } }
             if (cardRecipe == null) loadRecipe(ctx, classLoader)
             val recipe = cardRecipe
@@ -2198,8 +2276,27 @@ object MiniPlayerRuntime {
                     val setGlass = notificationGlassMethod ?: glassMethod ?: recipe?.lastOrNull {
                         it.method.name == "setMiGlassCompat"
                     }?.method
+                    // In the row's own order: material type 0, the outlines
+                    // and blur mode, the blend and glass, type 1, and the glass's size last.
+                    fun replay(name: String, edit: ((Array<Any?>) -> Unit)? = null) {
+                        val call = notificationExtras[name] ?: return
+                        val args = call.args.copyOf()
+                        args[call.viewAt] = view
+                        edit?.invoke(args)
+                        runCatching { call.method.invoke(null, *args) }
+                            .onFailure { Xp.log("MCMini: notification $name not replayed: $it") }
+                    }
+                    replay("setMiViewMaterialTypeCompat") { a ->
+                        val i = a.indexOfFirst { it is Int }
+                        if (i >= 0) a[i] = 0
+                    }
+                    replay("setBlurOutlineEnable")
+                    replay("setGlassOutlineEnable")
+                    replay("setMiViewBlurModeCompat")
                     blend?.invoke(null, ctx, view, false, colors, false)
                     setGlass?.invoke(null, view, glass)
+                    replay("setMiViewMaterialTypeCompat")
+                    replay("setMiGlassSdfMaxSizeCompat")
                 } }.onFailure { Xp.log("MCMini: notification glass unavailable: $it") }
             }
             dressedViews.add(view)

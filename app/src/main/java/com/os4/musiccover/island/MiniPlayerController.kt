@@ -4857,14 +4857,32 @@ internal class MiniPlayerController(
         var slept = false
         var wokeAt = 0L
         var lastFrameAt = 0L
+        /** The progress the clock was last asked to follow (ClockRoom.roomForRows). */
+        var clockP = Float.NaN
     }
 
     private class SpreadCollapseFinger(val startY: Float, val startProgress: Float, val range: Float) {
         var y = startY
         var ended = false
         var target = 1f
-        fun progress(): Float = if (ended) target
+        /**
+         * Let go: from where the finger left it to [target], on the cards' own spring with the
+         * finger's speed. Jumped straight to the end, a pull let go half way had the card in
+         * the island (or back in the list) on the very next frame (#122, filmed 2026-11-04).
+         */
+        val motion = com.os4.musiccover.CoverMorphMotion()
+        var steppedAt = 0L
+        fun progress(): Float = if (ended) motion.value
             else MiniPlayerStackGesture.collapseProgress(startProgress, y - startY, range)
+        /** Still on its way to [target] after the let-go. */
+        fun settling(): Boolean = ended && !motion.atRest()
+        fun step() {
+            if (!ended || motion.atRest()) return
+            val now = android.os.SystemClock.uptimeMillis()
+            val dt = if (steppedAt == 0L) 1f / 120f else ((now - steppedAt) / 1000f).coerceIn(0f, 0.05f)
+            steppedAt = now
+            motion.step(dt, Main.sClockResponse)
+        }
     }
 
     /**
@@ -4874,12 +4892,19 @@ internal class MiniPlayerController(
      * back down, the list went on opening, stopped half way under the held finger and went to
      * an end on its own a moment later (the user, 2026-09-30).
      */
-    private class SpreadFinger(val startY: Float) {
+    private class SpreadFinger(val startY: Float, val lift: Float = 0f) {
         var y = startY
         /** The pull at the moment the stack started to follow: its scroll's zero. */
         var base = Float.NaN
         var ended = false
         var toList = false
+        /**
+         * On screen, from the pill at rest to the lead row: the finger's pull over this is the
+         * spread's progress, so the card stays under the finger. Over the stack's scroll (220px
+         * against ~700px on screen) the card ran three times ahead of it and the first frame
+         * leapt a quarter of the way (#122). 0 until the morphs have started.
+         */
+        var span = 0f
         fun pulled() = startY - y
     }
 
@@ -4971,6 +4996,11 @@ internal class MiniPlayerController(
         val finger = s.collapseFinger?.takeIf { !it.ended } ?: return
         finger.target = if (MiniPlayerStackGesture.commits(
                 finger.y - finger.startY, velocityY, density(), cancelled)) 0f else 1f
+        // From the finger's last place and speed: down the screen is toward the islands (0).
+        finger.motion.value = finger.progress()
+        finger.motion.velocity = if (cancelled || finger.range <= 0f) 0f
+            else (-velocityY / finger.range).coerceIn(-COLLAPSE_RELEASE_SPEED, COLLAPSE_RELEASE_SPEED)
+        finger.motion.target = finger.target
         finger.ended = true
         s.still = 0
         NumState.goTo(if (finger.target == 0f) "NUMBER" else "LIST", why = "island collapse released")
@@ -5185,10 +5215,21 @@ internal class MiniPlayerController(
         s.lastY = Int.MIN_VALUE
         // Under a finger the stack goes where it takes it (followFinger), from where it is now.
         LockIslands.openStack("spread", scroll = held == null)
-        if (held != null) held.base = held.pulled()
+        if (held != null) {
+            // From the pill to the row as it is now, and on by the scroll still to come: the
+            // row rides the stack's scroll up to its place in the list.
+            held.span = if (s.stacked) 0f
+                else collapseRange(s) + kotlin.math.abs(s.cardsY - s.islandsY)
+            // Started from where the pill was lifted to, not from its rest: the lift is already
+            // part of the way out.
+            held.base = held.pulled() - if (s.stacked) 0f else held.lift
+        }
         // A short or unavailable scroll range can read as fully open on this first frame.
         // The visible islands still begin at their folded pose and catch up over real frames.
-        s.rawProgress = spreadProgress(s, NumState.position() ?: s.islandsY)
+        s.rawProgress = if (held != null && held.span > 0f) {
+            followFinger(s, held)
+            fingerProgress(held)
+        } else spreadProgress(s, NumState.position() ?: s.islandsY)
         applySpread(s, if (s.stacked) 0f else s.rawProgress)
         spreadTrace("spread out after ${waited}ms ready=$ready measured=$measured: " + describeSpread())
     }
@@ -5198,6 +5239,7 @@ internal class MiniPlayerController(
      * posed by the progress from then on. One with no card, or no place, fades where it is.
      */
     private fun startSpreadMorphs(s: Spread, toCards: Boolean) {
+        endLeadTail()
         val pill = player
         val claimedRows = HashSet<View>()
         // Closing, the row is drawn again: its places fade in as the cards come down.
@@ -5229,6 +5271,9 @@ internal class MiniPlayerController(
                 continue
             }
             view.visibility = View.VISIBLE
+            // The morph measures the pill at rest; the finger's lift is in its progress
+            // (waitSpread), so it is handed over rather than drawn twice.
+            if (!small) view.clearNudge()
             view.alpha = if (s.stacked) when (item.seat) {
                 SEAT_SMALL -> MiniPlayerGeometry.STACK_BACK_ALPHA
                 SEAT_HIDDEN -> 0f
@@ -5236,7 +5281,8 @@ internal class MiniPlayerController(
             } else 1f
             val m = MiniCardMorph(view, native, toCards, spreadListener, landingFor(item.key, native),
                 restBox = if (small) { { smallBoxOnScreen() } } else null,
-                circle = small && !s.stacked)
+                circle = small && !s.stacked,
+                holdMaterial = item.lead && !s.stacked)
             if (!m.startDragging()) {
                 if (small) recycleSmallView(view)
                 if (item.lead) {
@@ -5325,19 +5371,60 @@ internal class MiniPlayerController(
      */
     private var leadHeld: Pair<View, ViewTreeObserver.OnPreDrawListener>? = null
 
+    /** The pill still fading out on the lead row after an opening landed (MiniCardMorph.handOff). */
+    private var leadTail: MiniCardMorph? = null
+
+    /** Whatever of the landing's fade is left, over now: the pill is wanted for something else. */
+    private fun endLeadTail() {
+        val m = leadTail ?: return
+        leadTail = null
+        m.cancel()
+    }
+
+    /**
+     * When the open list asked for the hold to go ([letLeadGoWhenSettled]); 0 while the spread
+     * still needs it. The stack's own fade of the row to 1 starts when it reads LIST, and a
+     * quick pull can land before it is done: let go then, the fade would have the row part
+     * see-through for its last frames. A guard (#122): measured on a slow pull the fade had
+     * reached 1 before the landing, and the see-through frame filmed then was the glass, not
+     * this - but nothing holds a quick one.
+     */
+    private var leadLetGoAt = 0L
+
     private fun holdLeadThroughFold(row: View?) {
         val held = leadHeld
-        if (held != null && held.first === row) return
+        if (held != null && held.first === row) {
+            leadLetGoAt = 0L
+            return
+        }
+        leadLetGoAt = 0L
         if (held != null) {
             Gen.unpreDraw(held.first, held.second)
             setFoldAlpha(held.first, if (NumState.inNumber == true) 0f else 1f)
         }
         leadHeld = null
         if (row == null) return
-        val l = ViewTreeObserver.OnPreDrawListener { setFoldAlpha(row, 1f); true }
+        val l = ViewTreeObserver.OnPreDrawListener {
+            setFoldAlpha(row, 1f)
+            val since = leadLetGoAt
+            if (since != 0L) {
+                val waited = android.os.SystemClock.uptimeMillis() - since
+                if (waited > LEAD_LET_GO_MAX_MS || NumState.inNumber == false && !NumState.busy()) {
+                    // Not from inside the observer's own dispatch.
+                    Gen.post { if (leadHeld?.first === row && leadLetGoAt != 0L) holdLeadThroughFold(null) }
+                }
+            }
+            true
+        }
         Gen.preDraw(row, l)
         leadHeld = row to l
         setFoldAlpha(row, 1f)
+    }
+
+    /** The list is open: the row is the stack's again once its own fade has reached it. */
+    private fun letLeadGoWhenSettled() {
+        if (leadHeld == null) return
+        if (leadLetGoAt == 0L) leadLetGoAt = android.os.SystemClock.uptimeMillis()
     }
 
     private fun setFoldAlpha(row: View, a: Float) {
@@ -5367,6 +5454,7 @@ internal class MiniPlayerController(
     private fun moveSpread(s: Spread) {
         s.finger?.takeIf { !it.ended && s.phase == SPREAD_OPENING }?.let { followFinger(s, it) }
         val y = NumState.position() ?: return
+        s.collapseFinger?.step()
         val p = s.collapseFinger?.progress() ?: spreadProgress(s, y)
         s.rawProgress = p
         if (s.items.any { it.morph?.active == false }) {
@@ -5375,6 +5463,7 @@ internal class MiniPlayerController(
             return
         }
         applySpread(s, visibleSpreadProgress(s, p))
+        followClock(s)
         if (y != s.lastY) spreadFrameLog(s, y, p)
         // Held by the finger, it rests where the finger does; the let-go sends it to an end.
         if (s.finger?.ended == false || s.collapseFinger?.ended == false) {
@@ -5409,7 +5498,9 @@ internal class MiniPlayerController(
         s.wasDragged = dragged
         // Still by the stack's own drag, not its pull: a fling left the pull at 44 for good, and
         // counted as a finger the spread never came to rest and stood half folded for 10s.
-        val moving = s.collapseFinger?.let { !it.ended }
+        // A let-go still springing home is moving: counted still, it was sent to the fold as
+        // "stuck" three frames in, wherever the spring was taking it.
+        val moving = s.collapseFinger?.let { !it.ended || it.settling() }
             ?: (y != s.lastY || NumState.busy() || dragged)
         s.still = if (moving) 0 else s.still + 1
         s.lastY = y
@@ -5466,6 +5557,30 @@ internal class MiniPlayerController(
             (s.finger?.let { f -> " f=${f.pulled().toInt()}${if (f.ended) "e" else ""}" } ?: ""))
     }
 
+    /**
+     * The clock asked again whenever the cards have moved: past the stack's fold threshold the
+     * stack says there is nothing on the lock screen and stops telling the clock anything, so
+     * its size would stand wherever that left it. ClockRoom.roomForRows answers with this
+     * spread's progress (spreadClockProgress).
+     */
+    private fun followClock(s: Spread) {
+        if (!s.clockP.isNaN() && kotlin.math.abs(s.progress - s.clockP) < CLOCK_FOLLOW_STEP) return
+        s.clockP = s.progress
+        com.os4.musiccover.ClockRoom.reassertClockRoom()
+    }
+
+    /**
+     * The visible progress of a spread on its way between the islands (0) and the list (1), for
+     * the clock to follow: null when none is moving. Folding, the stack reads NUMBER 15% of the
+     * way home and tells the clock its notifications are gone - the clock grew to full size in
+     * four frames with the card still over the list, and shrank back if the finger did (#122).
+     */
+    fun spreadClockProgress(): Float? = spread
+        ?.takeIf { it.phase == SPREAD_OPENING || it.phase == SPREAD_CLOSING }?.progress
+
+    /** The spread is open as the list: what the stack tells the clock now is the list's place. */
+    fun spreadListShown(): Boolean = spread?.phase == SPREAD_OPEN
+
     /** For NumState's hands-up: the row spread out is being pulled home. */
     fun spreadFolding(): Boolean {
         val s = spread ?: return false
@@ -5476,9 +5591,16 @@ internal class MiniPlayerController(
     private fun followFinger(s: Spread, f: SpreadFinger) {
         if (f.base.isNaN()) return
         val span = s.cardsY - s.islandsY
-        val d = (f.pulled() - f.base).coerceAtLeast(0f).coerceAtMost(kotlin.math.abs(span).toFloat())
+        val range = kotlin.math.abs(span).toFloat()
+        // Plain: the finger's share of the way on screen, as that share of the scroll.
+        val d = if (f.span > 0f) fingerProgress(f) * range
+            else (f.pulled() - f.base).coerceAtLeast(0f).coerceAtMost(range)
         NumState.setScroll(s.islandsY + (if (span >= 0) d else -d).toInt())
     }
+
+    /** How far out the finger has pulled the lead card, by its distance on screen. */
+    private fun fingerProgress(f: SpreadFinger): Float =
+        ((f.pulled() - f.base) / f.span).coerceIn(0f, 1f)
 
     /** The finger on a pulled-open spread moved (the pill's route, as noteDragMove). */
     fun spreadFingerMove(y: Float): Boolean {
@@ -5516,17 +5638,32 @@ internal class MiniPlayerController(
     /** The list is open: the cards are the lock screen's own, the row's views put away. */
     private fun finishOpen(s: Spread, y: Int) {
         s.collapseFinger = null
-        holdLeadThroughFold(null)
+        letLeadGoWhenSettled()
         for (item in s.items) {
-            item.morph?.cancel()
+            val m = item.morph
+            if (m != null && item.lead && !s.stacked && m.active) {
+                // The pill fades out on the row, which draws its own glass again from now
+                // (MiniCardMorph.handOff); put away once it has gone.
+                endLeadTail()
+                leadTail = m
+                m.handOff {
+                    if (leadTail === m) leadTail = null
+                    if (spread?.phase == SPREAD_OPEN) {
+                        player?.visibility = View.INVISIBLE
+                        player?.alpha = 1f
+                    }
+                }
+            } else m?.cancel()
             item.morph = null
             item.view?.let { if (item.standIn) recycleSmallView(it) }
             item.view = null
             item.standIn = false
             item.native?.let(::showRow)
         }
-        player?.visibility = View.INVISIBLE
-        player?.alpha = 1f
+        if (leadTail == null) {
+            player?.visibility = View.INVISIBLE
+            player?.alpha = 1f
+        }
         smallIsland?.visibility = View.GONE
         smallIsland?.alpha = if (stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
         if (s.items.any { it.key == MUSIC_ISLAND }) ensureNativeHeaderVisible()
@@ -5615,6 +5752,7 @@ internal class MiniPlayerController(
      */
     private fun endSpread(folded: Boolean, why: String) {
         val s = spread ?: return
+        endLeadTail()
         spread = null
         Gen.unframe(spreadFrame)
         holdLeadThroughFold(null)
@@ -5642,6 +5780,8 @@ internal class MiniPlayerController(
         }
         player?.alpha = 1f
         if (folded) player?.visibility = View.VISIBLE
+        // Let go before the rows were in: the pill was held where the finger lifted it.
+        player?.springNudgeBack(0f, 0f)
         smallIsland?.alpha = if (stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
         // The small island's place as the fold left it: whoever came down into it stays. Nobody
         // did, and a card out from before came home: that one comes up there, growing in (the
@@ -6275,9 +6415,15 @@ internal class MiniPlayerController(
         // goes.
         if (spread != null) return false
         if (key == STACK_ISLAND && LockIslands.foldsNatively()) {
-            player?.springNudgeBack(0f, 0f)
+            // The pill stays where the finger has lifted it, and the morph starts from there
+            // (startSpreadMorphs takes the nudge over). Sprung home here, it dropped back down
+            // for the frame before the morph came up past it (#122).
+            val lift = (-(player?.nudgeY ?: 0f)).coerceAtLeast(0f)
+            player?.holdNudge()
             springSmallNudgeBack(0f, 0f)
-            openSpread("pull", SpreadFinger(startY))
+            openSpread("pull", SpreadFinger(startY, lift))
+            // Refused (another motion under way): nothing takes the nudge over.
+            if (spread == null) player?.springNudgeBack(0f, 0f)
             return true
         }
         if (noteMorphKey != null || morph != null || exchange != null) return false
@@ -6445,9 +6591,18 @@ internal class MiniPlayerController(
     /**
      * The list at its top ([MiniPlayerCollapseGesture.atListTop]). Its rest is 0 except with the
      * stack island opened out as the list, where the lock screen scrolls it down under the clock.
+     *
+     * Folded natively, the stack island is never "released" (isReleased), so the open list was
+     * read against a rest of 0: resting at 220 it counted as scrolled away, the pull down was not
+     * the islands', and the stack's own fold ran home in four frames - the card gone in one and
+     * the island popping up past its place (#122). Spread out, the rest is where the spread
+     * opened it to: the same scroll its progress is measured on.
      */
     fun nativeStackAtTop(readRest: Boolean): Boolean {
-        if (readRest) restScrollY = if (LockIslands.isReleased(STACK_ISLAND)) listRestScroll() else 0f
+        val spreadRest = spread?.takeIf { it.phase == SPREAD_OPEN || it.phase == SPREAD_CLOSING }
+            ?.cardsY?.toFloat()
+        if (readRest) restScrollY = spreadRest
+            ?: if (LockIslands.isReleased(STACK_ISLAND)) listRestScroll() else 0f
         val scrollY = nativeScrollY()
         lastScrollRead = "own=$scrollY/rest=$restScrollY"
         return MiniPlayerCollapseGesture.atListTop(scrollY, restScrollY)
@@ -7267,6 +7422,9 @@ internal class MiniPlayerController(
             spread = null
             LockIslands.setSpread(false, folded = true)
         }
+        // The lead row's fold alpha is the stack's again, the pre-draw holding it off the row.
+        holdLeadThroughFold(null)
+        endLeadTail()
         restoreHeader()
         removeDiscs()
         LockIslands.removeListener(islandListener)
@@ -9843,6 +10001,12 @@ private const val SPREAD_SLEEP_GAP_MS = 700L
 private const val SPREAD_WAKE_MS = 1500L
 /** Locked again with the list kept, the row has this long to show the stack island to open. */
 private const val LIST_KEPT_WAIT_MS = 1500L
+/** The open list's lead row is held whole at most this long for the stack's own fade to reach it. */
+private const val LEAD_LET_GO_MAX_MS = 600L
+/** The spread moving less than this since the clock was last asked: not worth asking again. */
+private const val CLOCK_FOLLOW_STEP = 0.002f
+/** A pull home let go hands its speed on at most this (progress a second), as a morph's does. */
+private const val COLLAPSE_RELEASE_SPEED = 5f
 
 /** Pulled home past this (from 1, the list), the let-go folds the row home: see spreadFolding. */
 private const val SPREAD_FOLD_BELOW = 0.95f

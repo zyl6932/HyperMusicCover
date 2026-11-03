@@ -28,11 +28,51 @@ public final class ClockRoom {
      * reach up still push it as they always did.
      */
     static float roomForRows(float requested) {
+        float spread = spreadClockY(requested);
+        if (!Float.isNaN(spread)) return resetClockRoom(spread);
         float room = roomForRowsNow(requested);
         // An empty stack must immediately give back the edited clock position. Easing from
         // an old notification constraint across a doze can otherwise retain a squeezed pose.
-        if (sRoomUnobstructed) return resetClockRoom(room);
-        return easeRoom(room);
+        float out = sRoomUnobstructed ? resetClockRoom(room) : easeRoom(room);
+        learnSpreadEnds(out);
+        return out;
+    }
+
+    /**
+     * The two ends a spread moves the clock between, as they were last given: with nothing on
+     * the lock screen (the islands' end - the stack island folded, its count hidden), and with
+     * the stack island open as the list. NaN until seen.
+     */
+    static float sSpreadOpenY = Float.NaN, sSpreadListY = Float.NaN;
+
+    private static void learnSpreadEnds(float out) {
+        if (Float.isNaN(out) || out >= Float.MAX_VALUE / 2f) return;
+        if (sRoomUnobstructed) sSpreadOpenY = out;
+        else if (MiniPlayerRuntime.spreadListShown()) sSpreadListY = out;
+    }
+
+    /**
+     * Where the clock stands while the stack island's spread moves between the islands and the
+     * list: that share of the way between the two ends, so it grows as the card comes home and
+     * shrinks as it goes out. Left to the stack, a pull home read as folded 15% of the way and
+     * the clock grew to full size in four frames with the card still over it, then shrank back
+     * if the finger did (#122). NaN when no spread moves, the face is not all_in_one (the
+     * others swap layouts for any finite y), or an end is not known yet.
+     */
+    static float spreadClockY(float requested) {
+        float p = MiniPlayerRuntime.spreadClockProgress();
+        if (Float.isNaN(p) || !ClockViews.anchoredStyle()) return Float.NaN;
+        float open = Float.isNaN(sSpreadOpenY) ? unobstructedClockY() : sSpreadOpenY;
+        float list = sSpreadListY;
+        // The first list of this process: the stack's own reading once it gives one.
+        if (Float.isNaN(list) && requested < Float.MAX_VALUE / 2f && !systemClockUnobstructed()) {
+            list = roomForRowsNow(requested);
+        }
+        if (Float.isNaN(open) || Float.isNaN(list) || list >= Float.MAX_VALUE / 2f) return Float.NaN;
+        // The last frames short of an end are that end: the spread finishes a hair before it.
+        if (p < 0.01f) p = 0f;
+        else if (p > 0.99f) p = 1f;
+        return open + (list - open) * p;
     }
 
     /** roomForRows at once, for a caller that eases its own way there (ClockCollapse.exitY). */
@@ -239,7 +279,10 @@ public final class ClockRoom {
      */
     public static void reassertClockRoom() {
         if (Main.sHoldY != null) return;
-        if (systemClockUnobstructed()) {
+        // A spread moving: roomForRows answers with its progress, whatever the stack says.
+        float spread = spreadClockY(Float.MAX_VALUE);
+        boolean spreadDriven = !Float.isNaN(spread);
+        if (!spreadDriven && systemClockUnobstructed()) {
             resetClockRoom(Main.sLastSystemY);
             return;
         }
@@ -252,7 +295,12 @@ public final class ClockRoom {
             Object triple = Xp.callMethod(flow, "getValue");
             if (triple == null) return;
             float y = ((Number) Xp.callMethod(triple, "getFirst")).floatValue();
-            if (!(y < Float.MAX_VALUE / 2f)) return;
+            // Nothing on the lock screen by the stack's word: the spread's own y carries the
+            // call (it is replaced in setNotifY all the same, and the flow is left alone).
+            if (!(y < Float.MAX_VALUE / 2f)) {
+                if (!spreadDriven) return;
+                y = spread;
+            }
             sRoomNudge = -sRoomNudge;
             // Its second is whether the clock jumps (ClockBaseAnimation.notifStateChange: true
             // -> Folme setTo, false -> doNotifyHeightChangeAnimation). Copied from the system's
