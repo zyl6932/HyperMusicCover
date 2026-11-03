@@ -894,6 +894,7 @@ public final class LockLyrics {
             // when the source is something else can never replace it. Asking after the payload
             // instead both fires for that and cannot loop, because each payload is tried once.
             rereadIfNewPayload(key, c);
+            rereadIfIdentityMoved(key, c);
             return;
         }
         String lastKey = sKey;
@@ -908,6 +909,8 @@ public final class LockLyrics {
         // A different song: the budget above is per track, and so is the payload it was spent on.
         sInfoSeen = null;
         sInfoTries = 0;
+        sIdentityRetried = false;
+        sLookedUpAs = null;
         // The previous song's route says nothing about this one, and leaving it set would let a
         // track that follows a session-lyric track skip the upgrade check entirely.
         sSource = LyricSource.SRC_NONE;
@@ -966,9 +969,16 @@ public final class LockLyrics {
      */
     private static boolean staleDuration(String lastKey, String key) {
         if (lastKey == null || lastKey.isEmpty() || !pkgOf(lastKey).equals(pkgOf(key))) return false;
-        String a = lastKey.substring(lastKey.lastIndexOf('|') + 1);
-        String b = key.substring(key.lastIndexOf('|') + 1);
+        String a = durationOf(lastKey);
+        String b = durationOf(key);
         return !a.isEmpty() && !"0".equals(a) && a.equals(b) && a.matches("[0-9]+");
+    }
+
+    /** The duration field of a song key: pkg|album|duration|id-or-name (TrackIdentity.keyOf). */
+    private static String durationOf(String key) {
+        int last = key.lastIndexOf('|');
+        int prev = last <= 0 ? -1 : key.lastIndexOf('|', last - 1);
+        return prev < 0 ? "" : key.substring(prev + 1, last);
     }
 
     private static final Runnable SETTLED_LOOKUP = new Runnable() {
@@ -1035,6 +1045,36 @@ public final class LockLyrics {
         if (sParked != null) sParked.rereading = true;
     }
 
+    /**
+     * Looks `key` up once more when the lookup found nothing and the session has since been read
+     * as a different song: a lookup started at the track change, while TITLE still looked like
+     * the song, searched under TITLE - and only later did TITLE move with the singing and give
+     * way to the name ARTIST spells (TrackIdentity), which is what the catalogues have. Once per
+     * song, and never over lines already up.
+     */
+    private static void rereadIfIdentityMoved(String key, MediaController c) {
+        if (!sEnabled || sDemo || key.isEmpty() || sLoading || sParked != null
+                || !sLines.isEmpty() || sIdentityRetried || sLookedUpAs == null) {
+            return;
+        }
+        String now = readAs(c);
+        if (now.equals(sLookedUpAs)) return;
+        sIdentityRetried = true;
+        Xp.log(TAG + key + " found nothing as " + sLookedUpAs + "; now read as " + now
+                + ", looking again");
+        CACHE.remove(key);
+        lookup(key, c, false);
+    }
+
+    /** How the session reads as a lookup, to notice it being read differently. */
+    private static String readAs(MediaController c) {
+        return TrackIdentity.of(c).lookupSignature();
+    }
+
+    /** What the last lookup searched for, and whether this song has been looked up again. */
+    private static String sLookedUpAs;
+    private static boolean sIdentityRetried;
+
     /** How many times one song may be re-read because the session published something new. */
     private static final int MAX_INFO_TRIES = 3;
     /** The payload the lookup for sKey was started against, so the next one can be recognised. */
@@ -1073,6 +1113,7 @@ public final class LockLyrics {
     private static void lookup(final String want, MediaController c, final boolean keepCurrent) {
         final int gen = ++sGen;
         sLoading = true;
+        sLookedUpAs = readAs(c);
         LyricSource.load(c, new LyricSource.Callback() {
             @Override
             public void onLines(List<LyricLine> lines, String why, int source) {
@@ -1227,30 +1268,18 @@ public final class LockLyrics {
     }
 
     /**
-     * Which song the lyrics belong to - deliberately without the title.
-     *
-     * Salt Player writes the line being sung INTO the title (for car and status bar lyrics) and
-     * moves "artist - title" into the artist field. Keyed on the title, every line of every song
-     * was a new track: the lines were thrown away and parsed again a line at a time, which on
-     * screen was the lyrics blinking out and back (state log 2026-09-16 02:42). Artist, album
-     * and duration hold still across a song under either convention.
-     *
-     * Except on 汽水 and QQ, which spell the artist two ways in one song - the singer, then
-     * "歌名 — 歌手" or "歌名-歌手" while a line is in the title - so the artist is its singer here
-     * (TrackName.singer). Read as published, that switch emptied the lyrics mid-song (#56).
+     * Which song the lyrics belong to: TrackIdentity's song key - package, album, duration and the
+     * catalogue's id, never TITLE (Salt, 汽水, QQ and NetEase write the line being sung into it, and
+     * every line was a new track: the lyrics blinked out and back, 2026-09-16) nor the singer
+     * (汽水 and QQ spell it two ways in one song, #56). The card's key when the session has no
+     * metadata to key on.
      */
     private static String lyricKey(String cardKey, MediaController c) {
         String fallback = cardKey == null ? "" : cardKey;
         if (c == null || fallback.isEmpty()) return fallback;
         try {
-            android.media.MediaMetadata md = c.getMetadata();
-            if (md == null) return fallback;
-            String album = md.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM);
-            String artist = TrackName.singer(c.getPackageName(),
-                    md.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST), album);
-            long dur = md.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION);
-            if (artist == null && album == null && dur <= 0) return fallback;
-            return c.getPackageName() + "|" + artist + "|" + album + "|" + dur;
+            String key = TrackIdentity.of(c).songKey();
+            return key.isEmpty() ? fallback : key;
         } catch (Throwable t) {
             return fallback;
         }

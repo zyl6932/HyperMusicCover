@@ -10,7 +10,7 @@ import com.os4.musiccover.ClockRoom
 import com.os4.musiccover.ClockRoomPolicy
 import com.os4.musiccover.CoverMorphMotion
 import com.os4.musiccover.Main
-import com.os4.musiccover.lyrics.TrackName
+import com.os4.musiccover.lyrics.TrackIdentity
 import com.os4.musiccover.Gen
 import com.os4.musiccover.Xp
 import com.os4.musiccover.immersive.ImmersiveHost
@@ -8194,9 +8194,9 @@ internal class MiniPlayerController(
             lastTrack = ""
         }
         val metadata = metadataOf(current)
-        // The song, not the title: Salt, 汽水 and QQ sing into TITLE, and every line threw the
-        // artwork away as a track change (#47, #56).
-        val track = TrackName.songKey(current.packageName, metadata).ifEmpty {
+        // The song, not the title: Salt, 汽水, QQ and NetEase sing into TITLE, and every line
+        // threw the artwork away as a track change (#47, #56).
+        val track = TrackIdentity.of(current.packageName, metadata).songKey().ifEmpty {
             current.packageName + "|" + metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
         }
         if (track != lastTrack) {
@@ -8230,11 +8230,18 @@ internal class MiniPlayerController(
         val metadata = metadataOf(current)
         val shown = traced("MC b.thumb") { thumbnailFor(musicCover(metadata), view) }
         view.setToggleShown(true)
-        // A title that is the line being sung is cut, never scrolled (MiniPlayerView.titleScrolls).
-        view.titleScrolls = !TrackName.singsIntoTitle(TrackName.songKey(current))
+        // A player singing into TITLE: the song and singer it spells into ARTIST instead, when
+        // they can be read out (TrackIdentity). A title that is still the line being sung is cut,
+        // never scrolled (MiniPlayerView.titleScrolls).
+        val identity = TrackIdentity.of(current.packageName, metadata)
+        val sung = identity.titleIsLine()
+        val readOut = sung && identity.songIsRead()
+        view.titleScrolls = !sung || readOut
+        val title = if (readOut) identity.song() else metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+        val artist = if (readOut) identity.singer() else metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
         view.bind(
-            metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty().ifBlank { "正在播放" },
-            metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
+            title.orEmpty().ifBlank { "正在播放" },
+            artist.orEmpty()
                 .ifBlank { metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty() },
             shown,
             stateOf(current)?.state == PlaybackState.STATE_PLAYING,

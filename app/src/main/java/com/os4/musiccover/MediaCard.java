@@ -2,7 +2,7 @@ package com.os4.musiccover;
 import com.os4.musiccover.Gen;
 
 import com.os4.musiccover.lyrics.LockLyrics;
-import com.os4.musiccover.lyrics.TrackName;
+import com.os4.musiccover.lyrics.TrackIdentity;
 import com.os4.musiccover.island.MiniPlayerRuntime;
 import android.content.Context;
 import android.media.session.MediaController;
@@ -588,7 +588,7 @@ public final class MediaCard {
             }
             sCardKey = cardKey(mediaData);
             // The card's title may be one the session callback has not shown us yet.
-            TrackName.note(Main.sWatched);
+            TrackIdentity.note(Main.sWatched);
         } else {
             sCardToken = null;
             sCardKey = "";

@@ -1,5 +1,6 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.lyrics.TrackIdentity;
 import com.os4.musiccover.lyrics.TrackName;
 import android.content.Context;
 import android.content.Intent;
@@ -86,15 +87,11 @@ final class MotionCover {
         MediaController c = Main.watched();
         MediaMetadata md = c == null ? null : c.getMetadata();
         if (ctx == null || md == null) return;
-        String t = md.getString(MediaMetadata.METADATA_KEY_TITLE);
-        String a = md.getString(MediaMetadata.METADATA_KEY_ARTIST);
-        // Salt, 汽水 and QQ (on Bluetooth) sing into TITLE and move the song into ARTIST; the
-        // lyric lookup already knows how to read them back out. See TrackName.
-        String[] sung = TrackName.searchName(c.getPackageName(), md);
-        if (sung != null) {
-            t = sung[0];
-            a = sung[1];
-        }
+        // Salt, 汽水, QQ and NetEase (on Bluetooth) sing into TITLE and move the song into ARTIST;
+        // the song and singer are read back out the way the lyric lookup reads them.
+        TrackIdentity id = TrackIdentity.of(c.getPackageName(), md);
+        String t = id.song();
+        String a = id.singer();
         // QQ's bracketed second names: the store has one of them, not both together.
         if (t != null) t = TrackName.untranslated(t);
         if (a != null) a = TrackName.unaliased(a);

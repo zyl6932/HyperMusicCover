@@ -1,11 +1,11 @@
 package com.os4.musiccover.lyrics;
 import com.os4.musiccover.Http;
 import com.os4.musiccover.Xp;
-import android.media.MediaMetadata;
 import android.media.session.MediaController;
 
 import java.net.URLEncoder;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -48,6 +48,7 @@ public final class NcmLyrics {
 
     /** What the session says about the song, reduced to the four things a match can use. */
     public static final class Query {
+        /** The reading searched under (TrackIdentity.primary), the title tidied for a search. */
         final String title;
         final String artist;
         final String album;
@@ -57,28 +58,41 @@ public final class NcmLyrics {
          * by the id, no search: the search is where QQ's renamed songs got lost (QqLyrics).
          */
         final String qqId;
+        /**
+         * Every reading a result is scored against (TrackIdentity.scored): one when the song is
+         * known, all of them when the evidence is tied. Empty only when the session named a
+         * singer and nothing else, and then the title and artist above are what is scored.
+         */
+        final List<TrackIdentity.Reading> readings;
+        /** Told which reading a catalogue matched, or null for fields typed into the probe. */
+        final TrackIdentity identity;
 
-        Query(String title, String artist, String album, long durationMs) {
-            this(title, artist, album, durationMs, null);
-        }
-
-        Query(String title, String artist, String album, long durationMs, String qqId) {
+        private Query(String title, String artist, String album, long durationMs, String qqId,
+                      List<TrackIdentity.Reading> readings, TrackIdentity identity) {
             this.title = title;
             this.artist = artist;
             this.album = album;
             this.durationMs = durationMs;
             this.qqId = qqId;
+            this.readings = readings;
+            this.identity = identity;
         }
 
         /** Stable across a track's lifetime, so it can key a cache. */
         String key() {
-            return title + '|' + artist + '|' + album + '|' + durationMs + '|' + qqId;
+            StringBuilder sb = new StringBuilder();
+            sb.append(title).append('|').append(artist).append('|').append(album).append('|')
+                    .append(durationMs).append('|').append(qqId);
+            for (TrackIdentity.Reading r : readings) sb.append('|').append(r.id());
+            return sb.toString();
         }
 
         @Override
         public String toString() {
-            return "title=" + q(title) + " artist=" + q(artist) + " album=" + q(album)
-                    + " dur=" + durationMs;
+            StringBuilder sb = new StringBuilder("title=" + q(title) + " artist=" + q(artist)
+                    + " album=" + q(album) + " dur=" + durationMs);
+            if (readings.size() > 1) sb.append(" readings=").append(readings);
+            return sb.toString();
         }
 
         private static String q(String s) {
@@ -86,126 +100,39 @@ public final class NcmLyrics {
         }
     }
 
-    /** The session's metadata, read out and handed to build() to be made searchable. */
+    /** The session's metadata, read as TrackIdentity reads it. */
     public static Query queryOf(MediaController c) {
         if (c == null) {
             return null;
         }
-        MediaMetadata md;
-        try {
-            md = c.getMetadata();
-        } catch (Throwable t) {
-            return null;
-        }
-        if (md == null) {
-            return null;
-        }
-        String title = str(md, MediaMetadata.METADATA_KEY_TITLE);
-        String artist = str(md, MediaMetadata.METADATA_KEY_ARTIST);
-        String album = str(md, MediaMetadata.METADATA_KEY_ALBUM);
-        if (artist.isEmpty()) {
-            artist = str(md, MediaMetadata.METADATA_KEY_ALBUM_ARTIST);
-        }
-        long dur = 0L;
-        try {
-            dur = md.getLong(MediaMetadata.METADATA_KEY_DURATION);
-        } catch (Throwable ignored) {
-        }
-        // A player singing into TITLE: the song and singer as ARTIST spells them (TrackName).
-        try {
-            String[] sung = TrackName.searchName(c.getPackageName(), md);
-            if (sung != null) {
-                title = sung[0];
-                artist = sung[1];
-            }
-        } catch (Throwable ignored) {
-        }
+        TrackIdentity id = TrackIdentity.of(c);
         String pkg = c.getPackageName();
-        boolean qq = pkg != null && pkg.startsWith("com.tencent.qqmusic");
-        // QQ 音乐 publishes 60000 for the length of every song now, the whole way through
-        // (2026-10-07, 打上花火, aLIEz, 夢灯籠 - all a minute). Taken at its word, every right
-        // answer lost 30 points for being four minutes long and nothing passed.
-        if (qq && dur == QQ_PLACEHOLDER_MS) {
-            dur = 0L;
-        }
-        Query q = build(title, artist, album, dur);
-        String qqId = qq ? LyricSource.idOf(c) : null;
-        return q == null || qqId == null ? q
-                : new Query(q.title, q.artist, q.album, q.durationMs, qqId);
+        return queryOf(id, TrackIdentity.isQq(pkg) ? LyricSource.idOf(c) : null);
     }
-
-    /** What QQ 音乐 publishes as a song's duration when it is not saying. */
-    private static final long QQ_PLACEHOLDER_MS = 60_000L;
 
     /**
-     * The four raw fields, rearranged into something searchable.
-     *
-     * Split out from queryOf so the diagnostic can drive it with fields typed by hand: this is
-     * where every player-specific quirk lives, so it is the part a "no lyrics for this song"
-     * report needs to be able to re-run.
+     * The four raw fields, as a search. For the diagnostic, which drives it with fields typed by
+     * hand: a "no lyrics for this song" report needs to be able to re-run how they were read.
      */
     public static Query build(String title, String artist, String album, long dur) {
-        title = title == null ? "" : title.trim();
-        artist = artist == null ? "" : artist.trim();
-        album = album == null ? "" : album.trim();
-        title = TrackName.undecorated(title);
-        // 汽水 sings into TITLE as well, with "歌名 — 歌手" in ARTIST - the song first, an em dash
-        // between. Searched as published, it asked for a song called "作曲：AKA时空恋人" (#56).
-        java.util.List<TrackName.Split> em = TrackName.splits(artist);
-        if (!em.isEmpty() && artist.contains(TrackName.EM)) {
-            title = em.get(0).song;
-            artist = em.get(0).singer;
-        }
-        // Salt Player publishes "Artist - Song" in ARTIST, so the song name is in there as well
-        // as - or instead of - TITLE. The first " - " splits it: a dash inside the song name
-        // ("i'm so tired... (Stripped - Live in LA)") comes after the one that matters, and
-        // taking the first keeps the whole remainder as the title.
-        int dash = artist.indexOf(" - ");
-        if (dash > 0) {
-            String head = artist.substring(0, dash).trim();
-            String tail = artist.substring(dash + 3).trim();
-            if (!head.isEmpty() && !tail.isEmpty()) {
-                if (title.isEmpty()) {
-                    title = tail;
-                    artist = head;
-                } else if (tail.equals(title)) {
-                    // The tail is only repeating what we already know; drop it so the search
-                    // gets a clean artist. An artist whose own name contains a dash and whose
-                    // title is published properly keeps it.
-                    artist = head;
-                } else if (tail.equals(album)) {
-                    // ARTIST and ALBUM agree on a name that TITLE does not carry - which is Salt
-                    // Player with its status-bar lyric switched on, where TITLE is the line being
-                    // sung. Searched as published it asks NetEase for a song called
-                    // "抹去雨水双眼无故地仰望": measured 2026-09-22 the right track came back
-                    // anyway, on the artist, with its duration matching to the millisecond, and
-                    // pick() threw it away because the name scored zero. Two fields against one,
-                    // and the two that agree are the two that hold still through a song.
-                    title = tail;
-                    artist = head;
-                }
-            }
-        }
-        // Only now, and only as a last resort: a single's album is the single, which is true
-        // often enough to be worth trying and not often enough to be tried first. It was tried
-        // first once, and Salt playing 逃跑计划's 夜空中最亮的星 off the album 世界 went looking
-        // for a song called 世界 and found nothing.
-        if (title.isEmpty()) {
-            title = album;
-        }
-        if (title.isEmpty() && artist.isEmpty()) {
-            return null;
-        }
-        return new Query(title, artist, album, dur);
+        return queryOf(TrackIdentity.of(null, title, artist, album, dur, null), null);
     }
 
-    private static String str(MediaMetadata md, String key) {
-        try {
-            String s = md.getString(key);
-            return s == null ? "" : s.trim();
-        } catch (Throwable t) {
-            return "";
+    /**
+     * What to search for and what to score against, all of it out of the identity: which reading
+     * is the song, and - when the evidence is tied - every reading for the scoring to try. The
+     * duration only when it can be believed: QQ's 60000 placeholder cost every right answer 30
+     * points for being four minutes long (TrackIdentity.QQ_PLACEHOLDER_MS).
+     */
+    static Query queryOf(TrackIdentity id, String qqId) {
+        TrackIdentity.Reading p = id.primary();
+        if (p == null) {
+            return id.artist.isEmpty() ? null
+                    : new Query("", id.artist, id.album, id.durationMs, qqId,
+                    java.util.Collections.<TrackIdentity.Reading>emptyList(), null);
         }
+        return new Query(TrackName.undecorated(p.song), p.singer, id.album, id.durationMs, qqId,
+                id.scored(), id.pkg == null ? null : id);
     }
 
     /** What came back for one song: the timed body, and the translation if there is one. */

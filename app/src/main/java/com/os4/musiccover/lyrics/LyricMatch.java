@@ -29,6 +29,11 @@ import java.util.Locale;
  * and a candidate is the song at 85. A right title by the right artist is 80 on its own: it has
  * to be the right length or on the right album as well. Another singer's song of the same name is
  * 50 + 15 + 10 = 75 at best and never passes.
+ *
+ * When TrackIdentity cannot tell which way round the session's fields go, a candidate is scored
+ * once for each reading and keeps its best. That needs no higher bar: a wrong reading puts the
+ * song's name where the singer goes, or the reverse, so it gives up the 50 or the 30 and tops out
+ * at 75. #127's 剑心 by 张杰, read three ways: as published 55, song first 105, song last 25.
  */
 final class LyricMatch {
 
@@ -67,11 +72,14 @@ final class LyricMatch {
         final Candidate candidate;
         final int score;
         final boolean artistMatched;
+        /** The reading it scored best under, or null when the query had none. */
+        final TrackIdentity.Reading reading;
 
-        Pick(Candidate candidate, int score, boolean artistMatched) {
+        Pick(Candidate candidate, int score, boolean artistMatched, TrackIdentity.Reading reading) {
             this.candidate = candidate;
             this.score = score;
             this.artistMatched = artistMatched;
+            this.reading = reading;
         }
 
         boolean passes() {
@@ -79,21 +87,24 @@ final class LyricMatch {
         }
     }
 
-    /** What the session says, cleaned once for every candidate it is compared with. */
-    static final class Wanted {
+    /** One reading of the session, cleaned once for every candidate it is compared with. */
+    static final class Alt {
         final String title;
         final List<String> artists;
-        final String album;
-        final long durationMs;
         final List<String> features;
+        /** A half of a bare-hyphen ARTIST: only equality counts (TrackIdentity.Reading.exact). */
+        final boolean exact;
+        final TrackIdentity.Reading reading;
         /** Credited names, not counting the aliases added to artists. */
-        private final int credits;
+        final int credits;
 
-        Wanted(NcmLyrics.Query q) {
-            title = clean(q.title);
+        Alt(String title, String artist, boolean exact, TrackIdentity.Reading reading) {
+            this.title = clean(title);
+            this.exact = exact;
+            this.reading = reading;
             artists = new ArrayList<>();
             int n = 0;
-            for (String a : splitArtists(q.artist)) {
+            for (String a : splitArtists(artist)) {
                 if (!clean(a).isEmpty()) n++;
                 artists.add(clean(a));
                 // Either of QQ's two names for a singer is them: NetEase credits あいみょん,
@@ -102,48 +113,90 @@ final class LyricMatch {
                 if (alias != null) artists.add(clean(alias[1]));
             }
             credits = n;
-            album = normalizeAlbum(q.album);
-            durationMs = q.durationMs;
-            features = features(q.title);
+            features = features(title);
+        }
+    }
+
+    /** What the session says: one Alt per reading the query is to be scored under. */
+    static final class Wanted {
+        final List<Alt> alts = new ArrayList<>(3);
+        final String album;
+        final long durationMs;
+        final TrackIdentity identity;
+
+        Wanted(NcmLyrics.Query q) {
+            this(q.readings, q.title, q.artist, q.album, q.durationMs, q.identity);
+        }
+
+        /** `title` and `artist` are scored only when there are no readings. */
+        Wanted(List<TrackIdentity.Reading> readings, String title, String artist, String album,
+               long durationMs, TrackIdentity identity) {
+            if (readings.isEmpty()) {
+                alts.add(new Alt(title, artist, false, null));
+            } else {
+                for (TrackIdentity.Reading r : readings) {
+                    alts.add(new Alt(TrackName.undecorated(r.song), r.singer, r.exact, r));
+                }
+            }
+            this.album = normalizeAlbum(album);
+            this.durationMs = durationMs;
+            this.identity = identity;
         }
 
         /** Two or more credited names: "A / B" gets a second, album-keyed search. */
         boolean multiCredit() {
-            return credits >= 2;
+            return alts.get(0).credits >= 2;
         }
     }
 
-    /** The highest scorer, passing or not; null candidate for an empty list. */
+    /**
+     * The highest scorer, passing or not; null candidate for an empty list. One that passes tells
+     * the identity which reading it passed under: that is the song, for the rest of its play.
+     */
     static Pick best(List<Candidate> candidates, Wanted w) {
         Candidate best = null;
         int bestScore = -1;
         boolean bestArtist = false;
+        Alt bestAlt = null;
         for (Candidate c : candidates) {
-            int s = score(c, w);
-            if (s > bestScore) {
-                best = c;
-                bestScore = s;
-                bestArtist = hasCommonArtist(w.artists, cleanedArtists(c.artist));
+            for (Alt a : w.alts) {
+                int s = score(c, a, w);
+                if (s > bestScore) {
+                    best = c;
+                    bestScore = s;
+                    bestAlt = a;
+                    bestArtist = hasCommonArtist(a.artists, cleanedArtists(c.artist), a.exact);
+                }
             }
         }
-        return new Pick(best, bestScore, bestArtist);
+        TrackIdentity.Reading r = bestAlt == null ? null : bestAlt.reading;
+        Pick p = new Pick(best, bestScore, bestArtist, r);
+        if (p.passes() && r != null && w.identity != null) w.identity.confirm(r);
+        return p;
     }
 
+    /** The candidate's score under the reading that suits it best. */
     static int score(Candidate c, Wanted w) {
+        int best = Integer.MIN_VALUE;
+        for (Alt a : w.alts) best = Math.max(best, score(c, a, w));
+        return best;
+    }
+
+    private static int score(Candidate c, Alt a, Wanted w) {
         int score = 0;
         if (w.durationMs > 0 && c.durationMs > 0) score += durationScore(w.durationMs, c.durationMs);
         String t = clean(c.title);
         // Both sides non-empty: a result whose title was all brackets cleans to "", and every
         // title contains "".
-        if (!w.title.isEmpty() && !t.isEmpty()
-                && (w.title.equals(t) || t.contains(w.title) || w.title.contains(t))) {
+        if (!a.title.isEmpty() && !t.isEmpty() && (a.title.equals(t)
+                || !a.exact && (t.contains(a.title) || a.title.contains(t)))) {
             score += 50;
         }
-        if (hasCommonArtist(w.artists, cleanedArtists(c.artist))) score += 30;
+        if (hasCommonArtist(a.artists, cleanedArtists(c.artist), a.exact)) score += 30;
         score += albumScore(w.album, normalizeAlbum(c.album));
-        if (!w.features.isEmpty()) {
+        if (!a.features.isEmpty()) {
             for (String f : features(c.title)) {
-                if (w.features.contains(f)) {
+                if (a.features.contains(f)) {
                     score += 20;
                     break;
                 }
@@ -174,12 +227,13 @@ final class LyricMatch {
         return out;
     }
 
-    private static boolean hasCommonArtist(List<String> local, List<String> remote) {
+    private static boolean hasCommonArtist(List<String> local, List<String> remote,
+                                           boolean exact) {
         for (String l : local) {
             if (l.isEmpty()) continue;
             for (String r : remote) {
                 if (r.isEmpty()) continue;
-                if (l.equals(r) || r.contains(l) || l.contains(r)) return true;
+                if (l.equals(r) || !exact && (r.contains(l) || l.contains(r))) return true;
             }
         }
         return false;
@@ -194,11 +248,9 @@ final class LyricMatch {
             java.util.regex.Pattern.compile("\\(.*?\\)|\\[.*?]|\\{.*?\\}");
     private static final java.util.regex.Pattern SPACE = java.util.regex.Pattern.compile("\\s+");
 
-    /** Brackets out, lower case, simplified script, no whitespace at all. */
+    /** Names.clean: the same "equal" as the gates and the bridge. */
     static String clean(String input) {
-        if (input == null) return "";
-        String s = BRACKETS.matcher(input).replaceAll("").trim().toLowerCase(Locale.ROOT);
-        return SPACE.matcher(NcmLyrics.folded(s)).replaceAll("");
+        return Names.clean(input);
     }
 
     /** The album the same way, but word boundaries kept until the scoring strips suffixes. */
@@ -206,7 +258,7 @@ final class LyricMatch {
         if (input == null) return "";
         String s = Normalizer.normalize(input, Normalizer.Form.NFKC);
         s = BRACKETS.matcher(s).replaceAll("").trim().toLowerCase(Locale.ROOT);
-        return SPACE.matcher(NcmLyrics.folded(s)).replaceAll(" ").trim();
+        return SPACE.matcher(Names.fold(s)).replaceAll(" ").trim();
     }
 
     private static int albumScore(String local, String remote) {

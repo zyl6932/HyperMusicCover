@@ -278,16 +278,16 @@ object LyriconSource {
      * than handing the track to the catalogues, which is where the bridge's copy would be lost.
      */
     @JvmStatic
-    fun linesFor(title: String?, artist: String?, player: String?): List<LyricLine>? {
+    fun linesFor(track: TrackIdentity, player: String?): List<LyricLine>? {
         var song = sSong
-        if (song == null || !isTrack(song, title, artist)) {
+        if (song == null || !isTrack(song, track)) {
             // Only a provider that has shown it publishes; see sPlayerSongs.
             if (player != null && player == sPlayer && sPlayerSongs > 0) {
                 val until = android.os.SystemClock.uptimeMillis() + CATCH_UP_MS
                 synchronized(sSongLock) {
                     while (true) {
                         song = sSong
-                        if (song != null && isTrack(song!!, title, artist)) break
+                        if (song != null && isTrack(song!!, track)) break
                         val left = until - android.os.SystemClock.uptimeMillis()
                         if (left <= 0) break
                         sSongLock.wait(left)
@@ -295,10 +295,10 @@ object LyriconSource {
                 }
             }
             val held = song
-            if (held == null || !isTrack(held, title, artist)) {
+            if (held == null || !isTrack(held, track)) {
                 if (held != null) {
-                    Xp.log("[MCLyricon] holding \"" + held.name + "\" while the track is \""
-                            + title + "\"; not reading it")
+                    Xp.log("[MCLyricon] holding \"" + held.name + "\" while the track is "
+                            + track.readings + "; not reading it")
                 }
                 return null
             }
@@ -321,23 +321,15 @@ object LyriconSource {
     }
 
     /**
-     * Whether the bridge's song is this track: a title that agrees, and an artist that does not
-     * disagree - or, on the players that sing into TITLE, the song and singer ARTIST spells
-     * (TrackName.splits). Held against the title alone, 汽水's song was refused from its first
-     * sung line on, and the lookup went to the catalogues with the line as the song's name (#56).
+     * Whether the bridge's song is this track: a name that agrees with a reading of the session
+     * (TrackIdentity) and a singer that does not disagree with that same reading. Held against
+     * TITLE alone, 汽水's song was refused from its first sung line on, and the lookup went to the
+     * catalogues with the line as the song's name (#56). A session with nothing to hold it
+     * against takes nothing.
      */
-    private fun isTrack(song: Song, title: String?, artist: String?): Boolean {
+    private fun isTrack(song: Song, track: TrackIdentity): Boolean {
         if (song.name.isNullOrBlank()) return false
-        if (!title.isNullOrBlank() && names(song.name, title) && names(song.artist, artist)) return true
-        return TrackName.pairIn(song.name, song.artist, artist)
-    }
-
-    /** Whether two names agree, or say nothing. A blank on either side is not a contradiction. */
-    private fun names(theirs: String?, ours: String?): Boolean {
-        val a = theirs?.trim()?.lowercase().orEmpty()
-        val b = ours?.trim()?.lowercase().orEmpty()
-        if (a.isEmpty() || b.isEmpty()) return true
-        return a.contains(b) || b.contains(a)
+        return track.accepts(song.name, song.artist)
     }
 
     /**

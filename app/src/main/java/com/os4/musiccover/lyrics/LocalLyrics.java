@@ -103,12 +103,8 @@ public final class LocalLyrics {
             dur = md.getLong(MediaMetadata.METADATA_KEY_DURATION);
         } catch (Throwable ignored) {
         }
-        String title = str(md, MediaMetadata.METADATA_KEY_TITLE);
-        String tail = artistTail(str(md, MediaMetadata.METADATA_KEY_ARTIST));
-        sb.append(" dur=").append(dur);
-        sb.append(" title=\"").append(title).append("\"->\"").append(NcmLyrics.norm(title));
-        sb.append("\" tail=\"").append(tail).append("\"->\"").append(NcmLyrics.norm(tail))
-                .append('"');
+        java.util.List<String> names = namesOf(c.getPackageName(), md);
+        sb.append(" dur=").append(dur).append(" names=").append(names);
 
         Cursor cur = null;
         int rows = 0;
@@ -126,8 +122,6 @@ public final class LocalLyrics {
             if (cur == null) {
                 return sb.append(" query returned null").toString();
             }
-            String a = NcmLyrics.norm(title);
-            String b = NcmLyrics.norm(tail);
             // The nearest few by duration, kept as they go past rather than collected and
             // sorted: printing the first few in cursor order is what hid the bug this probe was
             // written to find, and the whole question here is what sits closest to the target.
@@ -138,7 +132,7 @@ public final class LocalLyrics {
             while (cur.moveToNext() && rows < MAX_CANDIDATES) {
                 rows++;
                 String data = cur.getString(0);
-                boolean ok = data != null && named(a, b, cur.getString(2), data);
+                boolean ok = data != null && named(names, cur.getString(2), data);
                 if (ok) {
                     named++;
                 }
@@ -248,14 +242,11 @@ public final class LocalLyrics {
             // its own matches every cover version in it.
             return null;
         }
-        // Both readings of "what is this song called", because the players disagree about which
-        // field holds it. Salt Player writes the line being sung into TITLE and puts
-        // "歌手 - 歌名" in ARTIST, so on that player the tail is the only true name of the two.
-        String title = str(md, MediaMetadata.METADATA_KEY_TITLE);
-        String tail = artistTail(str(md, MediaMetadata.METADATA_KEY_ARTIST));
-        String a = NcmLyrics.norm(title);
-        String b = NcmLyrics.norm(tail);
-        if (a.isEmpty() && b.isEmpty()) {
+        // Every reading of "what is this song called", because the players disagree about which
+        // field holds it: Salt, 汽水, QQ and NetEase can write the line being sung into TITLE and
+        // spell the song into ARTIST, each its own way round (TrackIdentity).
+        java.util.List<String> names = namesOf(c.getPackageName(), md);
+        if (names.isEmpty()) {
             return null;
         }
 
@@ -283,7 +274,7 @@ public final class LocalLyrics {
                     continue;
                 }
                 long d = cur.getLong(1);
-                if (!named(a, b, cur.getString(2), data)) {
+                if (!named(names, cur.getString(2), data)) {
                     continue;
                 }
                 long diff = Math.abs(d - dur);
@@ -309,15 +300,28 @@ public final class LocalLyrics {
     /**
      * Whether a candidate row is the song the session named.
      *
-     * Two names are offered and either may be the real one, so either matching is a match. The
+     * Several names are offered and any may be the real one, so any matching is a match. The
      * file name is tested as well as the tag: this library is full of files called
      * "音频怪物 - 典狱司.MP3" whose ID3 title is the same string, and full of others whose tags
      * were never filled in at all, where the name on disk is all there is.
      */
-    private static boolean named(String a, String b, String tagTitle, String path) {
+    private static boolean named(java.util.List<String> names, String tagTitle, String path) {
         String tag = NcmLyrics.norm(tagTitle);
         String file = NcmLyrics.norm(baseName(path));
-        return holds(a, tag) || holds(a, file) || holds(b, tag) || holds(b, file);
+        for (String n : names) {
+            if (holds(n, tag) || holds(n, file)) return true;
+        }
+        return false;
+    }
+
+    /** The song's name under every reading TrackIdentity makes of the fields, normalised. */
+    private static java.util.List<String> namesOf(String pkg, MediaMetadata md) {
+        java.util.List<String> out = new java.util.ArrayList<>(3);
+        for (TrackIdentity.Reading r : TrackIdentity.of(pkg, md).readings) {
+            String n = NcmLyrics.norm(r.song);
+            if (!n.isEmpty() && !out.contains(n)) out.add(n);
+        }
+        return out;
     }
 
     /**
@@ -343,28 +347,6 @@ public final class LocalLyrics {
         String name = slash < 0 ? path : path.substring(slash + 1);
         int dot = name.lastIndexOf('.');
         return dot <= 0 ? name : name.substring(0, dot);
-    }
-
-    /** The song's name out of an "歌手 - 歌名" artist field, or null when it is not one. */
-    private static String artistTail(String artist) {
-        if (artist == null) {
-            return null;
-        }
-        int dash = artist.indexOf(" - ");
-        if (dash <= 0) {
-            return null;
-        }
-        String tail = artist.substring(dash + 3).trim();
-        return tail.isEmpty() ? null : tail;
-    }
-
-    private static String str(MediaMetadata md, String key) {
-        try {
-            String s = md.getString(key);
-            return s == null ? "" : s.trim();
-        } catch (Throwable t) {
-            return "";
-        }
     }
 
     // ---------------------------------------------------------------- reading the lyric

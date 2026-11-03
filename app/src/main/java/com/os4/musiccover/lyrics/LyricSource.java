@@ -160,11 +160,13 @@ public final class LyricSource {
      * payload reads as a stale one from the first sung line onwards: the only moment it passes is
      * the track change itself, before the player has overwritten TITLE. That is why the lyric was
      * there when the provider module was quick and gone for the whole song when it was not.
-     * So ARTIST's tail and the album are asked too, and agreement with any of the three is
-     * agreement - a rejection now needs every field the session published to disagree.
-     * ARTIST is read every way a player spells a song into it (TrackName.splits): Salt's
-     * "歌手 - 歌名", 汽水's "歌名 — 歌手" and QQ's "歌名-歌手", which is how QQ's payload came to be
-     * refused on every sung line (#47).
+     * So the payload's name is held against every reading of the session TrackIdentity makes -
+     * TITLE as published, the song ARTIST spells, the album - and agreement with any of them is
+     * agreement: a rejection needs every one to disagree. ARTIST is read the way each player
+     * spells a song into it, which a single hard-wired direction got wrong: QQ's "歌名-歌手"
+     * refused its payload on every sung line (#47), and NetEase's "歌名 - 歌手" was read as
+     * Salt's "歌手 - 歌名" and refused the whole song (#127). A reading the payload agrees with
+     * is the song from then on (TrackIdentity.accepts).
      */
     static String infoFor(MediaController c) {
         String session = sessionInfoFor(c);
@@ -204,36 +206,16 @@ public final class LyricSource {
             return null;
         }
         String theirs = songNameOf(info);
-        String ours = titleOf(c);
-        if (theirs == null || ours == null) {
+        if (theirs == null || theirs.trim().isEmpty()) {
             return info;
         }
-        String a = theirs.trim().toLowerCase();
-        String b = ours.trim().toLowerCase();
-        if (a.isEmpty() || b.isEmpty() || a.contains(b) || b.contains(a)) {
-            return info;
-        }
-        if (TrackName.songIn(a, metaOf(c, MediaMetadata.METADATA_KEY_ARTIST))
-                || agrees(a, metaOf(c, MediaMetadata.METADATA_KEY_ALBUM))) {
+        TrackIdentity id = TrackIdentity.of(c);
+        if (id.readings.isEmpty() || id.accepts(theirs)) {
             return info;
         }
         Xp.log("[MCLyric] the session's lyricInfo is still \"" + theirs
-                + "\" while the track is \"" + ours + "\"; not reading it");
+                + "\" while the track is " + id.readings + "; not reading it");
         return null;
-    }
-
-    /**
-     * Whether one of the session's other fields carries the name the payload claims.
-     *
-     * `name` is already trimmed and lowered; the field is not. Same containment test as the
-     * title's, and for the same reason: either side may carry decorations the other does not.
-     */
-    private static boolean agrees(String name, String other) {
-        if (other == null) {
-            return false;
-        }
-        String s = other.trim().toLowerCase();
-        return !s.isEmpty() && (name.contains(s) || s.contains(name));
     }
 
     /** Which song the payload says it is for, or null when it does not say. */
@@ -243,11 +225,6 @@ public final class LyricSource {
         } catch (Throwable t) {
             return null;
         }
-    }
-
-    /** What the session says is playing, for the payload to be held against. */
-    private static String titleOf(MediaController c) {
-        return metaOf(c, MediaMetadata.METADATA_KEY_TITLE);
     }
 
     /** One metadata string, or null - including when the session has no metadata at all. */
@@ -1428,10 +1405,7 @@ public final class LyricSource {
     private static void lyricon(MediaController c, Rows r) {
         String before = r.why;
         try {
-            MediaMetadata md = c == null ? null : c.getMetadata();
-            String title = md == null ? null : md.getString(MediaMetadata.METADATA_KEY_TITLE);
-            String artist = md == null ? null : md.getString(MediaMetadata.METADATA_KEY_ARTIST);
-            List<LyricLine> lines = LyriconSource.linesFor(title, artist,
+            List<LyricLine> lines = LyriconSource.linesFor(TrackIdentity.of(c),
                     c == null ? null : c.getPackageName());
             if (lines == null || lines.isEmpty()) {
                 return;
