@@ -160,7 +160,12 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         title.setTextColor(color)
         artist.setTextColor(color)
         if (toggleOverride == null) lastPlaying?.let { playing ->
-            toggle.setImageDrawable(MiniPlayerPathDrawable(if (playing) ICON_PAUSE else ICON_PLAY, color))
+            // The AOD eases the ink every frame of its run (#123); a new drawable parsed the
+            // icon's path again each time, so the one already showing takes the colour.
+            val icon = if (playing) ICON_PAUSE else ICON_PLAY
+            val shown = (toggle.drawable as? MiniPlayerPathDrawable)?.takeIf { it.pathData == icon }
+            if (shown != null) shown.color = color
+            else toggle.setImageDrawable(MiniPlayerPathDrawable(icon, color))
         }
     }
     private var artworkRadiusPx = dp(12).toFloat()
@@ -1126,9 +1131,16 @@ private const val SECOND_MS = 320L
 private const val FACE_PAD_DP = 4
 private const val FACE_GAP_DP = 2
 
-private class MiniPlayerPathDrawable(pathData: String, color: Int) : Drawable() {
+private class MiniPlayerPathDrawable(val pathData: String, color: Int) : Drawable() {
     private val path = PathParser.createPathFromPathData(pathData)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
+    var color: Int
+        get() = paint.color
+        set(value) {
+            if (paint.color == value) return
+            paint.color = value
+            invalidateSelf()
+        }
     override fun draw(canvas: Canvas) {
         val width = bounds.width().toFloat()
         val height = bounds.height().toFloat()
