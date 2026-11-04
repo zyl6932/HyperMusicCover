@@ -8063,7 +8063,8 @@ internal class MiniPlayerController(
             .onFailure { Xp.w("MCMini: notification bottom check failed: $it") }
     }
 
-    private fun scheduleRefresh() {
+    /** One refresh on the next turn of the main loop, however many ask for it before then. */
+    internal fun scheduleRefresh() {
         if (refreshPosted) return
         refreshPosted = true
         handler.post { refreshPosted = false; refresh() }

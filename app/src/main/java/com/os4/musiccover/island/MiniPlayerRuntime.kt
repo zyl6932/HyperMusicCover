@@ -127,6 +127,19 @@ object MiniPlayerRuntime {
     }
 
     /**
+     * refresh, on the next turn of the main loop and folded into one with any other asked for by
+     * then. For the session's own callbacks: each controller listens to that session too and
+     * schedules its own refresh off the same callback, so a refresh run here at once was a second
+     * one - and run before the controller's callback had landed, against the state it was about to
+     * replace. Not for a transition that has to land in this frame (cover mode in and out, the card
+     * coming and going): those keep refresh.
+     */
+    @JvmStatic fun refreshSoon() {
+        synchronized(controllers) { controllers.values.map { it.controller } }
+            .forEach { runCatching { it.scheduleRefresh() } }
+    }
+
+    /**
      * Each hook on its own: a build that renamed one class costs the feature that needed it,
      * not the rest of the mini player.
      */

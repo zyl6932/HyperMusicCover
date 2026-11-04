@@ -4128,7 +4128,7 @@ public class Main extends XposedModule {
                     public void onPlaybackStateChanged(PlaybackState state) {
                         LockLyrics.onPlaybackState(state);
                         updateCoverCardPlayback(state);
-                        MiniPlayerRuntime.refresh();
+                        MiniPlayerRuntime.refreshSoon();
                     }
 
                     @Override
@@ -4147,7 +4147,7 @@ public class Main extends XposedModule {
             }
         }
         updateCoverCardPlayback(c == null ? null : c.getPlaybackState());
-        MiniPlayerRuntime.refresh();
+        MiniPlayerRuntime.refreshSoon();
         onMediaUpdate();
     }
 
@@ -4291,7 +4291,11 @@ public class Main extends XposedModule {
 
     /** A tap or pull can enter the cover even when new media defaults to a collapsed island. */
     private static void onMediaUpdate(boolean explicitEntry) {
-        MiniPlayerRuntime.refresh();
+        // A tap into the cover is a transition the pill has to follow in this frame, as the
+        // morph it has just begun does; a session's update is one its own callback schedules a
+        // refresh for as well (MiniPlayerRuntime.refreshSoon).
+        if (explicitEntry) MiniPlayerRuntime.refresh();
+        else MiniPlayerRuntime.refreshSoon();
         // A new song on the lock screen, or its card just come up: the cover's picture is made
         // ahead of a tap (CoverPush.precomposeAsync sends each picture once).
         if (!sCoverMode) CoverPush.precomposeAsync(PRECOMPOSE_MEDIA_MS);
