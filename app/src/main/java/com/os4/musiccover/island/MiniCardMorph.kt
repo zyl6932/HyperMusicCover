@@ -1,6 +1,7 @@
 package com.os4.musiccover.island
 import com.os4.musiccover.CoverMorphMotion
 import com.os4.musiccover.Main
+import com.os4.musiccover.Settings
 import com.os4.musiccover.Gen
 import com.os4.musiccover.Xp
 import android.graphics.Matrix
@@ -509,9 +510,9 @@ internal class MiniCardMorph(
         val dt = if (lastFrame == 0L) 1f / 120f
             else ((frameTimeNanos - lastFrame) / 1e9f).coerceIn(0f, 0.05f)
         lastFrame = frameTimeNanos
-        motion.step(dt, Main.sClockResponse)
-        nudge.step(dt, Main.sClockResponse)
-        nudgeX.step(dt, Main.sClockResponse)
+        motion.step(dt, Settings.SPRING.get())
+        nudge.step(dt, Settings.SPRING.get())
+        nudgeX.step(dt, Settings.SPRING.get())
         if (!apply()) {
             lastCancel = geometryWhy()
             finish(false)

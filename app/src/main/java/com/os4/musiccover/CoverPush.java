@@ -86,7 +86,7 @@ public final class CoverPush {
         boolean keep = on && Main.keepsWallpaper();
         if (keep) on = false;
         Intent out = wallpaperIntent("art");
-        out.putExtra("cardmode", Main.sCoverCardStyle.mode == CoverCardStyle.CARD);
+        out.putExtra("cardmode", Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD);
         // The blur travels with the cover. A lyricblur broadcast is one shot - dropped, or
         // overtaken on the other side - and nothing else ever corrected it, so a song could play
         // out sharp under its lyrics. This makes every track change an agreement between the two
@@ -112,7 +112,7 @@ public final class CoverPush {
         // does not hold both ends of the fade - after its own restart, most of all. Never with
         // the display off: the frames would be composed and uploaded into a screen nobody is
         // looking at, and the clock is not springing either.
-        out.putExtra("fade", Main.sFadeWp && Main.screenOn());
+        out.putExtra("fade", Settings.FADE_WALLPAPER.on() && Main.screenOn());
         if (!on) {
             MotionCover.onCoverOff();
             CoverCardLayer.clear();
@@ -136,8 +136,8 @@ public final class CoverPush {
             return;
         }
         if (art == null) { Xp.log(Main.TAG + "pushart: no album art"); return; }
-        if (Main.sCoverCardStyle.mode == CoverCardStyle.CARD) CoverCardLayer.publish(art);
-        MotionCover.onCover(Main.sCoverCardStyle.mode == CoverCardStyle.CARD);
+        if (Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD) CoverCardLayer.publish(art);
+        MotionCover.onCover(Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD);
         int w = Main.sScreenW, h = Main.sScreenH;
         if (!Main.sVideoWallpaper && Main.sWpComposes) {
             // The source goes over instead of the composed picture, and the wallpaper process
@@ -155,11 +155,11 @@ public final class CoverPush {
                 // already on disk: the wallpaper process is pointed at it rather than given the
                 // same megabyte again. 20-68ms of a busy phone's entry went on that write.
                 shared = preSourceFor(art, w, h);
-                if (shared == null) shared = writeSharedSource(src, w, h, Main.sBias);
+                if (shared == null) shared = writeSharedSource(src, w, h, Settings.BIAS.get());
                 // Named, so the wallpaper process keeps it under this key and the next tap can
                 // ask for it by name - and so a push for the picture the tap already put up
                 // (sendKeptFirst) is let pass.
-                boolean card = Main.sCoverCardStyle.mode == CoverCardStyle.CARD;
+                boolean card = Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD;
                 String keptKey = preKey(art, w, h, card);
                 out.putExtra("prekey", keptKey);
                 noteKept(keptKey, layoutKey(w, h, card), Long.MAX_VALUE);
@@ -184,13 +184,13 @@ public final class CoverPush {
                 // under held the clock's band, which moves with every entry, so it was never
                 // kept at all. Now the picture is kept per song and the band measured on it.
                 String tintKey = artPrint(src) + ":" + src.getWidth() + "x" + src.getHeight()
-                        + ":" + w + "x" + h + ":" + Main.sBias + ":" + Main.sCoverCardStyle.mode;
+                        + ":" + w + "x" + h + ":" + Settings.BIAS.get() + ":" + Settings.COVER_STYLE.get().mode;
                 boolean reused = tintKey.equals(sTintKey) && sTintPic != null;
                 if (!reused) {
                     android.os.Trace.beginSection("MC push.compose");
                     try {
                         sTintPic = composeWallpaper(src, Math.max(1, w / TINT_SCALE),
-                                Math.max(1, h / TINT_SCALE), Main.sBias);
+                                Math.max(1, h / TINT_SCALE), Settings.BIAS.get());
                         sTintKey = tintKey;
                     } catch (Throwable t) {
                         Xp.w(Main.TAG + "composeWallpaper failed after the hand-over: " + t);
@@ -209,7 +209,7 @@ public final class CoverPush {
                 } finally {
                     android.os.Trace.endSection();
                 }
-                Xp.log(Main.TAG + "pushart " + w + "x" + h + " bias=" + Main.sBias + " as a "
+                Xp.log(Main.TAG + "pushart " + w + "x" + h + " bias=" + Settings.BIAS.get() + " as a "
                         + src.getWidth() + "x" + src.getHeight() + " source, sent in "
                         + (sent - t0) + "ms, own copy " + (reused ? "reused" : "composed") + " in "
                         + (android.os.SystemClock.uptimeMillis() - sent) + "ms");
@@ -226,14 +226,14 @@ public final class CoverPush {
         if (Main.sVideoWallpaper) {
             final Bitmap srcArt = art;
             final int fw = w, fh = h;
-            final float fb = Main.sCoverCardStyle.mode == CoverCardStyle.CARD ? 0.5f : Main.sBias;
+            final float fb = Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD ? 0.5f : Settings.BIAS.get();
             frostTask = new java.util.concurrent.FutureTask<>(
                     () -> CoverCompose.frostedFor(srcArt, fw, fh, fb));
             Gen.thread("mc-cover-frost", frostTask);
         }
         Bitmap full;
         try {
-            full = composeWallpaper(art, w, h, Main.sBias);
+            full = composeWallpaper(art, w, h, Settings.BIAS.get());
         } catch (Throwable t) {
             // This runs on a HandlerThread, and an uncaught throw on one reaches
             // KillApplicationHandler - so an OutOfMemoryError composing a full-screen cover
@@ -267,8 +267,8 @@ public final class CoverPush {
             q -= 15;
         } while (jpg.length > 700 * 1024 && q > 25);
         // The cover video's own crossfade is built in the wallpaper process out of this, so
-        // whether to ask for it has to travel with the push. See sVideoFade.
-        out.putExtra("vfade", Main.sVideoFade);
+        // whether to ask for it has to travel with the push. See Settings.VIDEO_FADE.
+        out.putExtra("vfade", Settings.VIDEO_FADE.on());
         // By path, not by value, and that is not an optimisation.
         //
         // Measured on this phone: the largest cover in the library composes to 612KB, the
@@ -290,7 +290,7 @@ public final class CoverPush {
         ProbeGuard.send(ctx, out);
         // After the send: the shade's background is not what anyone is waiting on.
         ShadeLayer.setArt(art);
-        Xp.log(Main.TAG + "pushart " + w + "x" + h + " bias=" + Main.sBias
+        Xp.log(Main.TAG + "pushart " + w + "x" + h + " bias=" + Settings.BIAS.get()
                 + " as " + jpg.length + "B jpeg, draw " + (tc - t0) + "ms encode "
                 + (android.os.SystemClock.uptimeMillis() - tc) + "ms");
         PaletteThrottle.INSTANCE.retriggerSoon(PALETTE_AFTER_PUSH_MS);
@@ -365,9 +365,9 @@ public final class CoverPush {
                         Gen.ownView(layer, iv);
                         Main.sCover = iv;
                     }
-                    if (Main.sCoverCardStyle.mode == CoverCardStyle.CARD) {
+                    if (Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD) {
                         CoverCardLayer.attach(layer);
-                        CoverCardLayer.style(Main.sCoverCardStyle);
+                        CoverCardLayer.style(Settings.COVER_STYLE.get());
                         // The backdrop is this view here, not the wallpaper process, so nothing
                         // over there will say it is up: this line is.
                         CoverCardLayer.releaseHeld();
@@ -427,7 +427,7 @@ public final class CoverPush {
                         armCoverFade();
                     }
                     Xp.log(Main.TAG + "video cover shown " + Main.sScreenW + "x" + Main.sScreenH
-                            + " bias=" + Main.sBias + (isNew ? " (new view)" : "")
+                            + " bias=" + Settings.BIAS.get() + (isNew ? " (new view)" : "")
                             + (artChanged ? " (new album)" : "")
                             + (wantBlur ? " (frosted)" : " (sharp)")
                             + ", fade " + (sCoverFadeWaitMs > 0 ? "owed" : "not owed"));
@@ -682,16 +682,16 @@ public final class CoverPush {
      * window's half of it starts later, when the player has the file.
      */
     private static long coverFadeMs() {
-        return Main.fadeMsFor(Main.sClockResponse);
+        return Main.fadeMsFor(Settings.SPRING.get());
     }
 
-    /** The fade mode by name, for the log and the state dump. See sFadeMode. */
+    /** The fade mode by name, for the log and the state dump. See Settings.FADE_MODE. */
     static String fadeModeName() {
-        int m = Main.sFadeMode;
+        int m = Settings.FADE_MODE.get();
         return m == Main.FADE_MODE_OFF ? "off" : m == Main.FADE_MODE_STRETCH ? "stretch" : "hold";
     }
 
-    /** Whether the owed fade is being held back for the wallpaper window. See sFadeMode. */
+    /** Whether the owed fade is being held back for the wallpaper window. See Settings.FADE_MODE. */
     static volatile boolean sCoverFadeWaiting;
     /** When the owed fade was armed, for the gap measurement and the log line. */
     static volatile long sCoverFadeArmedAt;
@@ -917,7 +917,7 @@ public final class CoverPush {
      */
     private static void armCoverFadeOut() {
         final ImageView iv = Main.sCover;
-        if (iv == null || Main.sFadeMode == Main.FADE_MODE_OFF) {
+        if (iv == null || Settings.FADE_MODE.get() == Main.FADE_MODE_OFF) {
             dropVideoCover();
             return;
         }
@@ -1052,7 +1052,7 @@ public final class CoverPush {
         }
         sCoverFadeArmedAt = android.os.SystemClock.uptimeMillis();
         Main.main().removeCallbacks(sCoverFadeTimeout);
-        sCoverFadeWaiting = Main.sFadeMode == Main.FADE_MODE_HOLD;
+        sCoverFadeWaiting = Settings.FADE_MODE.get() == Main.FADE_MODE_HOLD;
         if (!sCoverFadeWaiting) {
             releaseOwedSwap();
             return;
@@ -1204,9 +1204,9 @@ public final class CoverPush {
     static void pushFadeMs(Context ctx) {
         if (ctx == null) return;
         ProbeGuard.send(ctx, wallpaperIntent("fadems")
-                .putExtra("v", (int) Main.fadeMsFor(Main.sClockResponse)));
-        Xp.log(Main.TAG + "wallpaper fade = " + Main.fadeMsFor(Main.sClockResponse) + "ms for response "
-                + Main.sClockResponse);
+                .putExtra("v", (int) Main.fadeMsFor(Settings.SPRING.get())));
+        Xp.log(Main.TAG + "wallpaper fade = " + Main.fadeMsFor(Settings.SPRING.get()) + "ms for response "
+                + Settings.SPRING.get());
     }
 
     /** Asks the wallpaper process to re-upload the art it already has on disk. */
@@ -1411,13 +1411,13 @@ public final class CoverPush {
                     Bitmap art = AlbumArt.albumArt(ctx, false);
                     if (art == null) return;
                     int w = Main.sScreenW, h = Main.sScreenH;
-                    boolean card = Main.sCoverCardStyle.mode == CoverCardStyle.CARD;
+                    boolean card = Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD;
                     String key = preKey(art, w, h, card);
                     long now = android.os.SystemClock.uptimeMillis();
                     if (key.equals(sPreKey) && now - sPreAt < PRE_RESEND_MS) return;
                     Bitmap src = CoverCompose.prepareSource(art, w);
                     java.io.File f = new java.io.File(SHARE_DIR, SHARE_PRE_SOURCE);
-                    CoverCompose.writeSource(f, src, w, h, Main.sBias);
+                    CoverCompose.writeSource(f, src, w, h, Settings.BIAS.get());
                     Intent out = wallpaperIntent("precompose");
                     out.putExtra("src", f.getAbsolutePath());
                     out.putExtra("cardmode", card);
@@ -1436,7 +1436,7 @@ public final class CoverPush {
     }
 
     private static String layoutKey(int w, int h, boolean card) {
-        return w + "x" + h + ":" + Main.sBias + ":" + card;
+        return w + "x" + h + ":" + Settings.BIAS.get() + ":" + card;
     }
 
     /**
@@ -1465,7 +1465,7 @@ public final class CoverPush {
             return;
         }
         if (android.os.SystemClock.uptimeMillis() >= sKeptUntil) return;
-        boolean card = Main.sCoverCardStyle.mode == CoverCardStyle.CARD;
+        boolean card = Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD;
         if (!layoutKey(Main.sScreenW, Main.sScreenH, card).equals(sKeptLayout)) return;
         String title = sKeptTitle;
         if (title == null || !title.equals(Main.watchedTitle())) return;
@@ -1473,7 +1473,7 @@ public final class CoverPush {
             Intent out = wallpaperIntent("art");
             out.putExtra("cardmode", card);
             LockLyrics.putBlurOn(out);
-            out.putExtra("fade", Main.sFadeWp && Main.sScreenOn);
+            out.putExtra("fade", Settings.FADE_WALLPAPER.on() && Main.sScreenOn);
             out.putExtra("prekey", key);
             ProbeGuard.send(ctx, out);
             Xp.log(Main.TAG + "pushart: the kept cover asked for from the tap");
@@ -1485,7 +1485,7 @@ public final class CoverPush {
     /** What a precompose's file holds, as one string: the art, the screen, the bias, the mode. */
     private static String preKey(Bitmap art, int w, int h, boolean card) {
         return artPrint(art) + ":" + art.getWidth() + "x" + art.getHeight()
-                + ":" + w + "x" + h + ":" + Main.sBias + ":" + card;
+                + ":" + w + "x" + h + ":" + Settings.BIAS.get() + ":" + card;
     }
 
     /**
@@ -1494,7 +1494,7 @@ public final class CoverPush {
      */
     private static String preSourceFor(Bitmap art, int w, int h) {
         if (sPreKey.isEmpty()) return null;
-        boolean card = Main.sCoverCardStyle.mode == CoverCardStyle.CARD;
+        boolean card = Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD;
         if (!preKey(art, w, h, card).equals(sPreKey)) return null;
         java.io.File f = new java.io.File(SHARE_DIR, SHARE_PRE_SOURCE);
         return f.isFile() ? f.getAbsolutePath() : null;
@@ -1502,7 +1502,7 @@ public final class CoverPush {
 
     /** Only where a cover would be composed from the source by the wallpaper process. */
     private static boolean precomposeWanted() {
-        return !Main.sCoverMode && Main.sCoverFeatureOn && Main.sWpComposes && Main.sScreenOn
+        return !Main.sCoverMode && Settings.COVER_FEATURE.on() && Main.sWpComposes && Main.sScreenOn
                 && !Main.sVideoWallpaper && !Main.keepsWallpaper() && MediaCard.sCardPresent;
     }
 
@@ -2408,7 +2408,7 @@ public final class CoverPush {
      * mode the wallpaper is only the blurred backdrop - the square itself is CoverCardLayer.
      */
     private static Bitmap composeWallpaper(Bitmap src, int w, int h, float bias) {
-        return Main.sCoverCardStyle.mode == CoverCardStyle.CARD
+        return Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD
                 ? CoverCompose.cardBackground(src, w, h)
                 : CoverCompose.composeWallpaper(src, w, h, bias);
     }

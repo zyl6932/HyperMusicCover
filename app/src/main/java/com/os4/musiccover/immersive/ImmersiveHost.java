@@ -1,4 +1,5 @@
 package com.os4.musiccover.immersive;
+import com.os4.musiccover.Settings;
 import com.os4.musiccover.ClockCollapse;
 import com.os4.musiccover.EdgeBlurView;
 import com.os4.musiccover.island.LockIslands;
@@ -697,7 +698,7 @@ public final class ImmersiveHost {
         // A page that yielded to this cover comes back when it goes (coverLeft), and CoverPush
         // asks before cover mode has ended: the whole fade in is still ahead of it.
         if (sYield && sOpen != null && sOpen.ready() && sOpen.hasContent() && litNow()) {
-            return Main.fadeMsFor(Main.sClockResponse) + 32L;
+            return Main.fadeMsFor(Settings.SPRING.get()) + 32L;
         }
         ValueAnimator a = sFadeAnim;
         if (a == null || sFadeTo != 1f || !sShown) return 0L;
@@ -1203,7 +1204,7 @@ public final class ImmersiveHost {
     private static void startFade(final ImmersiveScene page, final float to, boolean late) {
         stopFade();
         final float from = sFade;
-        long ms = Main.fadeMsFor(Main.sClockResponse);
+        long ms = Main.fadeMsFor(Settings.SPRING.get());
         // The share of the full fade this one still has to go, so a turn half way is not slower.
         ms = Math.max(1L, Math.round(ms * Math.abs(to - from)));
         ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
@@ -1271,7 +1272,7 @@ public final class ImmersiveHost {
         sSwapOut = out;
         final float from = sFade;
         sSwapFade = from;
-        long ms = Math.max(1L, Math.round(Main.fadeMsFor(Main.sClockResponse) * from * SWAP_OUT_SHARE));
+        long ms = Math.max(1L, Math.round(Main.fadeMsFor(Settings.SPRING.get()) * from * SWAP_OUT_SHARE));
         ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
         a.setDuration(ms);
         a.setInterpolator(t -> 1f - (1f - t) * (1f - t) * (1f - t));

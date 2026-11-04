@@ -1,4 +1,5 @@
 package com.os4.musiccover.transit;
+import com.os4.musiccover.Settings;
 import com.os4.musiccover.ClockViews;
 import com.os4.musiccover.ClockCollapse;
 import com.os4.musiccover.immersive.CountdownScene;
@@ -127,15 +128,9 @@ public final class AmapTransitScene implements ImmersiveScene {
 
     // ---------------------------------------------------------------- the switch
 
-    /**
-     * The app's 「高德公交地铁」 switch: off, neither this page nor the trip's island in 高德
-     * (AmapTransitShare.setEnabled) is put up. Held here, in Main's state file; 高德 is told.
-     */
-    public static volatile boolean sOn = true;
-
     /** The switch moved ({@code op transitcfg --ez on}): 高德 told, and a page up taken down. */
     public void setOn(Context ctx, boolean on) {
-        sOn = on;
+        Settings.TRANSIT.set(on);
         Xp.log(TAG + "switch " + (on ? "on" : "off"));
         if (!on) mMain.post(() -> end("switch off"));
         tellAmap(ctx);
@@ -145,7 +140,7 @@ public final class AmapTransitScene implements ImmersiveScene {
     public void tellAmap(Context ctx) {
         try {
             ProbeGuard.send(ctx, new Intent(AmapNavScene.AMAP_PROBE).setPackage(PKG)
-                    .putExtra("transiton", sOn));
+                    .putExtra("transiton", Settings.TRANSIT.on()));
         } catch (Throwable t) {
             Xp.log(TAG + "switch not told: " + t);
         }
@@ -155,7 +150,7 @@ public final class AmapTransitScene implements ImmersiveScene {
 
     /** {@code op transit}, any thread. The answer is the state as it is now. */
     public String command(String json, String what, boolean demo) {
-        if (!sOn) {
+        if (!Settings.TRANSIT.on()) {
             // A 高德 that has not heard yet - started before SystemUI, or missed the change.
             if (json != null && !demo && Main.appContext() != null) tellAmap(Main.appContext());
             return "off " + describe();

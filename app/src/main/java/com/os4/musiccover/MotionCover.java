@@ -26,7 +26,7 @@ import java.util.Arrays;
  *                   own frame so the clock glass and the card blur see it - see WallpaperVideo
  *
  * The still is what shows until a video is ready, and whenever there is none. Off by default;
- * downloads only on an unmetered network unless sOnData. Cached videos play on any network.
+ * downloads only on an unmetered network unless Settings.MOTION_ON_DATA. Cached videos play on any network.
  */
 final class MotionCover {
 
@@ -34,9 +34,6 @@ final class MotionCover {
     }
 
     private static final String TAG = "[MCMotion] ";
-    static volatile boolean sEnabled;
-    /** Look up and download on a metered network too - mobile data. Off by default. */
-    static volatile boolean sOnData;
 
     private static final String DIR = "motion";
     private static final String INDEX = "index.txt";
@@ -140,16 +137,16 @@ final class MotionCover {
         // 保留壁纸 puts no cover up, so there is nothing for a video to stand in for. Not
         // card is not full screen: the switch is only hidden there, still on, and the video
         // went to the wallpaper over the user's own (2026-10-14).
-        if (Main.sCoverCardStyle.mode == CoverCardStyle.KEEP) {
+        if (Settings.COVER_STYLE.get().mode == CoverCardStyle.KEEP) {
             sGen++;
             sWantKey = "";
             stopVideo("keep wallpaper");
             return;
         }
-        if (!sEnabled || title == null || title.trim().isEmpty()) {
+        if (!Settings.MOTION.on() || title == null || title.trim().isEmpty()) {
             sGen++;
             sWantKey = "";
-            stopVideo(sEnabled ? "no title" : "off");
+            stopVideo(Settings.MOTION.on() ? "no title" : "off");
             return;
         }
         watchNetwork(ctx);
@@ -157,13 +154,13 @@ final class MotionCover {
         // Asked already, for this cover: playing, being looked up, or known to have none. The
         // metadata fires on every state change, and for some players on every sung line.
         if (key.equals(sWantKey) && sWantCard == card) {
-            if (!card && sPlayingFile != null && Main.sBias != sSentBias) {
-                sSentBias = Main.sBias;
+            if (!card && sPlayingFile != null && Settings.BIAS.get() != sSentBias) {
+                sSentBias = Settings.BIAS.get();
                 Intent i = new Intent("com.os4.musiccover.WPROBE");
                 i.setPackage("com.miui.miwallpaper");
                 i.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
                 i.putExtra("op", "vidbias");
-                i.putExtra("bias", Main.sBias);
+                i.putExtra("bias", Settings.BIAS.get());
                 ProbeGuard.send(ctx, i);
             }
             return;
@@ -232,8 +229,8 @@ final class MotionCover {
                 // The still's band position, sent rather than read back over there: a cover
                 // composed here (the JPEG route - the island's expand takes it) leaves no source
                 // file, and the video fell back to 0.25 and sat higher than the still.
-                i.putExtra("bias", Main.sBias);
-                sSentBias = Main.sBias;
+                i.putExtra("bias", Settings.BIAS.get());
+                sSentBias = Settings.BIAS.get();
                 ProbeGuard.send(ctx, i);
             });
         });
@@ -363,7 +360,7 @@ final class MotionCover {
                 return null;
             }
         }
-        if (!sOnData && !unmetered(ctx)) {
+        if (!Settings.MOTION_ON_DATA.on() && !unmetered(ctx)) {
             sLast = "not on an unmetered network; " + key + " not looked up";
             Xp.log(TAG + sLast);
             return null;
@@ -475,7 +472,7 @@ final class MotionCover {
                             && nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED);
                     boolean was = sWasUnmetered;
                     sWasUnmetered = now;
-                    if (!now || was || !sEnabled || sWantKey.isEmpty() || sPlayingFile != null
+                    if (!now || was || !Settings.MOTION.on() || sWantKey.isEmpty() || sPlayingFile != null
                             || !Main.sCoverMode) {
                         return;
                     }
@@ -499,7 +496,7 @@ final class MotionCover {
 
     /** The cover on screen, asked again if it has no video. Main thread. */
     static void retry() {
-        if (!sEnabled || sWantKey.isEmpty() || sPlayingFile != null || !Main.sCoverMode) return;
+        if (!Settings.MOTION.on() || sWantKey.isEmpty() || sPlayingFile != null || !Main.sCoverMode) return;
         sWantKey = "";
         onCover(sWantCard);
     }
@@ -527,7 +524,7 @@ final class MotionCover {
 
     /** For `op motion`. */
     static String describe() {
-        return "enabled=" + sEnabled + " want=" + sWantKey + " playing=" + sPlayingFile
+        return "enabled=" + Settings.MOTION.on() + " want=" + sWantKey + " playing=" + sPlayingFile
                 + (sPlayingFile == null ? "" : (sPlayingCard ? " (card)" : " (wallpaper)"))
                 + " last=" + sLast;
     }

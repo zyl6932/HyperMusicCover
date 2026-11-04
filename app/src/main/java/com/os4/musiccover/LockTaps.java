@@ -57,7 +57,7 @@ public final class LockTaps {
     static void feedTap(MotionEvent ev) {
         if (ev == null) return;
         feedTwoFingerTap(ev);
-        if (!Main.sTapToggle) return;
+        if (!Settings.TAP_TOGGLE.on()) return;
         // A gesture the system took away is never going to produce the second tap.
         if (ev.getActionMasked() == MotionEvent.ACTION_CANCEL) {
             cancelPendingTap("gesture cancelled");
@@ -241,7 +241,7 @@ public final class LockTaps {
      * ours, and every double tap the framework itself did not recognise as one.
      */
     static void armLockTap(final float y) {
-        if (!Main.sTapToggle) return;
+        if (!Settings.TAP_TOGGLE.on()) return;
         // Decided at the DOWN, because by the time this runs the centre - or the charging
         // animation - may have closed under the guard in onLockTap. See the dispatch hook for
         // the full account.
@@ -294,7 +294,7 @@ public final class LockTaps {
      * this device has simply not taken yet.
      */
     static void onLockTap(float y) {
-        if (!Main.sTapToggle) return;
+        if (!Settings.TAP_TOGGLE.on()) return;
         if (!Main.screenOn() || !Main.keyguardShowing()) return;
         // Only the keyguard shows the clock container, so this is also what rules out the shade
         // being pulled down over an unlocked phone - the same test the card restyle uses.

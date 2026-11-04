@@ -311,7 +311,7 @@ public final class ModuleState {
         // again. Nothing else refreshed this on the way up: 展开背景时下移通知 used to, by
         // accident, on its scene changes and only while it was switched on (2026-10-09).
         Main.refreshNotificationSink();
-        Xp.log(Main.TAG + "state restored: cover=" + cover + " bias=" + Main.sBias);
+        Xp.log(Main.TAG + "state restored: cover=" + cover + " bias=" + Settings.BIAS.get());
         if (cover) {
             Main.enterCoverMode(false);
             // The composed cover the shade reveals does not survive a restart, and the wallpaper

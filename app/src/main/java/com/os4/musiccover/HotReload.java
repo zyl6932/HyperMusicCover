@@ -714,7 +714,7 @@ public final class HotReload {
                         // injected into again.
                         step("notif sink", () -> {
                             Main.sNotificationSink.adopt(fNotifSink, fNotifPolicy,
-                                    Fingerprint.sFpAvoid);
+                                    Settings.FP_AVOID.get());
                             Main.refreshNotificationSink();
                         });
                     } else {

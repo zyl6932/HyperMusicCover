@@ -111,7 +111,7 @@ object ModuleBridge {
         val player: String = "",
         /**
          * Whether the media card's thumbnail is hidden. On, and not a setting on either side any
-         * more - see Main.sMcHideArt. Reported because the preview draws the card with the OEM's
+         * more - see Settings.MC_HIDE_ART. Reported because the preview draws the card with the OEM's
          * own picture of it, and what that picture contains depends on this.
          */
         val mcHideArt: Boolean = true,
@@ -189,9 +189,9 @@ object ModuleBridge {
         val lyriconInstalled: Boolean = false,
         /** 0 system default, 1 never avoid the fingerprint icon, 2 always avoid it. */
         val fpAvoid: Int = 0,
-        /** 「高德公交地铁」: the trip's island and lock screen page (AmapTransitScene.sOn). */
+        /** 「高德公交地铁」: the trip's island and lock screen page (Settings.TRANSIT). */
         val transit: Boolean = true,
-        /** 取餐码: a 微信 order page's pickup code on the island (PickupCodeIsland.sOn). */
+        /** 取餐码: a 微信 order page's pickup code on the island (Settings.PICKUP). */
         val pickup: Boolean = true,
         /**
          * 取餐码云端名单的状态：ColorOS 那一份自己的更新日期（空字符串＝从未同步过），

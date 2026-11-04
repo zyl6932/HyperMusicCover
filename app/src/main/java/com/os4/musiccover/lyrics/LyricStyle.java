@@ -21,7 +21,7 @@ public final class LyricStyle {
      * the one that was worth changing on the way past. The backing vocal's 17sp is the size it
      * always had beside the 25sp lead. `op lyricstyle` still moves all six for the session.
      */
-    static final LyricStyle DEFAULT = new LyricStyle(1f, 0.5f, 30f, 25f, 17f, 500);
+    public static final LyricStyle DEFAULT = new LyricStyle(1f, 0.5f, 30f, 25f, 17f, 500);
 
     /** The band's height as a share of the room, MIN_FILL..1; never under MIN_ROWS rows. */
     public final float fill;

@@ -62,7 +62,7 @@ final class PreviewShots {
         out.putString("track", MediaCard.sCardKey);
         if (diag != null) {
             diag.append("preview: cover=").append(Main.sCoverMode)
-                .append(" auto=").append(Main.sAuto)
+                .append(" auto=").append(Settings.AUTO.on())
                 .append(" cardKnown=").append(MediaCard.sCardKnown)
                 .append(" cardShowing=").append(MediaCard.sCardShowing)
                 .append(" keyguard=").append(Main.keyguardShowing())
@@ -137,7 +137,7 @@ final class PreviewShots {
                 .append(" rect=").append(MediaCard.sCardL).append(',').append(MediaCard.sCardT).append(' ')
                 .append(MediaCard.sCardW).append('x').append(MediaCard.sCardH)
                 .append(" artslot=").append(out.containsKey("artfrac") ? "yes" : "no")
-                .append(" hideArt=").append(Main.sMcHideArt);
+                .append(" hideArt=").append(Settings.MC_HIDE_ART.on());
         }
 
         putDate(out, dump);
@@ -237,7 +237,7 @@ final class PreviewShots {
         View img = box == null ? null : Main.findByName(box, "album_art_image");
         if (img == null) return;
         // Hidden by the user's own setting - nothing to draw, and saying so is how the app knows.
-        if (Main.sMcHideArt || box.getVisibility() != View.VISIBLE) return;
+        if (Settings.MC_HIDE_ART.on() || box.getVisibility() != View.VISIBLE) return;
         if (img.getWidth() <= 0 || img.getHeight() <= 0) return;
         int[] a = new int[2], b = new int[2];
         img.getLocationOnScreen(a);

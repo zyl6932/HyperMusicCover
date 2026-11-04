@@ -49,20 +49,6 @@ final class Fingerprint {
     private static final String AVOID_SUFFIX = "$$inlined$combine$1$3";
 
     /**
-     * Hide the lock screen fingerprint ring. Unlike the two card switches above, this one is not
-     * tied to cover mode: an icon that appeared and vanished as the music started and stopped
-     * would read as a glitch rather than as a setting.
-     */
-    static volatile boolean sHideFp;
-
-    /**
-     * Whether the notification stack keeps clear of the fingerprint icon: 0 leaves it to the
-     * system, 1 never avoids it, 2 always does. Not a boolean, because "off" here would mean two
-     * different things - stop reserving the space, or reserve it even with no print enrolled.
-     */
-    static volatile int sFpAvoid;
-
-    /**
      * Every fingerprint icon view built since SystemUI started, weakly held. The alpha is set at
      * construction, but the switch can move afterwards, and a hidden icon has to be able to come
      * back without the user restarting SystemUI.
@@ -162,7 +148,7 @@ final class Fingerprint {
         return ring;
     }
 
-    /** Set once the state file has been consulted for sHideFp, whether or not it had a value. */
+    /** Set once the state file has been consulted for Settings.HIDE_FP, whether or not it had a value. */
     private static volatile boolean sHideFpPeeked;
 
     /**
@@ -201,8 +187,8 @@ final class Fingerprint {
             if (!ModuleState.stateExists(f)) return;
             for (String line : new String(f.readFully()).split("\n")) {
                 if (line.startsWith("hidefp=")) {
-                    sHideFp = "1".equals(line.substring(7).trim());
-                    Xp.log(Main.TAG + "fingerprint setting read early: hide=" + sHideFp);
+                    Settings.HIDE_FP.set("1".equals(line.substring(7).trim()));
+                    Xp.log(Main.TAG + "fingerprint setting read early: hide=" + Settings.HIDE_FP.on());
                     return;
                 }
             }
@@ -275,7 +261,7 @@ final class Fingerprint {
      */
     static void applyHideFp() {
         adoptFodIcons();
-        if (!sHideFp) {
+        if (!Settings.HIDE_FP.on()) {
             sFodFrames.restore((animation, resource) -> {
                 try {
                     if (!fodForKeyguard(fodViewOf(animation))) return;
@@ -421,7 +407,7 @@ final class Fingerprint {
                 peekHideFp();
                 // draw(int resId) is the frame. Any other overload is not ours to touch, which
                 // the argument check below says without having to name the signature.
-                if (sHideFp && args.length == 1 && args[0] instanceof Integer
+                if (Settings.HIDE_FP.on() && args.length == 1 && args[0] instanceof Integer
                         && isFodRing((Integer) args[0])
                         && fodForKeyguard(fodViewOf(chain.getThisObject()))) {
                     // Substituting the drawable rather than skipping the draw: the animation
@@ -464,7 +450,7 @@ final class Fingerprint {
                 try {
                     Xp.hookAll("sysui.fp.icon_paint." + Xp.slug(name), iconCls, name, chain -> {
                         peekHideFp();
-                        if (sHideFp && fodForKeyguard(chain.getThisObject())) return null;
+                        if (Settings.HIDE_FP.on() && fodForKeyguard(chain.getThisObject())) return null;
                         return chain.proceed();
                     });
                     break;
@@ -491,7 +477,7 @@ final class Fingerprint {
                         peekHideFp();
                         // Painting nothing, rather than dimming: the alpha on this view is the
                         // OEM's to animate, and a frame it never paints cannot be animated back.
-                        if (sHideFp && fodForKeyguard(chain.getThisObject())) return null;
+                        if (Settings.HIDE_FP.on() && fodForKeyguard(chain.getThisObject())) return null;
                         return chain.proceed();
                     });
                     hooked++;
@@ -525,7 +511,7 @@ final class Fingerprint {
                     if (args.length == 3 && args[1] instanceof Object[]) {
                         Object[] vals = (Object[]) args[1];
                         // Clone before overriding: combine retains its array across emissions.
-                        Object[] effective = NotificationSink.withAvoidance(vals, sFpAvoid);
+                        Object[] effective = NotificationSink.withAvoidance(vals, Settings.FP_AVOID.get());
                         args[1] = effective;
                         Object result = chain.proceed(args);
                         String bound;
@@ -548,7 +534,7 @@ final class Fingerprint {
                                 && args[4] instanceof Object[]) {
                             try {
                                 args[4] = Main.sNotificationSink.attachToCombine(
-                                        args[1], (Object[]) args[4], sFpAvoid);
+                                        args[1], (Object[]) args[4], Settings.FP_AVOID.get());
                                 Main.sNotificationSink.hookStatus("notification combine entered");
                             } catch (Throwable t) {
                                 Main.sNotificationSink.hookStatus("combine attachment failed: " + t);
@@ -562,7 +548,7 @@ final class Fingerprint {
                             combine.getName().length() - 2), cl);
                     Xp.hookAll("sysui.fp.avoid_flow_collect", combinedFlow, "collect", chain -> {
                         try {
-                            if (Main.sNotificationSink.attach(chain.getThisObject(), sFpAvoid))
+                            if (Main.sNotificationSink.attach(chain.getThisObject(), Settings.FP_AVOID.get()))
                                 Xp.log(Main.TAG + "notification bound policy flow attached");
                         } catch (Throwable t) {
                             Xp.log(Main.TAG + "notification bound policy flow unavailable: " + t);
@@ -579,7 +565,7 @@ final class Fingerprint {
                         try {
                             Object upstream = Xp.getObjectField(chain.getThisObject(), "$upstream");
                             if (combinedFlow.isInstance(upstream)
-                                    && Main.sNotificationSink.attach(upstream, sFpAvoid))
+                                    && Main.sNotificationSink.attach(upstream, Settings.FP_AVOID.get()))
                                 Xp.log(Main.TAG + "notification bound policy flow attached before collection");
                         } catch (Throwable t) {
                             Xp.log(Main.TAG + "notification bound sharing attachment failed: " + t);

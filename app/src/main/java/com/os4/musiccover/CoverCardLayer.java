@@ -838,7 +838,7 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         float target = visible && current != null && (!afterBigClock || underBig)
                 && (phase == ClockCollapse.Phase.EXIT && !bigFall ? exitWithCard : !lyrics)
                 ? (inAod ? 1f : underBig ? reveal() : MediaCard.cardProgress()) : 0f;
-        float response = Math.max(0.18f, Main.sClockResponse);
+        float response = Math.max(0.18f, Settings.SPRING.get());
         // Tied to the clock's own flight on the lit screen, and to the big clock's edge on the way
         // into and out of its doze. Otherwise falling asleep it eases.
         if (!bigFall) fallAt = 0L;
@@ -879,7 +879,7 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         if (phase == ClockCollapse.Phase.AOD) scale.snap(scaleTarget);
         // At the response the app's 缩放动画阻尼 sets, so the card keeps time with the clock,
         // the wallpaper and the morph instead of running on a clock of its own.
-        else scale.step(scaleTarget, dt, Main.sClockResponse);
+        else scale.step(scaleTarget, dt, Settings.SPRING.get());
         boolean placing = followPlace(phase, dt, response, target);
         if (previous != null && (phase == ClockCollapse.Phase.AOD
                 || SystemClock.uptimeMillis() - changedAt > TRACK_FADE_MS)) {

@@ -1,4 +1,5 @@
 package com.os4.musiccover.lyrics;
+import com.os4.musiccover.Settings;
 import com.os4.musiccover.Main;
 import com.os4.musiccover.Gen;
 import com.os4.musiccover.Xp;
@@ -793,7 +794,7 @@ public final class LyricSource {
      * anything, and the artwork prefetch shares neither the thread nor the wait.
      */
     public static void warm(String id, String dir, String title, String artist) {
-        if (!LockLyrics.sOnline) return;
+        if (!Settings.LYRIC_ONLINE.on()) return;
         final int gen = --sWarmGen;
         if (id != null && dir != null) {
             String key = dir + '/' + id;
@@ -899,7 +900,7 @@ public final class LyricSource {
         final android.content.Context ctx = Main.sAppCtx;
         final MediaController controller = c;
         // Read once: a switch flipped mid-lookup starts a lookup of its own (LockLyrics.setOnline).
-        final boolean online = LockLyrics.sOnline;
+        final boolean online = Settings.LYRIC_ONLINE.on();
         if (info == null && id == null && q == null && ctx == null) {
             Xp.log("[MCLyric] " + pkg + " publishes neither lyricInfo, a song id, nor a name");
             onMain(cb, java.util.Collections.<LyricLine>emptyList(),
@@ -1009,8 +1010,8 @@ public final class LyricSource {
             hasRoma |= l.roma != null;
         }
         boolean[] want = {
-                LockLyrics.sTrans && !hasTrans && LyricParse.foreign(r.lines),
-                LockLyrics.sRoma && !hasRoma && LyricParse.romanisable(r.lines),
+                Settings.LYRIC_TRANS.on() && !hasTrans && LyricParse.foreign(r.lines),
+                Settings.LYRIC_ROMA.on() && !hasRoma && LyricParse.romanisable(r.lines),
         };
         if (!want[0] && !want[1]) return;
         final int own = r.source;

@@ -1,4 +1,5 @@
 package com.os4.musiccover.lyrics;
+import com.os4.musiccover.Settings;
 import com.os4.musiccover.MediaCard;
 import com.os4.musiccover.ClockCollapse;
 import com.os4.musiccover.Main;
@@ -321,7 +322,7 @@ final class LyricView extends View {
     private LyricStyle wantStyle;
     /** The translation and romanisation switches the layout now in use was made under. */
     private int builtTrans = LockLyrics.BELOW_TRANS;
-    /** The alignment pref the layout now in use was made under; see LockLyrics.sAlign. */
+    /** The alignment pref the layout now in use was made under; see Settings.LYRIC_ALIGN. */
     private int builtAlign = LockLyrics.ALIGN_LEFT;
     /** Diagnostics: how long the last layout took on its thread. */
     private long layoutMs;
@@ -423,7 +424,7 @@ final class LyricView extends View {
         paint.setColor(0xFFFFFFFF);
         transPaint.setColor(0xFFFFFFFF);
         bgPaint.setColor(0xFFFFFFFF);
-        applyPaintStyle(LockLyrics.sStyle);
+        applyPaintStyle(Settings.LYRIC_STYLE.get());
         // No frame rate is asked for here. The keyguard window renders at 60Hz on this 120Hz
         // panel unless the screen is touched, and neither setRequestedFrameRate on this view nor
         // a 120Hz vote on the window's own layer moved HyperOS off that (SurfaceFlinger dumps,
@@ -590,8 +591,8 @@ final class LyricView extends View {
                 || LockLyrics.below() != builtTrans
                 // The alignment is in the layout too, and asked for the same way: against what
                 // the layout in use was built with, not against the field.
-                || LockLyrics.sAlign != builtAlign
-                || !LockLyrics.sStyle.sameLayout(layoutStyle))
+                || Settings.LYRIC_ALIGN.get() != builtAlign
+                || !Settings.LYRIC_STYLE.get().sameLayout(layoutStyle))
                 && (LockLyrics.wantsAttached() || show == 0f)) {
             if (layOut()) {
                 changed = true;
@@ -1548,8 +1549,8 @@ final class LyricView extends View {
         final int v = LockLyrics.version();
         final int width = getWidth();
         final int transOn = LockLyrics.below();
-        final int alignOn = LockLyrics.sAlign;
-        final LyricStyle style = LockLyrics.sStyle;
+        final int alignOn = Settings.LYRIC_ALIGN.get();
+        final LyricStyle style = Settings.LYRIC_STYLE.get();
         final List<LyricLine> ls = LockLyrics.lines();
         if (!ls.isEmpty() && v == wantVersion && width == wantWidth && transOn == wantTrans
                 && alignOn == wantAlign && style.sameLayout(wantStyle)) return false;
@@ -1598,8 +1599,8 @@ final class LyricView extends View {
                         // being switched off: the next step asks again when it is due.
                         if (v != LockLyrics.version() || width != getWidth()
                                 || transOn != LockLyrics.below()
-                                || alignOn != LockLyrics.sAlign
-                                || !style.sameLayout(LockLyrics.sStyle)
+                                || alignOn != Settings.LYRIC_ALIGN.get()
+                                || !style.sameLayout(Settings.LYRIC_STYLE.get())
                                 || !LockLyrics.wantsAttached()) {
                             return;
                         }
@@ -1619,7 +1620,7 @@ final class LyricView extends View {
         LyricStyle style;
         /** The translation and romanisation switches this layout was made under; see LockLyrics.below(). */
         int transOn;
-        /** The alignment pref this layout was made under; see LockLyrics.sAlign. */
+        /** The alignment pref this layout was made under; see Settings.LYRIC_ALIGN. */
         int align;
         List<LyricLine> lines;
         StaticLayout[] main, trans;
@@ -1872,7 +1873,7 @@ final class LyricView extends View {
             getLocationOnScreen(loc);
             float me = loc[1];
             float floor = bandFloor();
-            if (LockLyrics.sStyle.writeBand(clock, floor, density, textPx, bandBounds)) {
+            if (Settings.LYRIC_STYLE.get().writeBand(clock, floor, density, textPx, bandBounds)) {
                 top = bandBounds[0] - me;
                 bottom = bandBounds[1] - me;
                 ok = bottom - top >= MIN_BAND_ROWS * textPx - 0.01f;
@@ -2229,7 +2230,7 @@ final class LyricView extends View {
      */
     private void updateTint() {
         int src = Main.coverTint();
-        LyricAppearance next = LockLyrics.sAppearance;
+        LyricAppearance next = Settings.LYRIC_APPEARANCE.get();
         if (src == tintSrc && appearance == next) return;
         tintSrc = src;
         appearance = next;

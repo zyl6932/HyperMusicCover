@@ -172,19 +172,12 @@ public final class Settings {
     // ---------------------------------------------------------------- the kinds
 
     public static final class Bool extends Entry<Bool> {
-        interface Store {
-            boolean get();
-
-            void set(boolean v);
-        }
-
         interface Apply {
             /** False when the value did not change and nothing follows. */
             boolean apply(Context c, boolean v);
         }
 
         private volatile boolean value;
-        private Store store;
         private boolean absentValue;
         private Apply apply;
 
@@ -194,17 +187,11 @@ public final class Settings {
         }
 
         public boolean on() {
-            return store != null ? store.get() : value;
+            return value;
         }
 
         public void set(boolean v) {
-            if (store != null) store.set(v);
-            else value = v;
-        }
-
-        Bool store(Store store) {
-            this.store = store;
-            return this;
+            value = v;
         }
 
         /** The value for {@link Absent#DEFAULT}, and the fallback for an extra of the wrong type. */
@@ -257,18 +244,11 @@ public final class Settings {
     }
 
     public static final class Real extends Entry<Real> {
-        interface Store {
-            float get();
-
-            void set(float v);
-        }
-
         interface Apply {
             boolean apply(Context c, float v);
         }
 
         private volatile float value;
-        private Store store;
         private float absentValue;
         private Apply apply;
 
@@ -279,17 +259,11 @@ public final class Settings {
         }
 
         public float get() {
-            return store != null ? store.get() : value;
+            return value;
         }
 
         public void set(float v) {
-            if (store != null) store.set(v);
-            else value = v;
-        }
-
-        Real store(Store store) {
-            this.store = store;
-            return this;
+            value = v;
         }
 
         Real absent(float v) {
@@ -335,18 +309,11 @@ public final class Settings {
     }
 
     public static final class Int extends Entry<Int> {
-        interface Store {
-            int get();
-
-            void set(int v);
-        }
-
         interface Apply {
             boolean apply(Context c, int v);
         }
 
         private volatile int value;
-        private Store store;
         private int absentValue;
         private Apply apply;
 
@@ -357,17 +324,11 @@ public final class Settings {
         }
 
         public int get() {
-            return store != null ? store.get() : value;
+            return value;
         }
 
         public void set(int v) {
-            if (store != null) store.set(v);
-            else value = v;
-        }
-
-        Int store(Store store) {
-            this.store = store;
-            return this;
+            value = v;
         }
 
         Int absent(int v) {
@@ -424,19 +385,12 @@ public final class Settings {
 
     /** A value object (a style), set by an op whose extras only it knows how to read. */
     public static final class Ref<T> extends Entry<Ref<T>> {
-        interface Store<T> {
-            T get();
-
-            void set(T v);
-        }
-
         interface Apply {
             /** Reads the op's extras and applies them. False when nothing changed. */
             boolean apply(Context c, Intent i);
         }
 
         private volatile T value;
-        private Store<T> store;
         private Apply apply;
 
         Ref(SettingSpec spec, T initial) {
@@ -445,17 +399,11 @@ public final class Settings {
         }
 
         public T get() {
-            return store != null ? store.get() : value;
+            return value;
         }
 
         public void set(T v) {
-            if (store != null) store.set(v);
-            else value = v;
-        }
-
-        Ref<T> store(Store<T> store) {
-            this.store = store;
-            return this;
+            value = v;
         }
 
         Ref<T> apply(Apply apply) {
@@ -483,11 +431,14 @@ public final class Settings {
 
     // The cover.
 
+    /**
+     * 启用音乐锁屏封面, the app's master switch for the cover. Unlike AUTO it is the user's, and it
+     * shuts every way in rather than only the automatic one: off, the card going up does not open the
+     * cover and neither does a tap on the artwork or on the music island - the island opens the plain
+     * card instead. The rest of the module (islands, shade, card tweaks) goes on. On when absent from
+     * the state file: every phone had the cover before the switch existed.
+     */
     public static final Bool COVER_FEATURE = new Bool(SettingSpec.COVER_FEATURE)
-            .store(new Bool.Store() {
-                public boolean get() { return Main.sCoverFeatureOn; }
-                public void set(boolean v) { Main.sCoverFeatureOn = v; }
-            })
             .op("coverfeature", "on", Absent.DEFAULT).absent(true).save(Save.NONE)
             .apply((c, v) -> {
                 Main.setCoverFeature(v);
@@ -495,12 +446,13 @@ public final class Settings {
             })
             .file("coverfeature");
 
-    /** Not kept: loadState turns it on at every start, whatever an old file said. */
+    /**
+     * Cover mode follows the media card. Not the user's: with it off the module does nothing at all,
+     * which is not a state worth offering - uninstalling is the way to turn the module off. The adb
+     * "auto" op can still flip it for a debugging session; not kept, and loadState turns it back on
+     * at every start whatever an old file said.
+     */
     public static final Bool AUTO = new Bool(SettingSpec.AUTO)
-            .store(new Bool.Store() {
-                public boolean get() { return Main.sAuto; }
-                public void set(boolean v) { Main.sAuto = v; }
-            })
             .op("auto", "on", Absent.DEFAULT).absent(true).save(Save.NONE)
             .apply((c, v) -> {
                 Main.setAuto(v);
@@ -509,10 +461,6 @@ public final class Settings {
 
     /** Kept as it was set: a value read from the file is not clamped (setBias clamps). */
     public static final Real BIAS = new Real(SettingSpec.BIAS)
-            .store(new Real.Store() {
-                public float get() { return Main.sBias; }
-                public void set(float v) { Main.sBias = v; }
-            })
             .op("bias", "v", Absent.DEFAULT).save(Save.NONE)
             .apply((c, v) -> {
                 Main.setBias(v);
@@ -527,16 +475,12 @@ public final class Settings {
      */
     public static final Ref<CoverCardStyle> COVER_STYLE =
             new Ref<CoverCardStyle>(SettingSpec.COVER_STYLE, CoverCardStyle.defaults())
-            .store(new Ref.Store<CoverCardStyle>() {
-                public CoverCardStyle get() { return Main.sCoverCardStyle; }
-                public void set(CoverCardStyle v) { Main.sCoverCardStyle = v; }
-            })
             .op("coverstyle", "key", Absent.IGNORE).save(Save.SOON)
             .apply((c, i) -> {
-                CoverCardStyle was = Main.sCoverCardStyle;
+                CoverCardStyle was = Settings.COVER_STYLE.get();
                 CoverCardStyle next = was.with(i.getStringExtra("key"),
                         i.getFloatExtra("v", Float.NaN));
-                Main.sCoverCardStyle = next;
+                Settings.COVER_STYLE.set(next);
                 CoverCardLayer.style(next);
                 CoverCardLayer.refresh();
                 if (Main.sCoverMode && next.mode != was.mode) {
@@ -555,12 +499,12 @@ public final class Settings {
                 }
                 return true;
             })
-            .file("coverstyle", () -> String.valueOf(Main.sCoverCardStyle.mode),
-                    v -> Main.sCoverCardStyle = Main.sCoverCardStyle.with("mode", Float.parseFloat(v)))
+            .file("coverstyle", () -> String.valueOf(Settings.COVER_STYLE.get().mode),
+                    v -> Settings.COVER_STYLE.set(Settings.COVER_STYLE.get().with("mode", Float.parseFloat(v))))
             // No covercardcorner: the square's corners are the media card's own, and the app
             // draws them from the cardradius it gets with the pictures.
             .answer(out -> {
-                CoverCardStyle s = Main.sCoverCardStyle;
+                CoverCardStyle s = Settings.COVER_STYLE.get();
                 out.putInt(SettingSpec.COVER_STYLE.key, s.mode);
                 out.putFloat(SettingSpec.COVER_CARD_FILL.key, s.fill);
                 out.putFloat(SettingSpec.COVER_CARD_POS.key, s.pos);
@@ -573,10 +517,6 @@ public final class Settings {
      * exists, and writing the default over it would lose the setting the user actually had.
      */
     public static final Real CLOCK_HEIGHT = new Real(SettingSpec.CLOCK_HEIGHT)
-            .store(new Real.Store() {
-                public float get() { return Main.sClockHeightDp; }
-                public void set(float v) { Main.sClockHeightDp = v; }
-            })
             .op("clockscale", "v", Absent.DEFAULT)
             .apply((c, v) -> {
                 Main.setClockHeightDp(v);
@@ -585,35 +525,30 @@ public final class Settings {
             // A settled clock has no frames left to carry a new size on; ask for one.
             .then(c -> ClockCollapse.refresh())
             .file("clock", () -> String.valueOf(Float.isNaN(Main.sClockLegacyK)
-                            ? Main.sClockHeightDp : Main.sClockLegacyK),
+                            ? Settings.CLOCK_HEIGHT.get() : Main.sClockLegacyK),
                     v -> Main.setClockHeightDp(Float.parseFloat(v)));
 
     /** NaN = follow the height; the query answers the size the clock is at either way. */
     public static final Real CLOCK_SIZE = new Real(SettingSpec.CLOCK_SIZE)
-            .store(new Real.Store() {
-                public float get() { return Main.sClockSize; }
-                public void set(float v) { Main.sClockSize = v; }
-            })
             .op("clocksize", "v", Absent.DEFAULT).absent(1f)
             .apply((c, v) -> {
                 Main.setClockSize(v);
                 return true;
             })
             .then(c -> ClockCollapse.refresh())
-            .file("clocksize", () -> Float.isNaN(Main.sClockSize) ? null : String.valueOf(Main.sClockSize),
+            .file("clocksize", () -> Float.isNaN(Settings.CLOCK_SIZE.get()) ? null : String.valueOf(Settings.CLOCK_SIZE.get()),
                     v -> Main.setClockSize(Float.parseFloat(v)))
             .answer(out -> out.putFloat(SettingSpec.CLOCK_SIZE.key, Main.effectiveClockSize()));
 
     /**
+     * How far the date and the clock are moved together, in dp, from where cover mode puts them.
+     * Positive is down.
+     *
      * clockoff, glass and spring are not kept: the clock's offset, the glass clock's end and the
-     * transition's spring are all fixed. Each is still reachable from its own op, for the
-     * session.
+     * transition's spring are all fixed - no slider, and loadState reads none of them. Each is still
+     * reachable from its own op, for the session.
      */
     public static final Real CLOCK_OFFSET = new Real(SettingSpec.CLOCK_OFFSET)
-            .store(new Real.Store() {
-                public float get() { return Main.sClockOffsetDp; }
-                public void set(float v) { Main.sClockOffsetDp = v; }
-            })
             .op("clockoffset", "v", Absent.DEFAULT)
             .apply((c, v) -> {
                 Main.setClockOffsetDp(v);
@@ -622,34 +557,41 @@ public final class Settings {
             .then(c -> ClockCollapse.refresh());
 
     public static final Real GLASS_END = new Real(SettingSpec.GLASS_END)
-            .store(new Real.Store() {
-                public float get() { return Main.sGlassEnd; }
-                public void set(float v) { Main.sGlassEnd = v; }
-            })
             .op("glassend", "v", Absent.DEFAULT)
             .apply((c, v) -> {
-                Main.sGlassEnd = Main.clamp01(v);
+                Settings.GLASS_END.set(Main.clamp01(v));
                 return true;
             })
             .then(c -> ClockCollapse.refresh());
 
-    /** Nothing forced on screen: see Main.setClockResponse, which also saves. */
+    /**
+     * What the transition runs on, and the wallpaper crossfade with it (see Main.fadeMsFor). Fixed at
+     * the OEM preset for this transition; `op clockspring` moves it for the rest of the session.
+     * Nothing forced on screen: see Main.setClockResponse, which also saves.
+     */
     public static final Real SPRING = new Real(SettingSpec.SPRING)
-            .store(new Real.Store() {
-                public float get() { return Main.sClockResponse; }
-                public void set(float v) { Main.sClockResponse = v; }
-            })
             .op("clockspring", "v", Absent.DEFAULT).save(Save.NONE)
             .apply((c, v) -> {
                 Main.setClockResponse(v);
                 return true;
             });
 
+    /**
+     * Keep cover mode's small clock in the always-on display instead of handing it back to the OEM's.
+     *
+     * About the FULL-SCREEN AOD only - the one that shows the whole lock screen, dimmed. That is the
+     * mode the user asked for, and the one where the OEM itself is trying to show the lock screen's
+     * clock (see ClockCollapse.sAodHeld). The plain linkage AOD and the classic plugin AOD are left
+     * exactly as they were.
+     *
+     * One setting for both views of the lock screen: the lyrics are a layer over cover mode rather
+     * than a mode of their own, so "cover" and "lyrics" have no separate AOD to disagree about.
+     *
+     * On by default: the grow-back was tried and read as the cover being taken away at the moment the
+     * screen went off. The app's row says it the other way round (the OEM's big clock wanted), and
+     * inverts it, once, where it reads the key.
+     */
     public static final Bool AOD_SMALL = new Bool(SettingSpec.AOD_SMALL)
-            .store(new Bool.Store() {
-                public boolean get() { return Main.sAodSmall; }
-                public void set(boolean v) { Main.sAodSmall = v; }
-            })
             .op("aodclock", "small", Absent.TOGGLE)
             .then(c -> {
                 // The pose a held doze was drawn at is the small one, and the fall into an OEM
@@ -657,7 +599,7 @@ public final class Settings {
                 // standing, turning the setting off would still land on the small clock once.
                 // Dropped, it is the state a doze that never settled is in.
                 ClockCollapse.forgetAodPose();
-                Xp.log(Main.TAG + "AOD keeps the small clock " + (Main.sAodSmall ? "on" : "off")
+                Xp.log(Main.TAG + "AOD keeps the small clock " + (Settings.AOD_SMALL.on() ? "on" : "off")
                         + " (full-screen AOD now: " + Main.fullAodOn() + ")");
             })
             .file("aodsmall");
@@ -669,91 +611,110 @@ public final class Settings {
      * which the keyguard does every time it comes up.
      */
     public static final Bool COLON = new Bool(SettingSpec.COLON)
-            .store(new Bool.Store() {
-                public boolean get() { return HyperTweaks.sForceColon; }
-                public void set(boolean v) { HyperTweaks.sForceColon = v; }
-            })
             .op("colon", "on", Absent.TOGGLE)
             .then(c -> HyperTweaks.publishColon(Main.sAppCtx))
             .file("colon");
 
     // The media card. One op for the four, saved and applied once whichever came.
 
+    /**
+     * The media card, restyled: its thumbnail hidden. This is the first thing the module changes
+     * about the card itself, and it follows the same ownership rule as the cut-out: the card is
+     * rebound on every track change and re-laid out constantly, so the look is asserted every frame
+     * from a guard rather than set once.
+     *
+     * This and MC_ART_IN_LYRICS are both ON, and neither is the user's: the app has no switches for
+     * them and the state file does not keep them. Off was the cautious default while they were new;
+     * on is the look this ships with - the artwork is already the wallpaper, so the thumbnail is
+     * showing it a second time. Both apply in cover mode only. `op mediacard` still moves them for
+     * the rest of the session.
+     */
     public static final Bool MC_HIDE_ART = new Bool(SettingSpec.MC_HIDE_ART)
-            .store(new Bool.Store() {
-                public boolean get() { return Main.sMcHideArt; }
-                public void set(boolean v) { Main.sMcHideArt = v; }
-            })
             .op("mediacard", "hideart", Absent.IGNORE).absent(false).save(Save.NONE);
 
+    /**
+     * Whether the hidden thumbnail comes back while the lock screen lyrics are up.
+     *
+     * Only means anything with MC_HIDE_ART on, which is what the app's layout says: it is the
+     * exception to that, not a setting of its own. Also fixed on, and for the same reason: the lyrics
+     * are up for most of a track, and a card that has lost its thumbnail by then has nothing to come
+     * back for.
+     */
     public static final Bool MC_ART_IN_LYRICS = new Bool(SettingSpec.MC_ART_IN_LYRICS)
-            .store(new Bool.Store() {
-                public boolean get() { return Main.sMcArtInLyrics; }
-                public void set(boolean v) { Main.sMcArtInLyrics = v; }
-            })
             .op("mediacard", "lyricart", Absent.IGNORE).absent(false).save(Save.NONE);
 
+    /**
+     * Whether tapping the card's title line toggles playback.
+     *
+     * It exists because of where the real button is: on this card it sits over the fingerprint
+     * sensor, so a thumb aiming at pause is as likely to unlock the phone instead. The title is the
+     * one part of the card that is both large and nowhere near the sensor.
+     *
+     * Applied on the lock screen only, like the two above, and for a sharper reason than
+     * consistency: the shade shows the SAME card view, and in the shade the real button works and the
+     * title is the OEM's. Held the same way too - asserted from the card guard rather than set once,
+     * because the guard is already what tells us the card is still ours.
+     */
     public static final Bool MC_TITLE_TAP = new Bool(SettingSpec.MC_TITLE_TAP)
-            .store(new Bool.Store() {
-                public boolean get() { return Main.sMcTitleTap; }
-                public void set(boolean v) { Main.sMcTitleTap = v; }
-            })
             .op("mediacard", "titletap", Absent.IGNORE).absent(false).save(Save.NONE)
             .file("mctap");
 
+    /**
+     * A button on the card that turns the cover page into the lyric page and back - the same switch
+     * as the two-finger tap, for anyone who would rather see it than know it. It covers the player's
+     * own button to the right of "next", which is why it is off by default. Only drawn in cover mode,
+     * on the lock screen, for a track that has lyrics: anywhere else there is only one page and
+     * nothing for it to do. See CardPageButton.
+     */
     public static final Bool MC_PAGE_BUTTON = new Bool(SettingSpec.MC_PAGE_BUTTON)
-            .store(new Bool.Store() {
-                public boolean get() { return Main.sMcPageBtn; }
-                public void set(boolean v) { Main.sMcPageBtn = v; }
-            })
             .op("mediacard", "pagebtn", Absent.IGNORE).absent(false).save(Save.NONE)
             .file("mcpage");
 
     static {
         FINISH.put("mediacard", c -> {
             ModuleState.saveState();
-            Xp.log(Main.TAG + "media card hideArt=" + Main.sMcHideArt
-                    + " artInLyrics=" + Main.sMcArtInLyrics
-                    + " titleTap=" + Main.sMcTitleTap + " pageBtn=" + Main.sMcPageBtn);
+            Xp.log(Main.TAG + "media card hideArt=" + Settings.MC_HIDE_ART.on()
+                    + " artInLyrics=" + Settings.MC_ART_IN_LYRICS.on()
+                    + " titleTap=" + Settings.MC_TITLE_TAP.on() + " pageBtn=" + Settings.MC_PAGE_BUTTON.on());
             MediaCard.applyMediaCard();
         });
     }
 
     /**
-     * The card on screen was built before this switch was read: the probe changes it in place
-     * (ProbeReceiver, which also answers what became of it).
+     * The lock screen media card's progress bar, lit the way the island's is.
+     *
+     * On by default. Switched off it takes effect on the next card the OEM builds: the mode is read in
+     * the widget's constructor and the shader it decides on is a final field, so a bar already
+     * running it cannot be talked out of it - the probe changes the one on screen in place instead
+     * (ProbeReceiver.settingAnswer, which also answers what became of it).
      */
     public static final Bool SEEK_GLOW = new Bool(SettingSpec.SEEK_GLOW)
-            .store(new Bool.Store() {
-                public boolean get() { return HyperTweaks.sBarGlow; }
-                public void set(boolean v) { HyperTweaks.sBarGlow = v; }
-            })
             .op("seekglow", "on", Absent.TOGGLE)
             .file("seekglow");
 
     // The transition.
 
+    /**
+     * A single tap on the cover puts the wallpaper back, the way tapping Apple's full-bleed artwork
+     * does. Tapping again brings the cover back.
+     */
     public static final Bool TAP_TOGGLE = new Bool(SettingSpec.TAP_TOGGLE)
-            .store(new Bool.Store() {
-                public boolean get() { return Main.sTapToggle; }
-                public void set(boolean v) { Main.sTapToggle = v; }
-            })
             .op("tap", "on", Absent.TOGGLE)
             .file("tap");
 
+    /**
+     * Whether the wallpaper crossfades between the album cover and the lock wallpaper instead of
+     * swapping in one frame. The fade itself runs in the wallpaper process, which is the only place
+     * that holds both pictures; all this decides is whether to ask for it.
+     */
     public static final Bool FADE_WALLPAPER = new Bool(SettingSpec.FADE_WALLPAPER)
-            .store(new Bool.Store() {
-                public boolean get() { return Main.sFadeWp; }
-                public void set(boolean v) { Main.sFadeWp = v; }
-            })
             .op("fadewp", "on", Absent.TOGGLE)
             .file("fadewp");
 
+    /**
+     * Apple Music's motion artwork in place of the still cover. Off by default. See MotionCover.
+     */
     public static final Bool MOTION = new Bool(SettingSpec.MOTION)
-            .store(new Bool.Store() {
-                public boolean get() { return MotionCover.sEnabled; }
-                public void set(boolean v) { MotionCover.sEnabled = v; }
-            })
             .op("motion", "on", Absent.IGNORE).absent(false)
             // The cover on screen now gets one, or loses its own.
             .then(c -> {
@@ -761,27 +722,34 @@ public final class Settings {
             })
             .file("motion");
 
+    /**
+     * Look up and download motion artwork on a metered network too - mobile data. Off by default.
+     */
     public static final Bool MOTION_ON_DATA = new Bool(SettingSpec.MOTION_ON_DATA)
-            .store(new Bool.Store() {
-                public boolean get() { return MotionCover.sOnData; }
-                public void set(boolean v) { MotionCover.sOnData = v; }
-            })
             .op("motion", "data", Absent.IGNORE).absent(false)
             .then(c -> {
-                if (MotionCover.sOnData) Main.main().post(MotionCover::retry);
+                if (Settings.MOTION_ON_DATA.on()) Main.main().post(MotionCover::retry);
             })
             .file("motiondata");
 
     /**
-     * Off by default: see the note on Main.sVideoFade. A change re-pushes the art, because the
-     * cover video on the device right now was built with whichever value was in force when it
-     * was pushed.
+     * Whether the COVER VIDEO ITSELF crossfades into the cover, in the wallpaper window.
+     *
+     * Off, and it is off because of what it cost when it was on: measured on the device, the cards'
+     * blurred background stopped switching to the cover at all - the window never showed the new
+     * frame. A cover video with a fade in it is a file of a dozen frames, a frame of the user's own
+     * wallpaper has to be decoded to build it, and both ends of it are converted to YUV; any of those
+     * going wrong leaves the reload at the end of that chain never happening, while the SystemUI view
+     * - which is put up by the other process entirely - goes on showing the cover. A one-frame cover,
+     * which is what this was before the fade existed, cannot fail that way.
+     *
+     * The lag it was meant to hide is handled where it actually lives: see FADE_MODE. Kept as a switch
+     * rather than deleted because the muxer now handles any frame count (checked off the device: two
+     * samples in, byte-identical file out) and this is one adb line to try again. A change re-pushes
+     * the art, because the cover video on the device right now was built with whichever value was in
+     * force when it was pushed.
      */
     public static final Bool VIDEO_FADE = new Bool(SettingSpec.VIDEO_FADE)
-            .store(new Bool.Store() {
-                public boolean get() { return Main.sVideoFade; }
-                public void set(boolean v) { Main.sVideoFade = v; }
-            })
             .op("vcfade", "on", Absent.TOGGLE)
             .then(c -> {
                 if (Main.sCoverMode) CoverPush.pushArtAsync(true, false);
@@ -790,10 +758,6 @@ public final class Settings {
 
     /** `--ei mode 0|1|2` picks one; without it the op cycles, to compare the three on the phone. */
     public static final Int FADE_MODE = new Int(SettingSpec.FADE_MODE)
-            .store(new Int.Store() {
-                public int get() { return Main.sFadeMode; }
-                public void set(int v) { Main.sFadeMode = v; }
-            })
             .op("fadesync", "mode", Absent.CYCLE)
             .then(c -> Xp.log(Main.TAG + "cover fade mode = " + CoverPush.fadeModeName()
                     + " (0 off, 1 hold for the wallpaper window, 2 stretch by the"
@@ -802,21 +766,23 @@ public final class Settings {
 
     // The fingerprint.
 
-    /** Also read on its own, before the state file is, by Fingerprint.peekHideFp. */
+    /**
+     * Hide the lock screen fingerprint ring. Unlike the card switches, this one is not tied to cover
+     * mode: an icon that appeared and vanished as the music started and stopped would read as a glitch
+     * rather than as a setting. Also read on its own, before the state file is, by
+     * Fingerprint.peekHideFp.
+     */
     public static final Bool HIDE_FP = new Bool(SettingSpec.HIDE_FP)
-            .store(new Bool.Store() {
-                public boolean get() { return Fingerprint.sHideFp; }
-                public void set(boolean v) { Fingerprint.sHideFp = v; }
-            })
             .op("hidefp", "on", Absent.TOGGLE)
             .then(c -> Fingerprint.applyHideFp())
             .file("hidefp");
 
+    /**
+     * Whether the notification stack keeps clear of the fingerprint icon: 0 leaves it to the system,
+     * 1 never avoids it, 2 always does. Not a boolean, because "off" here would mean two different
+     * things - stop reserving the space, or reserve it even with no print enrolled.
+     */
     public static final Int FP_AVOID = new Int(SettingSpec.FP_AVOID)
-            .store(new Int.Store() {
-                public int get() { return Fingerprint.sFpAvoid; }
-                public void set(int v) { Fingerprint.sFpAvoid = v; }
-            })
             .op("fpavoid", "mode", Absent.DEFAULT)
             .then(c -> Main.refreshNotificationSink())
             .file("fpavoid");
@@ -824,14 +790,14 @@ public final class Settings {
     // The lyrics.
 
     /**
-     * Kept as "lyricmaster" rather than the old "lyrics", which is not read: a file from when
-     * that one was written may still hold a 0 nobody remembers setting.
+     * Whether the lyrics are the lock screen's to show: the master switch. The two-finger tap swaps
+     * cover and lyrics only while it is on, and switching it takes the tap's answer with it (see
+     * LockLyrics.setEnabled).
+     *
+     * Kept as "lyricmaster" rather than the old "lyrics", which is not read: a file from when that one
+     * was written may still hold a 0 nobody remembers setting.
      */
     public static final Bool LYRICS = new Bool(SettingSpec.LYRICS)
-            .store(new Bool.Store() {
-                public boolean get() { return LockLyrics.sEnabled; }
-                public void set(boolean v) { LockLyrics.sEnabled = v; }
-            })
             .op("lyrics", "on", Absent.TOGGLE)
             .apply((c, v) -> {
                 LockLyrics.setEnabled(v, Main.sTrackKey, Main.sWatched);
@@ -839,91 +805,99 @@ public final class Settings {
             })
             .file("lyricmaster");
 
+    /**
+     * Keep the screen lit while lyrics are playing on the lock screen.
+     */
     public static final Bool LYRIC_KEEP_ON = new Bool(SettingSpec.LYRIC_KEEP_ON)
-            .store(new Bool.Store() {
-                public boolean get() { return LockLyrics.sKeepOn; }
-                public void set(boolean v) { LockLyrics.sKeepOn = v; }
-            })
             .op("lyrickeep", "on", Absent.TOGGLE)
             .then(c -> LockLyrics.refresh())
             .file("lyrickeep");
 
+    /**
+     * A held note's glow brighter than white on an HDR screen.
+     *
+     * Off by default, and it was off for a reason that has since been fixed: the colour mode is a
+     * whole window's, and the lyrics used to share the lock screen's with the clock and the media
+     * card, so the card's material was drawn as HDR content and brightened (reported 2026-09-16, still
+     * there on 2026-09-29 with the headroom request removed - SurfaceFlinger picks its own 5.00). With
+     * this switch on the lyrics have a window of their own, and only it is switched - see LyricWindow;
+     * with it off they stay in the keyguard's layer, since the window costs them the lock screen's
+     * z-order (see LockLyrics.attach). Off by default until that has been lived with.
+     */
     public static final Bool LYRIC_HDR = new Bool(SettingSpec.LYRIC_HDR)
-            .store(new Bool.Store() {
-                public boolean get() { return LockLyrics.sHdr; }
-                public void set(boolean v) { LockLyrics.sHdr = v; }
-            })
             .op("lyrichdr", "on", Absent.TOGGLE)
             .then(c -> LockLyrics.refresh())
             .file("lyrichdr");
 
     /**
-     * The view notices the switch itself and lays the lines out again around it; refresh only
-     * has to start the frames that let it. Left at the default when absent from the file: the
-     * key did not exist before this setting did.
+     * Whether a line's translation is drawn under it.
+     *
+     * On by default, because it is what the lyrics look like when the source has one: off is for
+     * people who read the language and find the second line in the way. It is not a filter on what is
+     * fetched - the layout drops the translation's rows, so the lines close up rather than leaving a
+     * gap where it was. The view notices the switch itself and lays the lines out again around it;
+     * refresh only has to start the frames that let it. Left at the default when absent from the file:
+     * the key did not exist before this setting did.
      */
     public static final Bool LYRIC_TRANS = new Bool(SettingSpec.LYRIC_TRANS)
-            .store(new Bool.Store() {
-                public boolean get() { return LockLyrics.sTrans; }
-                public void set(boolean v) { LockLyrics.sTrans = v; }
-            })
             .op("lyrictrans", "on", Absent.TOGGLE)
             .then(c -> LockLyrics.refresh())
             .file("lyrictrans");
 
+    /**
+     * Whether a line's romanisation is drawn under it, over the translation. Off by default and apart
+     * from the translation's switch - either can be shown alone (#64). Like the translation it is laid
+     * out, not fetched: switching it redraws what is already there.
+     */
     public static final Bool LYRIC_ROMA = new Bool(SettingSpec.LYRIC_ROMA)
-            .store(new Bool.Store() {
-                public boolean get() { return LockLyrics.sRoma; }
-                public void set(boolean v) { LockLyrics.sRoma = v; }
-            })
             .op("lyricroma", "on", Absent.TOGGLE)
             .then(c -> LockLyrics.refresh())
             .file("lyricroma");
 
-    /** Saved only when it changed. */
+    /**
+     * Whether a lyric may come off the network (PR #103): the database, the TTML Hub, the catalogues,
+     * the queue's read-ahead and the translations borrowed from any of them. Off, only the player's own
+     * session, its file and the Lyricon bridge are read. On by default. Saved only when it changed.
+     */
     public static final Bool LYRIC_ONLINE = new Bool(SettingSpec.LYRIC_ONLINE)
-            .store(new Bool.Store() {
-                public boolean get() { return LockLyrics.sOnline; }
-                public void set(boolean v) { LockLyrics.sOnline = v; }
-            })
             .op("lyriconline", "on", Absent.TOGGLE)
             .apply((c, v) -> LockLyrics.setOnline(v))
             .file("lyriconline");
 
     /**
-     * Same shape as the translation switch, saved the way the style is: a quick run of picks is
-     * one write. Clamped in setAlign, from the file as from an op.
+     * Where the lines settle in their column: LockLyrics.ALIGN_LEFT, _CENTER or _RIGHT.
+     *
+     * Unlike the switches this cannot be drawn around once changed - the alignment is baked into every
+     * StaticLayout - so LyricView lays the lines out again when this differs from what the layout in
+     * use was built with (see its builtAlign). Left is what the lyrics did before the setting existed,
+     * and what a state file written before it loads as.
+     *
+     * Saved the way the style is: a quick run of picks is one write. Clamped in setAlign, from the
+     * file as from an op.
      */
     public static final Int LYRIC_ALIGN = new Int(SettingSpec.LYRIC_ALIGN)
-            .store(new Int.Store() {
-                public int get() { return LockLyrics.sAlign; }
-                public void set(int v) { LockLyrics.sAlign = v; }
-            })
             .op("lyricalign", "v", Absent.KEEP).save(Save.SOON)
             .apply((c, v) -> LockLyrics.setAlign(v))
             .then(c -> LockLyrics.refresh())
-            .file("lyricalign", () -> String.valueOf(LockLyrics.sAlign),
+            .file("lyricalign", () -> String.valueOf(Settings.LYRIC_ALIGN.get()),
                     v -> LockLyrics.setAlign(Integer.parseInt(v)));
 
     /**
-     * The two sizes are the user's (the 歌词外观 page); the band's other four values are fixed
-     * and not kept, see LyricStyle. Clamped by LyricStyle.with, from the file as from an op.
+     * Immutable snapshot: the UI, renderer and state loader all use the same validated values. The two
+     * sizes are the user's (the 歌词外观 page); the band's other four values are fixed and not kept,
+     * see LyricStyle. Clamped by LyricStyle.with, from the file as from an op.
      */
     public static final Ref<LyricStyle> LYRIC_STYLE =
-            new Ref<LyricStyle>(SettingSpec.LYRIC_SIZE, LockLyrics.sStyle)
-            .store(new Ref.Store<LyricStyle>() {
-                public LyricStyle get() { return LockLyrics.sStyle; }
-                public void set(LyricStyle v) { LockLyrics.sStyle = v; }
-            })
+            new Ref<LyricStyle>(SettingSpec.LYRIC_SIZE, LyricStyle.DEFAULT)
             .op("lyricstyle", "key", Absent.IGNORE).save(Save.SOON)
             .apply((c, i) -> LockLyrics.setStyle(i.getStringExtra("key"),
                     i.getFloatExtra("v", Float.NaN)))
-            .file("lyricsize", () -> String.valueOf(LockLyrics.sStyle.sizeSp),
+            .file("lyricsize", () -> String.valueOf(Settings.LYRIC_STYLE.get().sizeSp),
                     v -> LockLyrics.setStyle("size", Float.parseFloat(v)))
-            .file("lyricbgsize", () -> String.valueOf(LockLyrics.sStyle.bgSizeSp),
+            .file("lyricbgsize", () -> String.valueOf(Settings.LYRIC_STYLE.get().bgSizeSp),
                     v -> LockLyrics.setStyle("bgsize", Float.parseFloat(v)))
             .answer(out -> {
-                LyricStyle s = LockLyrics.sStyle;
+                LyricStyle s = Settings.LYRIC_STYLE.get();
                 out.putFloat(SettingSpec.LYRIC_BG_SIZE.key, s.bgSizeSp);
                 out.putFloat(SettingSpec.LYRIC_FILL.key, s.fill);
                 out.putFloat(SettingSpec.LYRIC_POS.key, s.pos);
@@ -932,31 +906,30 @@ public final class Settings {
                 out.putInt(SettingSpec.LYRIC_WEIGHT.key, s.weight);
             });
 
-    /** One line of JSON in the file: no '=' or newline in it to confuse the reader. */
+    /**
+     * Colours and opacity of the lead and the backing vocal; the default is the official look. One
+     * line of JSON in the file: no '=' or newline in it to confuse the reader.
+     */
     public static final Ref<LyricAppearance> LYRIC_APPEARANCE =
-            new Ref<LyricAppearance>(SettingSpec.LYRIC_APPEARANCE, LockLyrics.sAppearance)
-            .store(new Ref.Store<LyricAppearance>() {
-                public LyricAppearance get() { return LockLyrics.sAppearance; }
-                public void set(LyricAppearance v) { LockLyrics.sAppearance = v; }
-            })
+            new Ref<LyricAppearance>(SettingSpec.LYRIC_APPEARANCE, LyricAppearance.DEFAULT)
             .op("lyricappearance", "json", Absent.IGNORE).save(Save.SOON)
             .apply((c, i) -> {
                 if (!i.hasExtra("json")) return false;
                 LockLyrics.setAppearance(i.getStringExtra("json"));
                 return true;
             })
-            .file("lyricappearance", () -> LockLyrics.sAppearance.toJson(), LockLyrics::setAppearance)
+            .file("lyricappearance", () -> Settings.LYRIC_APPEARANCE.get().toJson(), LockLyrics::setAppearance)
             .answer(out -> out.putString(SettingSpec.LYRIC_APPEARANCE.key,
-                    LockLyrics.sAppearance.toJson()));
+                    Settings.LYRIC_APPEARANCE.get().toJson()));
 
     // The islands.
 
-    /** On when absent from the file: the trip's page and island shipped before their switch. */
+    /**
+     * The app's 「高德公交地铁」 switch: off, neither the trip's lock screen page nor its island in 高德
+     * (AmapTransitShare.setEnabled) is put up; 高德 is told. On when absent from the file: the page and
+     * the island shipped before their switch.
+     */
     public static final Bool TRANSIT = new Bool(SettingSpec.TRANSIT)
-            .store(new Bool.Store() {
-                public boolean get() { return AmapTransitScene.sOn; }
-                public void set(boolean v) { AmapTransitScene.sOn = v; }
-            })
             .op("transitcfg", "on", Absent.IGNORE).absent(true)
             .apply((c, v) -> {
                 AmapTransitScene.INSTANCE.setOn(c, v);
@@ -964,11 +937,10 @@ public final class Settings {
             })
             .file("transit");
 
+    /**
+     * 取餐码: a 微信 order page's pickup code on the island. On unless turned off.
+     */
     public static final Bool PICKUP = new Bool(SettingSpec.PICKUP)
-            .store(new Bool.Store() {
-                public boolean get() { return PickupCodeIsland.sOn; }
-                public void set(boolean v) { PickupCodeIsland.sOn = v; }
-            })
             .op("pickup", "on", Absent.IGNORE).absent(true)
             .apply((c, v) -> {
                 PickupCodeIsland.INSTANCE.setOn(v);
@@ -977,15 +949,14 @@ public final class Settings {
             .file("pickup");
 
     /**
-     * `--ez card false` draws the island with the system's focus template again, which is the
-     * way back if ColorOS's card does not come up on a build. Kept, or it would last only until
-     * the next SystemUI start.
+     * Whether the pickup card is attached to the notification.
+     *
+     * On, and it is the point of the card now: this is HyperOS's own pickup card, taken from 小爱同学's
+     * layout (PickupCard), so there is no longer a second card style to prefer. Turned off (`op pickup
+     * --ez card false`) the system's focus template is back and the code is read from the param alone.
+     * Kept, or that would last only until the next SystemUI start.
      */
     public static final Bool PICKUP_CARD = new Bool(SettingSpec.PICKUP_CARD)
-            .store(new Bool.Store() {
-                public boolean get() { return PickupCodeIsland.sCard; }
-                public void set(boolean v) { PickupCodeIsland.sCard = v; }
-            })
             .op("pickup", "card", Absent.IGNORE).absent(true)
             .file("card");
 

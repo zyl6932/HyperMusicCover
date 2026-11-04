@@ -99,7 +99,7 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
     private boolean appSetting(Context c, Intent i, String op) throws Exception {
         if ("pushart".equals(op)) {
             boolean on = i.getBooleanExtra("on", true);
-            if (i.hasExtra("bias")) Main.sBias = Main.clamp01(i.getFloatExtra("bias", Main.sBias));
+            if (i.hasExtra("bias")) Settings.BIAS.set(Main.clamp01(i.getFloatExtra("bias", Settings.BIAS.get())));
             MediaController mc = on ? MediaCard.controllerFromCard(c) : null;
             if (on && mc == null) mc = Main.pickController(c);
             Main.sTrackKey = on ? Main.trackKey(mc) : "";
@@ -155,13 +155,13 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             View bar = Main.findLockScreenView("media_progress_bar");
             // With advanced material off the stock flat bar stays (#121); the switch is
             // kept, and the bar lights when the material comes back on.
-            String r = bar == null ? "no card up" : !HyperTweaks.sBarGlow
+            String r = bar == null ? "no card up" : !Settings.SEEK_GLOW.on()
                     ? HyperTweaks.clearBarGlow(bar)
                     : HyperTweaks.materialOn(bar.getContext())
                             ? HyperTweaks.applyBarGlow(bar) : "advanced material off, left flat";
-            Xp.log(Main.TAG + "media bar glow " + (HyperTweaks.sBarGlow ? "on" : "off")
+            Xp.log(Main.TAG + "media bar glow " + (Settings.SEEK_GLOW.on() ? "on" : "off")
                     + " - " + r);
-            setResultData((HyperTweaks.sBarGlow ? "on " : "off ") + r);
+            setResultData((Settings.SEEK_GLOW.on() ? "on " : "off ") + r);
         } else if ("motion".equals(op)) {
             // Motion covers: `--ez on` switches them, `--ez data true` downloads on mobile
             // data too, `--ez forget true` empties the cache; whichever, the answer is the
@@ -386,7 +386,7 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             // From WallpaperProbe, sent from inside the call that rebuilds the video
             // player - and also from the paths where no reload is coming at all, so
             // that the cover is never held for a message that will not arrive. See
-            // noteVideoReload() and sFadeMode.
+            // noteVideoReload() and Settings.FADE_MODE.
             CoverPush.noteVideoReload();
             // The window's content changes a few hundred ms AFTER this message, on
             // the wallpaper side, with nothing in this process asking for a frame -
@@ -461,7 +461,7 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
         } else if ("gdata".equals(op)) {
             Diagnostics.pokeGlassData(i.getIntExtra("idx", -1), i.getFloatExtra("v", 0f));
         } else if ("notifsink".equals(op)) {
-            setResultData("mode=" + Fingerprint.sFpAvoid + "\nhideFp=" + Fingerprint.sHideFp
+            setResultData("mode=" + Settings.FP_AVOID.get() + "\nhideFp=" + Settings.HIDE_FP.on()
                     + " suppressedFrames=" + Fingerprint.sFodFrames.pendingCount()
                     + " replayedFrames=" + Fingerprint.sFodFramesReplayed
                     + "\n" + Main.sNotificationSink.describe() + "\n"
@@ -577,7 +577,7 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
                     + " maxPointersSeen=" + LockTaps.sTwoMaxPointers + " trail=" + LockTaps.sTwoTrail
                     + " lastTwoTrail=" + LockTaps.sTwoTrailLast + " cancelled=" + LockTaps.sTwoCancelled
                     + " last=" + LockTaps.sTwoWhy
-                    + " lyrics=" + LockLyrics.sEnabled
+                    + " lyrics=" + Settings.LYRICS.on()
                     + " tap=" + (LockLyrics.sTapHidden ? "hidden" : "shown"));
         } else if ("cardvideo".equals(op)) {
             // The square card's motion cover, fixed file for now; see CardVideo.
@@ -886,20 +886,20 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             Xp.log(Main.TAG + "state: holdY=" + Main.sHoldY
                     + " lastSystemY=" + Main.sLastSystemY + " clock " + ClockCollapse.describe()
                     + " container=" + (Main.sContainer != null) + " verbose=" + Main.sVerbose);
-            Xp.log(Main.TAG + "cover: on=" + Main.sCoverMode + " auto=" + Main.sAuto
-                    + " bias=" + Main.sBias + " screen=" + Main.sScreenW + "x" + Main.sScreenH
+            Xp.log(Main.TAG + "cover: on=" + Main.sCoverMode + " auto=" + Settings.AUTO.on()
+                    + " bias=" + Settings.BIAS.get() + " screen=" + Main.sScreenW + "x" + Main.sScreenH
                     + " card=" + (MediaCard.sCardKnown ? (MediaCard.sCardShowing ? MediaCard.sCardKey : "gone") : "unknown")
                     + " following=" + (Main.sWatched == null ? "none" : Main.sWatched.getPackageName())
                     + " track=" + Main.sTrackKey);
             Xp.log(Main.TAG + "card rect: " + MediaCard.sCardL + "," + MediaCard.sCardT + " "
-                    + MediaCard.sCardW + "x" + MediaCard.sCardH + " hideArt=" + Main.sMcHideArt
-                    + " titleTap=" + Main.sMcTitleTap
+                    + MediaCard.sCardW + "x" + MediaCard.sCardH + " hideArt=" + Settings.MC_HIDE_ART.on()
+                    + " titleTap=" + Settings.MC_TITLE_TAP.on()
                     + " title=" + (Main.sCardTitleTapped != null) + " cardP=" + MediaCard.sCardP
-                    + " pageBtn=" + Main.sMcPageBtn + " " + CardPageButton.describe());
-            Xp.log(Main.TAG + "tap: toggle=" + Main.sTapToggle
+                    + " pageBtn=" + Settings.MC_PAGE_BUTTON.on() + " " + CardPageButton.describe());
+            Xp.log(Main.TAG + "tap: toggle=" + Settings.TAP_TOGGLE.on()
                     + " suppressed=" + Main.sTapSuppressed
                     + " bouncer=" + Main.bouncerUp()
-                    + " wallpaperFade=" + Main.sFadeWp);
+                    + " wallpaperFade=" + Settings.FADE_WALLPAPER.on());
         } else if ("verbose".equals(op)) {
             Main.sVerbose = i.getBooleanExtra("on", !Main.sVerbose);
             LockLyrics.verbose = Main.sVerbose;

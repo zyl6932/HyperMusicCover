@@ -1,5 +1,6 @@
 package com.os4.musiccover.pickup
 import com.os4.musiccover.Main
+import com.os4.musiccover.Settings
 import com.os4.musiccover.R
 import com.os4.musiccover.Gen
 import com.os4.musiccover.Xp
@@ -842,7 +843,7 @@ internal object PickupIsland {
         // The card ColorOS draws, in place of the focus template the system draws. Attached only
         // when it was actually built: a RemoteViews that fails to inflate takes the whole island
         // with it, and a card with a missing layout is worse than the template.
-        if (PickupCodeIsland.sCard) {
+        if (Settings.PICKUP_CARD.on()) {
             // A card that floats up comes in faint and is faded on the live view; see [fadePictureIn].
             val alpha = if (fresh) FADE_FROM else 1f
             runCatching {

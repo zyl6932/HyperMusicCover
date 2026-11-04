@@ -10,6 +10,7 @@ import com.os4.musiccover.ClockRoom
 import com.os4.musiccover.ClockRoomPolicy
 import com.os4.musiccover.CoverMorphMotion
 import com.os4.musiccover.Main
+import com.os4.musiccover.Settings
 import com.os4.musiccover.lyrics.TrackIdentity
 import com.os4.musiccover.Gen
 import com.os4.musiccover.Xp
@@ -4881,7 +4882,7 @@ internal class MiniPlayerController(
             val now = android.os.SystemClock.uptimeMillis()
             val dt = if (steppedAt == 0L) 1f / 120f else ((now - steppedAt) / 1000f).coerceIn(0f, 0.05f)
             steppedAt = now
-            motion.step(dt, Main.sClockResponse)
+            motion.step(dt, Settings.SPRING.get())
         }
     }
 

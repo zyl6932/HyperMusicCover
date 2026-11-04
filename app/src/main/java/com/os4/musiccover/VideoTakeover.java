@@ -178,7 +178,7 @@ final class VideoTakeover {
 
     /**
      * Whether the cover video itself crossfades into the cover. Off, and told rather than decided
-     * here: see Main.sVideoFade. With it off this process builds a one-frame cover video.
+     * here: see Settings.VIDEO_FADE. With it off this process builds a one-frame cover video.
      */
     static volatile boolean sVideoFade;
 
@@ -1331,7 +1331,7 @@ final class VideoTakeover {
 
     /**
      * A frame of the wallpaper's own video, for the multi-frame cover video's way in (only with
-     * Main.sVideoFade on). Scaled by the decoder: a 4K frame is 35MB unscaled. Null is not a
+     * Settings.VIDEO_FADE on). Scaled by the decoder: a 4K frame is 35MB unscaled. Null is not a
      * failure - it is the one-frame cover.
      */
     private static Bitmap wallpaperFrame(String path, long atMs, int w, int h) {

@@ -258,7 +258,7 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         float dt = lastFrame == 0L ? 1f / 120f
                 : Math.min(0.05f, Math.max(0f, (nowNs - lastFrame) / 1e9f));
         lastFrame = nowNs;
-        motion.step(dt, Main.sClockResponse);
+        motion.step(dt, Settings.SPRING.get());
         CoverMorphMotion.Box liveThumb = mini
                 ? MiniPlayerRuntime.artworkRestBox() : Main.coverMorphThumbnail();
         // Both ends chase their live boxes rather than taking them: the target is placed between
@@ -312,7 +312,7 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         float p = Math.max(0f, Math.min(1f, motion.value));
         float startRadius = mini ? MiniPlayerRuntime.artworkRadius()
                 : Math.min(14f * density, Math.min(thumb.w, thumb.h) * 0.20f);
-        CoverCardStyle style = Main.sCoverCardStyle;
+        CoverCardStyle style = Settings.COVER_STYLE.get();
         float endRadius = cardMode ? style.radius(Math.min(cover.w, cover.h)) : 0f;
         float radius = startRadius + (endRadius - startRadius) * p;
         float decoration = cardMode ? CoverMorphMotion.cardDecoration(motion.value) : 0f;

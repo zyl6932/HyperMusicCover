@@ -11,7 +11,7 @@ public final class LyricLine {
     final String translation;
     /**
      * How the line is said in Latin letters - romaji, jyutping, a Korean romanisation - or null.
-     * Kept apart from the translation because it has a switch of its own (LockLyrics.sRoma);
+     * Kept apart from the translation because it has a switch of its own (Settings.LYRIC_ROMA);
      * drawn over it when both are on (under()).
      */
     final String roma;

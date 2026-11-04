@@ -347,9 +347,9 @@ public class Main extends XposedModule {
      *
      * 36dp is 108px on this 480dpi screen - the OPPO clock the look was matched to.
      */
-    static final float DEFAULT_CLOCK_HEIGHT_DP = 36f;
+    static final float DEFAULT_CLOCK_HEIGHT_DP = SettingSpec.CLOCK_HEIGHT.defFloat;
     /** The bottom of the range. Below this a digit is a smudge. */
-    private static final float CLOCK_HEIGHT_MIN_DP = 20f;
+    private static final float CLOCK_HEIGHT_MIN_DP = SettingSpec.CLOCK_HEIGHT.min;
     /**
      * A sanity ceiling on a stored height, and the app's slider top when it has no clock to
      * measure.
@@ -359,7 +359,7 @@ public class Main extends XposedModule {
      * only has to stay above any glyph on any screen. 256dp is 768px on this 480dpi device,
      * against 448px measured for the tallest clock here.
      */
-    private static final float CLOCK_HEIGHT_MAX_DP = 256f;
+    private static final float CLOCK_HEIGHT_MAX_DP = SettingSpec.CLOCK_HEIGHT.max;
     /** The smallest scale ever written to a view, so no style can collapse itself to nothing. */
     static final float MIN_CLOCK_K = 0.05f;
     /**
@@ -371,8 +371,7 @@ public class Main extends XposedModule {
      * asked for. `op glassend` still moves it for the rest of the session, in these terms: --ef v 1
      * is the solid end.
      */
-    static final float DEFAULT_GLASS_END = 0f;
-    static volatile float sClockHeightDp = DEFAULT_CLOCK_HEIGHT_DP;
+    static final float DEFAULT_GLASS_END = SettingSpec.GLASS_END.defFloat;
     /**
      * A clock size stored before the unit changed, waiting for a measured box to convert with.
      *
@@ -389,7 +388,7 @@ public class Main extends XposedModule {
      * A setting again (user, 2026-09-30): the app's slider sends `op clocksize`, and the state
      * file keeps it. It was fixed at 0.09 for two days with the settings cut, and 0.09 is still
      * the default - the share the 36dp digits come to on the style they were chosen on. NaN is
-     * what the op asks for to hand the size back to sClockHeightDp, and is not written down.
+     * what the op asks for to hand the size back to Settings.CLOCK_HEIGHT, and is not written down.
      *
      * One thing this number does that NaN did not: it wakes ClockCollapse.targetY, which walks
      * the OEM's own squeeze so the variable font is DRAWN at the height asked for instead of
@@ -398,21 +397,11 @@ public class Main extends XposedModule {
      * the OEM's floor, and 36dp came to a share of the full clock that is close to it, so this
      * should be the same clock. If the digits ever read wider than before, this is the line.
      */
-    static final float DEFAULT_CLOCK_SIZE = 0.09f;
-    static volatile float sClockSize = DEFAULT_CLOCK_SIZE;
+    static final float DEFAULT_CLOCK_SIZE = SettingSpec.CLOCK_SIZE.defFloat;
     /** The smallest size the clock can be set to. */
-    static final float CLOCK_SIZE_MIN = 0.05f;
-    /**
-     * How far the date and the clock are moved together, in dp, from where cover mode puts
-     * them. Positive is down.
-     *
-     * Fixed at 0: no slider, and loadState does not read one. `op clockoffset` still moves it
-     * for the rest of the session.
-     */
-    static volatile float sClockOffsetDp = 0f;
-    static final float CLOCK_OFFSET_MIN_DP = -60f;
-    static final float CLOCK_OFFSET_MAX_DP = 300f;
-    static volatile float sGlassEnd = DEFAULT_GLASS_END;
+    static final float CLOCK_SIZE_MIN = SettingSpec.CLOCK_SIZE.min;
+    static final float CLOCK_OFFSET_MIN_DP = SettingSpec.CLOCK_OFFSET.min;
+    static final float CLOCK_OFFSET_MAX_DP = SettingSpec.CLOCK_OFFSET.max;
     /** The session we are mirroring, plus the callback that keeps the cover on the right track. */
     static MediaController sWatched;
 
@@ -426,25 +415,9 @@ public class Main extends XposedModule {
      * 0.5 = centred. Centred puts the most interesting part of the artwork exactly behind the
      * media card, which is why Apple biases it upwards.
      */
-    static final float DEFAULT_BIAS = 0.34f;
-    static volatile float sBias = DEFAULT_BIAS;
-    static volatile CoverCardStyle sCoverCardStyle = CoverCardStyle.defaults();
+    static final float DEFAULT_BIAS = SettingSpec.BIAS.defFloat;
     static volatile boolean sCoverCardPlaying;
 
-    /**
-     * Cover mode follows the media card. Not a setting: with it off the module does nothing at
-     * all, which is not a state worth offering - uninstalling is the way to turn the module off.
-     * The adb "auto" op can still flip it for a debugging session; it comes back on at startup.
-     */
-    static volatile boolean sAuto = true;
-    /**
-     * 启用音乐锁屏封面, the app's master switch for the cover. Unlike sAuto it is a setting, and
-     * it shuts every way in rather than only the automatic one: off, the card going up does not
-     * open the cover and neither does a tap on the artwork or on the music island - the island
-     * opens the plain card instead. The rest of the module (islands, shade, card tweaks) goes on.
-     * On when absent from the state file: every phone had the cover before the switch existed.
-     */
-    static volatile boolean sCoverFeatureOn = true;
     /** What the pushed wallpaper currently shows, so a metadata storm pushes it only once. */
     static volatile String sTrackKey = "";
     private static MediaSessionManager sMsm;
@@ -470,67 +443,6 @@ public class Main extends XposedModule {
     static final int[] LOC_CARD = new int[2];
 
     /**
-     * The media card, restyled. This is the first thing the module changes about the card
-     * itself, and it follows the same ownership rule as the cut-out: the card is rebound on
-     * every track change and re-laid out constantly, so the look is asserted every frame from a
-     * guard rather than set once.
-     *
-     * Both are ON now, and neither is a setting: the app has no switches for them and loadState
-     * does not read any. Off was the cautious default while they were new; on is the look this
-     * ships with - the artwork is already the wallpaper, so the thumbnail is showing it a second
-     * time. Both apply in cover mode only. `op mediacard` still moves them for the rest of the
-     * session.
-     */
-    static volatile boolean sMcHideArt = true;
-    /**
-     * Whether the hidden thumbnail comes back while the lock screen lyrics are up.
-     *
-     * Only means anything with sMcHideArt on, which is what the app's layout says: it is the
-     * exception to that setting, not a setting of its own. Also fixed on, and for the same
-     * reason: the lyrics are up for most of a track, and a card that has lost its thumbnail by
-     * then has nothing to come back for.
-     */
-    static volatile boolean sMcArtInLyrics = true;
-    /**
-     * Whether tapping the card's title line toggles playback.
-     *
-     * It exists because of where the real button is: on this card it sits over the fingerprint
-     * sensor, so a thumb aiming at pause is as likely to unlock the phone instead. The title is
-     * the one part of the card that is both large and nowhere near the sensor.
-     *
-     * Applied on the lock screen only, like the two switches above it, and for a sharper reason
-     * than consistency: the shade shows the SAME card view, and in the shade the real button
-     * works and the title is the OEM's. Held the same way too - asserted from the card guard
-     * rather than set once, because the guard is already what tells us the card is still ours.
-     */
-    static volatile boolean sMcTitleTap;
-    /**
-     * A button on the card that turns the cover page into the lyric page and back - the same
-     * switch as the two-finger tap, for anyone who would rather see it than know it. It covers
-     * the player's own button to the right of "next", which is why it is off by default. Only
-     * drawn in cover mode, on the lock screen, for a track that has lyrics: anywhere else there is
-     * only one page and nothing for it to do. See CardPageButton.
-     */
-    static volatile boolean sMcPageBtn;
-    /**
-     * Keep cover mode's small clock in the always-on display instead of handing it back to the
-     * OEM's, which is what it does by default.
-     *
-     * About the FULL-SCREEN AOD only - the one that shows the whole lock screen, dimmed. That is
-     * the mode the user asked for, and the one where the OEM itself is trying to show the lock
-     * screen's clock (see ClockCollapse.sAodHeld). The plain linkage AOD and the classic plugin
-     * AOD are left exactly as they were.
-     *
-     * One setting for both views of the lock screen: the lyrics are a layer over cover mode
-     * rather than a mode of their own, so "cover" and "lyrics" have no separate AOD to disagree
-     * about.
-     *
-     * On, and not a setting: the app has no switch for it and loadState does not read one. The
-     * grow-back was tried and read as the cover being taken away at the moment the screen went
-     * off. `op aodclock` still moves it for the rest of the session.
-     */
-    static volatile boolean sAodSmall = true;
-    /**
      * Whether the wallpaper process is sizing the keyguard texture to the SCREEN rather than to
      * the wallpaper file, which is its default and is the same switch as WallpaperProbe.sTexFit
      * on the other side. Kept here for one reason: while that is on, the re-fit below - which
@@ -542,7 +454,7 @@ public class Main extends XposedModule {
     static final NotificationSink sNotificationSink = new NotificationSink();
     private static final Runnable REFRESH_NOTIFICATION_SINK = () -> {
         try {
-            int mode = Fingerprint.sFpAvoid;
+            int mode = Settings.FP_AVOID.get();
             boolean refreshed = sNotificationSink.refresh(mode);
             Xp.log(TAG + "notification bound mode=" + mode
                     + (refreshed ? " policy flow updated" : " waiting for system collection"));
@@ -576,34 +488,6 @@ public class Main extends XposedModule {
     static float sArtWroteX = Float.NaN, sArtWroteY = Float.NaN;
 
     /**
-     * A single tap on the cover puts the wallpaper back, the way tapping Apple's full-bleed
-     * artwork does. Tapping again brings the cover back.
-     */
-    static volatile boolean sTapToggle = true;
-    /**
-     * Whether the wallpaper crossfades between the album cover and the lock wallpaper instead of
-     * swapping in one frame. The fade itself runs in the wallpaper process, which is the only
-     * place that holds both pictures; all this decides is whether to ask for it.
-     */
-    static volatile boolean sFadeWp = true;
-    /**
-     * Whether the COVER VIDEO ITSELF crossfades into the cover, in the wallpaper window.
-     *
-     * Off, and it is off because of what it cost when it was on: measured on the device, the
-     * cards' blurred background stopped switching to the cover at all - the window never showed
-     * the new frame. A cover video with a fade in it is a file of a dozen frames, a frame of the
-     * user's own wallpaper has to be decoded to build it, and both ends of it are converted to
-     * YUV; any of those going wrong leaves the reload at the end of that chain never happening,
-     * while the SystemUI view - which is put up by the other process entirely - goes on showing
-     * the cover. A one-frame cover, which is what this was before the fade existed, cannot fail
-     * that way.
-     *
-     * The lag it was meant to hide is handled where it actually lives: see sFadeMode. Kept as a
-     * switch rather than deleted because the muxer now handles any frame count (checked off the
-     * device: two samples in, byte-identical file out) and this is one adb line to try again.
-     */
-    static volatile boolean sVideoFade;
-    /**
      * What the cover's own fade does about the wallpaper window's head start, which is the one
      * thing about a live cover that cannot be fixed by making either half faster.
      *
@@ -635,7 +519,6 @@ public class Main extends XposedModule {
      * OFF for that one transition.
      */
     static final int FADE_MODE_OFF = 0, FADE_MODE_HOLD = 1, FADE_MODE_STRETCH = 2;
-    static volatile int sFadeMode = FADE_MODE_HOLD;
     /**
      * Set when the user tapped their way OUT of cover mode while the card was still up.
      *
@@ -700,16 +583,10 @@ public class Main extends XposedModule {
      * frame on it, against 25-41 here. Faster than that is asking for dropped frames on the one
      * frame the OEM is also recomputing the variable font.
      */
-    private static final float CLOCK_RESPONSE_MIN = 0.18f, CLOCK_RESPONSE_MAX = 0.60f;
+    private static final float CLOCK_RESPONSE_MIN = SettingSpec.SPRING.min,
+            CLOCK_RESPONSE_MAX = SettingSpec.SPRING.max;
     /** The wallpaper crossfade that belongs to EASE_COVER[1]. See fadeMsFor(). */
     private static final long EASE_COVER_FADE_MS = 370L;
-    /**
-     * What the transition runs on, and the wallpaper crossfade with it (see fadeMsFor).
-     *
-     * Fixed at the OEM preset for this transition: no slider, and loadState does not read one.
-     * `op clockspring` still moves it for the rest of the session.
-     */
-    public static volatile float sClockResponse = EASE_COVER[1];
 
     /**
      * The fade that belongs to a spring response: the card's stand-in animator and the
@@ -1024,9 +901,9 @@ public class Main extends XposedModule {
             if (sVideoWallpaper) sCover = null;
             CoverPush.pushArtAsync(true, false);
         }
-        if (sCoverMode && sCoverCardStyle.mode == CoverCardStyle.CARD) {
+        if (sCoverMode && Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD) {
             CoverCardLayer.attach(CoverPush.coverLayer());
-            CoverCardLayer.style(sCoverCardStyle);
+            CoverCardLayer.style(Settings.COVER_STYLE.get());
             CoverCardLayer.playback(sCoverCardPlaying);
         }
         // Re-apply on keyguard rebuild. Measured: the system never re-shows the
@@ -1962,16 +1839,16 @@ public class Main extends XposedModule {
      */
     private static float heightDpFor(RectF box) {
         float legacy = sClockLegacyK;
-        if (Float.isNaN(legacy)) return sClockHeightDp;
+        if (Float.isNaN(legacy)) return Settings.CLOCK_HEIGHT.get();
         sClockLegacyK = Float.NaN;
-        if (box == null || box.height() <= 0f) return sClockHeightDp;
+        if (box == null || box.height() <= 0f) return Settings.CLOCK_HEIGHT.get();
         float dp = legacy * box.height() / density();
-        sClockHeightDp = dp < CLOCK_HEIGHT_MIN_DP ? CLOCK_HEIGHT_MIN_DP
-                : (dp > CLOCK_HEIGHT_MAX_DP ? CLOCK_HEIGHT_MAX_DP : dp);
+        Settings.CLOCK_HEIGHT.set(dp < CLOCK_HEIGHT_MIN_DP ? CLOCK_HEIGHT_MIN_DP
+                : (dp > CLOCK_HEIGHT_MAX_DP ? CLOCK_HEIGHT_MAX_DP : dp));
         Xp.log(TAG + "clock scale " + r3(legacy) + " was a coefficient; " + r1(box.height())
-                + "px of glyphs makes that " + r1(sClockHeightDp) + "dp");
+                + "px of glyphs makes that " + r1(Settings.CLOCK_HEIGHT.get()) + "dp");
         ModuleState.saveState();
-        return sClockHeightDp;
+        return Settings.CLOCK_HEIGHT.get();
     }
 
     /** When the last with-cover-off needart answer was sent. See the needart branch. */
@@ -1991,25 +1868,25 @@ public class Main extends XposedModule {
             return;
         }
         sClockLegacyK = Float.NaN;
-        sClockHeightDp = v > CLOCK_HEIGHT_MAX_DP ? CLOCK_HEIGHT_MAX_DP : v;
-        Xp.log(TAG + "clock height = " + sClockHeightDp + "dp");
+        Settings.CLOCK_HEIGHT.set(v > CLOCK_HEIGHT_MAX_DP ? CLOCK_HEIGHT_MAX_DP : v);
+        Xp.log(TAG + "clock height = " + Settings.CLOCK_HEIGHT.get() + "dp");
     }
 
-    /** The clock size as a fraction of the style's full clock. NaN = follow sClockHeightDp. */
+    /** The clock size as a fraction of the style's full clock. NaN = follow Settings.CLOCK_HEIGHT. */
     static void setClockSize(float v) {
         if (Float.isNaN(v) || v <= 0f) {
-            sClockSize = Float.NaN;
+            Settings.CLOCK_SIZE.set(Float.NaN);
         } else {
-            sClockSize = v < CLOCK_SIZE_MIN ? CLOCK_SIZE_MIN : (v > 1f ? 1f : v);
+            Settings.CLOCK_SIZE.set(v < CLOCK_SIZE_MIN ? CLOCK_SIZE_MIN : (v > 1f ? 1f : v));
         }
-        Xp.log(TAG + "clock size = " + sClockSize);
+        Xp.log(TAG + "clock size = " + Settings.CLOCK_SIZE.get());
     }
 
     static void setClockOffsetDp(float v) {
         if (Float.isNaN(v)) v = 0f;
-        sClockOffsetDp = v < CLOCK_OFFSET_MIN_DP ? CLOCK_OFFSET_MIN_DP
-                : (v > CLOCK_OFFSET_MAX_DP ? CLOCK_OFFSET_MAX_DP : v);
-        Xp.log(TAG + "clock offset = " + sClockOffsetDp + "dp");
+        Settings.CLOCK_OFFSET.set(v < CLOCK_OFFSET_MIN_DP ? CLOCK_OFFSET_MIN_DP
+                : (v > CLOCK_OFFSET_MAX_DP ? CLOCK_OFFSET_MAX_DP : v));
+        Xp.log(TAG + "clock offset = " + Settings.CLOCK_OFFSET.get() + "dp");
     }
 
     /**
@@ -2024,13 +1901,13 @@ public class Main extends XposedModule {
     }
 
     static float effectiveClockSize() {
-        if (!Float.isNaN(sClockSize)) return sClockSize;
+        if (!Float.isNaN(Settings.CLOCK_SIZE.get())) return Settings.CLOCK_SIZE.get();
         RectF box = ClockViews.glyphBox();
         if (box == null || box.height() <= 0f) return Float.NaN;
         float unit = ClockViews.glyphUnit(box);
         float full = unit * ClockCollapse.fullRatio(unit);
         if (!(full > 0f)) return Float.NaN;
-        float s = sClockHeightDp * density() / full;
+        float s = Settings.CLOCK_HEIGHT.get() * density() / full;
         return s < CLOCK_SIZE_MIN ? CLOCK_SIZE_MIN : (s > 1f ? 1f : s);
     }
 
@@ -2046,10 +1923,10 @@ public class Main extends XposedModule {
      * pushFadeMs().
      */
     static void setClockResponse(float v) {
-        sClockResponse = v < CLOCK_RESPONSE_MIN ? CLOCK_RESPONSE_MIN
-                : (v > CLOCK_RESPONSE_MAX ? CLOCK_RESPONSE_MAX : v);
-        Xp.log(TAG + "clock response = " + sClockResponse + "s, fades "
-                + fadeMsFor(sClockResponse) + "ms");
+        Settings.SPRING.set(v < CLOCK_RESPONSE_MIN ? CLOCK_RESPONSE_MIN
+                : (v > CLOCK_RESPONSE_MAX ? CLOCK_RESPONSE_MAX : v));
+        Xp.log(TAG + "clock response = " + Settings.SPRING.get() + "s, fades "
+                + fadeMsFor(Settings.SPRING.get()) + "ms");
         ModuleState.saveState();
         CoverPush.pushFadeMs(sAppCtx);
     }
@@ -2464,9 +2341,9 @@ public class Main extends XposedModule {
      * change re-composes what is already on screen instead of waiting for the next track.
      */
     static void setBias(float v) {
-        sBias = clamp01(v);
+        Settings.BIAS.set(clamp01(v));
         ModuleState.saveState();
-        Xp.log(TAG + "cover bias = " + sBias);
+        Xp.log(TAG + "cover bias = " + Settings.BIAS.get());
         if (sCoverMode) CoverPush.pushArtAsync(true, false);
     }
 
@@ -2595,9 +2472,9 @@ public class Main extends XposedModule {
         // the clock's own frames instead of blinking away before the clock has begun to move.
         // Without an animation there is nothing to fade, and the settled look goes on directly.
         MediaCard.sCardP = animate ? 0f : 1f;
-        if (sCoverCardStyle.mode == CoverCardStyle.CARD) {
+        if (Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD) {
             CoverCardLayer.attach(CoverPush.coverLayer());
-            CoverCardLayer.style(sCoverCardStyle);
+            CoverCardLayer.style(Settings.COVER_STYLE.get());
             CoverCardLayer.playback(sCoverCardPlaying);
         }
         // The lyrics exception is decided here, before anything has moved. With the lyrics up
@@ -2606,7 +2483,7 @@ public class Main extends XposedModule {
         // the same blink with the direction reversed. wantsAttached() rather than wantsShown()
         // because nothing is on screen yet - it answers "will the lyrics be up", which is the
         // question this state is about.
-        CardArt.sLyricUp = sMcArtInLyrics && LockLyrics.wantsAttached();
+        CardArt.sLyricUp = Settings.MC_ART_IN_LYRICS.on() && LockLyrics.wantsAttached();
         CardArt.sLyricArtP = CardArt.sLyricArtTo = CardArt.sLyricUp ? 1f : 0f;
         CardArt.sLyricArtV = 0f;
         CardArt.sLyricArtAt = 0L;
@@ -2682,7 +2559,7 @@ public class Main extends XposedModule {
 
     /** 保留壁纸: cover mode leaves the wallpaper alone. See CoverCardStyle.KEEP. */
     static boolean keepsWallpaper() {
-        return sCoverCardStyle.mode == CoverCardStyle.KEEP;
+        return Settings.COVER_STYLE.get().mode == CoverCardStyle.KEEP;
     }
 
     /** The clock is small for the cover, or flying back from it. KeepDim's gate. */
@@ -2914,13 +2791,13 @@ public class Main extends XposedModule {
     public static void miniPlayerEnterCover() {
         if (!miniPlayerCanShow()) return;
         // No cover to open: the island opens into the plain card, as a pull up on it does.
-        if (!sCoverFeatureOn) {
+        if (!Settings.COVER_FEATURE.on()) {
             MiniPlayerRuntime.openCardInstead();
             return;
         }
         // Taken before the entry moves anything: the lyrics grow out of the island as it is now.
         LockLyrics.notePopOrigin(MiniPlayerRuntime.musicIslandCentreOnScreen());
-        if (!sAuto) {
+        if (!Settings.AUTO.on()) {
             // A manual entry owns the same container transition as automatic cover mode.
             // This also adopts an upward swipe still settling when its artwork is tapped.
             if (MiniPlayerRuntime.prepareSceneEntry()) {
@@ -2954,10 +2831,10 @@ public class Main extends XposedModule {
     public static void miniPlayerTurnScene(boolean enter) {
         if (!keyguardShowing() || bouncerUp()) return;
         if (enter) {
-            if (sCoverMode || !sCoverFeatureOn) return;
+            if (sCoverMode || !Settings.COVER_FEATURE.on()) return;
             // Back out of the island mid-morph: the lyrics come out of it too, from where it is.
             LockLyrics.notePopOrigin(MiniPlayerRuntime.musicIslandCentreOnScreen());
-            if (!sAuto) setCoverEnabled(true, true, false);
+            if (!Settings.AUTO.on()) setCoverEnabled(true, true, false);
             else enterFromTap("mini player pulled back up");
         } else {
             if (!sCoverMode) return;
@@ -3017,7 +2894,7 @@ public class Main extends XposedModule {
     /** The full-screen AOD may show a faint static colour wash even with the square hidden. */
     static boolean coverCardBackdropInAod() {
         View c = sContainer;
-        return sCoverMode && sCoverCardStyle.mode == CoverCardStyle.CARD && !sScreenOn
+        return sCoverMode && Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD && !sScreenOn
                 && ClockCollapse.phase() == ClockCollapse.Phase.AOD
                 && ClockCollapse.aodFullScreen() && keyguardShowing()
                 && !LockLyrics.lockScreenGone() && c != null && c.isShown();
@@ -3119,24 +2996,24 @@ public class Main extends XposedModule {
     }
 
     static boolean coverMorphCardMode() {
-        return sCoverCardStyle.mode == CoverCardStyle.CARD;
+        return Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD;
     }
 
     /** A manual entry must keep its moving artwork until the asynchronous backdrop can take it. */
     static boolean coverMorphHandoffReady(boolean cardMode) {
         long artAt = sCtArt;
         if (artAt == 0L) return false;
-        long afterArt = cardMode ? 120L : fadeMsFor(sClockResponse) + 140L;
+        long afterArt = cardMode ? 120L : fadeMsFor(Settings.SPRING.get()) + 140L;
         return android.os.SystemClock.uptimeMillis() - artAt >= afterArt;
     }
 
     /** The full-screen destination is the sharp band in CoverCompose.composeWallpaper(). */
     static CoverMorphMotion.Box coverMorphTarget(Bitmap art) {
         if (art == null || art.isRecycled()) return null;
-        if (sCoverCardStyle.mode == CoverCardStyle.FULL) {
+        if (Settings.COVER_STYLE.get().mode == CoverCardStyle.FULL) {
             if (sScreenW <= 0 || sScreenH <= 0 || art.getWidth() <= 0) return null;
             float height = art.getHeight() * (sScreenW / (float) art.getWidth());
-            float top = (sScreenH - height) * Math.max(0f, Math.min(1f, sBias));
+            float top = (sScreenH - height) * Math.max(0f, Math.min(1f, Settings.BIAS.get()));
             return new CoverMorphMotion.Box(0f, top, sScreenW, height);
         }
         ViewGroup layer = CoverPush.coverLayer();
@@ -3152,7 +3029,7 @@ public class Main extends XposedModule {
                 mediaTop = cardXY[1];
             }
         }
-        CoverCardStyle.Rect r = sCoverCardStyle.place(layer.getWidth(), layer.getHeight(),
+        CoverCardStyle.Rect r = Settings.COVER_STYLE.get().place(layer.getWidth(), layer.getHeight(),
                 layer.getResources().getDisplayMetrics().density,
                 ClockCollapse.contentBottomFor(layer) - xy[1],
                 ClockCollapse.unzoomY(layer, mediaTop) - xy[1]);
@@ -3518,7 +3395,7 @@ public class Main extends XposedModule {
      * shade, where the OEM's own click is the right one.
      */
     static boolean wantsArtTap() {
-        return sTapToggle && MediaCard.sCardShowing;
+        return Settings.TAP_TOGGLE.on() && MediaCard.sCardShowing;
     }
 
     /**
@@ -3577,7 +3454,7 @@ public class Main extends XposedModule {
         if (action == MotionEvent.ACTION_DOWN) {
             // With the cover switched off the artwork is the OEM's again: its tap would only
             // lead to a cover that is not allowed to open.
-            boolean onCard = (sCoverFeatureOn || sCoverMode)
+            boolean onCard = (Settings.COVER_FEATURE.on() || sCoverMode)
                     && (wantsArtTap() || MiniPlayerRuntime.wantsNativeArtworkGesture())
                     && screenOn() && keyguardShowing() && onKeyguardNow()
                     && !bouncerUp() && !sGestureOnCentre && !ChargeAnim.sGestureOnCharge;
@@ -3847,7 +3724,7 @@ public class Main extends XposedModule {
     static void enterFromTap(String why) {
         // Before the morph is begun, not only at setCoverEnabled: the morph would otherwise
         // start out of a card that then never turns into anything.
-        if (!sCoverFeatureOn) return;
+        if (!Settings.COVER_FEATURE.on()) return;
         long t0 = System.nanoTime();
         enterFromTapNow(why);
         noteToggleCost("in", System.nanoTime() - t0);
@@ -3888,9 +3765,9 @@ public class Main extends XposedModule {
         // Guarded on the two questions onMediaUpdate asks before it does anything.
         int to = LockLyrics.willAttachOnEntry()
                 ? CoverMorphRoute.LYRICS : CoverMorphRoute.COVER;
-        if (sAuto && MediaCard.sCardShowing && MiniPlayerRuntime.prepareSceneEntry()) {
+        if (Settings.AUTO.on() && MediaCard.sCardShowing && MiniPlayerRuntime.prepareSceneEntry()) {
             beginMiniMorph(true, to == CoverMorphRoute.COVER);
-        } else if (sAuto && MediaCard.sCardShowing
+        } else if (Settings.AUTO.on() && MediaCard.sCardShowing
                 && CoverMorphRoute.shouldMorph(CoverMorphRoute.NORMAL, to)) {
             beginMorph(true);
         } else {
@@ -3984,7 +3861,7 @@ public class Main extends XposedModule {
      * is handed back; on lets the card decide again, as it would have all along.
      */
     static void setCoverFeature(boolean on) {
-        sCoverFeatureOn = on;
+        Settings.COVER_FEATURE.set(on);
         Xp.log(TAG + "cover feature " + (on ? "on" : "off"));
         ModuleState.saveState();
         if (!on) {
@@ -3998,7 +3875,7 @@ public class Main extends XposedModule {
     }
 
     static synchronized void setAuto(boolean on) {
-        sAuto = on;
+        Settings.AUTO.set(on);
         Xp.log(TAG + "auto mode " + (on ? "on" : "off"));
         ModuleState.saveState();
         if (!on) {
@@ -4302,8 +4179,8 @@ public class Main extends XposedModule {
         // The cover is pushed off the media card's key, and the session's metadata can still be
         // the last song's at that moment - so the motion cover follows the metadata itself. It
         // keys on the song, so a player singing into TITLE does not look it up per line.
-        if (sCoverMode) MotionCover.onCover(sCoverCardStyle.mode == CoverCardStyle.CARD);
-        if (!sAuto || !MediaCard.sCardShowing) return;
+        if (sCoverMode) MotionCover.onCover(Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD);
+        if (!Settings.AUTO.on() || !MediaCard.sCardShowing) return;
         // The user tapped the cover away and the card is still up. The one case where "there is
         // a card" must not mean "put the cover back".
         if (sTapSuppressed) return;
@@ -4386,7 +4263,7 @@ public class Main extends XposedModule {
     static void setCoverEnabled(final boolean on, final boolean animate,
                                         final boolean fresh) {
         // The one door every way into the cover goes through, so the master switch is kept here.
-        if (on && !sCoverFeatureOn) return;
+        if (on && !Settings.COVER_FEATURE.on()) return;
         CoverPush.pushArtAsync(on, on && fresh);
         Runnable r = new Runnable() {
             @Override
@@ -4561,7 +4438,7 @@ public class Main extends XposedModule {
                 : !MediaCard.sCardShowing ? "no track on the card"
                 : null;
         if (no != null) return "blocked: " + no;
-        if (!LockLyrics.sEnabled) {
+        if (!Settings.LYRICS.on()) {
             // Nothing on the lock screen to switch. Answering the gesture by bringing the
             // lyrics back would be writing the app's setting from here, which is the whole of
             // what this gesture stopped doing.
@@ -4600,7 +4477,7 @@ public class Main extends XposedModule {
     static void detachCover() {
         // The session watch belongs to auto mode, not to the (legacy) in-SystemUI ImageView, so
         // dropping that view must not stop the module following the music.
-        if (!sAuto && sWatched != null && sMediaCb != null) {
+        if (!Settings.AUTO.on() && sWatched != null && sMediaCb != null) {
             try {
                 Gen.unsessionCallback(sWatched, sMediaCb);
             } catch (Throwable ignored) {

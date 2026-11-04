@@ -641,7 +641,7 @@ private fun CardGroup(
         // Two switches were here and are gone: hiding the card's thumbnail, and bringing it back
         // while the lyrics are up. Both are on and neither is a setting - the artwork is the
         // wallpaper in this mode, so the thumbnail is a second copy of it, and the exception that
-        // shows it again is what the lyrics being up is for. See Main.sMcHideArt.
+        // shows it again is what the lyrics being up is for. See Settings.MC_HIDE_ART.
         //
         // Requested for a reason of its own: on this card the real play/pause button sits over
         // the fingerprint sensor, so a thumb aiming for it unlocks the phone instead. The title
@@ -656,7 +656,7 @@ private fun CardGroup(
             },
         )
         // A visible way to the switch the two-finger tap already is. Only drawn in cover mode
-        // for a track with lyrics - see Main.sMcPageBtn. The one row here with a summary: it
+        // for a track with lyrics - see Settings.MC_PAGE_BUTTON. The one row here with a summary: it
         // takes the player's own button to the right of "next", and that has to be said.
         SwitchPreference(
             title = stringResource(R.string.card_page_button),

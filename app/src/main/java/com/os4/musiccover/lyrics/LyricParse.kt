@@ -64,7 +64,7 @@ object LyricParse {
      * The same again with a romanisation beside the translation - QQ Music, NetEase and Kuwo
      * ship one for Japanese and Korean songs, as a third timed text joined by time like the
      * translation. Kept on the line as its own field, drawn above the translation under a
-     * switch of its own (LockLyrics.sRoma).
+     * switch of its own (Settings.LYRIC_ROMA).
      */
     @JvmStatic
     fun parse(body: String, translation: String?, roma: String?): List<LyricLine> {

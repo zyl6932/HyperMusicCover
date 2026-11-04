@@ -35,18 +35,6 @@ final class HyperTweaks {
 
     private static final String TAG = "MCTweak: ";
 
-    /** The one tweak here with a switch, driven from the cover and clock page. */
-    static volatile boolean sForceColon;
-
-    /**
-     * The lock screen media card's progress bar, lit the way the island's is.
-     *
-     * On by default. Switched off it takes effect on the next card the OEM builds, not on the one
-     * on screen: the mode is read in the widget's constructor and the shader it decides on is a
-     * final field, so a bar already running it cannot be talked back out of it.
-     */
-    static volatile boolean sBarGlow = true;
-
     /**
      * What each hook did, in the order they were tried.
      *
@@ -70,8 +58,8 @@ final class HyperTweaks {
 
     /** One line per hook, for `op tweaks`. */
     static String describe() {
-        StringBuilder sb = new StringBuilder("colon=").append(sForceColon ? "on" : "off");
-        sb.append(System.lineSeparator()).append("barglow=").append(sBarGlow ? "on" : "off");
+        StringBuilder sb = new StringBuilder("colon=").append(Settings.COLON.on() ? "on" : "off");
+        sb.append(System.lineSeparator()).append("barglow=").append(Settings.SEEK_GLOW.on() ? "on" : "off");
         synchronized (STATUS) {
             if (STATUS.isEmpty()) {
                 sb.append(System.lineSeparator())
@@ -134,8 +122,8 @@ final class HyperTweaks {
         // Nothing found from SystemUI's own loader, which is the normal case: wait for the
         // plugin's loader to be built.
         if (!sPluginHooked) watchForPlugin();
-        clockColon(cl, "systemui", "sysui.clock.colon", () -> sForceColon);
-        mediaBarGlow(cl, () -> sBarGlow);
+        clockColon(cl, "systemui", "sysui.clock.colon", () -> Settings.COLON.on());
+        mediaBarGlow(cl, () -> Settings.SEEK_GLOW.on());
         coverUnlockFade(cl, Main::coverModeOn);
     }
 
@@ -940,7 +928,7 @@ final class HyperTweaks {
         if (ctx == null) return;
         try {
             android.provider.Settings.Global.putInt(
-                    ctx.getContentResolver(), GLOBAL_COLON, sForceColon ? 1 : 0);
+                    ctx.getContentResolver(), GLOBAL_COLON, Settings.COLON.on() ? 1 : 0);
         } catch (Throwable t) {
             // No permission, or a build that refuses the write: the always-on clock keeps the
             // colon it had. The lock screen's own colon does not go through here.

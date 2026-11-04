@@ -18,7 +18,7 @@ final class CardSpring {
         step(target, dt, DEFAULT_RESPONSE);
     }
 
-    /** @param response seconds per undamped cycle - Main.sClockResponse, like the other springs */
+    /** @param response seconds per undamped cycle - Settings.SPRING, like the other springs */
     void step(float target, float dt, float response) {
         if (dt <= 0f) return;
         double frequency = 2.0 * Math.PI / Math.max(0.12f, response);

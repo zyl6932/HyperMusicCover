@@ -1,4 +1,5 @@
 package com.os4.musiccover.lyrics;
+import com.os4.musiccover.Settings;
 import com.os4.musiccover.ModuleState;
 import com.os4.musiccover.MediaCard;
 import com.os4.musiccover.ClockCollapse;
@@ -41,18 +42,6 @@ public final class LockLyrics {
     public static volatile boolean verbose;
 
     /**
-     * Whether the lyrics are the lock screen's to show.
-     *
-     * ON, and not a switch any more: the app has no row for it and loadState does not read one.
-     * The two-finger tap below is how the lock screen is asked to show the cover instead, and it
-     * is the one that survives - it is what the setting was for most of its life. It does mean
-     * the network fetch happens inside SystemUI without anyone asking for it; that is the trade
-     * the setting was removed for, and `op lyrics` still turns it off for the rest of the
-     * session.
-     */
-    public static volatile boolean sEnabled = true;
-
-    /**
      * Whether the lock screen's two-finger tap has taken the lyrics away.
      *
      * A view of the switch, not the switch: the app's setting is untouched, and this only says
@@ -79,23 +68,7 @@ public final class LockLyrics {
     private static volatile PlaybackState sState;
     private static long sStateReadAt;
 
-    /** The user's second switch: keep the screen lit while lyrics are playing on the lock screen. */
-    public static volatile boolean sKeepOn;
     private static boolean sHolding;
-
-    /**
-     * The third switch: a held note's glow brighter than white on an HDR screen.
-     *
-     * Off by default, and it was off for a reason that has since been fixed: the colour mode is a
-     * whole window's, and the lyrics used to share the lock screen's with the clock and the media
-     * card, so the card's material was drawn as HDR content and brightened (reported 2026-09-16,
-     * still there on 2026-09-29 with the headroom request removed - SurfaceFlinger picks its own
-     * 5.00). With this switch on the lyrics have a window of their own, and only it is switched
-     * - see {@link LyricWindow}; with it off they stay in the keyguard's layer, since the window
-     * costs them the lock screen's z-order (see attach). Off by default until that has been
-     * lived with.
-     */
-    public static volatile boolean sHdr = false;
 
     /**
      * The switch, on a screen that can show it. Everything the highlight changes - the window,
@@ -104,42 +77,21 @@ public final class LockLyrics {
      * there whatever the switch says.
      */
     static boolean hdr() {
-        return sHdr && HdrDisplay.supported(Main.sAppCtx);
+        return Settings.LYRIC_HDR.on() && HdrDisplay.supported(Main.sAppCtx);
     }
-    /**
-     * The fourth switch: whether a line's translation is drawn under it.
-     *
-     * On by default, because it is what the lyrics look like when the source has one: off is for
-     * people who read the language and find the second line in the way. It is not a filter on
-     * what is fetched - the layout drops the translation's rows, so the lines close up rather
-     * than leaving a gap where it was.
-     */
-    public static volatile boolean sTrans = true;
-    /**
-     * The fifth: whether a line's romanisation is drawn under it, over the translation. Off by
-     * default and apart from the translation's switch - either can be shown alone (#64). Like
-     * the translation it is laid out, not fetched: switching it redraws what is already there.
-     */
-    public static volatile boolean sRoma = false;
-    /**
-     * Whether a lyric may come off the network (PR #103): the database, the TTML Hub, the
-     * catalogues, the queue's read-ahead and the translations borrowed from any of them. Off,
-     * only the player's own session, its file and the Lyricon bridge are read. On by default.
-     */
-    public static volatile boolean sOnline = true;
 
     /**
-     * Switches sOnline and looks the song on screen up again: off, a lyric that came off the
+     * Switches Settings.LYRIC_ONLINE and looks the song on screen up again: off, a lyric that came off the
      * network goes - with nothing local to replace it the song has none; on, a song with no
      * lyric, or no translation, gets the chance of one. The cache goes either way, since it
      * holds answers found under the other setting.
      */
     public static boolean setOnline(boolean on) {
-        if (on == sOnline) return false;
-        sOnline = on;
+        if (on == Settings.LYRIC_ONLINE.on()) return false;
+        Settings.LYRIC_ONLINE.set(on);
         Main.main().post(() -> {
             CACHE.clear();
-            if (!sEnabled || sDemo || sKey.isEmpty() || sController == null) return;
+            if (!Settings.LYRICS.on() || sDemo || sKey.isEmpty() || sController == null) return;
             if (!on && sLines.isEmpty() && !sLoading) return;
             Main.main().removeCallbacks(SETTLED_LOOKUP);
             unpark();
@@ -152,23 +104,10 @@ public final class LockLyrics {
     static final int BELOW_TRANS = 1, BELOW_ROMA = 2;
 
     static int below() {
-        return (sTrans ? BELOW_TRANS : 0) | (sRoma ? BELOW_ROMA : 0);
+        return (Settings.LYRIC_TRANS.on() ? BELOW_TRANS : 0) | (Settings.LYRIC_ROMA.on() ? BELOW_ROMA : 0);
     }
     /** Where the lines settle in their column: left, centre or right, as the settings offer. */
     static final int ALIGN_LEFT = 0, ALIGN_CENTER = 1, ALIGN_RIGHT = 2;
-    /**
-     * The alignment pref: one of the three constants above.
-     *
-     * Unlike the switches this cannot be drawn around once changed - the alignment is baked into
-     * every StaticLayout - so LyricView lays the lines out again when this differs from what the
-     * layout in use was built with (see its builtAlign). Left is what the lyrics did before the
-     * setting existed, and what a state file written before it loads as.
-     */
-    public static volatile int sAlign = ALIGN_LEFT;
-    /** Immutable snapshot: the UI, renderer and state loader all use the same validated values. */
-    public static volatile LyricStyle sStyle = LyricStyle.DEFAULT;
-    /** Colours and opacity of the lead and the backing vocal; the default is the official look. */
-    public static volatile LyricAppearance sAppearance = LyricAppearance.DEFAULT;
     /**
      * The most lines sung at the same time that are lit together (LyricFocus), 1..4. Not saved:
      * every overlapping line is lit, up to the ceiling; `op lyricmaxlines` lowers it for the
@@ -178,8 +117,8 @@ public final class LockLyrics {
 
     public static void setAppearance(String json) {
         LyricAppearance next = LyricAppearance.parse(json);
-        if (sAppearance.toJson().equals(next.toJson())) return;
-        sAppearance = next;
+        if (Settings.LYRIC_APPEARANCE.get().toJson().equals(next.toJson())) return;
+        Settings.LYRIC_APPEARANCE.set(next);
         LyricView view = sView;
         if (view != null) {
             view.invalidate();
@@ -202,17 +141,17 @@ public final class LockLyrics {
      */
     public static boolean setAlign(int mode) {
         int next = mode <= ALIGN_LEFT ? ALIGN_LEFT : Math.min(mode, ALIGN_RIGHT);
-        if (next == sAlign) return false;
-        sAlign = next;
+        if (next == Settings.LYRIC_ALIGN.get()) return false;
+        Settings.LYRIC_ALIGN.set(next);
         LyricView view = sView;
         if (view != null) view.kick();
         return true;
     }
 
     public static boolean setStyle(String key, float value) {
-        LyricStyle next = sStyle.with(key, value);
-        if (next == sStyle) return false;
-        sStyle = next;
+        LyricStyle next = Settings.LYRIC_STYLE.get().with(key, value);
+        if (next == Settings.LYRIC_STYLE.get()) return false;
+        Settings.LYRIC_STYLE.set(next);
         LyricView view = sView;
         if (view != null) view.kick();
         return true;
@@ -406,7 +345,7 @@ public final class LockLyrics {
      * A demo asks for them itself, whatever the switch says.
      */
     private static boolean wanted() {
-        return sEnabled && !sTapHidden || sDemo;
+        return Settings.LYRICS.on() && !sTapHidden || sDemo;
     }
 
     /**
@@ -634,11 +573,11 @@ public final class LockLyrics {
 
     /** The lyric page a tap into cover mode will land on. */
     public static boolean willAttachOnEntry() {
-        return hasLyrics() && CoverMorphRoute.lyricsAfterEntry(sEnabled, sTapHidden, sDemo);
+        return hasLyrics() && CoverMorphRoute.lyricsAfterEntry(Settings.LYRICS.on(), sTapHidden, sDemo);
     }
 
     public static boolean willAttachAfterTapToggle() {
-        return hasLyrics() && CoverMorphRoute.lyricsAfterToggle(sEnabled, sTapHidden, sDemo);
+        return hasLyrics() && CoverMorphRoute.lyricsAfterToggle(Settings.LYRICS.on(), sTapHidden, sDemo);
     }
 
     /**
@@ -905,7 +844,7 @@ public final class LockLyrics {
         Main.main().removeCallbacks(SETTLED_LOOKUP);
         unpark();
         sBlurVideoReloaded = false;
-        if (sEnabled && !key.isEmpty()) scheduleBlurKick(BLUR_ENTER_DELAY_MS + 16L);
+        if (Settings.LYRICS.on() && !key.isEmpty()) scheduleBlurKick(BLUR_ENTER_DELAY_MS + 16L);
         // A different song: the budget above is per track, and so is the payload it was spent on.
         sInfoSeen = null;
         sInfoTries = 0;
@@ -922,9 +861,9 @@ public final class LockLyrics {
         // - two messages, in the middle of the track change's crossfade, which is exactly when
         // the wallpaper process holds a switch back to wait for the fade. Those two could then
         // land in the wrong order and leave the cover sharp.
-        sLoading = sEnabled && !key.isEmpty();
+        sLoading = Settings.LYRICS.on() && !key.isEmpty();
         setLines(Collections.<LyricLine>emptyList(), "track changed");
-        if (!sEnabled || key.isEmpty()) return;
+        if (!Settings.LYRICS.on() || key.isEmpty()) return;
         Cached hit = CACHE.get(key);
         if (hit != null) {
             sLoading = false;
@@ -986,7 +925,7 @@ public final class LockLyrics {
         public void run() {
             String key = sKey;
             MediaController c = sController;
-            if (!sEnabled || sDemo || key.isEmpty()) return;
+            if (!Settings.LYRICS.on() || sDemo || key.isEmpty()) return;
             Cached hit = CACHE.get(key);
             if (hit != null) {
                 sLoading = false;
@@ -1023,7 +962,7 @@ public final class LockLyrics {
         // the network by now, and the session's own lyric outranks anything it can find. Turned
         // away, Apple's lyric - on the session 0.55s after the track change - waited out ten
         // seconds of catalogues that had nothing (2026-10-06, Here's to Never Growing Up).
-        if (!sEnabled || key.isEmpty() || sDemo) return;
+        if (!Settings.LYRICS.on() || key.isEmpty() || sDemo) return;
         if (sLoading && sParked == null && !sLines.isEmpty()) return;
         if (sParked != null && sParked.rereading) return;
         String info = LyricSource.infoFor(c);
@@ -1053,7 +992,7 @@ public final class LockLyrics {
      * song, and never over lines already up.
      */
     private static void rereadIfIdentityMoved(String key, MediaController c) {
-        if (!sEnabled || sDemo || key.isEmpty() || sLoading || sParked != null
+        if (!Settings.LYRICS.on() || sDemo || key.isEmpty() || sLoading || sParked != null
                 || !sLines.isEmpty() || sIdentityRetried || sLookedUpAs == null) {
             return;
         }
@@ -1091,7 +1030,7 @@ public final class LockLyrics {
      */
     static void onProviderLyrics() {
         Main.main().post(() -> {
-            if (!sEnabled || sDemo || sKey.isEmpty() || sController == null) return;
+            if (!Settings.LYRICS.on() || sDemo || sKey.isEmpty() || sController == null) return;
             if (!sLines.isEmpty() && (sSource == LyricSource.SRC_LYRIC_INFO
                     || sSource == LyricSource.SRC_LOCAL || sSource == LyricSource.SRC_LYRICON)) {
                 return;
@@ -1457,7 +1396,7 @@ public final class LockLyrics {
 
     /** The app's switch. The setting: it is written to the state file and the app reads it back. */
     public static void setEnabled(boolean on, String key, MediaController c) {
-        sEnabled = on;
+        Settings.LYRICS.set(on);
         // The switch is the master, so it takes the tap's answer with it. Switching the lyrics
         // off and on again brings them back; without this, turning them on while a previous tap
         // had hidden them would leave the lock screen on the cover with the switch saying on.
@@ -1475,7 +1414,7 @@ public final class LockLyrics {
      * would be the lock screen writing the app's setting, which is what it no longer does.
      */
     public static void toggleByTap(String key, MediaController c) {
-        if (!sEnabled) return;
+        if (!Settings.LYRICS.on()) return;
         sTapHidden = !sTapHidden;
         Xp.log(TAG + "two-finger tap: lyrics " + (sTapHidden ? "hidden" : "shown"));
         show(!sTapHidden, key, c, "hidden by the two-finger tap");
@@ -1579,7 +1518,7 @@ public final class LockLyrics {
         LyricView v = sView;
         View c = Main.sContainer;
         View card = card();
-        return "enabled=" + sEnabled + " tap=" + (sTapHidden ? "hidden" : "shown")
+        return "enabled=" + Settings.LYRICS.on() + " tap=" + (sTapHidden ? "hidden" : "shown")
                 + " demo=" + sDemo + " key=" + sKey + " lines=" + sLines.size()
                 + " has=" + hasLyrics() + " loading=" + sLoading
                 + " (" + sWhy + ") src=" + srcName(sSource)
@@ -2080,7 +2019,7 @@ public final class LockLyrics {
         // it while the display is dozing takes a screen wake lock and pulls the phone out of the
         // AOD at full brightness. Called from the tick, which never stops, so this would have
         // fired within a second of the screen going off.
-        boolean asked = sKeepOn && wantsShown() && !inHeldAod()
+        boolean asked = Settings.LYRIC_KEEP_ON.on() && wantsShown() && !inHeldAod()
                 && !sLines.isEmpty() && playing();
         // Not in a pocket or face down: with nothing to stop it, a song playing kept the screen
         // lit and the lyrics drawing at 60Hz wherever the phone was put, for as long as it

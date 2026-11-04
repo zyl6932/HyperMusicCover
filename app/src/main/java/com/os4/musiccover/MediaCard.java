@@ -147,7 +147,7 @@ public final class MediaCard {
                     // Only worth waiting for while something still wants something from the
                     // card: the restyle on the way in, or the artwork tap that is the way back.
                     if (attempt < CARD_RETRIES
-                            && ((Main.sCoverMode && (Main.sMcHideArt || Main.sMcTitleTap || Main.sMcPageBtn))
+                            && ((Main.sCoverMode && (Settings.MC_HIDE_ART.on() || Settings.MC_TITLE_TAP.on() || Settings.MC_PAGE_BUTTON.on()))
                                 || Main.wantsArtTap())) {
                         Main.main().postDelayed(new Runnable() {
                             @Override
@@ -171,7 +171,7 @@ public final class MediaCard {
                 sCardArtist = card.findViewById(card.getResources()
                         .getIdentifier("header_artist", "id", "com.android.systemui"));
                 assertMediaCard(card);
-                if (Main.sCoverMode && (Main.sMcHideArt || Main.sMcTitleTap || Main.sMcPageBtn)) guardCard(card);
+                if (Main.sCoverMode && (Settings.MC_HIDE_ART.on() || Settings.MC_TITLE_TAP.on() || Settings.MC_PAGE_BUTTON.on())) guardCard(card);
                 else releaseCardGuard();
             }
         });
@@ -217,13 +217,13 @@ public final class MediaCard {
                     || ((ClockCollapse.phase() == ClockCollapse.Phase.AOD || !Main.screenOnCached())
                         && LockLyrics.wantsAttached());
         }
-        float exc = CardArt.stepLyricArt(Main.sMcArtInLyrics && CardArt.sLyricUp);
+        float exc = CardArt.stepLyricArt(Settings.MC_ART_IN_LYRICS.on() && CardArt.sLyricUp);
         // One number, on purpose. Centring is not a setting of its own any more - a title with no
         // thumbnail beside it belongs in the middle and a title that has one does not - so the
         // title follows the same value the thumbnail does, and both now ride the exception's
         // progress instead of stepping to it: the thumbnail comes back and the title slides
         // aside for it, at the speed of the transition they are part of.
-        float hideP = Main.sMcHideArt ? p * (1f - exc) : 0f;
+        float hideP = Settings.MC_HIDE_ART.on() ? p * (1f - exc) : 0f;
         float centreP = hideP;
         View art = sCardArt;
         if (art != null) {
@@ -260,12 +260,12 @@ public final class MediaCard {
         }
         centreCardText(card, (TextView) sCardTitle, centreP);
         centreCardText(card, (TextView) sCardArtist, centreP);
-        CardTouch.applyTitleTap((TextView) sCardTitle, Main.sMcTitleTap && Main.sCoverMode && onKeyguard);
+        CardTouch.applyTitleTap((TextView) sCardTitle, Settings.MC_TITLE_TAP.on() && Main.sCoverMode && onKeyguard);
         // On the card's progress, so it comes and goes with the restyle - including the exit,
         // where cover mode is already off but the card is still fading back. Not in a capture
         // for the preview, and not in the AOD: that is a smaller stand-in card with no taps.
-        boolean pageBtn = Main.sMcPageBtn && onKeyguard && !Main.sCardForced
-                && LockLyrics.sEnabled && LockLyrics.hasLyrics()
+        boolean pageBtn = Settings.MC_PAGE_BUTTON.on() && onKeyguard && !Main.sCardForced
+                && Settings.LYRICS.on() && LockLyrics.hasLyrics()
                 && Main.screenOnCached() && ClockCollapse.phase() != ClockCollapse.Phase.AOD;
         // Which page it would go to. Asked of the lyrics' own intent while cover mode is on, so
         // the icon flips with the tap rather than when the lyric view has finished fading; held
@@ -516,7 +516,7 @@ public final class MediaCard {
     /** One line about the card right now: our state, and the view as it stands. */
     static String cardSnapshot() {
         StringBuilder sb = new StringBuilder();
-        sb.append("auto=").append(Main.sAuto).append(" cover=").append(Main.sCoverMode)
+        sb.append("auto=").append(Settings.AUTO.on()).append(" cover=").append(Main.sCoverMode)
           .append(" known=").append(sCardKnown).append(" showing=").append(sCardShowing)
           .append(" forced=").append(Main.sCardForced)
           .append(" token=").append(sCardToken != null)
@@ -605,7 +605,7 @@ public final class MediaCard {
         Main.main().removeCallbacks(sCardRemoved);
         if (showing) sCardPresent = true;
         else if (sCardPresent) Main.main().postDelayed(sCardRemoved, CARD_GONE_MS);
-        if (!Main.sAuto) {
+        if (!Settings.AUTO.on()) {
             sCardShowing = showing;
             MiniPlayerRuntime.refresh();
             return;
@@ -644,7 +644,7 @@ public final class MediaCard {
         // tear down a cover that is on the phone just because the card hook has not fired for
         // the first time. That wait has to end somewhere though, and it did not - which left
         // the wallpaper on the last album for good. See releaseUnobservedCover().
-        if (!Main.sAuto) return;
+        if (!Settings.AUTO.on()) return;
         if (!sCardKnown) {
             Main.releaseUnobservedCover(Main.activeSessions());
             return;

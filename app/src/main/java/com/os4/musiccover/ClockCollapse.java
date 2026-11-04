@@ -56,7 +56,7 @@ public final class ClockCollapse {
      *
      * Off, sleeping hands the clock back - toAod() springs it to whatever the doze lays out and
      * land() clears our transforms. On, and only under the full-screen AOD (the mode the setting
-     * is about; see Main.sAodSmall), the pose on screen at the moment of sleep is remembered and
+     * is about; see Settings.AOD_SMALL), the pose on screen at the moment of sleep is remembered and
      * re-applied every frame of the doze, so nothing moves at all.
      *
      * The OEM is trying to do the same thing - AllInOneClockAnimation.updateFullAodAnimState()
@@ -102,7 +102,7 @@ public final class ClockCollapse {
         // An immersive page as well as the cover: the full-screen doze keeps the page under the
         // clock (ImmersiveHost), and only that doze - the plain one is the OEM's, page and clock
         // alike.
-        return Main.sAodSmall && Main.fullAodOn();
+        return Settings.AOD_SMALL.on() && Main.fullAodOn();
     }
 
     /**
@@ -973,7 +973,7 @@ public final class ClockCollapse {
      * is always right for it.
      */
     private static float wantedOemHeight(float max) {
-        float s = Main.sClockSize;
+        float s = Settings.CLOCK_SIZE.get();
         return Float.isNaN(s) || !(max > 0f) ? Float.NaN : s * max;
     }
 
@@ -1450,7 +1450,7 @@ public final class ClockCollapse {
         final float gk = gw0 * gw0;
         final float gDamp = 2f * gw0;
         final float zeta = Main.EASE_COVER[0];
-        final float response = Main.sClockResponse;
+        final float response = Settings.SPRING.get();
         final float w0 = (float) (2 * Math.PI / response);
         final float k = w0 * w0;
         final float damp = 2f * zeta * w0;
@@ -2385,13 +2385,13 @@ public final class ClockCollapse {
         float full;
         android.os.Trace.beginSection("MC c.full");
         try { full = fullUnitFor(phase, m); } finally { android.os.Trace.endSection(); }
-        float size = Main.sClockSize;
+        float size = Settings.CLOCK_SIZE.get();
         float base = sizeBase(m, full);
-        float coverUnit = Float.isNaN(size) ? Main.sClockHeightDp * d : size * base;
+        float coverUnit = Float.isNaN(size) ? Settings.CLOCK_HEIGHT.get() * d : size * base;
         if (coverUnit > full) coverUnit = full;
         if (coverUnit < Main.MIN_CLOCK_K * base) coverUnit = Main.MIN_CLOCK_K * base;
         // The date and the clock move as one block.
-        float offset = Main.sClockOffsetDp * d;
+        float offset = Settings.CLOCK_OFFSET.get() * d;
         float coverDate, coverTop;
         if (m.anchored) {
             coverDate = coverDateY(m.date) + offset;

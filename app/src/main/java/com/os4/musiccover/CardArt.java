@@ -90,7 +90,7 @@ final class CardArt {
             sLyricArtAt = now;
             if (dt > 0f) {
                 final float zeta = Main.EASE_COVER[0];
-                final float w0 = (float) (2 * Math.PI / Main.sClockResponse);
+                final float w0 = (float) (2 * Math.PI / Settings.SPRING.get());
                 final float k = w0 * w0, damp = 2f * zeta * w0;
                 // Sub-stepped: a spring integrated at 60Hz with a response this short is not
                 // stable, and the clock's own loop substeps for the same reason.

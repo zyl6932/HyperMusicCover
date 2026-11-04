@@ -812,7 +812,7 @@ final class Diagnostics {
           .append(" moduleScreen=").append(Main.sScreenW).append('x').append(Main.sScreenH)
           .append(" statusBar=").append(sysDimen(v, "status_bar_height"))
           .append("\n");
-        sb.append("state: cover=").append(Main.sCoverMode).append(" auto=").append(Main.sAuto)
+        sb.append("state: cover=").append(Main.sCoverMode).append(" auto=").append(Settings.AUTO.on())
           .append(" card=").append(MediaCard.sCardKnown ? (MediaCard.sCardShowing ? "showing" : "gone") : "unknown")
           .append(" keyguard=").append(Main.onKeyguardNow())
           .append(" videoWallpaper=").append(Main.sVideoWallpaper)
@@ -820,11 +820,11 @@ final class Diagnostics {
           .append("\nhold: y=").append(Main.sHoldY)
           .append(" lastSystem=").append(Main.r1(Main.sLastSystemY))
           .append("\nclock: ").append(ClockCollapse.describe()).append('\n')
-          .append(" clockH=").append(Main.r1(Main.sClockHeightDp)).append("dp")
-          .append(" size=").append(Float.isNaN(Main.sClockSize) ? "dp" : Main.r3(Main.sClockSize))
-          .append(" offset=").append(Main.r1(Main.sClockOffsetDp)).append("dp")
-          .append(" response=").append(Main.r2(Main.sClockResponse)).append("s")
-          .append(" fades=").append(Main.fadeMsFor(Main.sClockResponse)).append("ms")
+          .append(" clockH=").append(Main.r1(Settings.CLOCK_HEIGHT.get())).append("dp")
+          .append(" size=").append(Float.isNaN(Settings.CLOCK_SIZE.get()) ? "dp" : Main.r3(Settings.CLOCK_SIZE.get()))
+          .append(" offset=").append(Main.r1(Settings.CLOCK_OFFSET.get())).append("dp")
+          .append(" response=").append(Main.r2(Settings.SPRING.get())).append("s")
+          .append(" fades=").append(Main.fadeMsFor(Settings.SPRING.get())).append("ms")
           // Whether the app's glass slider is live at all: the morph exists only on the styles
           // whose clock view has updateGlassValue, and this is what tells the app which those
           // are. The first thing to look at when the slider appears to do nothing.
@@ -1195,7 +1195,7 @@ final class Diagnostics {
         boolean sbDone = false;
         StringBuilder sb = new StringBuilder("aodprobe cover=" + Main.sCoverMode
                 + " screenOn=" + Main.sScreenOn + " grey=" + Main.sAodGrey
-                + " aodsmall=" + Main.sAodSmall + " fullAod=" + Main.fullAodOn()
+                + " aodsmall=" + Settings.AOD_SMALL.on() + " fullAod=" + Main.fullAodOn()
                 + " aodFull=" + ClockCollapse.aodFullScreen()
                 + " held=" + ClockCollapse.aodHeld()
                 + " coverGlass=" + (ClockGlass.sAodCoverGlassSet

@@ -40,7 +40,7 @@ final class ClockGlass {
     /** Arms the liquid-glass -> filled morph across the collapse. See applyGlassMorph(). */
     static void armGlassMorph() {
         sGlassV0 = 0f;
-        sGlassV1 = Main.sGlassEnd;
+        sGlassV1 = Settings.GLASS_END.get();
         sAppliedGlassV = Float.NaN;
         // Each entry morphs from the start again. Left set by the previous cover, the hold in
         // applyGlassMorph() jumped every later entry to the solid end on its first frame.
