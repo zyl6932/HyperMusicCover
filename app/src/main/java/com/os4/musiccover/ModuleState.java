@@ -3,8 +3,6 @@ package com.os4.musiccover;
 import com.os4.musiccover.lyrics.LockLyrics;
 import com.os4.musiccover.island.MiniPlayerRuntime;
 import com.os4.musiccover.shade.ShadeLayer;
-import com.os4.musiccover.transit.AmapTransitScene;
-import com.os4.musiccover.pickup.PickupCodeIsland;
 
 import java.util.function.BooleanSupplier;
 
@@ -14,7 +12,8 @@ import java.util.function.BooleanSupplier;
  * so a bad value costs only itself.
  *
  * Every key is one entry of {@link #KEYS}: how it is written and how it is read back, side by
- * side. A new setting is one entry there, nowhere else in this class.
+ * side. A setting's lines are its entry in {@link Settings}, named here only for where in the
+ * file they go; the other keys are measurements and state kept between starts.
  *
  * Carved out of Main (2026-10-14, after Diagnostics). The writer and the reader used to be two
  * hand-kept lists, a concatenation and an if/else chain, that had to agree key for key; the
@@ -90,6 +89,29 @@ public final class ModuleState {
         };
     }
 
+    /** A setting's lines, as its entry in Settings writes and reads them. */
+    private static Entry setting(Settings.Entry<?> s) {
+        return new Entry() {
+            @Override
+            void write(StringBuilder out) {
+                for (Settings.FileKey f : s.files) {
+                    String v = f.write.value();
+                    if (v != null) out.append('\n').append(f.name).append('=').append(v);
+                }
+            }
+
+            @Override
+            boolean read(String k, String v) throws Exception {
+                for (Settings.FileKey f : s.files) {
+                    if (!f.name.equals(k)) continue;
+                    f.read.apply(v);
+                    return true;
+                }
+                return false;
+            }
+        };
+    }
+
     /** What the file's cover key said; read by loadState after the walk, not applied in it. */
     private static boolean sCoverInFile;
 
@@ -101,25 +123,12 @@ public final class ModuleState {
      */
     private static final Entry[] KEYS = {
             bool("cover", () -> Main.sCoverMode, on -> sCoverInFile = on),
-            bool("coverfeature", () -> Main.sCoverFeatureOn, on -> Main.sCoverFeatureOn = on),
+            setting(Settings.COVER_FEATURE),
             // "auto" was a stored setting; following the card is unconditional now.
-            key("bias", () -> String.valueOf(Main.sBias), v -> Main.sBias = Float.parseFloat(v)),
-            // Only the mode. The square's size, place and corners, the clock's offset, the glass
-            // end and the spring are all fixed now, and nothing reads them - writing them down
-            // would be a value nothing could ever have set. covercardfill, covercardpos,
-            // covercardcorner and the dp covercardsize before them are not read: a file from
-            // before that is not allowed to hold them open - see CoverCardStyle. coverstyle IS
-            // read: which of the two shapes the cover takes is still the user's.
-            key("coverstyle", () -> String.valueOf(Main.sCoverCardStyle.mode),
-                    v -> Main.sCoverCardStyle = Main.sCoverCardStyle.with("mode", Float.parseFloat(v))),
-            // A pending pre-dp value is written as itself: it cannot be converted until a
-            // confirmed box exists, and writing the default over it would lose the setting the
-            // user actually had.
-            key("clock", () -> String.valueOf(Float.isNaN(Main.sClockLegacyK)
-                            ? Main.sClockHeightDp : Main.sClockLegacyK),
-                    v -> Main.setClockHeightDp(Float.parseFloat(v))),
-            key("clocksize", () -> Float.isNaN(Main.sClockSize) ? null : String.valueOf(Main.sClockSize),
-                    v -> Main.setClockSize(Float.parseFloat(v))),
+            setting(Settings.BIAS),
+            setting(Settings.COVER_STYLE),
+            setting(Settings.CLOCK_HEIGHT),
+            setting(Settings.CLOCK_SIZE),
             // A measurement, like cardrect: the full clock the size is a fraction of.
             key("clockfull", () -> ClockCollapse.fullUnitState() == null
                             ? null : String.valueOf(ClockCollapse.fullUnitState()),
@@ -129,58 +138,35 @@ public final class ModuleState {
             key("clockref", () -> Float.isNaN(ClockCollapse.refUnitState())
                             ? null : String.valueOf(ClockCollapse.refUnitState()),
                     v -> ClockCollapse.restoreRefUnit(Float.parseFloat(v))),
-            // clockoff, glass and spring are not read: the clock's offset, the glass clock's end
-            // and the transition's spring are all fixed. Each is still reachable from its own op,
-            // for the session.
-            bool("mctap", () -> Main.sMcTitleTap, on -> Main.sMcTitleTap = on),
-            bool("mcpage", () -> Main.sMcPageBtn, on -> Main.sMcPageBtn = on),
-            bool("tap", () -> Main.sTapToggle, on -> Main.sTapToggle = on),
+            setting(Settings.MC_TITLE_TAP),
+            setting(Settings.MC_PAGE_BUTTON),
+            setting(Settings.TAP_TOGGLE),
             shadeBlock(),
-            bool("fadewp", () -> Main.sFadeWp, on -> Main.sFadeWp = on),
-            bool("motion", () -> MotionCover.sEnabled, on -> MotionCover.sEnabled = on),
-            bool("motiondata", () -> MotionCover.sOnData, on -> MotionCover.sOnData = on),
-            bool("vcfade", () -> Main.sVideoFade, on -> Main.sVideoFade = on),
-            key("fsmode2", () -> String.valueOf(Main.sFadeMode),
-                    v -> Main.sFadeMode = Integer.parseInt(v)),
+            setting(Settings.FADE_WALLPAPER),
+            setting(Settings.MOTION),
+            setting(Settings.MOTION_ON_DATA),
+            setting(Settings.VIDEO_FADE),
+            setting(Settings.FADE_MODE),
             // A measurement rather than a setting, and kept for the same reason the geometry is:
             // a fresh SystemUI should not have to relearn it to use it.
             key("covergap", () -> String.valueOf(CoverPush.sCoverFadeGapMs),
                     v -> CoverPush.sCoverFadeGapMs = Long.parseLong(v)),
-            // Also read on its own, before this file is, by Fingerprint.peekHideFp.
-            bool("hidefp", () -> Fingerprint.sHideFp, on -> Fingerprint.sHideFp = on),
-            // The lyrics master switch, a setting again (2026-10-14). A new key rather than the
-            // old "lyrics", which is not read: a file from when that one was written may still
-            // hold a 0 nobody remembers setting.
-            bool("lyricmaster", () -> LockLyrics.sEnabled, on -> LockLyrics.sEnabled = on),
-            bool("colon", () -> HyperTweaks.sForceColon, on -> HyperTweaks.sForceColon = on),
-            bool("seekglow", () -> HyperTweaks.sBarGlow, on -> HyperTweaks.sBarGlow = on),
-            bool("lyrickeep", () -> LockLyrics.sKeepOn, on -> LockLyrics.sKeepOn = on),
+            setting(Settings.HIDE_FP),
+            setting(Settings.LYRICS),
+            setting(Settings.COLON),
+            setting(Settings.SEEK_GLOW),
+            setting(Settings.LYRIC_KEEP_ON),
             // The two-finger tap's page.
             bool("lyrichidden", () -> LockLyrics.sTapHidden, on -> LockLyrics.sTapHidden = on),
-            bool("lyrichdr", () -> LockLyrics.sHdr, on -> LockLyrics.sHdr = on),
-            // Written as 1 or 0 like the rest, but left at the default when absent: the key did
-            // not exist before this setting did, and the lyrics are supposed to look the way
-            // they always have on a file that predates it.
-            bool("lyrictrans", () -> LockLyrics.sTrans, on -> LockLyrics.sTrans = on),
-            bool("aodsmall", () -> Main.sAodSmall, on -> Main.sAodSmall = on),
-            // Off when absent, which is what every file from before it had.
-            bool("lyricroma", () -> LockLyrics.sRoma, on -> LockLyrics.sRoma = on),
-            // On when absent: every file from before it looked lyrics up online.
-            bool("lyriconline", () -> LockLyrics.sOnline, on -> LockLyrics.sOnline = on),
-            // 0 left, 1 centre, 2 right, and left when the key is absent: a file from before this
-            // setting is one where the lyrics always sat left. Clamped in the setter.
-            key("lyricalign", () -> String.valueOf(LockLyrics.sAlign),
-                    v -> LockLyrics.setAlign(Integer.parseInt(v))),
+            setting(Settings.LYRIC_HDR),
+            setting(Settings.LYRIC_TRANS),
+            setting(Settings.AOD_SMALL),
+            setting(Settings.LYRIC_ROMA),
+            setting(Settings.LYRIC_ONLINE),
+            setting(Settings.LYRIC_ALIGN),
             // lyricmaxlines is not read: every overlapping line is lit, see LyricFocus.
-            // The two sizes are the user's again (the 歌词外观 page, 2026-10-22); the band's other
-            // four values are still fixed and not written, see LyricStyle. Clamped by
-            // LyricStyle.with, like an op's value.
-            key("lyricsize", () -> String.valueOf(LockLyrics.sStyle.sizeSp),
-                    v -> LockLyrics.setStyle("size", Float.parseFloat(v))),
-            key("lyricbgsize", () -> String.valueOf(LockLyrics.sStyle.bgSizeSp),
-                    v -> LockLyrics.setStyle("bgsize", Float.parseFloat(v))),
-            // One line of JSON: no '=' or newline in it to confuse the reader below.
-            key("lyricappearance", () -> LockLyrics.sAppearance.toJson(), LockLyrics::setAppearance),
+            setting(Settings.LYRIC_STYLE),
+            setting(Settings.LYRIC_APPEARANCE),
             // The dp lyricoff and lyricgap from before the shares are dropped: what they meant
             // depends on the room, which is not known here. lyricfill, lyricpos, lyricside and
             // lyricweight are dropped with them: the band and its weight are fixed, see
@@ -190,14 +176,10 @@ public final class ModuleState {
             // nothing merely because nothing has played yet; updated in both directions so it
             // stops claiming one is working once it is not.
             bool("sawlyric", () -> LockLyrics.sSawSessionLyric, on -> LockLyrics.sSawSessionLyric = on),
-            key("fpavoid", () -> String.valueOf(Fingerprint.sFpAvoid),
-                    v -> Fingerprint.sFpAvoid = Integer.parseInt(v)),
-            // On when absent: the trip's page and island shipped before their switch.
-            bool("transit", () -> AmapTransitScene.sOn, on -> AmapTransitScene.sOn = on),
-            bool("pickup", () -> PickupCodeIsland.sOn, on -> PickupCodeIsland.sOn = on),
-            // Read back at startup, so it has to be written too: without it `--ez card false`
-            // lasted until the next SystemUI restart.
-            bool("card", () -> PickupCodeIsland.sCard, on -> PickupCodeIsland.sCard = on),
+            setting(Settings.FP_AVOID),
+            setting(Settings.TRANSIT),
+            setting(Settings.PICKUP),
+            setting(Settings.PICKUP_CARD),
             // Read with restoreLegacyConfig, not applyConfig: this file is migration data, and a
             // config the user has since changed must win over what was saved here.
             key("minicfg", () -> android.util.Base64.encodeToString(

@@ -396,19 +396,6 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
         out.putInt("minicfgschema", MiniPlayerConfig.SCHEMA_VERSION);
         float[] shortcuts = MiniPlayerRuntime.shortcutGeometry();
         if (shortcuts != null) out.putFloatArray("minishortcuts", shortcuts);
-        out.putBoolean("auto", Main.sAuto);
-        out.putBoolean("coverfeature", Main.sCoverFeatureOn);
-        out.putFloat("bias", Main.sBias);
-        out.putInt("coverstyle", Main.sCoverCardStyle.mode);
-        out.putFloat("covercardfill", Main.sCoverCardStyle.fill);
-        out.putFloat("covercardpos", Main.sCoverCardStyle.pos);
-        // No covercardcorner: the square's corners are the media card's own, and
-        // the app draws them from the cardradius it gets with the pictures.
-        out.putFloat("clock", Main.sClockHeightDp);
-        out.putFloat("clocksize", Main.effectiveClockSize());
-        out.putFloat("clockoff", Main.sClockOffsetDp);
-        out.putFloat("glass", Main.sGlassEnd);
-        out.putFloat("spring", Main.sClockResponse);
         // The whole shade settings page, generated from the one key list so a new
         // knob cannot reach the state file and miss the settings app.
         for (String key : ShadeLayer.CFG_KEYS) {
@@ -422,52 +409,20 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
         out.putString("track", MediaCard.sCardKey);
         MediaController mc = Main.sWatched;
         out.putString("player", mc == null ? "" : mc.getPackageName());
-        out.putBoolean("mcart", Main.sMcHideArt);
-        out.putBoolean("mclyricart", Main.sMcArtInLyrics);
-        out.putBoolean("mctap", Main.sMcTitleTap);
-        out.putBoolean("mcpage", Main.sMcPageBtn);
-        out.putBoolean("tap", Main.sTapToggle);
-        out.putBoolean("fadewp", Main.sFadeWp);
-        out.putBoolean("motion", MotionCover.sEnabled);
-        out.putBoolean("motiondata", MotionCover.sOnData);
-        out.putInt("fsmode2", Main.sFadeMode);
-        out.putBoolean("vcfade", Main.sVideoFade);
-        out.putBoolean("hidefp", Fingerprint.sHideFp);
-        out.putBoolean("aodsmall", Main.sAodSmall);
-        out.putBoolean("colon", HyperTweaks.sForceColon);
-        out.putBoolean("seekglow", HyperTweaks.sBarGlow);
-        out.putBoolean("lyrics", LockLyrics.sEnabled);
         // Where the lock screen's words came from right now, and whether there is
         // a Lyricon to talk to. The app's lyric-source row is these two: it names
         // the source, and warns to install something only when both this and the
         // LyricInfo package are absent. See FeaturesPage.
         out.putString("lyricsrc", LockLyrics.sourceName());
         out.putBoolean("lyricon", LyriconSource.installed());
-        out.putBoolean("lyrickeep", LockLyrics.sKeepOn);
-        out.putBoolean("lyrichdr", LockLyrics.sHdr);
-        out.putBoolean("lyrictrans", LockLyrics.sTrans);
-        out.putBoolean("lyricroma", LockLyrics.sRoma);
-        out.putBoolean("lyriconline", LockLyrics.sOnline);
-        out.putInt("lyricalign", LockLyrics.sAlign);
         out.putInt("lyricmaxlines", LockLyrics.sMaxLines);
-        out.putFloat("lyricbgsize", LockLyrics.sStyle.bgSizeSp);
-        out.putString("lyricappearance", LockLyrics.sAppearance.toJson());
-        out.putFloat("lyricfill", LockLyrics.sStyle.fill);
-        out.putFloat("lyricpos", LockLyrics.sStyle.pos);
-        out.putFloat("lyricside", LockLyrics.sStyle.sideDp);
-        out.putFloat("lyricsize", LockLyrics.sStyle.sizeSp);
-        out.putInt("lyricweight", LockLyrics.sStyle.weight);
         // Whether anything has actually written a lyric to a session, which is
         // what tells a working provider module from a merely installed one.
         out.putBoolean("sessionlyric", LockLyrics.sSawSessionLyric
                 || LyricSource.hasLyricInfo(Main.sWatched));
-        out.putInt("fpavoid", Fingerprint.sFpAvoid);
         out.putString("fpquick", FingerprintQuick.configJson(c));
         out.putBoolean("fpquicksys", FingerprintQuick.systemSwitch(c));
         out.putBoolean("fpquickok", FingerprintQuick.installed());
-        out.putBoolean("transit", AmapTransitScene.sOn);
-        out.putBoolean("pickup", PickupCodeIsland.sOn);
-        out.putBoolean("card", PickupCodeIsland.sCard);
         // 设置页那行「手动刷新取餐码云端规则」的副标题，和这一份名单有几个小程序。
         out.putString("rulesdate", PickupCloud.INSTANCE.stamp(PickupCloud.INSTANCE.getUpdatedAt()));
         out.putInt("rulescount", PickupCloud.INSTANCE.count());
@@ -498,6 +453,9 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
         // Every op is acknowledged below; this tells the app it can rely on that,
         // where a build from before it could only be sent to and hoped for.
         out.putBoolean("acks", true);
+        // Last: the pickup card's switch answers under "card" too, over the media card's
+        // flag above - as it always has. The app does not read either yet.
+        Settings.query(out);
         return out;
     }
 
