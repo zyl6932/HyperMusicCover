@@ -110,6 +110,7 @@ sysui.island.removed
 sysui.lyrics.leave.exit
 sysui.lyrics.leave.inj
 sysui.media_bar.ctor
+sysui.media_bar.material
 sysui.media_bar.touch
 sysui.mediacard.ctor
 sysui.mediacard.top_data
@@ -152,6 +153,8 @@ sysui.shade.scale
 sysui.taps.shade_dispatch
 sysui.transport.next
 sysui.transport.previous
+sysui.unlock_region.content_bounds
+sysui.unlock_region.scrollable
 sysui.wallpaper.black
 sysui.wallpaper.manager_ctor
 sysui.wallpaper.unlock_fade
