@@ -210,9 +210,29 @@ public final class ShadeLayer {
 
     // ------------------------------------------------------------------ cover
 
-    /** The cover, from Main's worker. Built into the background and not kept. */
+    /**
+     * The cover, from Main's worker. Built into the background and not kept.
+     *
+     * Not built while the shade features are off, which is how they ship: every push used to
+     * build the mesh anyway, on the worker the next push queues behind (26 builds, 1.56s of it
+     * in one 53s trace, 2026-10-20). Turning them on with a cover up asks for a push again - see
+     * ProbeReceiver's shadecfg and {@link #missingArt}.
+     */
     public static void setArt(Bitmap b) {
+        if (b != null && !sEnabled) {
+            if (ShadeBackdrop.hasArt()) ShadeBackdrop.setArt(null);
+            return;
+        }
         ShadeBackdrop.setArt(b);
+    }
+
+    /**
+     * Whether the shade wants a cover it does not have. False while the features are off: the
+     * missing background is then not a loss, and a keyguard rebuild must not push the cover again
+     * for it.
+     */
+    public static boolean missingArt() {
+        return sEnabled && !ShadeBackdrop.hasArt();
     }
 
     public static boolean hasArt() {

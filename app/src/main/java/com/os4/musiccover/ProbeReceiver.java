@@ -298,6 +298,10 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             // clamped in ShadeLayer.configure, so adb and the UI go through exactly
             // the same door.
             ShadeLayer.configure(i.getStringExtra("key"), i.getIntExtra("v", 0));
+            // Switched on with a cover up: the pushes so far did not build the background
+            // (ShadeLayer.setArt skips it while off), so ask for one now rather than at the
+            // next track.
+            if (ShadeLayer.missingArt() && Main.coverModeOn()) CoverPush.pushArtAsync(true, false);
             ModuleState.saveState();
         } else if ("fpquick".equals(op)) {
             // 指纹快捷功能: --es json '{"total":ms,"move":bool,"items":[...]}', or nothing to

@@ -1018,8 +1018,9 @@ public class Main extends XposedModule {
         // the track may have moved on while the screen was off.
         // ... and the shade's background has to be rebuilt for the same reason even on
         // the image path, where nothing else would notice it had gone: it is static, so
-        // a restart takes it and only this puts it back.
-        if (sCoverMode && (sVideoWallpaper || !ShadeLayer.hasArt())) {
+        // a restart takes it and only this puts it back. Only while the shade features are on:
+        // off, the shade never has a background, and asking for one would push on every rebuild.
+        if (sCoverMode && (sVideoWallpaper || ShadeLayer.missingArt())) {
             if (sVideoWallpaper) sCover = null;
             CoverPush.pushArtAsync(true, false);
         }
