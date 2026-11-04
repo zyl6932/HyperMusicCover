@@ -151,6 +151,13 @@ final class Prefetch {
      * The player reported something: re-read its queue and fetch what sits either side of the
      * current track. Cheap when nothing moved - the fetches are keyed on the artwork URI and a
      * cached one does not go out again.
+     *
+     * The queue is read at once, so a press straight after this one still knows where it lands.
+     * The fetches and the lyric warm-up wait FETCH_AFTER_MS, counted again from each track
+     * change: on a weak phone the decodes - up to four pictures of ~1MB - landed in the card's
+     * spring and the wallpaper's fade, and what they allocate is the garbage a collection then
+     * stops the whole process for, priority or not. A second press inside the wait is still
+     * answered from the pictures the last round left in the cache.
      */
     static void onTrack(final MediaController c) {
         if (c == null) {
@@ -158,19 +165,35 @@ final class Prefetch {
             sIndex = -1;
             return;
         }
-        work().post(new Runnable() {
+        final Handler h = work();
+        h.post(new Runnable() {
             @Override
             public void run() {
                 try {
                     readQueue(c);
-                    fetchAround();
-                    warmLyricAhead();
                 } catch (Throwable t) {
                     Xp.w(TAG + "queue read failed: " + t);
                 }
             }
         });
+        h.removeCallbacks(FETCH);
+        h.postDelayed(FETCH, FETCH_AFTER_MS);
     }
+
+    /** How long after a track change the pictures either side of it are fetched. */
+    private static final long FETCH_AFTER_MS = 1500L;
+
+    private static final Runnable FETCH = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                fetchAround();
+                warmLyricAhead();
+            } catch (Throwable t) {
+                Xp.w(TAG + "prefetch failed: " + t);
+            }
+        }
+    };
 
     /**
      * The artwork already decoded for one URI, or null. Read by ArtUri: the cover asks for the
