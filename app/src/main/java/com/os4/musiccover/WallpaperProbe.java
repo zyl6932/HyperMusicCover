@@ -1491,8 +1491,13 @@ public class WallpaperProbe {
                             // cover to itself is all it would make.
                             String pk = i.getStringExtra("prekey");
                             WallpaperArt.Composed kc = sComposed;
+                            // The kept composition has to be this push's picture too: sKeptShown
+                            // is only ever set, so after a later track composed and kept its own
+                            // the stale key still matched, sArt was that one's, and a skip back
+                            // to the tapped track left the last track's wallpaper under its card
+                            // (2026-11-04).
                             if (pk != null && pk.equals(sKeptShown) && kc != null
-                                    && sArt == kc.sharp) {
+                                    && pk.equals(kc.preKey) && sArt == kc.sharp) {
                                 Xp.log(TAG + "push for the cover the tap put up, passed over");
                                 return;
                             }
