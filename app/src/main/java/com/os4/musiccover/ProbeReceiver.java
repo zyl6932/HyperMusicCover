@@ -284,8 +284,6 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
         // Every op is acknowledged below; this tells the app it can rely on that,
         // where a build from before it could only be sent to and hoped for.
         out.putBoolean("acks", true);
-        // Last: the pickup card's switch answers under "card" too, over the media card's
-        // flag above - as it always has. The app does not read either yet.
         Settings.query(out);
         return out;
     }

@@ -147,7 +147,12 @@ public final class SettingSpec {
 
     /** 「高德公交地铁」. */
     public static final SettingSpec TRANSIT = bool("transit", true);
-    /** 取餐码, and drawing its island with ColorOS's card rather than the focus template. */
+    /** 取餐码, and drawing its island with the pickup card rather than the focus template. */
     public static final SettingSpec PICKUP = bool("pickup", true);
-    public static final SettingSpec PICKUP_CARD = bool("card", true);
+    /**
+     * Answered as "card" until 2026-11-04, the same key as whether the media card is showing,
+     * which it overwrote: the app's cardShowing was reading this switch. Its own key now; the
+     * state file still keeps it as "card".
+     */
+    public static final SettingSpec PICKUP_CARD = bool("pickupcard", true);
 }

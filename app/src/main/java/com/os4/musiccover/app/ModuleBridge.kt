@@ -1,4 +1,5 @@
 package com.os4.musiccover.app
+import com.os4.musiccover.SettingSpec
 import com.os4.musiccover.transit.MetroCodeIsland
 import com.os4.musiccover.island.MiniPlayerConfig
 import com.os4.musiccover.HotReloadPolicy
@@ -51,9 +52,9 @@ object ModuleBridge {
         val cover: Boolean = false,
         val auto: Boolean = false,
         /** 启用音乐锁屏封面. On for a module too old to report it: it had no way to turn off. */
-        val coverFeature: Boolean = true,
-        val bias: Float = 0.34f,
-        val coverStyle: Int = 0,
+        val coverFeature: Boolean = SettingSpec.COVER_FEATURE.defBool,
+        val bias: Float = SettingSpec.BIAS.defFloat,
+        val coverStyle: Int = SettingSpec.COVER_STYLE.defInt,
         /**
          * The square's side as a share of the room between the clock and the media card, and
          * where it sits in the height that leaves. Both fixed on the module side and neither
@@ -63,8 +64,8 @@ object ModuleBridge {
          * The corners are not here: they are the media card's own radius now, which the preview
          * already has in [Preview.cardRadius].
          */
-        val coverCardFill: Float = 1f,
-        val coverCardPos: Float = 0.5f,
+        val coverCardFill: Float = SettingSpec.COVER_CARD_FILL.defFloat,
+        val coverCardPos: Float = SettingSpec.COVER_CARD_POS.defFloat,
         /**
          * How tall the collapsed clock's digits are, in dp.
          *
@@ -74,7 +75,7 @@ object ModuleBridge {
          * different screen. A height is the same clock everywhere: the module divides it by the
          * glyphs it measures and scales by what comes out.
          */
-        val clockHeightDp: Float = 36f,
+        val clockHeightDp: Float = SettingSpec.CLOCK_HEIGHT.defFloat,
         /**
          * The collapsed clock's size as a fraction of the style's full clock, 1 = unchanged.
          * The module reports what the clock is at whether or not anything has set it; 0 = the
@@ -83,7 +84,7 @@ object ModuleBridge {
          */
         val clockSize: Float = 0f,
         /** How far the date and clock are moved together, in dp. Positive is down. */
-        val clockOffsetDp: Float = 0f,
+        val clockOffsetDp: Float = SettingSpec.CLOCK_OFFSET.defFloat,
         /**
          * The cover transition's spring response, in seconds - how long the clock takes to
          * travel. Larger is slower.
@@ -92,9 +93,9 @@ object ModuleBridge {
          * the number means the same thing on every style and screen, and the card and wallpaper
          * fades are derived from it too. 0.38 is the OEM's own preset for this transition.
          */
-        val clockResponse: Float = 0.38f,
+        val clockResponse: Float = SettingSpec.SPRING.defFloat,
         /** The glass clock's end in the OEM's own terms; 0 is fully transparent glass. */
-        val glassEnd: Float = 0f,
+        val glassEnd: Float = SettingSpec.GLASS_END.defFloat,
         val cardShowing: Boolean = false,
         val lockWallpaperOk: Boolean = false,
         /**
@@ -114,54 +115,54 @@ object ModuleBridge {
          * more - see Settings.MC_HIDE_ART. Reported because the preview draws the card with the OEM's
          * own picture of it, and what that picture contains depends on this.
          */
-        val mcHideArt: Boolean = true,
+        val mcHideArt: Boolean = SettingSpec.MC_HIDE_ART.defBool,
         /** With [mcHideArt] on, show the thumbnail anyway while the lyrics are up. Also fixed on. */
-        val mcArtInLyrics: Boolean = true,
-        val mcTitleTap: Boolean = false,
+        val mcArtInLyrics: Boolean = SettingSpec.MC_ART_IN_LYRICS.defBool,
+        val mcTitleTap: Boolean = SettingSpec.MC_TITLE_TAP.defBool,
         /** The card's cover/lyrics page button. Off by default. */
-        val mcPageButton: Boolean = false,
-        val hideFingerprint: Boolean = false,
+        val mcPageButton: Boolean = SettingSpec.MC_PAGE_BUTTON.defBool,
+        val hideFingerprint: Boolean = SettingSpec.HIDE_FP.defBool,
         /** Apple Music motion artwork in place of the still cover. Off by default. */
-        val motionCover: Boolean = false,
-        val motionOnData: Boolean = false,
+        val motionCover: Boolean = SettingSpec.MOTION.defBool,
+        val motionOnData: Boolean = SettingSpec.MOTION_ON_DATA.defBool,
         /** Draw the big clock's colon on the styles that drop it. */
-        val forceColon: Boolean = false,
+        val forceColon: Boolean = SettingSpec.COLON.defBool,
         /** Light the media card's progress bar the way the island's is lit (#49). On by default. */
-        val mediaBarGlow: Boolean = true,
+        val mediaBarGlow: Boolean = SettingSpec.SEEK_GLOW.defBool,
         /**
          * Lock screen lyrics, between the collapsed clock and the card. The master switch; the
          * two-finger tap on the lock screen swaps cover and lyrics only while it is on.
          */
-        val lyrics: Boolean = true,
+        val lyrics: Boolean = SettingSpec.LYRICS.defBool,
         /** Keep the screen lit while lock screen lyrics are playing. */
-        val lyricsKeepOn: Boolean = false,
+        val lyricsKeepOn: Boolean = SettingSpec.LYRIC_KEEP_ON.defBool,
         /** Draw the singing words brighter than white on an HDR screen. */
-        val lyricsHdr: Boolean = false,
+        val lyricsHdr: Boolean = SettingSpec.LYRIC_HDR.defBool,
         /** Draw each line's translation under it. On unless the user turns it off. */
-        val lyricsTrans: Boolean = true,
+        val lyricsTrans: Boolean = SettingSpec.LYRIC_TRANS.defBool,
         /**
          * The full-screen AOD shows the OEM's own clock instead of the cover's small one. The
          * wire says it the other way round - `aodsmall`, "keep the small clock" - so this is the
          * module's flag inverted, once, in the two places that name the key.
          */
-        val aodBigClock: Boolean = false,
+        val aodBigClock: Boolean = !SettingSpec.AOD_SMALL.defBool,
         /** Draw each line's romanisation under it, over the translation. Off by default. */
-        val lyricsRoma: Boolean = false,
+        val lyricsRoma: Boolean = SettingSpec.LYRIC_ROMA.defBool,
         /** Whether lyrics may be looked up on the network. On by default. */
-        val lyricsOnline: Boolean = true,
+        val lyricsOnline: Boolean = SettingSpec.LYRIC_ONLINE.defBool,
         /** Where the lines settle in their column: 0 left, 1 centre, 2 right. */
-        val lyricsAlign: Int = 0,
+        val lyricsAlign: Int = SettingSpec.LYRIC_ALIGN.defInt,
         /** The lyric band's height as a share of the room between the clock and the card. */
-        val lyricFill: Float = 1f,
+        val lyricFill: Float = SettingSpec.LYRIC_FILL.defFloat,
         /** Where the band sits in the height it leaves: 0 top, 0.5 centre, 1 bottom. */
-        val lyricPos: Float = 0.5f,
-        val lyricSideDp: Float = 30f,
-        val lyricSizeSp: Float = 25f,
-        val lyricWeight: Int = 500,
+        val lyricPos: Float = SettingSpec.LYRIC_POS.defFloat,
+        val lyricSideDp: Float = SettingSpec.LYRIC_SIDE.defFloat,
+        val lyricSizeSp: Float = SettingSpec.LYRIC_SIZE.defFloat,
+        val lyricWeight: Int = SettingSpec.LYRIC_WEIGHT.defInt,
         /** The backing vocal's size, beside lyricSizeSp. */
-        val lyricBgSizeSp: Float = 17f,
+        val lyricBgSizeSp: Float = SettingSpec.LYRIC_BG_SIZE.defFloat,
         /** Colours and opacity of the lead and the backing vocal, as LyricAppearance's JSON. */
-        val lyricAppearance: String = "",
+        val lyricAppearance: String = SettingSpec.LYRIC_APPEARANCE.defString,
         /**
          * A session has actually carried its own lyric since SystemUI started.
          *
@@ -188,11 +189,11 @@ object ModuleBridge {
          */
         val lyriconInstalled: Boolean = false,
         /** 0 system default, 1 never avoid the fingerprint icon, 2 always avoid it. */
-        val fpAvoid: Int = 0,
+        val fpAvoid: Int = SettingSpec.FP_AVOID.defInt,
         /** 「高德公交地铁」: the trip's island and lock screen page (Settings.TRANSIT). */
-        val transit: Boolean = true,
+        val transit: Boolean = SettingSpec.TRANSIT.defBool,
         /** 取餐码: a 微信 order page's pickup code on the island (Settings.PICKUP). */
-        val pickup: Boolean = true,
+        val pickup: Boolean = SettingSpec.PICKUP.defBool,
         /**
          * 取餐码云端名单的状态：ColorOS 那一份自己的更新日期（空字符串＝从未同步过），
          * 和它有几个小程序。设置页那行「手动刷新取餐码云端规则」的副标题读的就是它。
@@ -929,17 +930,17 @@ object ModuleBridge {
         return State(
             alive = true,
             cover = b.getBoolean("cover", false),
-            auto = b.getBoolean("auto", false),
-            coverFeature = b.getBoolean("coverfeature", true),
-            bias = b.getFloat("bias", 0.34f),
-            coverStyle = b.getInt("coverstyle", 0),
-            coverCardFill = b.getFloat("covercardfill", 1f),
-            coverCardPos = b.getFloat("covercardpos", 0.5f),
-            clockHeightDp = b.getFloat("clock", 36f),
+            auto = b.getBoolean(SettingSpec.AUTO.key, false),
+            coverFeature = b.bool(SettingSpec.COVER_FEATURE),
+            bias = b.real(SettingSpec.BIAS),
+            coverStyle = b.int(SettingSpec.COVER_STYLE),
+            coverCardFill = b.real(SettingSpec.COVER_CARD_FILL),
+            coverCardPos = b.real(SettingSpec.COVER_CARD_POS),
+            clockHeightDp = b.real(SettingSpec.CLOCK_HEIGHT),
             clockSize = sizeOf(b),
-            clockOffsetDp = b.getFloat("clockoff", 0f),
-            clockResponse = b.getFloat("spring", 0.38f),
-            glassEnd = b.getFloat("glass", 0f),
+            clockOffsetDp = b.real(SettingSpec.CLOCK_OFFSET),
+            clockResponse = b.real(SettingSpec.SPRING),
+            glassEnd = b.real(SettingSpec.GLASS_END),
             cardShowing = b.getBoolean("card", false),
             lockWallpaperOk = b.getBoolean("lockwp", false),
             clockHasGlass = b.getBoolean("clockglass", false),
@@ -948,42 +949,42 @@ object ModuleBridge {
             // The three fixed-on ones fall back to their fixed value here too: the defaults in
             // the bundle are for a module too old to send the key, and there is no longer a
             // version of this that would have them off by choice.
-            mcHideArt = b.getBoolean("mcart", true),
-            mcArtInLyrics = b.getBoolean("mclyricart", true),
-            mcTitleTap = b.getBoolean("mctap", false),
-            mcPageButton = b.getBoolean("mcpage", false),
-            hideFingerprint = b.getBoolean("hidefp", false),
-            motionCover = b.getBoolean("motion", false),
-            motionOnData = b.getBoolean("motiondata", false),
-            forceColon = b.getBoolean("colon", false),
-            mediaBarGlow = b.getBoolean("seekglow", true),
-            lyrics = b.getBoolean("lyrics", true),
-            lyricsKeepOn = b.getBoolean("lyrickeep", false),
-            lyricsHdr = b.getBoolean("lyrichdr", false),
+            mcHideArt = b.bool(SettingSpec.MC_HIDE_ART),
+            mcArtInLyrics = b.bool(SettingSpec.MC_ART_IN_LYRICS),
+            mcTitleTap = b.bool(SettingSpec.MC_TITLE_TAP),
+            mcPageButton = b.bool(SettingSpec.MC_PAGE_BUTTON),
+            hideFingerprint = b.bool(SettingSpec.HIDE_FP),
+            motionCover = b.bool(SettingSpec.MOTION),
+            motionOnData = b.bool(SettingSpec.MOTION_ON_DATA),
+            forceColon = b.bool(SettingSpec.COLON),
+            mediaBarGlow = b.bool(SettingSpec.SEEK_GLOW),
+            lyrics = b.bool(SettingSpec.LYRICS),
+            lyricsKeepOn = b.bool(SettingSpec.LYRIC_KEEP_ON),
+            lyricsHdr = b.bool(SettingSpec.LYRIC_HDR),
             // Defaults the other way: this one is on for anyone whose module predates the key.
-            lyricsTrans = b.getBoolean("lyrictrans", true),
+            lyricsTrans = b.bool(SettingSpec.LYRIC_TRANS),
             // The module says whether it keeps its own clock; the row says whether the big one
             // is wanted, so the answer is inverted here (see State.aodBigClock).
-            aodBigClock = !b.getBoolean("aodsmall", true),
-            lyricsRoma = b.getBoolean("lyricroma", false),
-            lyricsOnline = b.getBoolean("lyriconline", true),
-            lyricsAlign = b.getInt("lyricalign", 0),
-            lyricFill = b.getFloat("lyricfill", 1f),
-            lyricPos = b.getFloat("lyricpos", 0.5f),
-            lyricSideDp = b.getFloat("lyricside", 30f),
-            lyricSizeSp = b.getFloat("lyricsize", 25f),
-            lyricWeight = b.getInt("lyricweight", 500),
-            lyricBgSizeSp = b.getFloat("lyricbgsize", 17f),
-            lyricAppearance = b.getString("lyricappearance") ?: "",
+            aodBigClock = !b.bool(SettingSpec.AOD_SMALL),
+            lyricsRoma = b.bool(SettingSpec.LYRIC_ROMA),
+            lyricsOnline = b.bool(SettingSpec.LYRIC_ONLINE),
+            lyricsAlign = b.int(SettingSpec.LYRIC_ALIGN),
+            lyricFill = b.real(SettingSpec.LYRIC_FILL),
+            lyricPos = b.real(SettingSpec.LYRIC_POS),
+            lyricSideDp = b.real(SettingSpec.LYRIC_SIDE),
+            lyricSizeSp = b.real(SettingSpec.LYRIC_SIZE),
+            lyricWeight = b.int(SettingSpec.LYRIC_WEIGHT),
+            lyricBgSizeSp = b.real(SettingSpec.LYRIC_BG_SIZE),
+            lyricAppearance = b.getString(SettingSpec.LYRIC_APPEARANCE.key) ?: SettingSpec.LYRIC_APPEARANCE.defString,
             sessionLyric = b.getBoolean("sessionlyric", false),
             lyricSource = b.getString("lyricsrc") ?: "none",
             lyriconInstalled = b.getBoolean("lyricon", false),
-            fpAvoid = b.getInt("fpavoid", 0),
-            transit = b.getBoolean("transit", true),
+            fpAvoid = b.int(SettingSpec.FP_AVOID),
+            transit = b.bool(SettingSpec.TRANSIT),
             fpQuick = b.getString("fpquick") ?: "{}",
             fpQuickSystem = b.getBoolean("fpquicksys", true),
             fpQuickOk = b.getBoolean("fpquickok", false),
-            pickup = b.getBoolean("pickup", true),
+            pickup = b.bool(SettingSpec.PICKUP),
             rulesDate = b.getString("rulesdate") ?: "",
             rulesCount = b.getInt("rulescount", 0),
             shade = b.keySet()
@@ -1010,8 +1011,18 @@ object ModuleBridge {
         )
     }
 
+    /**
+     * A setting's answer under its query key, or the module's own default for a module too old to
+     * send the key. Both from SettingSpec, the one list the module answers from too.
+     */
+    private fun Bundle.bool(s: SettingSpec): Boolean = getBoolean(s.key, s.defBool)
+
+    private fun Bundle.real(s: SettingSpec): Float = getFloat(s.key, s.defFloat)
+
+    private fun Bundle.int(s: SettingSpec): Int = getInt(s.key, s.defInt)
+
     /** The module sends NaN for a size it could not work out; that is 0 here. */
-    private fun sizeOf(b: Bundle): Float = b.getFloat("clocksize", 0f).let { if (it > 0f) it else 0f }
+    private fun sizeOf(b: Bundle): Float = b.getFloat(SettingSpec.CLOCK_SIZE.key, 0f).let { if (it > 0f) it else 0f }
 
     private fun fullOf(b: Bundle): Float = b.getFloat("clockfull", 0f).let { if (it > 0f) it else 0f }
 
