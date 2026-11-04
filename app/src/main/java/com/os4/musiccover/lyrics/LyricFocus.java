@@ -21,11 +21,15 @@ final class LyricFocus {
     }
 
     static int startOf(LyricLine line) {
-        return line.bg == null ? line.start : Math.min(line.start, line.bg.start);
+        int start = line.start;
+        for (LyricLine bg : line.backgrounds()) start = Math.min(start, bg.start);
+        return start;
     }
 
     static int endOf(LyricLine line) {
-        return line.bg == null ? line.end : Math.max(line.end, line.bg.end);
+        int end = line.end;
+        for (LyricLine bg : line.backgrounds()) end = Math.max(end, bg.end);
+        return end;
     }
 
     boolean update(List<LyricLine> lines, int position, int limit, int fallback) {

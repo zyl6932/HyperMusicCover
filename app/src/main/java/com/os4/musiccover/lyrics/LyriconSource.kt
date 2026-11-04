@@ -310,9 +310,9 @@ object LyriconSource {
         // own: the arrival of the line after it, the same room every other word-timed source
         // leaves - see LyricParse.closeUntimedTail. By time, since the bridge's order is not
         // trusted either (the rows are sorted below).
-        val begins = rich.map { it.begin.toInt() }.sorted().toIntArray()
+        val begins = rich.map { ms(it.begin) }.sorted().toIntArray()
         for (line in rich) {
-            val nextStart = LyricParse.nextAfter(begins, line.begin.toInt(), line.end.toInt())
+            val nextStart = LyricParse.nextAfter(begins, ms(line.begin), ms(line.end))
             convert(line, nextStart)?.let { out.add(it) }
         }
         if (out.isEmpty()) return null
@@ -342,9 +342,13 @@ object LyriconSource {
      * A line whose words are missing or unusable stays line-timed, which draws correctly and
      * simply does not fill word by word.
      */
-    private fun convert(line: RichLyricLine, nextStart: Int): LyricLine? {
+    internal fun convert(line: RichLyricLine, nextStart: Int): LyricLine? {
         val text = line.text?.trim().orEmpty()
-        val words = line.words
+        // A time past an Int would wrap negative in toInt() and send the fill backwards; such a
+        // line is drawn line-timed instead (PR #106).
+        val words = line.words?.takeIf { ws -> ws.all { fits(it.begin) && fits(it.end) } }
+        val begin = ms(line.begin)
+        val end = ms(line.end)
         var built: LyricLine? = null
         if (!words.isNullOrEmpty()) {
             val sb = StringBuilder()
@@ -367,26 +371,34 @@ object LyriconSource {
                 for (k in chars.indices) if (chars[k] > n) chars[k] = n
                 val s = starts.toIntArray()
                 val e = ends.toIntArray()
-                LyricParse.closeUntimedTail(s, e, line.end.toInt(), nextStart)
+                LyricParse.closeUntimedTail(s, e, end, nextStart)
                 built = LyricLine(sb.substring(0, n), line.translation,
-                    LyricParse.romaOf(line.roma, sb.substring(0, n)), line.begin.toInt(),
-                    line.end.toInt(), line.isAlignedRight, s, e, chars.toIntArray())
+                    LyricParse.romaOf(line.roma, sb.substring(0, n)), begin,
+                    end, line.isAlignedRight, s, e, chars.toIntArray())
             }
-        }
-        if (built == null) {
-            if (text.isEmpty()) return null
-            built = LyricLine(text, line.translation, LyricParse.romaOf(line.roma, text),
-                line.begin.toInt(), line.end.toInt(), line.isAlignedRight, null, null, null)
         }
         // The background vocal, which the renderer hangs under the line rather than beside it.
         // It stretches the line if it outlasts it, as it does from a file (LyricParse.parse).
         val bg = background(line, nextStart)
-        if (bg != null) {
-            built.bg = bg
-            if (bg.end > built.end) built.end = bg.end
+        if (built == null && text.isEmpty()) {
+            // Nothing sung but the background vocal: it is the line, as a file's x-bg-only line
+            // is (LyricParse.parse), rather than a blank row of full-size text above it.
+            if (bg == null) return null
+            val t = line.translation
+            return if (t.isNullOrBlank()) bg else LyricLine(bg.text, t, bg.roma, bg.start,
+                bg.end, bg.opposite, bg.sylStart, bg.sylEnd, bg.charEnd)
         }
+        if (built == null) {
+            built = LyricLine(text, line.translation, LyricParse.romaOf(line.roma, text),
+                begin, end, line.isAlignedRight, null, null, null)
+        }
+        if (bg != null) built.addBackground(bg)
         return built
     }
+
+    private fun fits(v: Long) = v in 0L..Int.MAX_VALUE.toLong()
+
+    private fun ms(v: Long) = v.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
 
     /**
      * The backing vocal as a line of its own, with the bridge's own word timings when it
@@ -442,8 +454,8 @@ object LyriconSource {
                     val w = words[it]
                     if (w.end > w.begin) w.end.toInt() else w.begin.toInt()
                 }
-                LyricParse.closeUntimedTail(s, e, line.end.toInt(), nextStart)
-                built = LyricLine(text, null, s[0], maxOf(line.end.toInt(), e.max()),
+                LyricParse.closeUntimedTail(s, e, ms(line.end), nextStart)
+                built = LyricLine(text, null, s[0], maxOf(ms(line.end), e.max()),
                     line.isAlignedRight, s, e, chars)
             }
         }
@@ -451,7 +463,7 @@ object LyriconSource {
             // Words whose times could not be used still say what is sung.
             val shown = published.ifEmpty { words.joinToString("") { it.text.orEmpty() }.trim() }
             if (shown.isEmpty()) return null
-            built = LyricLine(shown, null, line.begin.toInt(), line.end.toInt(),
+            built = LyricLine(shown, null, ms(line.begin), ms(line.end),
                 line.isAlignedRight, null, null, null)
         }
         return LyricParse.unwrapBackground(built)

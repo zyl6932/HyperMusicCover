@@ -29,11 +29,32 @@ public final class LyricLine {
     final int[] sylEnd;
     final int[] charEnd;
 
+    private static final LyricLine[] NONE = new LyricLine[0];
+
     /**
-     * The background vocal sung over this line, if the file has one - drawn smaller underneath,
-     * with its own word timing. Null for most lines.
+     * The background vocals sung over this line, each drawn smaller underneath in turn, with its
+     * own word timing. Empty for most lines; a TTML line can carry several x-bg spans, and only
+     * keeping the first dropped the rest (PR #106). Never changed in place - addBackground
+     * replaces the array - so a copy of the line can share it.
      */
-    LyricLine bg;
+    private LyricLine[] backgrounds = NONE;
+
+    LyricLine[] backgrounds() {
+        return backgrounds;
+    }
+
+    /** Hangs a background vocal under this line; one that outlasts the line extends it. */
+    void addBackground(LyricLine b) {
+        LyricLine[] next = java.util.Arrays.copyOf(backgrounds, backgrounds.length + 1);
+        next[backgrounds.length] = b;
+        backgrounds = next;
+        if (b.end > end) end = b.end;
+    }
+
+    /** The same background vocals as from, for a copy of it with other text. */
+    void copyBackgrounds(LyricLine from) {
+        backgrounds = from.backgrounds;
+    }
 
     public LyricLine(String text, String translation, int start, int end, boolean opposite,
                      int[] sylStart, int[] sylEnd, int[] charEnd) {
@@ -46,17 +67,32 @@ public final class LyricLine {
         this.translation = translation == null || translation.trim().isEmpty()
                 ? null : translation.trim();
         this.roma = roma == null || roma.trim().isEmpty() ? null : roma.trim();
-        this.start = start;
-        // A database file is edited by hand; a line that ends before it starts is clamped here
-        // rather than trusted into a negative duration later.
-        this.end = Math.max(end, start);
         this.opposite = opposite;
         boolean words = sylStart != null && sylStart.length > 0
                 && sylEnd != null && sylEnd.length == sylStart.length
                 && charEnd != null && charEnd.length == sylStart.length;
+        // Character ranges the renderer would index past the text with, or run backwards over,
+        // leave the line line-timed: it still draws, just not word by word. Only that is checked
+        // here - times out of order are odd but drawable, and sungChars copes with them.
+        if (words && text != null) {
+            int previous = 0;
+            for (int k = 0; k < charEnd.length; k++) {
+                if (charEnd[k] < previous || charEnd[k] > text.length() || sylStart[k] < 0) {
+                    words = false;
+                    break;
+                }
+                previous = charEnd[k];
+            }
+        }
         this.sylStart = words ? sylStart : null;
         this.sylEnd = words ? sylEnd : null;
         this.charEnd = words ? charEnd : null;
+        // A first word sung before the line's own start would be half filled by the time the
+        // line is lit; the line starts when its singing does.
+        this.start = words ? Math.min(start, sylStart[0]) : start;
+        // A database file is edited by hand; a line that ends before it starts is clamped here
+        // rather than trusted into a negative duration later.
+        this.end = Math.max(end, this.start);
         // A word-timed line is not over while its last word is still being sung, whatever end
         // the file reported. Most word-timed files give a line no end of its own - enhanced LRC
         // is a timestamp per word and nothing else - and lyrics-core reads the line's end off
@@ -65,7 +101,8 @@ public final class LyricLine {
         // this end and stops drawing the word path at it, so an end ahead of the last syllable
         // cuts its fill off mid-sweep: on a line whose next one starts within a second, the
         // last word gets no sweep at all and the line leaves just as it begins.
-        if (words) this.end = Math.max(this.end, sylEnd[sylEnd.length - 1]);
+        // Every word's end, not the last one's: times are not required to be in order.
+        if (words) for (int e : sylEnd) this.end = Math.max(this.end, e);
     }
 
     /**

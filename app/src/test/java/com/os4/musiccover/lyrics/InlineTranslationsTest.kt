@@ -13,13 +13,13 @@ class InlineTranslationsTest {
         val line = LyricLine(text, null, 1000, 4000, false,
             intArrayOf(1000, 2000), intArrayOf(2000, 4000), intArrayOf(5, text.length))
         val backing = LyricLine("World", null, 1500, 4500, false, null, null, null)
-        line.bg = backing
+        line.addBackground(backing)
         val result = LyricParse.splitInlineTranslations(listOf(line)).single()
         assertEquals("Hello", result.text)
         assertEquals("你好", result.translation)
         assertArrayEquals(intArrayOf(5), result.charEnd)
         assertArrayEquals(intArrayOf(1000), result.sylStart)
-        assertSame(backing, result.bg)
+        assertSame(backing, result.backgrounds().single())
     }
 
     @Test

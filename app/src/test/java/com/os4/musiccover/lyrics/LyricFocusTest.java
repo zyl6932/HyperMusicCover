@@ -43,7 +43,7 @@ public class LyricFocusTest {
 
     @Test public void backingVoiceExtendsParentWithoutTakingSlot() {
         LyricLine parent = line(100, 200);
-        parent.bg = line(0, 900);
+        parent.addBackground(line(0, 900));
         LyricFocus focus = new LyricFocus();
         List<LyricLine> lines = Arrays.asList(parent, line(300, 800));
         focus.update(lines, 50, 2, 0);
