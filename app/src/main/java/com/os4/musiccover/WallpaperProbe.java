@@ -6,9 +6,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
-import android.graphics.Paint;
-import android.opengl.GLES20;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -343,28 +340,23 @@ public class WallpaperProbe {
      * standing: the user's measure is "the lock screen is darker than the desktop", and on the
      * device that reported it the two slots came back support_dark=true / false.
      */
-    private static volatile boolean sOemDarken;
-    private static volatile boolean sOemDarkenKnown;
+    static volatile boolean sOemDarken;
+    static volatile boolean sOemDarkenKnown;
     /**
      * The desktop renderer's own darkening, as the OEM last handed it over. It goes through the
      * same updateMaskLayerStatus(), so the hook reads it there without touching R8-renamed
      * WallpaperServiceController internals.
      */
-    private static volatile boolean sHomeDarken;
-    private static volatile boolean sHomeDarkenKnown;
-
-    /** The darkening the lock screen's real wallpaper is drawn with: the desktop's, once known. */
-    private static boolean origDarken() {
-        return sHomeDarkenKnown ? sHomeDarken : sOemDarken;
-    }
+    static volatile boolean sHomeDarken;
+    static volatile boolean sHomeDarkenKnown;
     /** What the OEM's keyguard texture holds right now is a cover, not the real wallpaper. */
-    private static volatile boolean sTexShowsCover;
+    static volatile boolean sTexShowsCover;
     /** Set when the program on screen has no mDarken to write; the OEM's value stands from then on. */
-    private static volatile boolean sDarkenBroken;
+    static volatile boolean sDarkenBroken;
     /** The frame the fade is on. Non-null only while one is running. */
     static volatile Bitmap sFade;
     /** Reused across fades: a 12MB allocation per transition is itself a dropped frame. */
-    private static Bitmap sFadeBuf;
+    static Bitmap sFadeBuf;
     /**
      * The second buffer, allocated only the first time the first one is still being read.
      *
@@ -377,13 +369,13 @@ public class WallpaperProbe {
      * published nor being uploaded, and the second buffer is what keeps a slow upload from
      * stalling the fade instead.
      */
-    private static Bitmap sFadeBuf2;
+    static Bitmap sFadeBuf2;
     /**
      * The buffer the GL thread is copying right now, or null. Guarded by FADE_LOCK, and
      * volatile because the hot reload's check section reads it from a binder thread.
      */
-    private static volatile Bitmap sUploading;
-    private static final Object FADE_LOCK = new Object();
+    static volatile Bitmap sUploading;
+    static final Object FADE_LOCK = new Object();
     /**
      * True from the moment a blended frame is handed to the engine until the GL thread has
      * finished reading it.
@@ -394,17 +386,7 @@ public class WallpaperProbe {
      * like on video: the top third of the wallpaper a step or two behind the rest, for several
      * frames in a row. So the fade waits for its frame to be consumed before composing another.
      */
-    private static volatile boolean sFadeInFlight;
-    private static volatile long sFadeSentAt;
-    /**
-     * How long to wait for that acknowledgement before composing anyway. A reload that never
-     * reaches the upload path - coalesced, or the engine simply not asking for a frame - must
-     * cost a dropped frame, not a fade that stops half way.
-     */
-    private static final long FADE_ACK_MS = 48L;
-    private static final Paint sFadePaint = new Paint(Paint.FILTER_BITMAP_FLAG);
-    /** Which fade is the current one, so a track change mid-flight cancels the old one. */
-    private static volatile int sFadeGen;
+    static volatile boolean sFadeInFlight;
     /**
      * How long the crossfade takes.
      *
@@ -444,7 +426,6 @@ public class WallpaperProbe {
      *   --es op trackfadems --ei v 60
      */
     static volatile long sTrackFadeMs = 180L;
-    private static final long FADE_STEP_MS = 16L;
     /**
      * Whether the OEM's frosted copy is regenerated on the fade's frames.
      *
@@ -453,95 +434,11 @@ public class WallpaperProbe {
      * part of it. What it costs is the notification and media cards blurring a wallpaper up to
      * 240ms stale, which nobody can see, and the upload that ends the fade puts it right.
      */
-    private static volatile boolean sSkipFrost = true;
+    static volatile boolean sSkipFrost = true;
     /** Live for the duration of one fade, read by the frosting hook on the GL thread. */
-    private static volatile boolean sFrostSkipping;
+    static volatile boolean sFrostSkipping;
 
-    // ------------------------------------------------------------------ the GPU crossfade
-
-    /**
-     * The crossfade done on the GPU instead of by re-uploading the texture every frame.
-     *
-     * The CPU fade above is capped by what one frame of it costs, and that turned out not to be
-     * the blend: measured on OS4.0.0.35 over a day of track changes, 9-17 frames per ~385ms fade
-     * with the blend at 4-6ms and the rest spent waiting 17-89 times for the GL thread. Read off
-     * the dex, every reloadTexture() is ImageEngineImpl.L(): U() re-runs onSurfaceCreated() -
-     * glCreateProgram + glProgramBinary, glGenTextures, a full texImage2D, glGenerateMipmap, and
-     * the frosting - and then, because the request was T(false), finishRendering() tears the EGL
-     * context down so the next frame has to rebuild it first. The previous texture is never
-     * deleted either; it only goes when that context does.
-     *
-     * So this uploads each end exactly once. The picture being faded TO goes through one normal
-     * reload, which is the OEM's own upload, frosting included, and is the steady state the fade
-     * lands on. The picture being faded FROM goes into a texture of ours on the first frame after.
-     * Every frame of the fade is then just a redraw - T(true), with the surface-created flag left
-     * alone - and after the OEM has drawn its texture, the draw hook below issues the OEM's own
-     * draw() once more with our texture bound and constant-alpha blending. Same program, same
-     * uniforms, so darken, dark mode, the wake zoom and the reveal apply to both pictures alike.
-     *
-     * Only for AnimImageGLProgram itself: the glass/gradient/blur programs override commonDraw()
-     * with passes of their own, and redrawing their last one would be wrong. Those fall back to
-     * the CPU fade, and so does anything this finds it cannot do mid-flight.
-     */
-    private static final class GpuFade {
-        /** The picture in our texture, drawn over the OEM's at the fade's alpha. */
-        final Bitmap from;
-        /** The picture in the OEM's texture, underneath. */
-        final Bitmap to;
-        /** The overlay's alpha at the start and at the end. A fresh fade goes 1 -> 0. */
-        final float a0, a1;
-        /**
-         * What the screen shows when this lands. `to` for a fade that ends with the overlay gone;
-         * for one that ends with the overlay at full strength, the picture the OEM texture has
-         * to be swapped to before the overlay can be let go - see drawGpuFade().
-         */
-        final Bitmap dest;
-        final long durMs;
-        final Runnable done;
-        /** The fade this one reversed, whose texture of `from` it takes over. GL thread clears it. */
-        volatile GpuFade inherit;
-        final long startedAt = SystemClock.uptimeMillis();
-        /** Set on the GL thread once the upload of the far end has gone through. */
-        volatile boolean armed;
-        volatile boolean finished;
-        volatile long t0;
-        volatile int frames;
-        volatile long uploadMs;
-        volatile int contexts;
-        /** The end-of-fade swap of the OEM texture to `dest`: asked for, and landed. */
-        volatile boolean swapRequested;
-        volatile boolean swapUploaded;
-        /** GL thread only: the swap has been posted to the main thread. */
-        boolean swapPosted;
-
-        GpuFade(Bitmap from, Bitmap to, float a0, float a1, Bitmap dest, long durMs,
-                Runnable done) {
-            this.from = from;
-            this.to = to;
-            this.a0 = a0;
-            this.a1 = a1;
-            this.dest = dest;
-            this.durMs = durMs;
-            this.done = done;
-        }
-
-        /** The overlay's alpha at `now`, as the GL thread will draw it. */
-        float alphaAt(long now) {
-            long s = t0;
-            if (!armed || s == 0L) return a0;
-            float t = Math.min(1f, (now - s) / (float) durMs);
-            // The CPU fade's curve, so switching between the two changes the cost, not the feel.
-            float e = 1f - (1f - t) * (1f - t) * (1f - t);
-            return a0 + (a1 - a0) * e;
-        }
-
-        /** The picture this fade started from. */
-        Bitmap start() {
-            return a1 >= 0.5f ? to : from;
-        }
-    }
-
-    static volatile GpuFade sGpuFade;
+    static volatile WallpaperFade.GpuFade sGpuFade;
     /** The probe's switch: `--es op gpufade --ez on false` puts the CPU fade back. */
     static volatile boolean sGpuFadeOn = true;
     /** Set when the draw path met something it cannot handle; the CPU fade is used from then on. */
@@ -553,22 +450,16 @@ public class WallpaperProbe {
      * lands and the real wallpaper would otherwise be decoded off disk - the 210ms the getBitmap
      * short-circuit exists to avoid.
      */
-    private static volatile Bitmap sUploadOverride;
+    static volatile Bitmap sUploadOverride;
     static volatile Object sKeyguardRenderer;
     static Class<?> sPlainProgram;
     /**
      * GL-thread state: our texture, the fade it belongs to and the context it was made in.
      * sGlTex is volatile because the hot reload's check section reads it from a binder thread.
      */
-    private static volatile int sGlTex;
-    private static GpuFade sGlTexFor;
-    private static android.opengl.EGLContext sGlTexCtx;
-    private static final int[] sGlInts = new int[4];
-    private static final float[] sGlColor = new float[4];
+    static volatile int sGlTex;
     /** Which FRAME_REQUESTS entry this build answers to, once one has; -1 until then. */
     static volatile int sFrameReq = -1;
-    /** A fade that has not seen its last frame this long after it should have is ended here. */
-    private static final long GPU_FADE_GRACE_MS = 1500L;
 
     /**
      * 保留壁纸's dim, 0..0.25: the wallpaper's fragment shader multiplies the texture by
@@ -856,12 +747,12 @@ public class WallpaperProbe {
                     // A GPU fade's far end. Uploaded once, and from then on the fade is drawn
                     // over it, so this is the only upload the whole transition makes.
                     Bitmap ov = sUploadOverride;
-                    GpuFade gf = sGpuFade;
+                    WallpaperFade.GpuFade gf = sGpuFade;
                     if (ov != null && gf != null) {
                         if (ov.isRecycled() || ov.getWidth() != w || ov.getHeight() != h) {
                             Xp.log(TAG + "gpu fade dropped: its far end is " + describe(ov)
                                     + " but the texture is " + w + "x" + h);
-                            abortGpuFade(gf);
+                            WallpaperFade.abortGpuFade(gf);
                         } else {
                             args[0] = ov;
                             sTexShowsCover = ov != sOrig;
@@ -891,7 +782,7 @@ public class WallpaperProbe {
                     if (fade != null && (fade.getWidth() != w || fade.getHeight() != h)) {
                         Xp.log(TAG + "fade dropped: composed for " + describe(fade)
                                 + " but the texture is " + w + "x" + h);
-                        cancelFade();
+                        WallpaperFade.cancelFade();
                         fade = null;
                         synchronized (FADE_LOCK) {
                             sUploading = null;
@@ -1194,7 +1085,7 @@ public class WallpaperProbe {
                 }
                 sOemDarken = dark;
                 sOemDarkenKnown = true;
-                args[1] = origDarken() && !sTexShowsCover;
+                args[1] = WallpaperFade.origDarken() && !sTexShowsCover;
                 return chain.proceed(args);
             });
             Xp.log(TAG + "darken hooked");
@@ -1220,20 +1111,20 @@ public class WallpaperProbe {
                 }
                 try {
                     if (sOemDarkenKnown && !sDarkenBroken && mine) {
-                        applyDarken(chain.getThisObject());
+                        WallpaperFade.applyDarken(chain.getThisObject());
                     }
                     Object r = mine && (WallpaperVideo.on() || WallpaperEngines.sVideoGlLive)
                             ? WallpaperEngines.drawWithVideo(chain) : chain.proceed();
                     if (!mine) return r;
-                    GpuFade f = sGpuFade;
+                    WallpaperFade.GpuFade f = sGpuFade;
                     if (f == null && sGlTex == 0) return r;
                     try {
-                        drawGpuFade(chain.getThisObject(), f);
+                        WallpaperFade.drawGpuFade(chain.getThisObject(), f);
                     } catch (Throwable t) {
                         sGpuFadeBroken = true;
                         Xp.w(TAG + "gpu fade draw failed, using the CPU fade from now on: "
                                 + Log.getStackTraceString(t));
-                        if (f != null) abortGpuFade(f);
+                        if (f != null) WallpaperFade.abortGpuFade(f);
                     }
                     return r;
                 } finally {
@@ -1373,599 +1264,8 @@ public class WallpaperProbe {
         return WallpaperArt.frostedIfWanted(WallpaperArt.sharpFittedArt());
     }
 
-    /**
-     * Crossfades the keyguard texture from one picture to another.
-     *
-     * Both ends are already at texture size and both live in this process, so a frame costs one
-     * blend and one re-upload and nothing crosses a process boundary - which is the only reason
-     * this is affordable at all.
-     *
-     * The OEM's own reveal animator was the obvious thing to drive and is the wrong shape. Its
-     * shader says so itself: "Reveal is the animation value that goes from 1 (the image is
-     * hidden) to 0 (the image is visible)", and the branch behind it is
-     * blendSrcOver(vec4(0.,0.,0.,uReveal), ori) - one texture fading to black. It can dissolve a
-     * picture; it cannot dissolve between two, which is what Apple's transition is.
-     *
-     * Time-based rather than step-based: a frame that overruns costs a frame, not a longer
-     * transition. The clock is springing to its own curve over in SystemUI and cannot wait.
-     */
-    static void startFade(final Bitmap from, final Bitmap to, final Runnable done) {
-        startFade(from, to, done, sFadeMs);
-    }
-
-    static void startFade(final Bitmap from, final Bitmap to, final Runnable done,
-                                  final long durMs) {
-        final Context ctx = sCtx;
-        if (ctx == null || from == null || to == null || from.isRecycled() || to.isRecycled()
-                || from.getWidth() != to.getWidth() || from.getHeight() != to.getHeight()) {
-            Xp.log(TAG + "no fade: " + describe(from) + " -> " + describe(to));
-            if (done != null) done.run();
-            WallpaperEngines.reloadTexture();
-            return;
-        }
-        if (sSharedLock && WallpaperEngines.lockEngine() == null) {
-            // The desktop is on screen and the lock screen's picture is not on it: nothing to
-            // fade. The cover is put on when the lock screen comes back - syncSharedLock().
-            if (done != null) done.run();
-            return;
-        }
-        if (gpuFadeUsable()) {
-            startGpuFade(from, to, done, durMs);
-            return;
-        }
-        if (fadeTooExpensive(from)) {
-            if (done != null) done.run();
-            WallpaperEngines.reloadTexture();
-            return;
-        }
-        // Both ends agree with each other by the check above; whether they agree with the
-        // TEXTURE is the thing that decides how this looks on screen, and it is the one number
-        // that is not in either of them. Logged once per fade so a report of a bad transition
-        // can be read off the log instead of guessed at.
-        if (from.getWidth() != sReportedW || from.getHeight() != sReportedH) {
-            Xp.log(TAG + "fade " + describe(from) + " -> " + describe(to)
-                    + " does NOT match the texture " + sReportedW + "x" + sReportedH);
-        }
-        final int fw = from.getWidth(), fh = from.getHeight();
-        final int gen = ++sFadeGen;
-        final long t0 = SystemClock.uptimeMillis();
-        final long[] spent = {0L, 0L, 0L};  // blend ms, frames, frames waited out
-        sFrostSkipping = sSkipFrost;
-        sFadeInFlight = false;
-        final Runnable step = new Runnable() {
-            @Override
-            public void run() {
-                // A newer fade has taken over - a track changed while this one was in the air.
-                // It owns sFade and the buffer now, so this one simply stops.
-                if (gen != sFadeGen) return;
-                long now = SystemClock.uptimeMillis();
-                // The GL thread has not finished with the buffer yet. Come back rather than
-                // compose over the top of it - see sFadeInFlight.
-                if (sFadeInFlight && now - sFadeSentAt < FADE_ACK_MS) {
-                    spent[2]++;
-                    Gen.postDelayed(this, 2L);
-                    return;
-                }
-                long el = now - t0;
-                if (el >= durMs) {
-                    sFade = null;
-                    sFadeInFlight = false;
-                    sFrostSkipping = false;
-                    if (done != null) done.run();
-                    // The last upload is a normal one: the real bitmap, and the frosted copy
-                    // regenerated from it.
-                    WallpaperEngines.reloadTexture();
-                    Xp.log(TAG + "fade done in " + el + "ms over " + spent[1] + " frames, blend "
-                            + (spent[1] == 0 ? 0 : spent[0] / spent[1]) + "ms/frame, waited "
-                            + spent[2] + "x for the upload"
-                            + (sSkipFrost ? ", frosting skipped" : ""));
-                    return;
-                }
-                float t = el / (float) durMs;
-                // Ease OUT, not smoothstep. The clock it has to keep company with is a spring,
-                // and a spring is all front-loaded: most of the movement is over in the first
-                // third. A symmetric curve spends that third barely changing, which is exactly
-                // when the eye is looking, and then finishes after the clock has stopped.
-                float e = 1f - (1f - t) * (1f - t) * (1f - t);
-                // A buffer nobody can be reading. With both taken - one published and not yet
-                // picked up, the other still being uploaded - this frame is skipped rather than
-                // composed over one of them, which is what tore the texture on slower phones.
-                Bitmap dst = pickFadeBuf(fw, fh);
-                if (dst == null) {
-                    spent[2]++;
-                    Gen.postDelayed(this, 2L);
-                    return;
-                }
-                long b0 = SystemClock.uptimeMillis();
-                blendInto(dst, from, to, e);
-                spent[0] += SystemClock.uptimeMillis() - b0;
-                spent[1]++;
-                synchronized (FADE_LOCK) {
-                    sFade = dst;
-                }
-                sFadeInFlight = true;
-                sFadeSentAt = SystemClock.uptimeMillis();
-                // Kept alive between frames: T(false) finishes rendering after every frame,
-                // which throws the EGL context away for the next one to rebuild.
-                WallpaperEngines.reloadEngine(WallpaperEngines.lockEngine(), true);
-                Gen.postDelayed(this, FADE_STEP_MS);
-            }
-        };
-        Gen.post(step);
-    }
-
-    /**
-     * Ends a fade in flight without running its completion. For a fade that has become invalid
-     * rather than one that has finished - the buffer it was composing into no longer matches
-     * the texture, so nothing it produces from here is worth uploading.
-     */
-    private static void cancelFade() {
-        sFadeGen++;
-        sFade = null;
-        sFadeInFlight = false;
-        sFrostSkipping = false;
-    }
-
-    /**
-     * A fade buffer of this size that the GL thread cannot be reading, or null if both are busy.
-     *
-     * The choice is made under FADE_LOCK, and the lambda takes sFade and marks it as uploading
-     * under the same lock, so a buffer picked here is neither published (the lambda cannot pick
-     * it up while it is being composed) nor mid-upload. Main thread only.
-     */
-    private static Bitmap pickFadeBuf(int w, int h) {
-        synchronized (FADE_LOCK) {
-            if (usableFadeBuf(sFadeBuf, w, h)) return sFadeBuf;
-            if (usableFadeBuf(sFadeBuf2, w, h)) return sFadeBuf2;
-            // Allocate into a slot that is free - never over a buffer that is still in use,
-            // or the upload reading it would be reading a recycled or replaced bitmap.
-            if (!fadeBufBusy(sFadeBuf)) {
-                sFadeBuf = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-                return sFadeBuf;
-            }
-            if (!fadeBufBusy(sFadeBuf2)) {
-                sFadeBuf2 = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-                return sFadeBuf2;
-            }
-            return null;
-        }
-    }
-
-    private static boolean fadeBufBusy(Bitmap b) {
-        return b != null && (b == sFade || b == sUploading);
-    }
-
-    private static boolean usableFadeBuf(Bitmap b, int w, int h) {
-        return b != null && !b.isRecycled() && b.getWidth() == w && b.getHeight() == h
-                && !fadeBufBusy(b);
-    }
-
-    /** Whether the GPU fade can be trusted with the keyguard as it is right now. */
-    private static boolean gpuFadeUsable() {
-        if (!sGpuFadeOn || sGpuFadeBroken || !sDrawHooked || sPlainProgram == null) return false;
-        // On a shared still the desktop renderer stands in for the keyguard's, and it is known
-        // before its first upload as the lock screen's - which is the upload the fade starts.
-        Object renderer = sSharedLock ? sDesktopRenderer : sKeyguardRenderer;
-        if (renderer == null || WallpaperEngines.lockEngine() == null) return false;
-        try {
-            Object prog = Xp.getObjectField(Xp.getObjectField(renderer, "mAnimator"), "mProgram");
-            if (prog != null && prog.getClass() == sPlainProgram) return true;
-            Xp.log(TAG + "gpu fade not used: the keyguard program is "
-                    + (prog == null ? "null" : prog.getClass().getSimpleName()));
-        } catch (Throwable t) {
-            Xp.log(TAG + "gpu fade not used: " + t);
-        }
-        return false;
-    }
-
     /** The keyguard renderer's GL thread, as its last frame ran on; 0 until one has drawn. */
-    private static volatile int sKeyguardGlTid;
-    /** What boostForFade raised, and from what. Main thread. */
-    private static int sBoostedMainFrom = Integer.MIN_VALUE;
-    private static int sBoostedGlTid;
-    private static int sBoostedGlFrom;
-    private static boolean sBoostLogged;
-
-    /**
-     * The fade's two threads at display priority while it runs, and back after. Main thread.
-     *
-     * With four cores up and all four full - SystemUI's frames, its GC, WeChat in the background -
-     * the fade's main thread and GL thread sat runnable for 400-800ms of a 1.1s entry (trace
-     * 2026-10-20): the cover came up late and stalled half way, though each of its frames is a
-     * millisecond or two. Raised only as far as URGENT_DISPLAY, still below SystemUI's render
-     * thread, and never lowered from where it already was.
-     */
-    private static void boostForFade(boolean on) {
-        final int want = android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY;
-        try {
-            if (on) {
-                if (sBoostedMainFrom == Integer.MIN_VALUE) {
-                    int now = android.os.Process.getThreadPriority(android.os.Process.myTid());
-                    if (now > want) {
-                        android.os.Process.setThreadPriority(want);
-                        sBoostedMainFrom = now;
-                    }
-                }
-                int gl = sKeyguardGlTid;
-                if (gl != 0 && sBoostedGlTid == 0) {
-                    int now = android.os.Process.getThreadPriority(gl);
-                    if (now > want) {
-                        android.os.Process.setThreadPriority(gl, want);
-                        sBoostedGlTid = gl;
-                        sBoostedGlFrom = now;
-                        if (!sBoostLogged) {
-                            sBoostLogged = true;
-                            Xp.log(TAG + "fade threads raised to " + want + " (GL " + gl + " from "
-                                    + now + ", main from " + sBoostedMainFrom + ")");
-                        }
-                    }
-                }
-                return;
-            }
-            if (sBoostedMainFrom != Integer.MIN_VALUE) {
-                android.os.Process.setThreadPriority(sBoostedMainFrom);
-                sBoostedMainFrom = Integer.MIN_VALUE;
-            }
-            if (sBoostedGlTid != 0) {
-                int gl = sBoostedGlTid;
-                sBoostedGlTid = 0;
-                android.os.Process.setThreadPriority(gl, sBoostedGlFrom);
-            }
-        } catch (Throwable t) {
-            // Not allowed, or the GL thread is gone: the fade runs as it always did.
-            sBoostedMainFrom = Integer.MIN_VALUE;
-            sBoostedGlTid = 0;
-            Xp.d(TAG + "fade priority: " + t);
-        }
-    }
-
-    private static void startGpuFade(Bitmap from, Bitmap to, Runnable done, long durMs) {
-        boostForFade(true);
-        // A CPU fade still running owns sFade; stop it before the texture changes hands. A GPU
-        // fade overtaken by this one simply stops too, without running its completion - the
-        // same rule the CPU fade's generation check follows, and for the same reason: the one
-        // that matters here is the exit's, which clears the art this new fade has just set.
-        cancelFade();
-        final GpuFade old = sGpuFade;
-        final GpuFade f;
-        if (old != null && !old.finished) {
-            float a = old.alphaAt(SystemClock.uptimeMillis());
-            // Not once the old fade has started swapping its underneath picture: the OEM texture
-            // may already be its far end, which this reversal would otherwise take for its start.
-            // That fade is visually over by then, so a fresh fade from it is the right thing.
-            if (!old.swapRequested && sameImage(to, old.start())) {
-                // Going back to where the running fade came from - the big and small clock
-                // toggled again before the last toggle had finished. Starting over from `from`
-                // would jump the wallpaper to that fade's far end and fade back from there.
-                // Both pictures are already on the GPU, so this runs the same pair backwards
-                // from the alpha on screen right now, and uploads nothing to do it.
-                float target = old.a1 >= 0.5f ? 0f : 1f;
-                f = new GpuFade(old.from, old.to, a, target, to, durMs, done);
-                f.inherit = old;
-                f.armed = old.armed;
-                f.t0 = old.armed ? SystemClock.uptimeMillis() : 0L;
-                sUploadOverride = old.to;
-                sGpuFade = f;
-                Xp.log(TAG + "gpu fade reversed at alpha " + Math.round(a * 100f) / 100f
-                        + " -> " + target);
-            } else {
-                // A third picture - a skip while the last one was still fading. Only two
-                // pictures can be on screen, so start from whichever of the two dominates it
-                // now: the jump is at most half a fade instead of all of one.
-                Bitmap near = a >= 0.5f ? old.from : old.to;
-                if (near != null && !near.isRecycled() && near.getWidth() == to.getWidth()
-                        && near.getHeight() == to.getHeight()) {
-                    from = near;
-                }
-                f = startFreshGpuFade(from, to, done, durMs);
-            }
-        } else {
-            f = startFreshGpuFade(from, to, done, durMs);
-        }
-        android.view.Choreographer.FrameCallback loop =
-                new android.view.Choreographer.FrameCallback() {
-            @Override
-            public void doFrame(long frameTimeNanos) {
-                if (sGpuFade != f) return;
-                if (SystemClock.uptimeMillis() - f.startedAt > f.durMs + GPU_FADE_GRACE_MS) {
-                    // The GL thread stopped drawing - the screen went off, most likely. End it
-                    // with a real reload: what is uploaded is the far end only for a fade that
-                    // lands on its underneath picture, not for one waiting on its swap.
-                    sLastFade = "TIMED OUT after " + f.frames + " frames (armed=" + f.armed
-                            + ", swap=" + f.swapRequested + "/" + f.swapUploaded + ")";
-                    Xp.log(TAG + "gpu fade timed out after " + f.frames + " frames (armed="
-                            + f.armed + ", swap=" + f.swapRequested + "/" + f.swapUploaded + ")");
-                    finishGpuFade(f);
-                    WallpaperEngines.reloadTexture();
-                    return;
-                }
-                WallpaperEngines.requestFrame(true);
-                Gen.frame(this);
-            }
-        };
-        Gen.frame(loop);
-    }
-
-    /** A fade from `from` to `to` from the start: one reload uploads `to` underneath. */
-    private static GpuFade startFreshGpuFade(Bitmap from, Bitmap to, Runnable done, long durMs) {
-        GpuFade f = new GpuFade(from, to, 1f, 0f, to, durMs, done);
-        sUploadOverride = to;
-        sGpuFade = f;
-        WallpaperEngines.reloadEngine(WallpaperEngines.lockEngine(), true);
-        return f;
-    }
-
-    /**
-     * Whether two pictures are the same picture. Identity first; otherwise the same size and the
-     * same coarse print, because a cover re-composed for the same track is a new Bitmap with the
-     * same pixels, and that is exactly the case a toggle back into cover mode produces.
-     */
-    private static boolean sameImage(Bitmap a, Bitmap b) {
-        if (a == b) return true;
-        if (a == null || b == null || a.isRecycled() || b.isRecycled()) return false;
-        if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight()) return false;
-        return WallpaperDiag.print8(a) == WallpaperDiag.print8(b);
-    }
-
-    /** Main thread. Lands a fade: its completion runs and the override goes. */
-    private static void finishGpuFade(GpuFade f) {
-        if (sGpuFade != f) return;
-        sGpuFade = null;
-        sUploadOverride = null;
-        boostForFade(false);
-        if (f.done != null) f.done.run();
-        // A cover that has just faded out leaves the desktop holding the lock screen's cut of
-        // its own picture. Put back now, under the lock screen where it looks the same, rather
-        // than as the user unlocks.
-        if (sSharedLock) WallpaperEngines.syncSharedLock();
-        // A video held back by the fade is drawn from the next frame; ask for it rather than
-        // wait on the player's next one, which a paused player would never send.
-        if (WallpaperVideo.on()) WallpaperEngines.videoFrame();
-    }
-
-    /** Any thread. Ends a fade that cannot continue, with a plain reload so nothing is stranded. */
-    private static void abortGpuFade(final GpuFade f) {
-        f.finished = true;
-        Gen.post(new Runnable() {
-            @Override
-            public void run() {
-                if (sGpuFade != f) return;
-                finishGpuFade(f);
-                WallpaperEngines.reloadTexture();
-            }
-        });
-    }
-
-    /**
-     * GL thread, before the OEM draws: the darkening that belongs to the picture in its texture.
-     * Every frame rather than once, because the texture changes hands under reloads the OEM's
-     * own updateMaskLayerStatus() does not follow.
-     */
-    private static void applyDarken(Object renderer) {
-        try {
-            Object prog = Xp.getObjectField(Xp.getObjectField(renderer, "mAnimator"), "mProgram");
-            if (prog == null) return;
-            int want = origDarken() && !sTexShowsCover ? 1 : 0;
-            if (((Integer) Xp.getObjectField(prog, "mDarken")).intValue() != want) {
-                Xp.setObjectField(prog, "mDarken", want);
-            }
-        } catch (Throwable t) {
-            sDarkenBroken = true;
-            Xp.log(TAG + "cannot set the darkening, leaving it to the OEM: " + t);
-        }
-    }
-
-    /**
-     * One frame of the GPU fade, on the GL thread, after the OEM has drawn the far end.
-     *
-     * Also where our texture is let go of - when its fade has ended or been replaced, and only
-     * in the context that made it. A texture of a context that has since been destroyed went
-     * with that context and is not ours to delete any more.
-     */
-    private static void drawGpuFade(Object renderer, final GpuFade f) {
-        android.opengl.EGLContext ctx = android.opengl.EGL14.eglGetCurrentContext();
-        // A reversed fade takes over the texture of the fade it reversed - same picture, so
-        // there is nothing to upload again. The chain is walked because a toggle can reverse a
-        // reversal before the GL thread has drawn the first one.
-        if (f != null && sGlTex != 0 && sGlTexFor != f && f.inherit != null) {
-            int depth = 0;
-            for (GpuFade p = f.inherit; p != null && depth < 16; p = p.inherit, depth++) {
-                if (p == sGlTexFor && p.from == f.from) {
-                    sGlTexFor = f;
-                    break;
-                }
-            }
-        }
-        if (f != null) f.inherit = null;
-        if (sGlTex != 0 && (sGlTexFor != f || f.finished || !ctx.equals(sGlTexCtx))) {
-            if (ctx.equals(sGlTexCtx)) {
-                GLES20.glDeleteTextures(1, new int[]{sGlTex}, 0);
-            }
-            sGlTex = 0;
-            sGlTexFor = null;
-            sGlTexCtx = null;
-        }
-        if (f == null || f.finished) return;
-
-        long now = SystemClock.uptimeMillis();
-        // The clock starts with the first frame that shows the far end underneath, so a reload
-        // that lands late shortens nothing: until then the near end is drawn at full strength
-        // over whatever the texture still is, which is the near end anyway.
-        if (f.armed && f.t0 == 0L) f.t0 = now;
-        long el = f.t0 == 0L ? 0L : now - f.t0;
-        boolean holding = false;
-        if (el >= f.durMs && f.a1 >= 0.5f && !f.swapUploaded) {
-            // Landing with the overlay at full strength: the screen already shows `dest`, but
-            // from OUR texture. The OEM's has to become it before the overlay can go, or letting
-            // go would cut back to the picture underneath. So one reload, and the overlay is
-            // held at full strength until the upload hook says it has landed.
-            holding = true;
-            if (!f.swapPosted) {
-                f.swapPosted = true;
-                Gen.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (sGpuFade != f) return;
-                        sUploadOverride = f.dest;
-                        f.swapRequested = true;
-                        WallpaperEngines.reloadEngine(WallpaperEngines.lockEngine(), true);
-                    }
-                });
-            }
-        }
-        if (el >= f.durMs && !holding) {
-            f.finished = true;
-            if (sGlTex != 0) {
-                GLES20.glDeleteTextures(1, new int[]{sGlTex}, 0);
-                sGlTex = 0;
-                sGlTexFor = null;
-                sGlTexCtx = null;
-            }
-            Gen.post(new Runnable() {
-                @Override
-                public void run() {
-                    sLastFade = "done in " + (SystemClock.uptimeMillis() - f.startedAt) + "ms, "
-                            + f.frames + " frames, armed=" + f.armed;
-                    Xp.log(TAG + "gpu fade done in " + (SystemClock.uptimeMillis() - f.startedAt)
-                            + "ms from the request, alpha " + Math.round(f.a0 * 100f) / 100f
-                            + " -> " + f.a1 + ", " + f.frames + " frames over " + f.durMs
-                            + "ms, first upload after " + (f.t0 - f.startedAt) + "ms, near end "
-                            + "uploaded in " + f.uploadMs + "ms" + (f.contexts > 1
-                            ? ", GL context rebuilt " + (f.contexts - 1) + "x mid-fade" : ""));
-                    finishGpuFade(f);
-                }
-            });
-            return;
-        }
-
-        Object prog = Xp.getObjectField(Xp.getObjectField(renderer, "mAnimator"), "mProgram");
-        if (prog == null || prog.getClass() != sPlainProgram) {
-            Xp.log(TAG + "gpu fade dropped: the program became "
-                    + (prog == null ? "null" : prog.getClass().getSimpleName()));
-            abortGpuFade(f);
-            return;
-        }
-        Object wp = Xp.getObjectField(prog, "mAnimImageGLWallpaper");
-        int oemTex = ((Integer) Xp.getObjectField(wp, "mTextureId")).intValue();
-
-        if (sGlTex == 0) {
-            if (f.from.isRecycled()) {
-                abortGpuFade(f);
-                return;
-            }
-            long u0 = SystemClock.uptimeMillis();
-            int[] ids = new int[1];
-            GLES20.glGenTextures(1, ids, 0);
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, ids[0]);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER,
-                    GLES20.GL_LINEAR);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER,
-                    GLES20.GL_LINEAR);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S,
-                    GLES20.GL_CLAMP_TO_EDGE);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T,
-                    GLES20.GL_CLAMP_TO_EDGE);
-            android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, f.from, 0);
-            sGlTex = ids[0];
-            sGlTexFor = f;
-            sGlTexCtx = ctx;
-            f.contexts++;
-            f.uploadMs += SystemClock.uptimeMillis() - u0;
-        }
-
-        float alpha = f.alphaAt(now);
-
-        boolean blend = GLES20.glIsEnabled(GLES20.GL_BLEND);
-        int[] fn = sGlInts;
-        int[] one = new int[1];
-        GLES20.glGetIntegerv(GLES20.GL_BLEND_SRC_RGB, one, 0);
-        fn[0] = one[0];
-        GLES20.glGetIntegerv(GLES20.GL_BLEND_DST_RGB, one, 0);
-        fn[1] = one[0];
-        GLES20.glGetIntegerv(GLES20.GL_BLEND_SRC_ALPHA, one, 0);
-        fn[2] = one[0];
-        GLES20.glGetIntegerv(GLES20.GL_BLEND_DST_ALPHA, one, 0);
-        fn[3] = one[0];
-        GLES20.glGetFloatv(GLES20.GL_BLEND_COLOR, sGlColor, 0);
-
-        // draw() is a bare glDrawArrays, so the overlay inherits the uniforms commonDraw() set
-        // for the picture underneath - uDarken included. When only one of the two is the
-        // original, the overlay gets its own value, and it is put back after.
-        boolean darkUnder = false, darkOver = false;
-        int uDarken = -1;
-        if (sOemDarkenKnown && origDarken() && !sDarkenBroken) {
-            darkUnder = !sTexShowsCover;
-            darkOver = f.from == sOrig;
-            if (darkOver != darkUnder) {
-                uDarken = ((Integer) Xp.getObjectField(wp, "uDarken")).intValue();
-                GLES20.glUniform1i(uDarken, darkOver ? 1 : 0);
-            }
-        }
-
-        GLES20.glEnable(GLES20.GL_BLEND);
-        GLES20.glBlendFunc(GLES20.GL_CONSTANT_ALPHA, GLES20.GL_ONE_MINUS_CONSTANT_ALPHA);
-        GLES20.glBlendColor(0f, 0f, 0f, alpha);
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        // A fresh fade (overlay 1 -> 0) over a motion cover fades the video's last frame out,
-        // not the old still - see WallpaperVideo.fadeOverlay.
-        int video = f.a0 >= 0.5f && f.a1 < 0.5f ? WallpaperVideo.fadeOverlay() : 0;
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, video != 0 ? video : sGlTex);
-        Xp.callMethod(wp, "draw");
-
-        if (uDarken != -1) GLES20.glUniform1i(uDarken, darkUnder ? 1 : 0);
-
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, oemTex);
-        GLES20.glBlendFuncSeparate(fn[0], fn[1], fn[2], fn[3]);
-        GLES20.glBlendColor(sGlColor[0], sGlColor[1], sGlColor[2], sGlColor[3]);
-        if (!blend) GLES20.glDisable(GLES20.GL_BLEND);
-        f.frames++;
-    }
-
-    /**
-     * Whether a crossfade at this texture size is affordable, measured rather than assumed.
-     *
-     * Every frame of the fade goes through reloadTexture(), and that is not a cheap poke: it
-     * re-runs the OEM's onSurfaceCreated(), which clears the surface, rebuilds the GL program
-     * and re-uploads the WHOLE texture. So the cost of a fade is the texture size times the
-     * frame count, and it is paid on the GL thread while the clock is springing next to it.
-     *
-     * Measured on the device, same phone, same 240ms fade, the only difference being the lock
-     * wallpaper's own dimensions:
-     *
-     *   1200x2608 (= the screen)  12.5MB/frame  8 frames  waited 16x for the upload   fine
-     *   1579x3432                 21MB/frame    7 frames  waited 51x                  breaks
-     *
-     * Breaks how: the GL thread falls far enough behind that the compositor picks up a frame
-     * from the middle of onSurfaceCreated() - after glClearColor, before updateMVPMatrix - and
-     * that frame is the cover drawn small on black, in a corner. Reported from the device as
-     * "a small album cover in the top right, then it switches over", in both directions.
-     *
-     * So the gate is the ratio to the screen, which is the number the frame budget actually
-     * scales with. A lock wallpaper the size of the screen is what ensureLockWallpaper() writes
-     * and what this was built for; 1.7x the screen is not, and a hard cut is better than a
-     * transition that flashes. Unknown surface size fades, as before - never make the OEM's own
-     * behaviour worse over a number we have not read yet.
-     */
-    private static boolean fadeTooExpensive(Bitmap from) {
-        long screen = (long) sSurfaceW * sSurfaceH;
-        if (screen <= 0) return false;
-        long texture = (long) from.getWidth() * from.getHeight();
-        if (texture * 2 <= screen * 3) return false;           // <= 1.5x the screen
-        Xp.log(TAG + "no fade: " + describe(from) + " is "
-                + (Math.round(texture * 10.0 / screen) / 10.0) + "x the screen ("
-                + sSurfaceW + "x" + sSurfaceH + ") - one upload of it is "
-                + (texture * 4 / (1024 * 1024)) + "MB and the fade needs one per frame."
-                + " Swapping in one frame instead.");
-        return true;
-    }
-
-    /** One frame of the crossfade. Both sources are already exactly dst's size. */
-    private static void blendInto(Bitmap dst, Bitmap from, Bitmap to, float t) {
-        Canvas cv = new Canvas(dst);
-        cv.drawBitmap(from, 0f, 0f, null);
-        sFadePaint.setAlpha(Math.round(255f * (t < 0f ? 0f : t > 1f ? 1f : t)));
-        cv.drawBitmap(to, 0f, 0f, sFadePaint);
-    }
+    static volatile int sKeyguardGlTid;
 
     /**
      * Keeps a copy of the real lock wallpaper, which is the only thing the cover can fade back
@@ -2140,7 +1440,7 @@ public class WallpaperProbe {
                             if (fade && from != null && to != null) {
                                 sLeaveAt = SystemClock.uptimeMillis();
                                 sLeaveMs = sFadeMs;
-                                startFade(from, to, new Runnable() {
+                                WallpaperFade.startFade(from, to, new Runnable() {
                                     @Override
                                     public void run() {
                                         // Kept when a cover is already on its way: it arrives
@@ -2281,7 +1581,7 @@ public class WallpaperProbe {
                         if (sGpuFadeOn) sGpuFadeBroken = false;
                         Xp.log(TAG + "gpu fade " + (sGpuFadeOn ? "on" : "off")
                                 + " (draw hooked=" + sDrawHooked + ", usable now="
-                                + gpuFadeUsable() + ")");
+                                + WallpaperFade.gpuFadeUsable() + ")");
                     } else if ("pcache".equals(op)) {
                         // The clock-colour answers kept until the wallpaper changes; see
                         // PaletteCache. `--ez clear true` drops them.
@@ -2747,7 +2047,7 @@ public class WallpaperProbe {
         Xp.log(TAG + "art set " + describe(b));
         if (VideoTakeover.videoPath()) VideoTakeover.videoWindowTakeover(false);
         else if (fade && from != null && to != null) {
-            startFade(from, to, null, trackChange ? sTrackFadeMs : sFadeMs);
+            WallpaperFade.startFade(from, to, null, trackChange ? sTrackFadeMs : sFadeMs);
         } else if (reload) WallpaperEngines.reloadTexture();
         tellArtShown();
     }

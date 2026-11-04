@@ -20,7 +20,7 @@ import java.nio.ByteBuffer;
  * appears in one frame is what the notif cards' blurred background cannot follow: the wallpaper
  * window is what that blur samples, FastPlayer swaps its frames with no View-layer transition
  * above it, and a single-frame replacement therefore changes every card's background in one
- * frame. A fade gives it the same shape the still path already has (WallpaperProbe.startFade),
+ * frame. A fade gives it the same shape the still path already has (WallpaperFade.startFade),
  * which is the only other place this module can reach that window.
  */
 public class CoverVideoEncoder {

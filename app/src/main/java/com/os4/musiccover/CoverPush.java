@@ -1872,7 +1872,7 @@ public final class CoverPush {
      *                                           compositor picks up a half-built frame - the
      *                                           cover drawn small on black, in a corner
      *
-     * So WallpaperProbe.fadeTooExpensive() refuses to fade above 1.5x the screen and swaps in
+     * So WallpaperFade.fadeTooExpensive() refuses to fade above 1.5x the screen and swaps in
      * one frame instead. That is the right call at that point, but from the outside it reads as
      * "the transition only works if your wallpaper happens to be the right resolution", which is
      * not something anyone should have to know. The extra pixels buy nothing either way: the

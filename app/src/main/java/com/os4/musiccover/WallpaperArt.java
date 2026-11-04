@@ -309,7 +309,7 @@ final class WallpaperArt {
                             VideoTakeover.videoWindowTakeover(false);
                             return;
                         }
-                        if (from != null && to != null) WallpaperProbe.startFade(from, to, null);
+                        if (from != null && to != null) WallpaperFade.startFade(from, to, null);
                         else WallpaperEngines.reloadTexture();
                     }
                 };
