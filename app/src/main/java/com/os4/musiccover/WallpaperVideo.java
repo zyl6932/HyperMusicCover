@@ -111,7 +111,7 @@ final class WallpaperVideo {
         if (sFrostWant == on) return;
         sFrostWant = on;
         sFrostChangedAt = SystemClock.uptimeMillis();
-        if (sOn) WallpaperProbe.videoFrame();
+        if (sOn) WallpaperEngines.videoFrame();
     }
 
     /** GL thread: a still's crossfade is running, and whether it began with video on screen. */
@@ -138,7 +138,7 @@ final class WallpaperVideo {
         sBias = bias;
         sFrameWaiting = sCurrent;
         Xp.log(TAG + "bias " + bias);
-        if (sOn) WallpaperProbe.videoFrame();
+        if (sOn) WallpaperEngines.videoFrame();
     }
 
     static void start(Context ctx, String path, float bias) {
@@ -178,7 +178,7 @@ final class WallpaperVideo {
         }
         // The SurfaceTexture has to be made in the engine's GL context, so the first frame
         // request is what creates it; the player is started once it exists.
-        WallpaperProbe.videoFrame();
+        WallpaperEngines.videoFrame();
     }
 
     static void stop(String why) {
@@ -198,7 +198,7 @@ final class WallpaperVideo {
             Xp.log(TAG + "off (" + why + ") " + stats());
             // The GL thread fades the last frame out over the still and then lets its objects
             // go; this frame starts it.
-            WallpaperProbe.videoFrame();
+            WallpaperEngines.videoFrame();
         }
     }
 
@@ -227,7 +227,7 @@ final class WallpaperVideo {
                         Xp.log(TAG + "screen off, paused " + stats());
                     } else if (sOn) {
                         p.start();
-                        WallpaperProbe.videoFrame();
+                        WallpaperEngines.videoFrame();
                     }
                 } catch (Throwable t) {
                     Xp.w(TAG + "screen " + i.getAction() + ": " + t);
@@ -350,7 +350,7 @@ final class WallpaperVideo {
         if (!sOn && sCtx == null) return 0;
         try {
             Object prog = Xp.getObjectField(Xp.getObjectField(renderer, "mAnimator"), "mProgram");
-            if (prog == null || prog.getClass() != WallpaperProbe.plainProgram()) {
+            if (prog == null || prog.getClass() != WallpaperEngines.plainProgram()) {
                 if (!sWarnedProgram) {
                     sWarnedProgram = true;
                     Xp.log(TAG + "not drawn: the keyguard program is "
@@ -447,7 +447,7 @@ final class WallpaperVideo {
             }
             // A fade in either direction asks for its own frames: a paused or stopped player
             // sends none.
-            if (sAlpha != target || sFrost != frostTarget) WallpaperProbe.videoFrame();
+            if (sAlpha != target || sFrost != frostTarget) WallpaperEngines.videoFrame();
             sDrawn++;
             return sFullTex;
         } catch (Throwable t) {
@@ -478,7 +478,7 @@ final class WallpaperVideo {
             if (s != sTexture) return;
             sDecoded++;
             sFrameWaiting = true;
-            WallpaperProbe.videoFrame();
+            WallpaperEngines.videoFrame();
         }, Gen.handler());
         sPendingTexture = st;
         Gen.post(() -> attachPlayer(st));

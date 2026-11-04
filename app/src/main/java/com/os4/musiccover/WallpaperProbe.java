@@ -17,7 +17,6 @@ import android.util.Log;
 
 import java.lang.reflect.Method;
 
-import io.github.libxposed.api.XposedInterface;
 import java.lang.reflect.Modifier;
 
 
@@ -206,27 +205,27 @@ public class WallpaperProbe {
      * go through the keyguard branch, cover, fade, frost and all, and the cover is in the
      * wallpaper window where the clock's glass and the cards sample it.
      */
-    private static volatile boolean sSharedLock;
+    static volatile boolean sSharedLock;
 
     /**
      * The desktop engine's own word on the lock screen: its show/hideKeyguardWallpaper calls,
      * which arrive as the keyguard locks and unlocks. Null until the first of them - a process
      * started on the lock screen - and then SystemUI's reading, carried on its messages, fills in.
      */
-    private static volatile Boolean sDesktopKgShown;
+    static volatile Boolean sDesktopKgShown;
 
     /**
      * The desktop renderer's last getBitmap was answered with one of ours. Read by the upload
      * that follows it: if the lock screen went in between, that upload is the home screen's,
      * and it is carrying a cover.
      */
-    private static volatile boolean sDesktopGaveOurs;
+    static volatile boolean sDesktopGaveOurs;
 
     /** The desktop's renderer, from its last upload. */
-    private static volatile Object sDesktopRenderer;
+    static volatile Object sDesktopRenderer;
 
     /** The desktop's last upload went through the keyguard branch. */
-    private static volatile boolean sDesktopOnLock;
+    static volatile boolean sDesktopOnLock;
 
     /**
      * The shade is up, so the DESKTOP wallpaper should be showing the cover.
@@ -555,8 +554,8 @@ public class WallpaperProbe {
      * short-circuit exists to avoid.
      */
     private static volatile Bitmap sUploadOverride;
-    private static volatile Object sKeyguardRenderer;
-    private static Class<?> sPlainProgram;
+    static volatile Object sKeyguardRenderer;
+    static Class<?> sPlainProgram;
     /**
      * GL-thread state: our texture, the fade it belongs to and the context it was made in.
      * sGlTex is volatile because the hot reload's check section reads it from a binder thread.
@@ -589,9 +588,7 @@ public class WallpaperProbe {
     static volatile long sKeepAt;
     static int sKeepDurMs = 100;
     static boolean sKeepPumping;
-    /** The pump's own frame request, on the main thread. */
-    private static final long KEEP_PUMP_MS = 24L;
-    private static final Handler KEEP_MAIN = Gen.watchHandler(new Handler(Looper.getMainLooper()));
+    static final Handler KEEP_MAIN = Gen.watchHandler(new Handler(Looper.getMainLooper()));
     static final Object KEEP_LOCK = new Object();
     /** Diagnostics: messages received, drawn changes, and the last few drawn values. */
     static int sKeepMsgs;
@@ -602,10 +599,6 @@ public class WallpaperProbe {
     static int sKeepLogN;
     /** True while the keyguard renderer's own onDrawFrame runs. GL thread only. */
     private static boolean sKeyguardDrawing;
-    /** The program `uKeepDim` was last resolved on, and its location (-1: not in this one). */
-    private static int sKeepDimProgram;
-    private static int sKeepDimLoc = -1;
-    private static final int[] sCurProgram = new int[1];
 
     /**
      * The lock clock's colours, taken from the cover while the cover is up.
@@ -790,7 +783,7 @@ public class WallpaperProbe {
                 boolean keyguard = chain.getThisObject().getClass().getName().contains("Keyguard");
                 if (!keyguard && args.length > 0 && args[0] instanceof Bitmap
                         && chain.getThisObject().getClass().getName().contains("Desktop")) {
-                    keyguard = desktopUpload(chain.getThisObject(), (Bitmap) args[0]);
+                    keyguard = WallpaperEngines.desktopUpload(chain.getThisObject(), (Bitmap) args[0]);
                 }
                 // Temporary diagnostic: name every renderer that reaches the upload, so the
                 // DESKTOP one can be addressed by name. It shares this code path and is let
@@ -1043,7 +1036,7 @@ public class WallpaperProbe {
                     "com.miui.miwallpaper.container.openGL.DesktopAnimImageWallpaperRenderer",
                     sCl);
             Xp.hookAll("wall.desktop.bitmap", dr, "getBitmap", chain -> {
-                if (!desktopOnLockWanted()) {
+                if (!WallpaperEngines.desktopOnLockWanted()) {
                     sDesktopGaveOurs = false;
                     return chain.proceed();
                 }
@@ -1079,7 +1072,7 @@ public class WallpaperProbe {
                 // them. A foldable builds one engine per screen, so this also runs more than once
                 // there - resolve() is per engine class and returns at once after the first.
                 EngineNames.resolve(sKeyguardEngine);
-                noteEngineInstance(sKeyguardEngine);
+                WallpaperEngines.noteEngineInstance(sKeyguardEngine);
                 Xp.log(TAG + "keyguard engine captured: " + sKeyguardEngine);
                 // From here the lock screen has an image engine, so this is the first moment a
                 // cover has somewhere to go - and by now the receiver above is up, which is what
@@ -1140,7 +1133,7 @@ public class WallpaperProbe {
                 if (m.getParameterCount() != 2) continue;
                 Xp.hook("wall.desktop.keyguard_show", m, chain -> {
                     Object r = chain.proceed();
-                    if (sSharedLock) onDesktopKeyguard(show);
+                    if (sSharedLock) WallpaperEngines.onDesktopKeyguard(show);
                     else sDesktopKgShown = show;
                     return r;
                 });
@@ -1229,8 +1222,8 @@ public class WallpaperProbe {
                     if (sOemDarkenKnown && !sDarkenBroken && mine) {
                         applyDarken(chain.getThisObject());
                     }
-                    Object r = mine && (WallpaperVideo.on() || sVideoGlLive)
-                            ? drawWithVideo(chain) : chain.proceed();
+                    Object r = mine && (WallpaperVideo.on() || WallpaperEngines.sVideoGlLive)
+                            ? WallpaperEngines.drawWithVideo(chain) : chain.proceed();
                     if (!mine) return r;
                     GpuFade f = sGpuFade;
                     if (f == null && sGlTex == 0) return r;
@@ -1259,7 +1252,7 @@ public class WallpaperProbe {
         try {
             Class<?> glw = Xp.findClass("com.miui.miwallpaper.opengl.ImageGLWallpaper", sCl);
             Xp.hookAll("wall.render.gl_draw", glw, "draw", chain -> {
-                if (sKeyguardDrawing) applyKeepDim();
+                if (sKeyguardDrawing) WallpaperEngines.applyKeepDim();
                 return chain.proceed();
             });
             Xp.log(TAG + "keep-dim uniform hooked");
@@ -1340,7 +1333,7 @@ public class WallpaperProbe {
      * different answer per renderer - so it is read from the renderer that is about to upload,
      * immediately before the crop that uses it, rather than left over from the last one.
      */
-    private static void adoptSurfaceOf(Object renderer) {
+    static void adoptSurfaceOf(Object renderer) {
         try {
             Object surface = Xp.getObjectField(renderer, "mSurfaceSize");
             if (surface instanceof android.graphics.Rect) {
@@ -1407,10 +1400,10 @@ public class WallpaperProbe {
                 || from.getWidth() != to.getWidth() || from.getHeight() != to.getHeight()) {
             Xp.log(TAG + "no fade: " + describe(from) + " -> " + describe(to));
             if (done != null) done.run();
-            reloadTexture();
+            WallpaperEngines.reloadTexture();
             return;
         }
-        if (sSharedLock && lockEngine() == null) {
+        if (sSharedLock && WallpaperEngines.lockEngine() == null) {
             // The desktop is on screen and the lock screen's picture is not on it: nothing to
             // fade. The cover is put on when the lock screen comes back - syncSharedLock().
             if (done != null) done.run();
@@ -1422,7 +1415,7 @@ public class WallpaperProbe {
         }
         if (fadeTooExpensive(from)) {
             if (done != null) done.run();
-            reloadTexture();
+            WallpaperEngines.reloadTexture();
             return;
         }
         // Both ends agree with each other by the check above; whether they agree with the
@@ -1461,7 +1454,7 @@ public class WallpaperProbe {
                     if (done != null) done.run();
                     // The last upload is a normal one: the real bitmap, and the frosted copy
                     // regenerated from it.
-                    reloadTexture();
+                    WallpaperEngines.reloadTexture();
                     Xp.log(TAG + "fade done in " + el + "ms over " + spent[1] + " frames, blend "
                             + (spent[1] == 0 ? 0 : spent[0] / spent[1]) + "ms/frame, waited "
                             + spent[2] + "x for the upload"
@@ -1494,7 +1487,7 @@ public class WallpaperProbe {
                 sFadeSentAt = SystemClock.uptimeMillis();
                 // Kept alive between frames: T(false) finishes rendering after every frame,
                 // which throws the EGL context away for the next one to rebuild.
-                reloadEngine(lockEngine(), true);
+                WallpaperEngines.reloadEngine(WallpaperEngines.lockEngine(), true);
                 Gen.postDelayed(this, FADE_STEP_MS);
             }
         };
@@ -1553,7 +1546,7 @@ public class WallpaperProbe {
         // On a shared still the desktop renderer stands in for the keyguard's, and it is known
         // before its first upload as the lock screen's - which is the upload the fade starts.
         Object renderer = sSharedLock ? sDesktopRenderer : sKeyguardRenderer;
-        if (renderer == null || lockEngine() == null) return false;
+        if (renderer == null || WallpaperEngines.lockEngine() == null) return false;
         try {
             Object prog = Xp.getObjectField(Xp.getObjectField(renderer, "mAnimator"), "mProgram");
             if (prog != null && prog.getClass() == sPlainProgram) return true;
@@ -1683,10 +1676,10 @@ public class WallpaperProbe {
                     Xp.log(TAG + "gpu fade timed out after " + f.frames + " frames (armed="
                             + f.armed + ", swap=" + f.swapRequested + "/" + f.swapUploaded + ")");
                     finishGpuFade(f);
-                    reloadTexture();
+                    WallpaperEngines.reloadTexture();
                     return;
                 }
-                requestFrame(true);
+                WallpaperEngines.requestFrame(true);
                 Gen.frame(this);
             }
         };
@@ -1698,7 +1691,7 @@ public class WallpaperProbe {
         GpuFade f = new GpuFade(from, to, 1f, 0f, to, durMs, done);
         sUploadOverride = to;
         sGpuFade = f;
-        reloadEngine(lockEngine(), true);
+        WallpaperEngines.reloadEngine(WallpaperEngines.lockEngine(), true);
         return f;
     }
 
@@ -1724,10 +1717,10 @@ public class WallpaperProbe {
         // A cover that has just faded out leaves the desktop holding the lock screen's cut of
         // its own picture. Put back now, under the lock screen where it looks the same, rather
         // than as the user unlocks.
-        if (sSharedLock) syncSharedLock();
+        if (sSharedLock) WallpaperEngines.syncSharedLock();
         // A video held back by the fade is drawn from the next frame; ask for it rather than
         // wait on the player's next one, which a paused player would never send.
-        if (WallpaperVideo.on()) videoFrame();
+        if (WallpaperVideo.on()) WallpaperEngines.videoFrame();
     }
 
     /** Any thread. Ends a fade that cannot continue, with a plain reload so nothing is stranded. */
@@ -1738,7 +1731,7 @@ public class WallpaperProbe {
             public void run() {
                 if (sGpuFade != f) return;
                 finishGpuFade(f);
-                reloadTexture();
+                WallpaperEngines.reloadTexture();
             }
         });
     }
@@ -1815,7 +1808,7 @@ public class WallpaperProbe {
                         if (sGpuFade != f) return;
                         sUploadOverride = f.dest;
                         f.swapRequested = true;
-                        reloadEngine(lockEngine(), true);
+                        WallpaperEngines.reloadEngine(WallpaperEngines.lockEngine(), true);
                     }
                 });
             }
@@ -1980,7 +1973,7 @@ public class WallpaperProbe {
      * this has to be a copy - and the fingerprint is what stops it being copied again on every
      * reload that happens while cover mode is off.
      */
-    private static void rememberOriginal(Bitmap b) {
+    static void rememberOriginal(Bitmap b) {
         if (b == null || b.isRecycled()) return;
         try {
             int print = WallpaperDiag.print8(b);
@@ -2030,7 +2023,7 @@ public class WallpaperProbe {
                         + (carried == null ? " " + i.getExtras() : " jpg=" + carried.length + "B"));
                 try {
                     if (i.hasExtra("video")) VideoTakeover.noteLockWallpaper(i.getBooleanExtra("video", false));
-                    if (i.hasExtra("shared")) noteSharedLock(i.getBooleanExtra("shared", false));
+                    if (i.hasExtra("shared")) WallpaperEngines.noteSharedLock(i.getBooleanExtra("shared", false));
                     // Only where the engine has said nothing yet - a process that started on the
                     // lock screen. Its own show/hide is the authority: a message sent just before
                     // an unlock can land just after the hide, and must not undo it.
@@ -2047,13 +2040,13 @@ public class WallpaperProbe {
                         float to = Math.max(0f, Math.min(0.5f, i.getFloatExtra("v", 0f)));
                         int ms = Math.max(1, i.getIntExtra("ms", 100));
                         synchronized (KEEP_LOCK) {
-                            sKeepFrom = keepDimNowLocked();
+                            sKeepFrom = WallpaperEngines.keepDimNowLocked();
                             sKeepTo = to;
                             sKeepAt = android.os.SystemClock.uptimeMillis();
                             sKeepDurMs = ms;
                             sKeepMsgs++;
                         }
-                        startKeepPump();
+                        WallpaperEngines.startKeepPump();
                     } else if ("keepdimreport".equals(op)) {
                         setResultData(WallpaperDiag.keepDimReport());
                     } else if ("bmp".equals(op)) {
@@ -2068,7 +2061,7 @@ public class WallpaperProbe {
                         sTexFit = i.getBooleanExtra("on", !sTexFit);
                         Xp.log(TAG + "texture fit to screen " + (sTexFit ? "ON" : "off")
                                 + " (surface " + sSurfaceW + "x" + sSurfaceH + ")");
-                        reloadTexture();
+                        WallpaperEngines.reloadTexture();
                     } else if ("precompose".equals(op)) {
                         String src = i.getStringExtra("src");
                         if (src != null && !VideoTakeover.videoPath()) {
@@ -2248,7 +2241,7 @@ public class WallpaperProbe {
                                 return;
                             }
                         }
-                        if (reload) reloadTexture();
+                        if (reload) WallpaperEngines.reloadTexture();
                     } else if ("shadeart".equals(op)) {
                         // The notification shade went up or came down. Swapping the DESKTOP
                         // texture is what puts the cover where the cards' glass samples, which is
@@ -2261,7 +2254,7 @@ public class WallpaperProbe {
                             sShadeOn = on;
                             Xp.log(TAG + "shade art " + (on ? "ON - desktop wallpaper is the cover"
                                     : "off - desktop wallpaper back to its own picture"));
-                            reloadDesktopTexture();
+                            WallpaperEngines.reloadDesktopTexture();
                         }
                     } else if ("lyricblur".equals(op)) {
                         final boolean on = i.getBooleanExtra("on", false);
@@ -2271,7 +2264,7 @@ public class WallpaperProbe {
                             WallpaperArt.setLyricBlur(on);
                         }
                     } else if ("reload".equals(op)) {
-                        reloadTexture();
+                        WallpaperEngines.reloadTexture();
                     } else if ("fadems".equals(op)) {
                         long v = i.getIntExtra("v", (int) sFadeMs);
                         sFadeMs = v < 60L ? 60L : (v > 1200L ? 1200L : v);
@@ -2387,7 +2380,7 @@ public class WallpaperProbe {
                 public void onReceive(Context c, Intent i) {
                     sDesktopKgShown = false;
                     if (!sSharedLock) return;
-                    Gen.post(WallpaperProbe::syncSharedLock);
+                    Gen.post(WallpaperEngines::syncSharedLock);
                 }
             }, screen, Context.RECEIVER_EXPORTED);
         } catch (Throwable t) {
@@ -2427,7 +2420,7 @@ public class WallpaperProbe {
         // point on the shared clock. A KEEP wallpaper was being refused on every install that
         // landed inside its 100-300ms move.
         if (sGlTex != 0) return "a gpu crossfade holds a texture";
-        if (sVideoGlLive || WallpaperVideo.holdsGl()) return "the motion cover holds GL objects";
+        if (WallpaperEngines.sVideoGlLive || WallpaperVideo.holdsGl()) return "the motion cover holds GL objects";
         if (VideoTakeover.sCoverVideoActive || VideoTakeover.sActiveEngine != null || VideoTakeover.sPathPinned) {
             return "the cover video owns the wallpaper window";
         }
@@ -2605,7 +2598,7 @@ public class WallpaperProbe {
             return;
         }
         register(sCtx);
-        if (sKeepAt != 0L) startKeepPump();
+        if (sKeepAt != 0L) WallpaperEngines.startKeepPump();
         Xp.log(TAG + "adopted art=" + describe(sArt) + " card=" + sCardMode
                 + " blur=" + sLyricBlur + "/" + sLyricBlurWant
                 + " engine=" + (sKeyguardEngine == null ? "none" : "yes"));
@@ -2618,7 +2611,7 @@ public class WallpaperProbe {
      */
     static void retireForReload() {
         sKeepPumping = false;
-        KEEP_MAIN.removeCallbacks(KEEP_PUMP);
+        KEEP_MAIN.removeCallbacks(WallpaperEngines.KEEP_PUMP);
         WallpaperVideo.retire();
         sComposed = null;
         sFitted = null;
@@ -2755,7 +2748,7 @@ public class WallpaperProbe {
         if (VideoTakeover.videoPath()) VideoTakeover.videoWindowTakeover(false);
         else if (fade && from != null && to != null) {
             startFade(from, to, null, trackChange ? sTrackFadeMs : sFadeMs);
-        } else if (reload) reloadTexture();
+        } else if (reload) WallpaperEngines.reloadTexture();
         tellArtShown();
     }
 
@@ -2797,464 +2790,6 @@ public class WallpaperProbe {
 
     /** The precompose key of the cover the tap last put up (applyKept). Main thread. */
     static String sKeptShown;
-
-    /**
-     * The ways to ask the engine to run its preRender step, and the arguments it takes there.
-     *
-     * Ordered newest-name-first. The names are R8-obfuscated (OS4.0.0.35: u, b, T) and a build
-     * that renamed one used to take the whole reload down with it - the log below is what that
-     * looked like, and what it cost is in Handoff 27.
-     */
-    static final Object[][] FRAME_REQUESTS = {
-            {"T", Boolean.FALSE},
-            // OS4.0.0.17's name for the same method, read off its bytecode rather than inferred
-            // from the log: there ImageEngineImpl.M(Z) and U(Z) stand where 0.35 has L(Z) and
-            // T(Z). M and L are instruction-for-instruction identical, and U and T both open on
-            // `iget-boolean h:Z; if-eqz; iget-object t:HashMap; s()` - the post-a-frame path.
-            // What settles the pairing is the rest of that set: changeScrollWithScreen and g
-            // kept their names across both builds, and those are what align the two lists.
-            {"U", Boolean.FALSE},
-            // 8.0.8-flip-q18's name, off its bytecode: ImageEngineImpl.Z(Z) opens on
-            // `iget-boolean s:Z; if-eqz -> return; iget-object k:Handler; Handler.post(Runnable)`,
-            // which is the same post-a-frame shape as T/U above with the fields renamed (that
-            // build's guard is s where 7.0.7's is h). The sibling V(Z) is 563 code units of
-            // surface work and is NOT this - it is the one to avoid calling by accident.
-            {"Z", Boolean.FALSE},
-            // The OEM's own showKeyguardWallpaper(ZI)/hideKeyguardWallpaper(ZI) take a boolean
-            // and an int, so a build that widened the frame request the same way is worth one
-            // more try. 0 is the no-animation value everywhere these appear.
-            {"T", Boolean.FALSE, Integer.valueOf(0)},
-    };
-
-    /**
-     * Re-runs the DESKTOP renderer's own surface-created path, the same way reloadTexture() does
-     * for the keyguard: the engine's pending-surface flag plus its own frame request, so the OEM
-     * does the upload rather than us touching GL.
-     */
-    private static void reloadDesktopTexture() {
-        Object eng = sDesktopEngine;
-        if (eng == null) {
-            Xp.log(TAG + "reload: no desktop engine captured - the desktop wallpaper cannot be "
-                    + "swapped, so the cards' glass will keep showing the wallpaper");
-            return;
-        }
-        reloadEngine(eng);
-    }
-
-    static void reloadTexture() {
-        Object eng = lockEngine();
-        if (eng == null) {
-            if (sSharedLock) {
-                // Not a failure: the desktop is on screen, and the cover waits for the lock
-                // screen - see syncSharedLock().
-                Xp.log(TAG + "reload: the lock screen shares the desktop and is not up, the cover"
-                        + " waits for it");
-                return;
-            }
-            Xp.log(TAG + "reload: no keyguard engine (is the lockscreen wallpaper "
-                    + "still the same image as the desktop one?)");
-            return;
-        }
-        reloadEngine(eng);
-    }
-
-    /**
-     * The engine whose texture the lock screen shows: the keyguard's, or with a shared still the
-     * desktop's while the lock screen is up. Null when the lock screen shows nothing of ours to
-     * reload - shared, and the desktop is what is on screen.
-     */
-    private static Object lockEngine() {
-        if (!sSharedLock) return sKeyguardEngine;
-        return sharedKeyguardShown() ? sDesktopEngine : null;
-    }
-
-    private static boolean sharedKeyguardShown() {
-        Boolean shown = sDesktopKgShown;
-        return shown != null ? shown : VideoTakeover.lockScreenUp();
-    }
-
-    /** Whether the desktop's next upload is the lock screen's. See sSharedLock. */
-    private static boolean desktopOnLockWanted() {
-        return sSharedLock && (sArt != null || sFade != null) && sharedKeyguardShown();
-    }
-
-    /**
-     * GL thread, from the upload hook: whether this desktop upload goes through the keyguard
-     * branch. When it does not, everything the keyguard branch left on the desktop's texture is
-     * taken back, so the home screen gets its own picture at its own geometry - the texture
-     * dimension hook would otherwise keep answering with the screen-sized cut.
-     */
-    private static boolean desktopUpload(Object renderer, Bitmap orig) {
-        sDesktopRenderer = renderer;
-        boolean lock = desktopOnLockWanted();
-        if (lock != sDesktopOnLock) {
-            sDesktopOnLock = lock;
-            Xp.log(TAG + (lock ? "the desktop renderer draws the lock screen's cover"
-                    : "the desktop renderer is back to its own picture"));
-        }
-        boolean gaveOurs = sDesktopGaveOurs;
-        sDesktopGaveOurs = false;
-        if (lock) return true;
-        if (gaveOurs) {
-            // Unlocked between the source and the upload: what is about to go up is a cover, on
-            // the home screen. Up it goes - this frame cannot be stopped - and straight after it
-            // the desktop's own picture.
-            Xp.log(TAG + "the desktop was handed a cover as the lock screen went; reloading it");
-            final Object eng = sDesktopEngine;
-            Gen.post(() -> {
-                if (!desktopOnLockWanted()) reloadEngine(eng);
-            });
-        }
-        try {
-            Object t = Xp.getObjectField(renderer, "mTexture");
-            if (t != null) {
-                sTexSizes.remove(t);
-                if (sKeyguardTexture == t) sKeyguardTexture = null;
-            }
-        } catch (Throwable ignored) {
-        }
-        if (sKeyguardRenderer == renderer) sKeyguardRenderer = null;
-        // What a cover fades in from. The keyguard branch learns it from the upload that carries
-        // no cover, which on a shared still never comes, so it is taken from the desktop's own
-        // uploads instead, cut to the screen exactly as the keyguard branch would cut it.
-        if (sSharedLock && !sShadeOn && sArt == null && !gaveOurs) {
-            adoptSurfaceOf(renderer);
-            Bitmap screen = screenSized(orig);
-            rememberOriginal(screen != null ? screen : orig);
-        }
-        return false;
-    }
-
-    /** Told by SystemUI on every message. See sSharedLock. */
-    private static void noteSharedLock(boolean shared) {
-        if (shared == sSharedLock) return;
-        sSharedLock = shared;
-        Xp.log(TAG + (shared ? "the lock screen shares the desktop's still: the cover goes on the"
-                + " desktop engine while locked" : "the lock screen has a wallpaper of its own again"));
-        // Whatever was remembered belonged to the other arrangement's lock wallpaper.
-        sOrig = null;
-        Gen.post(() -> {
-            // The picture the first cover fades in from is learnt from a desktop upload with no
-            // cover on it. One now, of the picture already on screen, so that first fade is not
-            // a cut.
-            if (shared && sArt == null && sDesktopEngine != null) reloadEngine(sDesktopEngine);
-            syncSharedLock();
-        });
-    }
-
-    /**
-     * The desktop engine was told the lock screen showed or hid. Main thread or binder - posted.
-     */
-    private static void onDesktopKeyguard(boolean showing) {
-        sDesktopKgShown = showing;
-        Gen.post(WallpaperProbe::syncSharedLock);
-    }
-
-    /**
-     * Puts the desktop's texture in step with the lock screen: the cover on it while the lock
-     * screen is up, the desktop's own picture the moment it goes. One reload, and only when the
-     * two disagree, so a phone without a cover never has its desktop touched. Main thread.
-     */
-    private static void syncSharedLock() {
-        boolean want = desktopOnLockWanted();
-        if (want == sDesktopOnLock) return;
-        Object eng = sDesktopEngine;
-        if (eng == null) return;
-        // A fade in the air is left to finish on its own: its frames find no engine to reload
-        // once the lock screen is gone, and its end is what clears the art on the way out.
-        Xp.log(TAG + (want ? "the cover goes on the shared desktop wallpaper"
-                : "the shared desktop wallpaper gets its own picture back"));
-        reloadEngine(eng);
-    }
-
-    /**
-     * Records an engine instance and says what distinguishes it from the others.
-     *
-     * The int fields are dumped because on the multi-display build they are what tells the
-     * instances apart: MultiDisplayEngineService.b is `which` - the value
-     * MiuiWallpaperManager.isLockWhich reads to separate the lock engine from the desktop one -
-     * and c is what it passes to WallpaperServiceController alongside it. Neither is named in a
-     * way that can be relied on, so they are reported rather than interpreted.
-     */
-    private static void noteEngineInstance(Object eng) {
-        if (eng == null) return;
-        if (!sKeyguardEngines.contains(eng)) sKeyguardEngines.add(eng);
-        Xp.log(TAG + "keyguard engine #" + sKeyguardEngines.size() + ": " + WallpaperDiag.describeEngine(eng));
-    }
-
-    /** The wallpaper app's own version, which is what a report has to be read against. */
-    static String wallpaperVersion() {
-        try {
-            Context c = sCtx;
-            if (c == null) return "unknown (no context)";
-            android.content.pm.PackageInfo pi =
-                    c.getPackageManager().getPackageInfo(c.getPackageName(), 0);
-            return pi.packageName + " " + pi.versionName + " (" + pi.versionCode + ")";
-        } catch (Throwable t) {
-            return "unknown: " + t;
-        }
-    }
-
-    private static void reloadEngine(Object eng) {
-        reloadEngine(eng, false);
-    }
-
-    /**
-     * keepAlive asks for the frame with T(true). Read off OS4.0.0.35: the boolean is what
-     * ImageEngineImpl.L() hands its post-render step, and false runs finishRendering() on the
-     * spot - the EGL surface and context are destroyed after the frame - where true defers that
-     * by a second. So a run of frames wants true: with false every one of them pays for a new
-     * context, and U() treats a new context as a new surface and re-uploads everything.
-     */
-    private static void reloadEngine(Object eng, boolean keepAlive) {
-        if (eng == null) return;
-        try {
-            Xp.callMethod(eng, "u");
-        } catch (Throwable t) {
-            Xp.w(TAG + "reload: u() failed: " + t);
-        }
-        // Resolved, never assumed. On the multi-display build this flag is called `w`, and the
-        // name `b` that it has on 7.0.7 belongs there to an int holding `which` - so writing `b`
-        // blind is not a miss, it is a write onto the engine's own lock-or-desktop identity.
-        // EngineNames only hands back a name it has confirmed is a boolean.
-        String flag = EngineNames.pendingFlag;
-        if (flag == null) {
-            Xp.log(TAG + "reload: no pending-surface flag resolved; the frame will redraw what is "
-                    + "uploaded instead of re-reading it. " + EngineNames.report());
-        } else {
-            try {
-                Xp.setBooleanField(eng, flag, true);
-            } catch (Throwable t) {
-                Xp.w(TAG + "reload: the pending-surface field '" + flag + "' failed: " + t);
-            }
-        }
-        if (frameRequest(eng, keepAlive)) {
-            // Not per frame: a fade asks for a reload every frame, and this log goes through
-            // LSPosed's binder and file on each one.
-            if (!keepAlive) {
-                Xp.log(TAG + "reload requested on " + eng.getClass().getSimpleName()
-                        + " via " + FRAME_REQUESTS[sFrameReq][0] + "()");
-            }
-            return;
-        }
-        WallpaperDiag.reportNoFrameRequest(eng);
-    }
-
-    /** WallpaperVideo still holds GL objects; one more frame on the keyguard lets them go. */
-    private static volatile boolean sVideoGlLive;
-
-    /**
-     * The keyguard's frame with the motion cover in it: the OEM's own draw, with the texture it
-     * binds swapped for the one WallpaperVideo composed this frame. See WallpaperVideo.
-     */
-    private static Object drawWithVideo(XposedInterface.Chain chain) throws Throwable {
-        Object renderer = chain.getThisObject();
-        Object wp = null;
-        int oemTex = 0;
-        try {
-            Object prog = Xp.getObjectField(Xp.getObjectField(renderer, "mAnimator"),
-                    "mProgram");
-            wp = Xp.getObjectField(prog, "mAnimImageGLWallpaper");
-            oemTex = ((Integer) Xp.getObjectField(wp, "mTextureId")).intValue();
-        } catch (Throwable t) {
-            wp = null;
-        }
-        int tex = wp == null ? 0 : WallpaperVideo.beforeDraw(renderer,
-                sGpuFade != null || sFade != null, sReportedW, sReportedH, oemTex);
-        sVideoGlLive = WallpaperVideo.on() || WallpaperVideo.holdsGl();
-        if (tex != 0) {
-            try {
-                Xp.setObjectField(wp, "mTextureId", tex);
-            } catch (Throwable t) {
-                Xp.w(TAG + "video: cannot swap the texture: " + t);
-                tex = 0;
-            }
-        }
-        if (tex == 0) wp = null;
-        try {
-            return chain.proceed();
-        } finally {
-            // Only if it is still ours: a reload inside the frame sets a new one of the OEM's.
-            if (wp != null && ((Integer) Xp.getObjectField(wp, "mTextureId")).intValue() == tex) {
-                Xp.setObjectField(wp, "mTextureId", oemTex);
-            }
-        }
-    }
-
-    static Class<?> plainProgram() {
-        return sPlainProgram;
-    }
-
-    /** Any thread: a frame for the video, asked for on the main thread like the fade's. */
-    static void videoFrame() {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            requestFrame(true);
-        } else {
-            Gen.post(() -> requestFrame(true));
-        }
-    }
-
-    /**
-     * Puts the current dim on whatever program is about to draw. GL thread, inside the
-     * wallpaper's own draw.
-     *
-     * The location is cached per program: the keyguard's program is rebuilt on some
-     * transitions, and asking the driver for the location every frame would be a call per
-     * frame for a value that only moves during a transition.
-     */
-    private static void applyKeepDim() {
-        synchronized (KEEP_LOCK) {
-            if (sKeepAt != 0L) {
-                float t = sKeepDurMs <= 0 ? 1f
-                        : Math.min(1f, (android.os.SystemClock.uptimeMillis() - sKeepAt)
-                        / (float) sKeepDurMs);
-                float e = t * t * (3f - 2f * t);
-                sKeepDim = sKeepFrom + (sKeepTo - sKeepFrom) * e;
-                if (t >= 1f) {
-                    sKeepDim = sKeepTo;
-                    sKeepFrom = sKeepTo;
-                    sKeepAt = 0L;
-                }
-            }
-            noteKeepDrawLocked();
-        }
-        android.opengl.GLES20.glGetIntegerv(android.opengl.GLES20.GL_CURRENT_PROGRAM,
-                sCurProgram, 0);
-        final int prog = sCurProgram[0];
-        if (prog != sKeepDimProgram) {
-            sKeepDimProgram = prog;
-            sKeepDimLoc = prog == 0 ? -1
-                    : android.opengl.GLES20.glGetUniformLocation(prog, "uKeepDim");
-        }
-        if (sKeepDimLoc >= 0) {
-            android.opengl.GLES20.glUniform1f(sKeepDimLoc, sKeepDim);
-        }
-    }
-
-    /** The values the shader was really told, for `op keepdimreport`. Holds KEEP_LOCK. */
-    private static void noteKeepDrawLocked() {
-        int n = sKeepLogN;
-        float last = n == 0 ? Float.NaN : sKeepLogV[(n - 1) % KEEP_LOG];
-        if (!Float.isNaN(last) && Math.abs(last - sKeepDim) < 0.005f) return;
-        sKeepLogAt[n % KEEP_LOG] = android.os.SystemClock.uptimeMillis();
-        sKeepLogV[n % KEEP_LOG] = sKeepDim;
-        sKeepLogN = n + 1;
-        sKeepDraws++;
-    }
-
-    /**
-     * Asks for wallpaper frames while the dim is moving. A still wallpaper draws only when
-     * asked, so without this the value would sit in a uniform nobody renders.
-     */
-    private static final Runnable KEEP_PUMP = new Runnable() {
-        @Override
-        public void run() {
-            boolean live;
-            synchronized (KEEP_LOCK) {
-                live = sKeepAt != 0L;
-                // No frame came back for a while: the request is not reaching the renderer
-                // on this build. Snap and stop rather than pump for ever.
-                if (live && android.os.SystemClock.uptimeMillis() - sKeepAt
-                        > sKeepDurMs + 250L) {
-                    sKeepDim = sKeepTo;
-                    sKeepFrom = sKeepTo;
-                    sKeepAt = 0L;
-                    live = false;
-                }
-            }
-            if (!live) {
-                sKeepPumping = false;
-                return;
-            }
-            requestFrame(true);
-            KEEP_MAIN.postDelayed(this, KEEP_PUMP_MS);
-        }
-    };
-
-    private static void startKeepPump() {
-        if (sKeepPumping) return;
-        sKeepPumping = true;
-        KEEP_MAIN.removeCallbacks(KEEP_PUMP);
-        KEEP_MAIN.post(KEEP_PUMP);
-    }
-
-    /** The value the animation is at now, so a new target starts from what is on screen. */
-    private static float keepDimNowLocked() {
-        if (sKeepAt == 0L) return sKeepDim;
-        float t = sKeepDurMs <= 0 ? 1f
-                : Math.min(1f, (android.os.SystemClock.uptimeMillis() - sKeepAt)
-                / (float) sKeepDurMs);
-        float e = t * t * (3f - 2f * t);
-        return sKeepFrom + (sKeepTo - sKeepFrom) * e;
-    }
-
-    /** A redraw of what is uploaded, with no reload - the GPU fade's per-frame request. */
-    private static void requestFrame(boolean keepAlive) {
-        Object eng = lockEngine();
-        if (eng != null && !frameRequest(eng, keepAlive)) WallpaperDiag.reportNoFrameRequest(eng);
-    }
-
-    /**
-     * Whether an entry's boolean is the one that DEFERS the post-render teardown, read off that
-     * build's own bytecode and never guessed.
-     *
-     * Index-aligned with FRAME_REQUESTS. True only where the dex has been read: T and U hand
-     * their argument to the post-render step, where false runs finishRendering() on the spot -
-     * the EGL surface and context destroyed after the frame - and true defers it by a second.
-     * Z's boolean is a different question entirely (whether preRender re-reads the texture), and
-     * the T(Z,I) entry is a shape nobody has met yet, so neither of those is ever given ours.
-     */
-    private static final boolean[] FRAME_REQ_DEFERS_TEARDOWN = {true, true, false, false};
-
-    /** Tries the known frame requests, the one that answered last time first. */
-    private static boolean frameRequest(Object eng, boolean keepAlive) {
-        int known = sFrameReq;
-        if (known >= 0 && callFrameRequest(eng, known, keepAlive)) return true;
-        for (int i = 0; i < FRAME_REQUESTS.length; i++) {
-            if (i == known) continue;
-            if (callFrameRequest(eng, i, keepAlive)) {
-                sFrameReq = i;
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean callFrameRequest(Object eng, int entry, boolean keepAlive) {
-        Object[] req = FRAME_REQUESTS[entry];
-        Object[] args = new Object[req.length - 1];
-        System.arraycopy(req, 1, args, 0, args.length);
-        // The argument is the OEM's, not ours, everywhere its meaning has not been read out of
-        // that build's bytecode. It used to be overwritten with keepAlive unconditionally, which
-        // sent `true` where FRAME_REQUESTS deliberately says FALSE, the no-animation value at
-        // every one of these entry points.
-        //
-        // On 7.0.7 that went unnoticed: the frame request there is U(Z), which reaches preRender
-        // either way. On 8.0.8-flip the frame request is Z(Z), which posts preRender - V(Z),
-        // named by its own "#preRender" trace section - and THAT one branches on the argument.
-        // With true it never re-read the texture, so a GPU fade armed on nothing: measured as
-        // `gpu fade timed out after 226 frames (armed=false)`, about 1.9s of the cover sitting
-        // in the wallpaper process without being drawn, which is what read on the phone as the
-        // cover taking seconds to appear and needing a fold or a rotation to show up.
-        //
-        // Where the boolean IS the teardown flag, though, ours is the right value and sending
-        // the OEM's costs the whole animation: a run of frames asked for with false destroys the
-        // EGL context after every one of them, and the next frame is a new context, which the
-        // engine treats as a new surface and re-uploads everything for. That is a fade at 9-17
-        // frames where the same fade with true draws 44-46 - the difference between a crossfade
-        // and a slideshow, and what made the frost going on for the lyrics stutter.
-        if (keepAlive && entry < FRAME_REQ_DEFERS_TEARDOWN.length
-                && FRAME_REQ_DEFERS_TEARDOWN[entry]
-                && args.length > 0 && args[0] instanceof Boolean) {
-            args[0] = Boolean.TRUE;
-        }
-        try {
-            Xp.callMethod(eng, (String) req[0], args);
-            return true;
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
     /** CRC32 of the pushed JPEG, the cover video's cache key. 0 means "work it out". */
     static volatile long sCurrentArtChecksum;
 
@@ -3314,7 +2849,7 @@ public class WallpaperProbe {
      * this upload. Taking it from anywhere else is what cropped the cover for one screen and
      * handed it to another.
      */
-    private static Bitmap screenSized(Bitmap src) {
+    static Bitmap screenSized(Bitmap src) {
         int w = sSurfaceW, h = sSurfaceH;
         if (!sTexFit || src == null || w <= 0 || h <= 0) return null;
         if (src.getWidth() == w && src.getHeight() == h) return null;

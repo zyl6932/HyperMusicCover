@@ -310,7 +310,7 @@ final class WallpaperArt {
                             return;
                         }
                         if (from != null && to != null) WallpaperProbe.startFade(from, to, null);
-                        else WallpaperProbe.reloadTexture();
+                        else WallpaperEngines.reloadTexture();
                     }
                 };
                 Gen.post(settle);

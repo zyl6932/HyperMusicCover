@@ -136,7 +136,7 @@ final class WallpaperDiag {
      */
     static String selfTest() {
         StringBuilder sb = new StringBuilder("=== wallpaper self test ===");
-        sb.append("\nwallpaper package: ").append(WallpaperProbe.wallpaperVersion());
+        sb.append("\nwallpaper package: ").append(WallpaperEngines.wallpaperVersion());
         sb.append('\n').append(EngineNames.report());
         sb.append("\nkeyguard engines: ").append(WallpaperProbe.sKeyguardEngines.size());
         synchronized (WallpaperProbe.sKeyguardEngines) {
@@ -151,8 +151,8 @@ final class WallpaperDiag {
         sb.append("\nvideo engine: ").append(VideoTakeover.sVideoEngine == null ? "none"
                 : VideoTakeover.sVideoEngine.getClass().getSimpleName());
         sb.append("\nframe request: ").append(WallpaperProbe.sFrameReq < 0 ? "none has answered yet"
-                : WallpaperProbe.FRAME_REQUESTS[WallpaperProbe.sFrameReq][0] + "() (candidate " + (WallpaperProbe.sFrameReq + 1) + " of "
-                        + WallpaperProbe.FRAME_REQUESTS.length + ")");
+                : WallpaperEngines.FRAME_REQUESTS[WallpaperProbe.sFrameReq][0] + "() (candidate " + (WallpaperProbe.sFrameReq + 1) + " of "
+                        + WallpaperEngines.FRAME_REQUESTS.length + ")");
         Object eng = WallpaperProbe.sKeyguardEngine;
         if (eng != null) {
             sb.append("\n  (Z)V methods here: ").append(oneBooleanMethods(eng));
