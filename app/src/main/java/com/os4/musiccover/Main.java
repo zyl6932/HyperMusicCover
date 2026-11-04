@@ -884,6 +884,9 @@ public class Main extends XposedModule {
         // "Has notifications" as the clock faces are told it, less the rows nobody can see
         // (NotifPresence).
         NotifPresence.install(cl);
+        // A swipe up on the blank above the rows unlocks, not scrolls the stack, though the
+        // media card behind the pill still lies there laid out (UnlockSwipeRegion, #101).
+        UnlockSwipeRegion.install(cl);
         // The lock screen's per-region palettes read again when the cover changes (CoverPalette).
         CoverPalette.install(cl);
 
