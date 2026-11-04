@@ -2114,6 +2114,12 @@ public class Main extends XposedModule {
      * A number rather than the view itself: the view object outlives its own measurement, so
      * what has to be compared is how big it was, and 0x0 is the tell for "before the first
      * layout" that the negative answer above was taken under.
+     *
+     * The containers inside the clock view are part of it too: the negative is decided by
+     * drawnUnder(), which walks every layer between the digits and the root, so the key that
+     * releases it has to see those same layers. Keyed on the top view alone, magazine C's
+     * clock_container_style1 going 0 -> 1 on the wake changed nothing here, and the negative
+     * taken while it was faded held for the life of the keyguard (#130).
      */
     private static int clockSize(View root) {
         View clock = ClockViews.clockViewOf(root);
@@ -2122,8 +2128,39 @@ public class Main extends XposedModule {
         // notification variant at the same 1200x2608, and fades its other layer by alpha, and
         // a "no clock here" taken on the hidden one has to be asked again when that changes.
         int shown = clock.getVisibility() == View.VISIBLE && clock.getAlpha() > 0.01f ? 1 : 0;
-        return ((System.identityHashCode(clock) * 31 + clock.getWidth()) * 8191
+        int key = ((System.identityHashCode(clock) * 31 + clock.getWidth()) * 8191
                 + clock.getHeight()) * 2 + shown;
+        key = key * 31 + containersShown(clock, CLOCK_KEY_DEPTH);
+        // And whether the screen is lit, so a negative taken in the dark is asked once more on
+        // the wake. The second guard for the same bug: with the display off and no AOD, magazine
+        // C fades clock_container_style1 after a few seconds, and whatever the OEM fades next
+        // while dark should not outlive the wake either. Part of the key rather than "never cache
+        // in the dark": the AOD is dark too and pre-draws every frame, and an uncached negative
+        // would re-run resolveTimeTarget's reflective walk on each of them.
+        return key * 2 + (sScreenOn ? 1 : 0);
+    }
+
+    /**
+     * How deep under the clock view the containers are folded into clockSize(). The digits sit
+     * three groups down on magazine C (container / time row / hour-minute pair); a few more
+     * covers the deeper styles without walking leaves, which are most of the tree.
+     */
+    private static final int CLOCK_KEY_DEPTH = 5;
+
+    /** Which of the groups under v are drawn, folded into one number. Groups only, no leaves. */
+    private static int containersShown(View v, int depth) {
+        if (depth <= 0 || !(v instanceof ViewGroup)) return 0;
+        ViewGroup g = (ViewGroup) v;
+        int h = 0;
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View c = g.getChildAt(i);
+            if (!(c instanceof ViewGroup)) continue;
+            boolean drawn = c.getVisibility() == View.VISIBLE && c.getAlpha() > 0.01f;
+            h = h * 3 + (drawn ? 2 : 1);
+            // Hidden groups are not walked: nothing under them is drawn, whatever it says.
+            if (drawn) h = h * 31 + containersShown(c, depth - 1);
+        }
+        return h;
     }
 
     public static String idOf(View v) {
