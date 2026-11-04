@@ -104,195 +104,11 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             if (on && mc == null) mc = Main.pickController(c);
             Main.sTrackKey = on ? Main.trackKey(mc) : "";
             Main.setCoverEnabled(on, i.getBooleanExtra("anim", true), false);
-        } else if ("coverstyle".equals(op)) {
-            String key = i.getStringExtra("key");
-            float value = i.getFloatExtra("v", Float.NaN);
-            CoverCardStyle next = Main.sCoverCardStyle.with(key, value);
-            boolean modeChanged = next.mode != Main.sCoverCardStyle.mode;
-            Main.sCoverCardStyle = next;
-            CoverCardLayer.style(next);
-            CoverCardLayer.refresh();
-            ModuleState.saveStateSoon();
-            if (Main.sCoverMode && modeChanged) {
-                // Leaving 保留壁纸, the dim belongs to the style that is going away. The clock
-                // may well stay held (another style's cover), so no exit frame will clear it.
-                if (!Main.keepsWallpaper()) KeepDim.apply(0f);
-                if (next.mode == CoverCardStyle.CARD) {
-                    CoverCardLayer.attach(CoverPush.coverLayer());
-                    CoverCardLayer.playback(Main.sCoverCardPlaying);
-                }
-                CoverPush.pushArtAsync(true, false);
-                // Into or out of 保留壁纸, the clock changes hands between cover mode and the
-                // lyric page.
-                Main.syncCoverHold(true);
-            }
-        } else if ("mediacard".equals(op)) {
-            if (i.hasExtra("hideart")) Main.sMcHideArt = i.getBooleanExtra("hideart", false);
-            if (i.hasExtra("lyricart")) {
-                Main.sMcArtInLyrics = i.getBooleanExtra("lyricart", false);
-            }
-            if (i.hasExtra("titletap")) {
-                Main.sMcTitleTap = i.getBooleanExtra("titletap", false);
-            }
-            if (i.hasExtra("pagebtn")) {
-                Main.sMcPageBtn = i.getBooleanExtra("pagebtn", false);
-            }
-            ModuleState.saveState();
-            Xp.log(Main.TAG + "media card hideArt=" + Main.sMcHideArt
-                    + " artInLyrics=" + Main.sMcArtInLyrics
-                    + " titleTap=" + Main.sMcTitleTap + " pageBtn=" + Main.sMcPageBtn);
-            MediaCard.applyMediaCard();
-        } else if ("lyrics".equals(op)) {
-            boolean on = i.getBooleanExtra("on", !LockLyrics.sEnabled);
-            LockLyrics.setEnabled(on, Main.sTrackKey, Main.sWatched);
-            ModuleState.saveState();
-        } else if ("lyrichdr".equals(op)) {
-            LockLyrics.sHdr = i.getBooleanExtra("on", !LockLyrics.sHdr);
-            Xp.log(Main.TAG + "lyrics HDR highlight: " + LockLyrics.sHdr);
-            LockLyrics.refresh();
-            ModuleState.saveState();
-        } else if ("lyrictrans".equals(op)) {
-            LockLyrics.sTrans = i.getBooleanExtra("on", !LockLyrics.sTrans);
-            Xp.log(Main.TAG + "lyrics translations: " + LockLyrics.sTrans);
-            // The view notices the switch itself and lays the lines out again around
-            // it; refresh only has to start the frames that let it.
-            LockLyrics.refresh();
-            ModuleState.saveState();
-        } else if ("lyricroma".equals(op)) {
-            LockLyrics.sRoma = i.getBooleanExtra("on", !LockLyrics.sRoma);
-            Xp.log(Main.TAG + "lyrics romanisations: " + LockLyrics.sRoma);
-            LockLyrics.refresh();
-            ModuleState.saveState();
-        } else if ("lyricstyle".equals(op)) {
-            String key = i.getStringExtra("key");
-            if (LockLyrics.setStyle(key, i.getFloatExtra("v", Float.NaN))) {
-                ModuleState.saveStateSoon();
-            }
-        } else if ("lyricappearance".equals(op)) {
-            if (i.hasExtra("json")) {
-                LockLyrics.setAppearance(i.getStringExtra("json"));
-                ModuleState.saveStateSoon();
-            }
         } else if ("lyricmaxlines".equals(op)) {
             // For the session only: not a setting, see LyricFocus.DEFAULT_LIMIT.
             if (LockLyrics.setMaxLines(i.getIntExtra("v", LockLyrics.sMaxLines))) {
                 LockLyrics.refresh();
             }
-        } else if ("lyricalign".equals(op)) {
-            // Same shape as the translation switch: the view notices the change and
-            // lays the lines out again, refresh only has to start the frames that let
-            // it. Saved the way lyricstyle is, folding a quick run of picks into one
-            // write.
-            if (LockLyrics.setAlign(i.getIntExtra("v", LockLyrics.sAlign))) {
-                Xp.log(Main.TAG + "lyrics alignment: " + LockLyrics.sAlign);
-                LockLyrics.refresh();
-                ModuleState.saveStateSoon();
-            }
-        } else if ("lyriconline".equals(op)) {
-            if (LockLyrics.setOnline(i.getBooleanExtra("on", !LockLyrics.sOnline))) {
-                Xp.log(Main.TAG + "lyrics from the network: " + LockLyrics.sOnline);
-                ModuleState.saveState();
-            }
-        } else if ("lyrickeep".equals(op)) {
-            LockLyrics.sKeepOn = i.getBooleanExtra("on", !LockLyrics.sKeepOn);
-            Xp.log(Main.TAG + "lyrics keep the screen on: " + LockLyrics.sKeepOn);
-            LockLyrics.refresh();
-            ModuleState.saveState();
-        } else if ("motion".equals(op)) {
-            // Motion covers. `--ez on` switches them, `--ez forget true` empties the
-            // cache; either way the answer is the state. See MotionCover.
-            if (i.hasExtra("on")) {
-                MotionCover.sEnabled = i.getBooleanExtra("on", false);
-                ModuleState.saveState();
-                Xp.log(Main.TAG + "motion covers " + (MotionCover.sEnabled ? "on" : "off"));
-                // The cover on screen now gets one, or loses its own.
-                if (Main.sCoverMode) CoverPush.pushArtAsync(true, false);
-            }
-            // `--ez data true`: download on mobile data too.
-            if (i.hasExtra("data")) {
-                MotionCover.sOnData = i.getBooleanExtra("data", false);
-                ModuleState.saveState();
-                Xp.log(Main.TAG + "motion covers on mobile data " + (MotionCover.sOnData ? "on" : "off"));
-                if (MotionCover.sOnData) Main.main().post(MotionCover::retry);
-            }
-            if (i.getBooleanExtra("forget", false)) MotionCover.forget(c);
-            setResultData(MotionCover.describe());
-        } else if ("colon".equals(op)) {
-            HyperTweaks.sForceColon = i.getBooleanExtra("on",
-                    !HyperTweaks.sForceColon);
-            ModuleState.saveState();
-            // The always-on display draws its own clock in its own process, which
-            // can read neither this flag nor the file it is saved in, so the switch
-            // is mirrored somewhere both can see.
-            HyperTweaks.publishColon(Main.sAppCtx);
-            // Nothing to re-apply: the clock asks its bean whether to draw the colon
-            // on the next layout, which the keyguard does every time it comes up.
-            Xp.log(Main.TAG + "force clock colon "
-                    + (HyperTweaks.sForceColon ? "on" : "off"));
-        } else if ("seekglow".equals(op)) {
-            HyperTweaks.sBarGlow = i.getBooleanExtra("on", !HyperTweaks.sBarGlow);
-            ModuleState.saveState();
-            // The card on screen was built before this switch was read, so it is
-            // changed in place - lit as applyBarGlow lights a new one, or put back to
-            // the flat bar it was built as (HyperTweaks.clearBarGlow).
-            View bar = Main.findLockScreenView("media_progress_bar");
-            // With advanced material off the stock flat bar stays (#121); the switch is
-            // kept, and the bar lights when the material comes back on.
-            String r = bar == null ? "no card up" : !HyperTweaks.sBarGlow
-                    ? HyperTweaks.clearBarGlow(bar)
-                    : HyperTweaks.materialOn(bar.getContext())
-                            ? HyperTweaks.applyBarGlow(bar) : "advanced material off, left flat";
-            Xp.log(Main.TAG + "media bar glow " + (HyperTweaks.sBarGlow ? "on" : "off")
-                    + " - " + r);
-            setResultData((HyperTweaks.sBarGlow ? "on " : "off ") + r);
-        } else if ("hidefp".equals(op)) {
-            Fingerprint.sHideFp = i.getBooleanExtra("on", !Fingerprint.sHideFp);
-            ModuleState.saveState();
-            Xp.log(Main.TAG + "hide fingerprint " + (Fingerprint.sHideFp ? "on" : "off"));
-            Fingerprint.applyHideFp();
-        } else if ("aodclock".equals(op)) {
-            Main.sAodSmall = i.getBooleanExtra("small", !Main.sAodSmall);
-            ModuleState.saveState();
-            // The pose a held doze was drawn at is the small one, and the fall into an
-            // OEM doze aims at that remembered pose rather than at the live clock. Left
-            // standing, turning the setting off would still land on the small clock
-            // once. Dropped, it is the state a doze that never settled is in.
-            ClockCollapse.forgetAodPose();
-            Xp.log(Main.TAG + "AOD keeps the small clock " + (Main.sAodSmall ? "on" : "off")
-                    + " (full-screen AOD now: " + Main.fullAodOn() + ")");
-        } else if ("fpavoid".equals(op)) {
-            Fingerprint.sFpAvoid = i.getIntExtra("mode", 0);
-            ModuleState.saveState();
-            Main.refreshNotificationSink();
-            Xp.log(Main.TAG + "fingerprint avoid mode=" + Fingerprint.sFpAvoid);
-        } else if ("bias".equals(op)) {
-            Main.setBias(i.getFloatExtra("v", Main.DEFAULT_BIAS));
-        } else if ("clockscale".equals(op)) {
-            Main.setClockHeightDp(i.getFloatExtra("v", Main.DEFAULT_CLOCK_HEIGHT_DP));
-            ModuleState.saveState();
-            // A settled clock has no frames left to carry a new size on; ask for one.
-            ClockCollapse.refresh();
-        } else if ("clocksize".equals(op)) {
-            Main.setClockSize(i.getFloatExtra("v", 1f));
-            ModuleState.saveState();
-            ClockCollapse.refresh();
-        } else if ("clockoffset".equals(op)) {
-            Main.setClockOffsetDp(i.getFloatExtra("v", 0f));
-            ModuleState.saveState();
-            ClockCollapse.refresh();
-        } else if ("glassend".equals(op)) {
-            Main.sGlassEnd = Main.clamp01(i.getFloatExtra("v", Main.DEFAULT_GLASS_END));
-            ModuleState.saveState();
-            Xp.log(Main.TAG + "glass end = " + Main.sGlassEnd);
-            ClockCollapse.refresh();
-        } else if ("clockspring".equals(op)) {
-            // Nothing forced on screen: see setClockResponse(). The fades it pushes
-            // are the only thing outside this process.
-            Main.setClockResponse(i.getFloatExtra("v", Main.EASE_COVER[1]));
-        } else if ("auto".equals(op)) {
-            Main.setAuto(i.getBooleanExtra("on", true));
-        } else if ("coverfeature".equals(op)) {
-            Main.setCoverFeature(i.getBooleanExtra("on", true));
         } else if ("shadecfg".equals(op)) {
             // One op for the whole settings page. The key is validated and the value
             // clamped in ShadeLayer.configure, so adb and the UI go through exactly
@@ -319,21 +135,44 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
         } else if ("minicfg".equals(op)) {
             MiniPlayerRuntime.applyConfig(c, i.getStringExtra("json"));
             ModuleState.saveState();
+        } else if (Settings.dispatch(c, i, op)) {
+            settingAnswer(c, i, op);
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * What a few of the table's ops do besides setting (Settings.dispatch has applied, saved and
+     * followed up the setting by now): an answer to the sender, or a command riding on the op.
+     */
+    private void settingAnswer(Context c, Intent i, String op) {
+        if ("seekglow".equals(op)) {
+            // The card on screen was built before this switch was read, so it is
+            // changed in place - lit as applyBarGlow lights a new one, or put back to
+            // the flat bar it was built as (HyperTweaks.clearBarGlow).
+            View bar = Main.findLockScreenView("media_progress_bar");
+            // With advanced material off the stock flat bar stays (#121); the switch is
+            // kept, and the bar lights when the material comes back on.
+            String r = bar == null ? "no card up" : !HyperTweaks.sBarGlow
+                    ? HyperTweaks.clearBarGlow(bar)
+                    : HyperTweaks.materialOn(bar.getContext())
+                            ? HyperTweaks.applyBarGlow(bar) : "advanced material off, left flat";
+            Xp.log(Main.TAG + "media bar glow " + (HyperTweaks.sBarGlow ? "on" : "off")
+                    + " - " + r);
+            setResultData((HyperTweaks.sBarGlow ? "on " : "off ") + r);
+        } else if ("motion".equals(op)) {
+            // Motion covers: `--ez on` switches them, `--ez data true` downloads on mobile
+            // data too, `--ez forget true` empties the cache; whichever, the answer is the
+            // state. See MotionCover.
+            if (i.getBooleanExtra("forget", false)) MotionCover.forget(c);
+            setResultData(MotionCover.describe());
         } else if ("pickup".equals(op)) {
-            // 取餐码: --ez on true|false from the app; --es do read for one read now;
-            // --es do vdtest [--ei task N] [--ei min M] for the hidden display's
+            // 取餐码: --ez on true|false and --ez card from the app; --es do read for one
+            // read now; --es do vdtest [--ei task N] [--ei min M] for the hidden display's
             // experiment (§6 of 取餐码方案.md); --es do vdoff to put it back. The state
             // of both halves is the result either way.
-            if (i.hasExtra("on")) {
-                PickupCodeIsland.INSTANCE.setOn(i.getBooleanExtra("on", true));
-                ModuleState.saveState();
-            }
-            // --ez card false draws the island with the system's focus template again,
-            // which is the way back if ColorOS's card does not come up on this build.
-            if (i.hasExtra("card")) {
-                PickupCodeIsland.sCard = i.getBooleanExtra("card", true);
-                ModuleState.saveState();
-            }
             String doIt = i.getStringExtra("do");
             if ("read".equals(doIt)) PickupCodeIsland.INSTANCE.readNow();
             if ("vdtest".equals(doIt)) {
@@ -348,19 +187,11 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
                 setResultData(PickupCodeIsland.INSTANCE.describe()
                         + " | " + PickupPark.INSTANCE.describe());
             }
-        } else if ("transitcfg".equals(op)) {
-            // 「高德公交地铁」: --ez on true|false from the app; without it, 高德
-            // asking as it starts (AmapImmerse), and told what it is.
-            if (i.hasExtra("on")) {
-                AmapTransitScene.INSTANCE.setOn(c, i.getBooleanExtra("on", true));
-                ModuleState.saveState();
-            } else {
-                AmapTransitScene.INSTANCE.tellAmap(c);
-            }
-        } else {
-            return false;
+        } else if ("transitcfg".equals(op) && !i.hasExtra("on")) {
+            // 「高德公交地铁」 without its switch: 高德 asking as it starts (AmapImmerse),
+            // and told what it is.
+            AmapTransitScene.INSTANCE.tellAmap(c);
         }
-        return true;
     }
 
     /**
@@ -899,33 +730,6 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             // Over the probe rather than the log because the module's INFO lines are
             // not readable on this device - LSPosed keeps error level only.
             setResultData(HyperTweaks.describe());
-        } else if ("fadewp".equals(op)) {
-            Main.sFadeWp = i.getBooleanExtra("on", !Main.sFadeWp);
-            ModuleState.saveState();
-            Xp.log(Main.TAG + "wallpaper crossfade " + (Main.sFadeWp ? "on" : "off"));
-        } else if ("vcfade".equals(op)) {
-            // Off by default: see the note on sVideoFade. Setting it here re-pushes
-            // the art, because the cover video that is on the device right now was
-            // built with whichever value was in force when it was pushed.
-            Main.sVideoFade = i.getBooleanExtra("on", !Main.sVideoFade);
-            ModuleState.saveState();
-            Xp.log(Main.TAG + "cover video crossfade " + (Main.sVideoFade ? "on" : "off")
-                    + (Main.sCoverMode ? " - re-pushing the art" : ""));
-            if (Main.sCoverMode) CoverPush.pushArtAsync(true, false);
-        } else if ("fadesync".equals(op)) {
-            // --ei mode 0|1|2 picks one; with no mode it cycles, so the three can be
-            // compared on the phone with one command instead of three builds.
-            int mode = i.getIntExtra("mode", -1);
-            Main.sFadeMode = mode >= 0 && mode <= Main.FADE_MODE_STRETCH
-                    ? mode : (Main.sFadeMode + 1) % (Main.FADE_MODE_STRETCH + 1);
-            ModuleState.saveState();
-            Xp.log(Main.TAG + "cover fade mode = " + CoverPush.fadeModeName()
-                    + " (0 off, 1 hold for the wallpaper window, 2 stretch by the"
-                    + " last measured gap " + CoverPush.sCoverFadeGapMs + "ms)");
-        } else if ("tap".equals(op)) {
-            Main.sTapToggle = i.getBooleanExtra("on", !Main.sTapToggle);
-            ModuleState.saveState();
-            Xp.log(Main.TAG + "tap-to-toggle " + (Main.sTapToggle ? "on" : "off"));
         } else if ("clockshot".equals(op)) {
             // For telling the two candidate causes apart by hand: with this off the
             // module never draws the live clock, and the preview falls back to its
