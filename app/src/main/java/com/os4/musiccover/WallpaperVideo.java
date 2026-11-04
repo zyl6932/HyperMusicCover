@@ -164,7 +164,7 @@ final class WallpaperVideo {
         sCurrent = false;
         sRetries = 0;
         sApp = ctx.getApplicationContext();
-        sFrostWant = WallpaperProbe.lyricBlurWanted();
+        sFrostWant = WallpaperArt.lyricBlurWanted();
         sOn = true;
         registerScreen(ctx);
         Xp.log(TAG + "on: " + path + " " + sVideoW + "x" + sVideoH + " bias=" + bias);

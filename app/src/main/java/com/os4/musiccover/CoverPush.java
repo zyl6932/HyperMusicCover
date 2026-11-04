@@ -119,7 +119,7 @@ public final class CoverPush {
             if (Main.sVideoWallpaper) showVideoCover(ctx, false, null, null, 0);
             out.putExtra("off", true);
             ProbeGuard.send(ctx, out);
-            // The wallpaper process keeps what was up for 30s more (WallpaperProbe.composedLater).
+            // The wallpaper process keeps what was up for 30s more (WallpaperArt.composedLater).
             if (sKeptUntil == Long.MAX_VALUE) {
                 sKeptUntil = android.os.SystemClock.uptimeMillis() + KEPT_AFTER_OFF_MS;
             }
@@ -1389,7 +1389,7 @@ public final class CoverPush {
     /**
      * The lock screen is up with a media card and no cover: hand the wallpaper process this
      * song's source ahead of a tap, so entering cover mode finds the composition made
-     * (WallpaperProbe.precompose) instead of composing between the tap and the fade - that wait
+     * (WallpaperArt.precompose) instead of composing between the tap and the fade - that wait
      * is the blurred background coming up late behind the clock, and on a slower phone the
      * compose is most of it. The wake and every media update ask; the same art is sent once.
      *

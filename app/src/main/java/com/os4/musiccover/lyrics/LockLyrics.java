@@ -340,7 +340,7 @@ public final class LockLyrics {
      * half, arrives after the switch that replaced it. Without the time on it the wallpaper
      * process has no way to tell which of the two is the newer answer and takes the last one to
      * arrive: the cover comes in sharp under its lyrics and stays that way for the song, because
-     * both sides believe they agree. See WallpaperProbe.takeBlurDecision.
+     * both sides believe they agree. See WallpaperArt.takeBlurDecision.
      */
     public static void putBlurOn(Intent out) {
         long state = sBlurSent;      // one read: the answer and its time travel together

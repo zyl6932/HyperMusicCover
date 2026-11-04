@@ -889,7 +889,7 @@ final class VideoTakeover {
                     return;
                 }
                 // centerCrop always allocates, so this end is ours to give back.
-                Bitmap to = WallpaperProbe.centerCrop(art, ew, eh);
+                Bitmap to = WallpaperArt.centerCrop(art, ew, eh);
                 if (lyricBlur) {
                     Bitmap blurred = CoverCompose.frosted(to);
                     if (blurred != to) {
@@ -902,7 +902,7 @@ final class VideoTakeover {
                 try {
                     if (sVideoFade) {
                         if (fadeFrom != null && !fadeFrom.isRecycled()) {
-                            from = WallpaperProbe.centerCrop(fadeFrom, ew, eh);
+                            from = WallpaperArt.centerCrop(fadeFrom, ew, eh);
                         } else {
                             from = wallpaperFrame(lockPath, savedPos, ew, eh);
                         }
@@ -1034,7 +1034,7 @@ final class VideoTakeover {
             File broken = new File(ctx.getFilesDir(), TAKEOVER_BROKEN);
             File mark = new File(ctx.getFilesDir(), TAKEOVER_MARK);
             if (mark.exists()) {
-                String key = new String(WallpaperProbe.readBytes(mark.getAbsolutePath()), "UTF-8").trim();
+                String key = new String(WallpaperArt.readBytes(mark.getAbsolutePath()), "UTF-8").trim();
                 mark.delete();
                 java.io.FileOutputStream out = new java.io.FileOutputStream(broken, true);
                 out.write((key + "\n").getBytes("UTF-8"));
@@ -1043,7 +1043,7 @@ final class VideoTakeover {
                         + " - that engine is not given one again by this build");
             }
             if (broken.exists()) {
-                for (String line : new String(WallpaperProbe.readBytes(broken.getAbsolutePath()), "UTF-8").split("\n")) {
+                for (String line : new String(WallpaperArt.readBytes(broken.getAbsolutePath()), "UTF-8").split("\n")) {
                     if (!line.trim().isEmpty()) sBrokenTakeovers.add(line.trim());
                 }
             }
@@ -1343,7 +1343,7 @@ final class VideoTakeover {
                     ? mmr.getScaledFrameAtTime(atMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST, w, h)
                     : mmr.getScaledFrameAtTime(-1L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, w, h);
             if (frame == null) return null;
-            Bitmap out = WallpaperProbe.centerCrop(frame, w, h);
+            Bitmap out = WallpaperArt.centerCrop(frame, w, h);
             if (out != frame) frame.recycle();
             return out;
         } catch (Throwable t) {
