@@ -72,13 +72,13 @@ public class WallpaperProbe {
      * the KEYGUARD renderer - the desktop wallpaper shares this code and is not ours to resize.
      */
     private static volatile boolean sTexFit = true;
-    private static volatile Object sKeyguardTexture;
+    static volatile Object sKeyguardTexture;
     /**
      * The size each keyguard texture was last uploaded at, so getTextureDimensions can answer for
      * the texture being asked about instead of for whichever screen uploaded most recently.
      * Weak, because these are the OEM's objects and a screen that goes away takes its own with it.
      */
-    private static final java.util.Map<Object, android.graphics.Rect> sTexSizes =
+    static final java.util.Map<Object, android.graphics.Rect> sTexSizes =
             java.util.Collections.synchronizedMap(
                     new java.util.WeakHashMap<Object, android.graphics.Rect>());
     /**
@@ -93,7 +93,7 @@ public class WallpaperProbe {
      * Guarded by itself: each screen's renderer fits on its own GL thread, and a retirement
      * clears it from the main thread.
      */
-    private static final java.util.HashMap<Long, Bitmap> sScreenArts = new java.util.HashMap<>();
+    static final java.util.HashMap<Long, Bitmap> sScreenArts = new java.util.HashMap<>();
     private static Bitmap sScreenArtOf;
     static volatile int sReportedW, sReportedH;
 
@@ -122,7 +122,7 @@ public class WallpaperProbe {
      * stale answer back - which is how a track changed at the moment the lyrics arrived could
      * leave the cover sharp for the rest of the song, both sides believing it was blurred.
      */
-    private static volatile boolean sLyricBlurWant;
+    static volatile boolean sLyricBlurWant;
     /**
      * When the newest blur decision this process has been given was made, on the clock both
      * processes share. See LockLyrics.putBlurOn.
@@ -141,7 +141,7 @@ public class WallpaperProbe {
      * what this process already holds. 0 means the message carried no stamp at all - an older
      * SystemUI, which sends the answer on its own.
      */
-    private static volatile long sBlurSeq;
+    static volatile long sBlurSeq;
     /**
      * Every message that could carry a blur decision, and every one that carried a cover.
      *
@@ -151,7 +151,7 @@ public class WallpaperProbe {
      * being asked for. Counted separately because the two halves are cleared for the same reason
      * but not by the same thing: a lyric switch arriving mid-fade owns the blur and not the art.
      */
-    private static volatile int sMsgSeq, sArtSeq;
+    static volatile int sMsgSeq, sArtSeq;
     private static Bitmap sFrosted, sFrostedOf;
     private static Bitmap sFrosted2, sFrostedOf2;
 
@@ -164,18 +164,18 @@ public class WallpaperProbe {
      * is a bare field write on a path that already exists; nothing is measured that was not
      * already happening.
      */
-    private static volatile long sTmT0, sTmBurst, sTmArt, sTmSent, sTmRecv, sTmRead, sTmComposed,
+    static volatile long sTmT0, sTmBurst, sTmArt, sTmSent, sTmRecv, sTmRead, sTmComposed,
             sTmFrosted, sTmMain, sTmUploaded, sTmCheckMs;
-    private static volatile long sTmSkip;
-    private static volatile int sTmTries, sTmSkips, sTmSkipDir;
-    private static volatile String sTmKind = "";
+    static volatile long sTmSkip;
+    static volatile int sTmTries, sTmSkips, sTmSkipDir;
+    static volatile String sTmKind = "";
 
     /**
      * The keyguard engine, captured so a new track can re-run the texture upload without the
      * process being killed. Its GL work all happens on one HandlerThread; nothing here touches
      * GL directly, it only asks the engine to run its own surface-created path again.
      */
-    private static volatile Object sKeyguardEngine;
+    static volatile Object sKeyguardEngine;
 
     /**
      * Every keyguard engine built, newest last.
@@ -185,7 +185,7 @@ public class WallpaperProbe {
      * at, with nothing in the log to say so. Kept as a list first and picked between second,
      * because which one is right is exactly the question the port has to answer.
      */
-    private static final java.util.List<Object> sKeyguardEngines =
+    static final java.util.List<Object> sKeyguardEngines =
             java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
     /** Renderer class names already reported by the diagnostic above; one line each. */
@@ -202,7 +202,7 @@ public class WallpaperProbe {
      * Not ours to leave swapped: a failure that strands this one shows the album cover on the
      * user's home screen, so anything that sets it has to have a path that puts it back.
      */
-    private static volatile Object sDesktopEngine;
+    static volatile Object sDesktopEngine;
 
     /**
      * The lock screen shows the desktop's still, with no keyguard engine of its own (#84: a
@@ -336,7 +336,7 @@ public class WallpaperProbe {
      * all. Missing it costs exactly one hard cut - the reload that performs it is the reload
      * that learns the original - so this heals itself on first use after a process restart.
      */
-    private static volatile Bitmap sOrig;
+    static volatile Bitmap sOrig;
     private static volatile int sOrigPrint;
 
     // ------------------------------------------------------------------ the OEM's darkening
@@ -463,7 +463,7 @@ public class WallpaperProbe {
      *
      *   --es op trackfadems --ei v 60
      */
-    private static volatile long sTrackFadeMs = 180L;
+    static volatile long sTrackFadeMs = 180L;
     private static final long FADE_STEP_MS = 16L;
     /**
      * Whether the OEM's frosted copy is regenerated on the fade's frames.
@@ -563,10 +563,10 @@ public class WallpaperProbe {
 
     private static volatile GpuFade sGpuFade;
     /** The probe's switch: `--es op gpufade --ez on false` puts the CPU fade back. */
-    private static volatile boolean sGpuFadeOn = true;
+    static volatile boolean sGpuFadeOn = true;
     /** Set when the draw path met something it cannot handle; the CPU fade is used from then on. */
-    private static volatile boolean sGpuFadeBroken;
-    private static volatile boolean sDrawHooked;
+    static volatile boolean sGpuFadeBroken;
+    static volatile boolean sDrawHooked;
     /**
      * What the keyguard texture must be uploaded from while a GPU fade runs: the far end of it.
      * Needed on the way OUT of cover mode above all, where the art is still set until the fade
@@ -586,7 +586,7 @@ public class WallpaperProbe {
     private static final int[] sGlInts = new int[4];
     private static final float[] sGlColor = new float[4];
     /** Which FRAME_REQUESTS entry this build answers to, once one has; -1 until then. */
-    private static volatile int sFrameReq = -1;
+    static volatile int sFrameReq = -1;
     /** A fade that has not seen its last frame this long after it should have is ended here. */
     private static final long GPU_FADE_GRACE_MS = 1500L;
 
@@ -601,24 +601,24 @@ public class WallpaperProbe {
      * one value per frame instead was a coarse fade - a wallpaper redraw per broadcast, and
      * whichever of the two the phone happened to miss read as a snap (2026-10-17).
      */
-    private static volatile float sKeepDim;
-    private static float sKeepFrom;
-    private static float sKeepTo;
+    static volatile float sKeepDim;
+    static float sKeepFrom;
+    static float sKeepTo;
     /** Written under KEEP_LOCK; volatile because the hot reload's check section reads it. */
-    private static volatile long sKeepAt;
-    private static int sKeepDurMs = 100;
-    private static boolean sKeepPumping;
+    static volatile long sKeepAt;
+    static int sKeepDurMs = 100;
+    static boolean sKeepPumping;
     /** The pump's own frame request, on the main thread. */
     private static final long KEEP_PUMP_MS = 24L;
     private static final Handler KEEP_MAIN = Gen.watchHandler(new Handler(Looper.getMainLooper()));
-    private static final Object KEEP_LOCK = new Object();
+    static final Object KEEP_LOCK = new Object();
     /** Diagnostics: messages received, drawn changes, and the last few drawn values. */
-    private static int sKeepMsgs;
-    private static int sKeepDraws;
-    private static final int KEEP_LOG = 8;
-    private static final long[] sKeepLogAt = new long[KEEP_LOG];
-    private static final float[] sKeepLogV = new float[KEEP_LOG];
-    private static int sKeepLogN;
+    static int sKeepMsgs;
+    static int sKeepDraws;
+    static final int KEEP_LOG = 8;
+    static final long[] sKeepLogAt = new long[KEEP_LOG];
+    static final float[] sKeepLogV = new float[KEEP_LOG];
+    static int sKeepLogN;
     /** True while the keyguard renderer's own onDrawFrame runs. GL thread only. */
     private static boolean sKeyguardDrawing;
     /** The program `uKeepDim` was last resolved on, and its location (-1: not in this one). */
@@ -1350,12 +1350,12 @@ public class WallpaperProbe {
         return BitmapFactory.decodeByteArray(jpg, 0, jpg.length, o);
     }
 
-    private static String sRenderState = "";
+    static String sRenderState = "";
     /** How the last GPU fade ended, for `op selftest`. */
-    private static volatile String sLastFade = "none yet";
+    static volatile String sLastFade = "none yet";
     private static boolean sRenderStateFailed;
     /** The screen, as MIUI's own renderer has it (mSurfaceSize). 0 until an upload has run. */
-    private static volatile int sSurfaceW, sSurfaceH;
+    static volatile int sSurfaceW, sSurfaceH;
 
     /**
      * The three numbers that decide where the wallpaper lands on screen, read off MIUI's own
@@ -1891,7 +1891,7 @@ public class WallpaperProbe {
         if (a == b) return true;
         if (a == null || b == null || a.isRecycled() || b.isRecycled()) return false;
         if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight()) return false;
-        return print8(a) == print8(b);
+        return WallpaperDiag.print8(a) == WallpaperDiag.print8(b);
     }
 
     /** Main thread. Lands a fade: its completion runs and the override goes. */
@@ -2163,7 +2163,7 @@ public class WallpaperProbe {
     private static void rememberOriginal(Bitmap b) {
         if (b == null || b.isRecycled()) return;
         try {
-            int print = print8(b);
+            int print = WallpaperDiag.print8(b);
             Bitmap have = sOrig;
             if (have != null && !have.isRecycled() && print == sOrigPrint
                     && have.getWidth() == b.getWidth() && have.getHeight() == b.getHeight()) {
@@ -2177,19 +2177,6 @@ public class WallpaperProbe {
         } catch (Throwable t) {
             Xp.log(TAG + "could not remember the lock wallpaper: " + t);
         }
-    }
-
-    /** Coarse identity. Same idea as the module's artPrint, and for the same reason. */
-    private static int print8(Bitmap b) {
-        int w = b.getWidth(), h = b.getHeight();
-        if (w < 8 || h < 8) return 0;
-        int v = w * 31 + h;
-        for (int y = 0; y < 8; y++) {
-            for (int x = 0; x < 8; x++) {
-                v = v * 31 + b.getPixel(x * (w - 1) / 7, y * (h - 1) / 7);
-            }
-        }
-        return v;
     }
 
     /** Fills w x h from the source without distorting it, the way CENTER_CROP would. */
@@ -2242,7 +2229,7 @@ public class WallpaperProbe {
                         sDesktopKgShown = i.getBooleanExtra("locked", false);
                     }
                     if ("cls".equals(op)) {
-                        dumpClass(i.getStringExtra("name"), i.getStringExtra("grep"));
+                        WallpaperDiag.dumpClass(i.getStringExtra("name"), i.getStringExtra("grep"));
                     } else if ("keepdim".equals(op)) {
                         // 保留壁纸's dim, as a target and the time to reach it. The frames
                         // are asked for by KEEP_PUMP and the value is interpolated at draw
@@ -2259,9 +2246,9 @@ public class WallpaperProbe {
                         }
                         startKeepPump();
                     } else if ("keepdimreport".equals(op)) {
-                        setResultData(keepDimReport());
+                        setResultData(WallpaperDiag.keepDimReport());
                     } else if ("bmp".equals(op)) {
-                        traceBitmaps(i.getStringExtra("name"));
+                        WallpaperDiag.traceBitmaps(i.getStringExtra("name"));
                     } else if ("texfit".equals(op)) {
                         // The one switch for the screen-sized keyguard texture, which is on unless
                         // this turns it off: if a phone ever draws the wallpaper into a corner,
@@ -2562,11 +2549,11 @@ public class WallpaperProbe {
                     } else if ("vgl".equals(op)) {
                         VideoTakeover.videoWindowTakeover(i.getBooleanExtra("on", true));
                     } else if ("timing".equals(op)) {
-                        String rep = timingReport();
+                        String rep = WallpaperDiag.timingReport();
                         for (String line : rep.split("\n")) Xp.log(TAG + line);
                         setResultData(rep);
                     } else if ("selftest".equals(op)) {
-                        String rep = selfTest();
+                        String rep = WallpaperDiag.selfTest();
                         for (String line : rep.split("\n")) Xp.log(TAG + line);
                         setResultData(rep);
                     } else {
@@ -2885,79 +2872,6 @@ public class WallpaperProbe {
                 + " glTex=" + sGlTex + " video=" + (VideoTakeover.sLockIsVideo == null ? "?" : VideoTakeover.sLockIsVideo)
                 + " takeover=" + VideoTakeover.sCoverVideoActive + " texfit=" + sTexFit
                 + " keep=" + sKeepDim;
-    }
-
-    /**
-     * The last track change, segment by segment.
-     *
-     * Segments are printed only where both ends were actually stamped, so the JPEG path - which
-     * has no source read and no composition on this side - reports what it did rather than a row
-     * of zeroes claiming it was instant.
-     */
-    private static String timingReport() {
-        if (sTmRecv == 0L) {
-            return "=== cover timing ===\nno push seen yet."
-                    + " Change a track with the lock screen up, then ask again.";
-        }
-        StringBuilder sb = new StringBuilder("=== cover timing === (" + sTmKind + " path)");
-        // Absolute, so a press stamped outside this process (`cut -d" " -f1 /proc/uptime` in the
-        // same shell command as the key event) can be subtracted from it: what is left is the
-        // player's own share, which is the part none of the segments below can see.
-        sb.append("\n  the module saw the new track at (uptime): ").append(sTmT0).append("ms");
-        // The head start: the press, heard in SystemUI, against the player getting round to
-        // saying so. This is the room a prefetch would have to work in.
-        if (sTmSkip > 0L && sTmT0 > sTmSkip) {
-            sb.append("\n  the PLAYER took: ").append(sTmT0 - sTmSkip)
-                    .append("ms to report the ")
-                    .append(sTmSkipDir < 0 ? "previous" : "next")
-                    .append(" track (we knew the moment it was asked for)");
-        }
-        seg(sb, "waiting for the artwork", sTmT0, sTmArt,
-                sTmTries > 0 ? sTmTries + (sTmTries == 1 ? " try" : " tries") : null);
-        seg(sb, "  of which the wallpaper check", sTmCheckMs);
-        seg(sb, "preparing and writing it", sTmArt, sTmSent, null);
-        seg(sb, "broadcast in flight", sTmSent, sTmRecv, null);
-        seg(sb, "reading the source", sTmRecv, sTmRead, null);
-        seg(sb, "composing", sTmRead, sTmComposed, null);
-        seg(sb, "frosting for the lyrics", sTmComposed, sTmFrosted, null);
-        seg(sb, "on to the main thread", sTmFrosted > 0 ? sTmFrosted : sTmComposed, sTmMain, null);
-        seg(sb, "uploading the texture", sTmMain, sTmUploaded, null);
-        long end = sTmUploaded > 0L ? sTmUploaded : sTmMain;
-        if (sTmT0 > 0L && end > sTmT0) {
-            sb.append("\n  ---\n  this press to cover on screen: ").append(end - sTmT0)
-                    .append("ms");
-        }
-        // What someone pressing next repeatedly actually watches: the presses in between were
-        // thrown away, and the screen held the old cover for all of it.
-        if (sTmBurst > 0L && end > sTmBurst && sTmSkips > 0) {
-            sb.append("\n  FIRST press of this burst to cover on screen: ")
-                    .append(end - sTmBurst).append("ms (")
-                    .append(sTmSkips).append(" more press")
-                    .append(sTmSkips == 1 ? "" : "es").append(" swallowed on the way)");
-        }
-        // The two halves of the lyrics' blur. They disagreeing is the bug where a track changed
-        // at the moment the lyrics arrived and the cover stayed sharp for the rest of the song:
-        // `want` is what SystemUI last asked for, `on` is what the cover is actually drawn with.
-        sb.append("\nlyric blur: ").append(sLyricBlur ? "on" : "off")
-                .append(", asked for: ").append(sLyricBlurWant ? "on" : "off")
-                .append(" (decided at ").append(sBlurSeq).append("ms, ")
-                .append(sMsgSeq).append(" messages since)")
-                .append(sLyricBlur == sLyricBlurWant ? "" : "   <- OUT OF STEP");
-        sb.append("\ncrossfade after that: ").append(sTrackFadeMs)
-                .append("ms on a track change, ").append(sFadeMs)
-                .append("ms entering or leaving cover mode");
-        return sb.toString();
-    }
-
-    private static void seg(StringBuilder sb, String name, long from, long to, String note) {
-        if (from <= 0L || to <= 0L || to < from) return;
-        sb.append("\n  ").append(name).append(": ").append(to - from).append("ms");
-        if (note != null) sb.append(" (").append(note).append(')');
-    }
-
-    private static void seg(StringBuilder sb, String name, long ms) {
-        if (ms <= 0L) return;
-        sb.append("\n  ").append(name).append(": ").append(ms).append("ms");
     }
 
     /**
@@ -3444,7 +3358,7 @@ public class WallpaperProbe {
      * that renamed one used to take the whole reload down with it - the log below is what that
      * looked like, and what it cost is in Handoff 27.
      */
-    private static final Object[][] FRAME_REQUESTS = {
+    static final Object[][] FRAME_REQUESTS = {
             {"T", Boolean.FALSE},
             // OS4.0.0.17's name for the same method, read off its bytecode rather than inferred
             // from the log: there ImageEngineImpl.M(Z) and U(Z) stand where 0.35 has L(Z) and
@@ -3673,89 +3587,11 @@ public class WallpaperProbe {
     private static void noteEngineInstance(Object eng) {
         if (eng == null) return;
         if (!sKeyguardEngines.contains(eng)) sKeyguardEngines.add(eng);
-        Xp.log(TAG + "keyguard engine #" + sKeyguardEngines.size() + ": " + describeEngine(eng));
-    }
-
-    /** One engine instance: its class, its identity, and every int it carries. */
-    private static String describeEngine(Object eng) {
-        StringBuilder sb = new StringBuilder(eng.getClass().getSimpleName())
-                .append('@').append(Integer.toHexString(System.identityHashCode(eng)));
-        try {
-            for (Class<?> k = eng.getClass(); k != null && k != Object.class;
-                 k = k.getSuperclass()) {
-                for (java.lang.reflect.Field f : k.getDeclaredFields()) {
-                    if (f.getType() != int.class || Modifier.isStatic(f.getModifiers())) continue;
-                    f.setAccessible(true);
-                    sb.append(' ').append(k.getSimpleName()).append('.').append(f.getName())
-                            .append('=').append(f.getInt(eng));
-                }
-            }
-        } catch (Throwable t) {
-            sb.append(" (ints unreadable: ").append(t).append(')');
-        }
-        return sb.toString();
-    }
-
-    /**
-     * Everything a port to an unseen build needs, in one answer.
-     *
-     * Written for the case where the phone is someone else's: they run this once (or just send
-     * the LSPosed log, which this also goes to) and it has to be enough to work out what moved,
-     * without a second round trip. So it reports what was RESOLVED, what it was resolved to, and
-     * the candidates for anything that was not - never just "failed".
-     */
-    static String selfTest() {
-        StringBuilder sb = new StringBuilder("=== wallpaper self test ===");
-        sb.append("\nwallpaper package: ").append(wallpaperVersion());
-        sb.append('\n').append(EngineNames.report());
-        sb.append("\nkeyguard engines: ").append(sKeyguardEngines.size());
-        synchronized (sKeyguardEngines) {
-            for (int n = 0; n < sKeyguardEngines.size(); n++) {
-                Object e = sKeyguardEngines.get(n);
-                sb.append("\n  #").append(n + 1).append(' ').append(describeEngine(e))
-                        .append(e == sKeyguardEngine ? "   <- the one being pushed to" : "");
-            }
-        }
-        sb.append("\ndesktop engine: ").append(sDesktopEngine == null ? "none"
-                : describeEngine(sDesktopEngine));
-        sb.append("\nvideo engine: ").append(VideoTakeover.sVideoEngine == null ? "none"
-                : VideoTakeover.sVideoEngine.getClass().getSimpleName());
-        sb.append("\nframe request: ").append(sFrameReq < 0 ? "none has answered yet"
-                : FRAME_REQUESTS[sFrameReq][0] + "() (candidate " + (sFrameReq + 1) + " of "
-                        + FRAME_REQUESTS.length + ")");
-        Object eng = sKeyguardEngine;
-        if (eng != null) {
-            sb.append("\n  (Z)V methods here: ").append(oneBooleanMethods(eng));
-        }
-        // The three numbers that decide where the picture lands. On one screen they are always
-        // the same; where they differ, they name the two screens that got crossed.
-        sb.append("\nrender state: ").append(sRenderState.isEmpty() ? "no upload yet" : sRenderState);
-        sb.append("\nsurface adopted: ").append(sSurfaceW).append('x').append(sSurfaceH);
-        synchronized (sTexSizes) {
-            sb.append("\ntexture sizes held: ").append(sTexSizes.size());
-            for (java.util.Map.Entry<Object, android.graphics.Rect> e : sTexSizes.entrySet()) {
-                sb.append("\n  ").append(e.getKey().getClass().getSimpleName())
-                        .append('@').append(Integer.toHexString(System.identityHashCode(e.getKey())))
-                        .append(" -> ").append(e.getValue().width()).append('x')
-                        .append(e.getValue().height())
-                        .append(e.getKey() == sKeyguardTexture ? "  <- current" : "");
-            }
-        }
-        synchronized (sScreenArts) {
-            sb.append("\ncuts held: ").append(sScreenArts.size());
-        }
-        sb.append("\nart: ").append(describe(sArt)).append("  orig: ").append(describe(sOrig));
-        sb.append("\ntexture: ").append(sKeyguardTexture == null ? "not captured" : "captured");
-        sb.append("\ngpu fade: on=").append(sGpuFadeOn).append(" hooked=").append(sDrawHooked)
-                .append(" broken=").append(sGpuFadeBroken);
-        // How the last transition actually ended. "TIMED OUT ... armed=false" is the shape of a
-        // frame request that the OEM accepted and did nothing with.
-        sb.append("\nlast fade: ").append(sLastFade);
-        return sb.toString();
+        Xp.log(TAG + "keyguard engine #" + sKeyguardEngines.size() + ": " + WallpaperDiag.describeEngine(eng));
     }
 
     /** The wallpaper app's own version, which is what a report has to be read against. */
-    private static String wallpaperVersion() {
+    static String wallpaperVersion() {
         try {
             Context c = sCtx;
             if (c == null) return "unknown (no context)";
@@ -3809,7 +3645,7 @@ public class WallpaperProbe {
             }
             return;
         }
-        reportNoFrameRequest(eng);
+        WallpaperDiag.reportNoFrameRequest(eng);
     }
 
     /** WallpaperVideo still holds GL objects; one more frame on the keyguard lets them go. */
@@ -3960,27 +3796,10 @@ public class WallpaperProbe {
         return sKeepFrom + (sKeepTo - sKeepFrom) * e;
     }
 
-    /** For `op keepdimreport`: what was asked for and what the shader actually got. */
-    private static String keepDimReport() {
-        synchronized (KEEP_LOCK) {
-            StringBuilder sb = new StringBuilder("dim=").append(sKeepDim)
-                    .append(" from=").append(sKeepFrom).append(" to=").append(sKeepTo)
-                    .append(" at=").append(sKeepAt).append(" dur=").append(sKeepDurMs)
-                    .append(" msgs=").append(sKeepMsgs).append(" draws=").append(sKeepDraws)
-                    .append(" pumping=").append(sKeepPumping).append(" log=");
-            int keep = Math.min(sKeepLogN, KEEP_LOG);
-            for (int i = 0; i < keep; i++) {
-                int k = (sKeepLogN - keep + i) % KEEP_LOG;
-                sb.append(sKeepLogAt[k]).append(':').append(sKeepLogV[k]).append(' ');
-            }
-            return sb.toString();
-        }
-    }
-
     /** A redraw of what is uploaded, with no reload - the GPU fade's per-frame request. */
     private static void requestFrame(boolean keepAlive) {
         Object eng = lockEngine();
-        if (eng != null && !frameRequest(eng, keepAlive)) reportNoFrameRequest(eng);
+        if (eng != null && !frameRequest(eng, keepAlive)) WallpaperDiag.reportNoFrameRequest(eng);
     }
 
     /**
@@ -4044,33 +3863,6 @@ public class WallpaperProbe {
             return false;
         }
     }
-
-    private static void reportNoFrameRequest(Object eng) {
-        // Nothing to call, so say what this build DOES have: the methods taking one boolean are
-        // the only candidates, and naming them is the whole of what re-deriving the name needs.
-        Xp.log(TAG + "reload: no frame request on " + eng.getClass().getSimpleName()
-                + " - the texture keeps what it holds until the OEM rebuilds the surface."
-                + " Methods here that take one boolean: " + oneBooleanMethods(eng));
-    }
-
-    /** One-boolean methods declared on the engine and its supers, for re-deriving a name. */
-    private static String oneBooleanMethods(Object eng) {
-        StringBuilder sb = new StringBuilder();
-        try {
-            for (Class<?> c = eng.getClass(); c != null && c != Object.class;
-                 c = c.getSuperclass()) {
-                for (Method m : c.getDeclaredMethods()) {
-                    Class<?>[] p = m.getParameterTypes();
-                    if (p.length != 1 || p[0] != boolean.class) continue;
-                    if (sb.length() > 0) sb.append(", ");
-                    sb.append(c.getSimpleName()).append('.').append(m.getName()).append("(Z)");
-                }
-            }
-        } catch (Throwable t) {
-            return "could not be listed: " + t;
-        }
-        return sb.length() == 0 ? "none" : sb.toString();
-    }
     /** CRC32 of the pushed JPEG, the cover video's cache key. 0 means "work it out". */
     static volatile long sCurrentArtChecksum;
 
@@ -4114,120 +3906,6 @@ public class WallpaperProbe {
         } catch (Throwable t) {
             Xp.w(TAG + "blurshown failed: " + t);
         }
-    }
-
-    private static void dumpClass(String name, String grep) {
-        if (name == null) { Xp.log(TAG + "need --es name"); return; }
-        Class<?> c;
-        try {
-            c = Xp.findClass(name, sCl);
-        } catch (Throwable t) {
-            Xp.log(TAG + name + " NOT FOUND");
-            return;
-        }
-        Xp.log(TAG + "=== " + c.getName());
-        String g = grep == null ? null : grep.toLowerCase();
-        for (Class<?> k = c; k != null && k != Object.class; k = k.getSuperclass()) {
-            for (Method m : k.getDeclaredMethods()) {
-                StringBuilder sb = new StringBuilder(m.getReturnType().getSimpleName())
-                        .append(' ').append(m.getName()).append('(');
-                Class<?>[] ps = m.getParameterTypes();
-                for (int j = 0; j < ps.length; j++) {
-                    if (j > 0) sb.append(", ");
-                    sb.append(ps[j].getSimpleName());
-                }
-                sb.append(')');
-                if (g == null || sb.toString().toLowerCase().contains(g)) {
-                    Xp.log(TAG + "  " + sb);
-                }
-            }
-            for (java.lang.reflect.Field f : k.getDeclaredFields()) {
-                String line = f.getType().getSimpleName() + " ." + f.getName();
-                if (g == null || line.toLowerCase().contains(g)) {
-                    Xp.log(TAG + "  " + line);
-                }
-            }
-            Xp.log(TAG + "  --- ^ " + k.getName());
-        }
-    }
-
-    /**
-     * Hooks every method of a class that carries a Bitmap in or out and logs it, which is how
-     * we find where the wallpaper texture actually enters the renderer.
-     */
-    /**
-     * Hooks every Bitmap-carrying method and constructor on a renderer, and logs each call with
-     * its arguments and result. Reached only through the `bmp` probe op.
-     *
-     * It used to run at load time, for the whole list of renderers, to find out how the wallpaper
-     * bitmap travels into the GL texture. That question is answered (the answer is
-     * onSurfaceCreated -> mTexture.use -> the lambda we replace the bitmap in, which is where the
-     * module has worked since), and the cost of leaving it on was a hook on every one of those
-     * methods in every wallpaper process, plus a log line per call, whether or not anyone was
-     * looking. It stays as a probe because the first step in porting this module to a build whose
-     * R8 names have moved is reading them back off the phone, and this is the tool that does it.
-     */
-    private static void traceBitmaps(String name) {
-        if (name == null) { Xp.log(TAG + "need --es name"); return; }
-        Class<?> c;
-        try {
-            c = Xp.findClass(name, sCl);
-        } catch (Throwable t) {
-            Xp.log(TAG + name + " NOT FOUND");
-            return;
-        }
-        int n = 0;
-        for (java.lang.reflect.Constructor<?> ct : c.getDeclaredConstructors()) {
-            boolean touches = false;
-            for (Class<?> p : ct.getParameterTypes()) {
-                if (p == Bitmap.class) touches = true;
-            }
-            if (!touches) continue;
-            try {
-                Xp.hook("wall.probe.ctor_args." + Xp.slug(c.getSimpleName())
-                        + "#" + Xp.slug(Xp.signature(ct)), ct, argLogger("<init>"));
-                n++;
-            } catch (Throwable ignored) {
-            }
-        }
-        for (Class<?> k = c; k != null && k != Object.class; k = k.getSuperclass()) {
-            for (final Method m : k.getDeclaredMethods()) {
-                if (Modifier.isAbstract(m.getModifiers())) continue;
-                boolean touches = m.getReturnType() == Bitmap.class;
-                for (Class<?> p : m.getParameterTypes()) {
-                    if (p == Bitmap.class) touches = true;
-                }
-                if (!touches) continue;
-                try {
-                    Xp.hook("wall.probe.bitmap_args."
-                            + Xp.slug(m.getDeclaringClass().getSimpleName())
-                            + "." + Xp.slug(m.getName())
-                            + "#" + Xp.slug(Xp.signature(m)),
-                            m, argLogger(m.getName()));
-                    n++;
-                } catch (Throwable ignored) {
-                }
-            }
-        }
-        Xp.log(TAG + "traced " + n + " bitmap-carrying methods on " + c.getName());
-    }
-
-    private static XposedInterface.Hooker argLogger(final String name) {
-        return chain -> {
-            Object result = chain.proceed();
-            StringBuilder sb = new StringBuilder(TAG)
-                    .append(chain.getThisObject() == null ? "?"
-                            : chain.getThisObject().getClass().getSimpleName())
-                    .append('.').append(name).append('(');
-            java.util.List<Object> args = chain.getArgs();
-            for (int j = 0; j < args.size(); j++) {
-                if (j > 0) sb.append(", ");
-                sb.append(describe(args.get(j)));
-            }
-            sb.append(") -> ").append(describe(result));
-            Xp.log(sb.toString());
-            return result;
-        };
     }
 
     /**
