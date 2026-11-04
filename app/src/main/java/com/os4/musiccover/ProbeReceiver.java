@@ -374,120 +374,144 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             // Answered through the ordered broadcast's result extras: the app is a
             // separate process and this is the only channel it already has. A reply
             // arriving at all is also how the app knows the module is loaded.
-            android.os.Bundle out = new android.os.Bundle();
-            out.putBoolean("alive", true);
-            out.putBoolean("cover", Main.sCoverMode);
-            out.putString("minicfg", MiniPlayerRuntime.configJson(c));
-            out.putInt("minicfgschema", MiniPlayerConfig.SCHEMA_VERSION);
-            float[] shortcuts = MiniPlayerRuntime.shortcutGeometry();
-            if (shortcuts != null) out.putFloatArray("minishortcuts", shortcuts);
-            out.putBoolean("auto", Main.sAuto);
-            out.putBoolean("coverfeature", Main.sCoverFeatureOn);
-            out.putFloat("bias", Main.sBias);
-            out.putInt("coverstyle", Main.sCoverCardStyle.mode);
-            out.putFloat("covercardfill", Main.sCoverCardStyle.fill);
-            out.putFloat("covercardpos", Main.sCoverCardStyle.pos);
-            // No covercardcorner: the square's corners are the media card's own, and
-            // the app draws them from the cardradius it gets with the pictures.
-            out.putFloat("clock", Main.sClockHeightDp);
-            out.putFloat("clocksize", Main.effectiveClockSize());
-            out.putFloat("clockoff", Main.sClockOffsetDp);
-            out.putFloat("glass", Main.sGlassEnd);
-            out.putFloat("spring", Main.sClockResponse);
-            // The whole shade settings page, generated from the one key list so a new
-            // knob cannot reach the state file and miss the settings app.
-            for (String key : ShadeLayer.CFG_KEYS) {
-                out.putInt("shade_" + key, ShadeLayer.cfgInt(key));
-            }
-            out.putInt("shadeMode", ShadeLayer.mode());
-            out.putBoolean("card", MediaCard.sCardShowing);
-            // Checked live rather than reported from the cached flag: the user can
-            // change the wallpaper at any time and that is what breaks the feature.
-            out.putBoolean("lockwp", CoverPush.hasLockWallpaper(c));
-            out.putString("track", MediaCard.sCardKey);
-            MediaController mc = Main.sWatched;
-            out.putString("player", mc == null ? "" : mc.getPackageName());
-            out.putBoolean("mcart", Main.sMcHideArt);
-            out.putBoolean("mclyricart", Main.sMcArtInLyrics);
-            out.putBoolean("mctap", Main.sMcTitleTap);
-            out.putBoolean("mcpage", Main.sMcPageBtn);
-            out.putBoolean("tap", Main.sTapToggle);
-            out.putBoolean("fadewp", Main.sFadeWp);
-            out.putBoolean("motion", MotionCover.sEnabled);
-            out.putBoolean("motiondata", MotionCover.sOnData);
-            out.putInt("fsmode2", Main.sFadeMode);
-            out.putBoolean("vcfade", Main.sVideoFade);
-            out.putBoolean("hidefp", Fingerprint.sHideFp);
-            out.putBoolean("aodsmall", Main.sAodSmall);
-            out.putBoolean("colon", HyperTweaks.sForceColon);
-            out.putBoolean("seekglow", HyperTweaks.sBarGlow);
-            out.putBoolean("lyrics", LockLyrics.sEnabled);
-            // Where the lock screen's words came from right now, and whether there is
-            // a Lyricon to talk to. The app's lyric-source row is these two: it names
-            // the source, and warns to install something only when both this and the
-            // LyricInfo package are absent. See FeaturesPage.
-            out.putString("lyricsrc", LockLyrics.sourceName());
-            out.putBoolean("lyricon", LyriconSource.installed());
-            out.putBoolean("lyrickeep", LockLyrics.sKeepOn);
-            out.putBoolean("lyrichdr", LockLyrics.sHdr);
-            out.putBoolean("lyrictrans", LockLyrics.sTrans);
-            out.putBoolean("lyricroma", LockLyrics.sRoma);
-            out.putBoolean("lyriconline", LockLyrics.sOnline);
-            out.putInt("lyricalign", LockLyrics.sAlign);
-            out.putInt("lyricmaxlines", LockLyrics.sMaxLines);
-            out.putFloat("lyricbgsize", LockLyrics.sStyle.bgSizeSp);
-            out.putString("lyricappearance", LockLyrics.sAppearance.toJson());
-            out.putFloat("lyricfill", LockLyrics.sStyle.fill);
-            out.putFloat("lyricpos", LockLyrics.sStyle.pos);
-            out.putFloat("lyricside", LockLyrics.sStyle.sideDp);
-            out.putFloat("lyricsize", LockLyrics.sStyle.sizeSp);
-            out.putInt("lyricweight", LockLyrics.sStyle.weight);
-            // Whether anything has actually written a lyric to a session, which is
-            // what tells a working provider module from a merely installed one.
-            out.putBoolean("sessionlyric", LockLyrics.sSawSessionLyric
-                    || LyricSource.hasLyricInfo(Main.sWatched));
-            out.putInt("fpavoid", Fingerprint.sFpAvoid);
-            out.putString("fpquick", FingerprintQuick.configJson(c));
-            out.putBoolean("fpquicksys", FingerprintQuick.systemSwitch(c));
-            out.putBoolean("fpquickok", FingerprintQuick.installed());
-            out.putBoolean("transit", AmapTransitScene.sOn);
-            out.putBoolean("pickup", PickupCodeIsland.sOn);
-            out.putBoolean("card", PickupCodeIsland.sCard);
-            // 设置页那行「手动刷新取餐码云端规则」的副标题，和这一份名单有几个小程序。
-            out.putString("rulesdate", PickupCloud.INSTANCE.stamp(PickupCloud.INSTANCE.getUpdatedAt()));
-            out.putInt("rulescount", PickupCloud.INSTANCE.count());
-            // Everything the app's preview needs to be to scale. It draws a lock
-            // screen it cannot see, and every one of these is device-specific, so
-            // they are measured here rather than written down twice.
-            out.putInt("sw", Main.sScreenW);
-            out.putInt("sh", Main.sScreenH);
-            out.putInt("cardl", MediaCard.sCardL);
-            out.putInt("cardt", MediaCard.sCardT);
-            out.putInt("cardw", MediaCard.sCardW);
-            out.putInt("cardh", MediaCard.sCardH);
-            float[] cg = ClockViews.clockGeometry();
-            if (cg != null) {
-                out.putFloat("clockw", cg[0]);
-                out.putFloat("clockh", cg[1]);
-                out.putFloat("clocky", cg[2]);
-                out.putFloat("clockpad", Main.CLOCK_PAD);
-                out.putFloat("clockx", cg[3]);
-                out.putFloat("clockpivotx", cg[4]);
-                out.putFloat("clockfull", Main.clockFullRatio());
-            }
-            // Outside the block above: it is a property of the STYLE, not of the
-            // measurement, and the app needs it even on a frame where the clock
-            // could not be measured - that is exactly when the slider it disables
-            // would otherwise look like it was doing something.
-            out.putBoolean("clockglass", ClockGlass.clockHasGlass());
-            // Every op is acknowledged below; this tells the app it can rely on that,
-            // where a build from before it could only be sent to and hoped for.
-            out.putBoolean("acks", true);
-            setResultExtras(out);
+            setResultExtras(queryBundle(c));
+        } else if ("querydump".equals(op)) {
+            // The same answer as text, one key per line in key order, for adb: `am broadcast`
+            // prints result extras only as a parcel size, and a sender of its own cannot take
+            // an ordered result from outside an app process ("resultTo requires
+            // resultToApp"). What the settings refactor is checked against.
+            setResultData(dumpBundle(queryBundle(c)));
         } else {
             return false;
         }
         return true;
+    }
+
+    /** What `query` answers: every setting the app shows, and what its preview needs. */
+    private static android.os.Bundle queryBundle(Context c) {
+        android.os.Bundle out = new android.os.Bundle();
+        out.putBoolean("alive", true);
+        out.putBoolean("cover", Main.sCoverMode);
+        out.putString("minicfg", MiniPlayerRuntime.configJson(c));
+        out.putInt("minicfgschema", MiniPlayerConfig.SCHEMA_VERSION);
+        float[] shortcuts = MiniPlayerRuntime.shortcutGeometry();
+        if (shortcuts != null) out.putFloatArray("minishortcuts", shortcuts);
+        out.putBoolean("auto", Main.sAuto);
+        out.putBoolean("coverfeature", Main.sCoverFeatureOn);
+        out.putFloat("bias", Main.sBias);
+        out.putInt("coverstyle", Main.sCoverCardStyle.mode);
+        out.putFloat("covercardfill", Main.sCoverCardStyle.fill);
+        out.putFloat("covercardpos", Main.sCoverCardStyle.pos);
+        // No covercardcorner: the square's corners are the media card's own, and
+        // the app draws them from the cardradius it gets with the pictures.
+        out.putFloat("clock", Main.sClockHeightDp);
+        out.putFloat("clocksize", Main.effectiveClockSize());
+        out.putFloat("clockoff", Main.sClockOffsetDp);
+        out.putFloat("glass", Main.sGlassEnd);
+        out.putFloat("spring", Main.sClockResponse);
+        // The whole shade settings page, generated from the one key list so a new
+        // knob cannot reach the state file and miss the settings app.
+        for (String key : ShadeLayer.CFG_KEYS) {
+            out.putInt("shade_" + key, ShadeLayer.cfgInt(key));
+        }
+        out.putInt("shadeMode", ShadeLayer.mode());
+        out.putBoolean("card", MediaCard.sCardShowing);
+        // Checked live rather than reported from the cached flag: the user can
+        // change the wallpaper at any time and that is what breaks the feature.
+        out.putBoolean("lockwp", CoverPush.hasLockWallpaper(c));
+        out.putString("track", MediaCard.sCardKey);
+        MediaController mc = Main.sWatched;
+        out.putString("player", mc == null ? "" : mc.getPackageName());
+        out.putBoolean("mcart", Main.sMcHideArt);
+        out.putBoolean("mclyricart", Main.sMcArtInLyrics);
+        out.putBoolean("mctap", Main.sMcTitleTap);
+        out.putBoolean("mcpage", Main.sMcPageBtn);
+        out.putBoolean("tap", Main.sTapToggle);
+        out.putBoolean("fadewp", Main.sFadeWp);
+        out.putBoolean("motion", MotionCover.sEnabled);
+        out.putBoolean("motiondata", MotionCover.sOnData);
+        out.putInt("fsmode2", Main.sFadeMode);
+        out.putBoolean("vcfade", Main.sVideoFade);
+        out.putBoolean("hidefp", Fingerprint.sHideFp);
+        out.putBoolean("aodsmall", Main.sAodSmall);
+        out.putBoolean("colon", HyperTweaks.sForceColon);
+        out.putBoolean("seekglow", HyperTweaks.sBarGlow);
+        out.putBoolean("lyrics", LockLyrics.sEnabled);
+        // Where the lock screen's words came from right now, and whether there is
+        // a Lyricon to talk to. The app's lyric-source row is these two: it names
+        // the source, and warns to install something only when both this and the
+        // LyricInfo package are absent. See FeaturesPage.
+        out.putString("lyricsrc", LockLyrics.sourceName());
+        out.putBoolean("lyricon", LyriconSource.installed());
+        out.putBoolean("lyrickeep", LockLyrics.sKeepOn);
+        out.putBoolean("lyrichdr", LockLyrics.sHdr);
+        out.putBoolean("lyrictrans", LockLyrics.sTrans);
+        out.putBoolean("lyricroma", LockLyrics.sRoma);
+        out.putBoolean("lyriconline", LockLyrics.sOnline);
+        out.putInt("lyricalign", LockLyrics.sAlign);
+        out.putInt("lyricmaxlines", LockLyrics.sMaxLines);
+        out.putFloat("lyricbgsize", LockLyrics.sStyle.bgSizeSp);
+        out.putString("lyricappearance", LockLyrics.sAppearance.toJson());
+        out.putFloat("lyricfill", LockLyrics.sStyle.fill);
+        out.putFloat("lyricpos", LockLyrics.sStyle.pos);
+        out.putFloat("lyricside", LockLyrics.sStyle.sideDp);
+        out.putFloat("lyricsize", LockLyrics.sStyle.sizeSp);
+        out.putInt("lyricweight", LockLyrics.sStyle.weight);
+        // Whether anything has actually written a lyric to a session, which is
+        // what tells a working provider module from a merely installed one.
+        out.putBoolean("sessionlyric", LockLyrics.sSawSessionLyric
+                || LyricSource.hasLyricInfo(Main.sWatched));
+        out.putInt("fpavoid", Fingerprint.sFpAvoid);
+        out.putString("fpquick", FingerprintQuick.configJson(c));
+        out.putBoolean("fpquicksys", FingerprintQuick.systemSwitch(c));
+        out.putBoolean("fpquickok", FingerprintQuick.installed());
+        out.putBoolean("transit", AmapTransitScene.sOn);
+        out.putBoolean("pickup", PickupCodeIsland.sOn);
+        out.putBoolean("card", PickupCodeIsland.sCard);
+        // 设置页那行「手动刷新取餐码云端规则」的副标题，和这一份名单有几个小程序。
+        out.putString("rulesdate", PickupCloud.INSTANCE.stamp(PickupCloud.INSTANCE.getUpdatedAt()));
+        out.putInt("rulescount", PickupCloud.INSTANCE.count());
+        // Everything the app's preview needs to be to scale. It draws a lock
+        // screen it cannot see, and every one of these is device-specific, so
+        // they are measured here rather than written down twice.
+        out.putInt("sw", Main.sScreenW);
+        out.putInt("sh", Main.sScreenH);
+        out.putInt("cardl", MediaCard.sCardL);
+        out.putInt("cardt", MediaCard.sCardT);
+        out.putInt("cardw", MediaCard.sCardW);
+        out.putInt("cardh", MediaCard.sCardH);
+        float[] cg = ClockViews.clockGeometry();
+        if (cg != null) {
+            out.putFloat("clockw", cg[0]);
+            out.putFloat("clockh", cg[1]);
+            out.putFloat("clocky", cg[2]);
+            out.putFloat("clockpad", Main.CLOCK_PAD);
+            out.putFloat("clockx", cg[3]);
+            out.putFloat("clockpivotx", cg[4]);
+            out.putFloat("clockfull", Main.clockFullRatio());
+        }
+        // Outside the block above: it is a property of the STYLE, not of the
+        // measurement, and the app needs it even on a frame where the clock
+        // could not be measured - that is exactly when the slider it disables
+        // would otherwise look like it was doing something.
+        out.putBoolean("clockglass", ClockGlass.clockHasGlass());
+        // Every op is acknowledged below; this tells the app it can rely on that,
+        // where a build from before it could only be sent to and hoped for.
+        out.putBoolean("acks", true);
+        return out;
+    }
+
+    /** [b] as "key=Type:value" lines, sorted, arrays written out. */
+    static String dumpBundle(android.os.Bundle b) {
+        StringBuilder sb = new StringBuilder();
+        for (String k : new java.util.TreeSet<>(b.keySet())) {
+            Object v = b.get(k);
+            String s = v == null ? "null"
+                    : v instanceof float[] ? "float[]:" + java.util.Arrays.toString((float[]) v)
+                    : v.getClass().getSimpleName() + ":" + v;
+            sb.append(k).append('=').append(s).append('\n');
+        }
+        return sb.toString();
     }
 
     /** A message from the module's other halves: the wallpaper process's hand-shakes and
