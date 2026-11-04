@@ -619,6 +619,8 @@ object MiniPlayerRuntime {
                             runCatching { keepRecipe(target!!.context, recorded, bg?.background) }
                                 .onFailure { Xp.log("MCMini: recipe not kept: $it") }
                             if (cardEffect != cls.simpleName) Xp.log("MCMini: card material -> ${cls.simpleName}")
+                            matNote("card recipe <- ${cls.simpleName} (was $cardEffect): " +
+                                recorded.joinToString(" ; ") { matCall(it.method.name, it.args) })
                             cardEffect = cls.simpleName
                             materialGeneration++
                             refresh()
@@ -719,13 +721,34 @@ object MiniPlayerRuntime {
             // comes again with every change of the row's height.
             val at = args.indexOfFirst { it === element }
             if (at < 0) return
+            val previous = notificationExtras[method.name]
             val first = notificationExtras.put(method.name,
                 Recorded(method, Array(args.size) { i -> copyArray(args[i]) }, at)) == null
-            // Type 1 and the size come after the blend and glass that re-dress the islands: the
-            // first of each re-dresses them once more, or they would wait for the next change.
-            if (first && notificationBlend != null && notificationGlass != null) {
+            // The size comes with every change of the row's height and says nothing about
+            // which material the next dressing replays; the others do.
+            var changed = false
+            if (method.name != "setMiGlassSdfMaxSizeCompat") {
+                val now = matCall(method.name, args)
+                val was = previous?.let { matCall(it.method.name, it.args) }
+                changed = previous != null && now != was
+                if (now != was) matNoteLimited("row extra") { "$now (was ${was ?: "none"}) from ${matTag(source)}" }
+            }
+            if (notificationBlend == null || notificationGlass == null) return
+            if (first) {
+                // Type 1 and the size come after the blend and glass that re-dress the islands:
+                // the first of each re-dresses them once more, or they would wait for the next
+                // change.
                 materialGeneration++
-                refresh()
+                refreshSoon()
+            } else if (changed) {
+                // A row dresses itself type 0, outlines and blur mode, blend and glass, then
+                // type 1, and an island dressed in between replayed the 0 - the frosted material
+                // on a glass phone - until something unrelated dressed it again: seconds, or for
+                // good (logged 2026-11-04, 8s twice). Checked once the row's run is through: a
+                // rebind goes 0 and back to 1 every second or two, and only a run that ends on
+                // something other than what the islands wear needs them dressed again.
+                extrasHandler.removeCallbacks(extrasCheck)
+                extrasHandler.post(extrasCheck)
             }
             return
         }
@@ -755,9 +778,33 @@ object MiniPlayerRuntime {
         val signature = listOf(blend.toList(), glass.toList())
         if (signature != notificationSignature) {
             notificationSignature = signature
+            matNoteLimited("row look <-") { "blend=${matArg(blend)} glass=${matArg(glass)} from ${matTag(source)}" }
             materialGeneration++
-            refresh()
+            // On the next turn of the loop, not now: this is the middle of the row's own run of
+            // calls, with its type 1 still to come (see the extras above). Folded, too - the
+            // row's colours change on every frame of a wake, and each was a dressing of its own.
+            refreshSoon()
         }
+    }
+
+    /** The row's steps the islands were last dressed with; null before the first dressing. */
+    @Volatile private var dressedExtras: String? = null
+
+    private val extrasHandler by lazy { Gen.handler() }
+
+    /** The row's material steps as the next dressing would replay them, the size aside. */
+    private fun extrasNow(): String = notificationExtras.values
+        .filter { it.method.name != "setMiGlassSdfMaxSizeCompat" }
+        .map { matCall(it.method.name, it.args) }
+        .sorted().joinToString(" ; ")
+
+    private val extrasCheck = Runnable {
+        val now = extrasNow()
+        val dressed = dressedExtras ?: return@Runnable
+        if (now == dressed) return@Runnable
+        matNote("row steps changed under the islands: $dressed -> $now, dressing again")
+        materialGeneration++
+        refresh()
     }
 
     /** A recipe's values: the effect, the background, and every call with its arguments. */
@@ -1051,6 +1098,13 @@ object MiniPlayerRuntime {
         if (!view.isAttachedToWindow) return
         val ctx = view.context
         val blurOpened = blurOpenedMethod?.let { runCatching { it.invoke(null, ctx) as Boolean }.getOrNull() } ?: true
+        if (dimNoted.add(view)) {
+            val own = view !in notificationDressedViews && aodDimLook != null
+            matNoteLimited("dim") {
+                "${matTag(view)} first frame: ${if (!blurOpened) "flat fill" else if (own) "card look" else "OEM frame raw"}" +
+                    " glass=${args[12]} notif=${view in notificationDressedViews}"
+            }
+        }
         runCatching {
             if (blurOpened) {
                 val look = if (view in notificationDressedViews) null else aodDimLook
@@ -1143,7 +1197,13 @@ object MiniPlayerRuntime {
         aodDimFlat = false
         val cl = loader ?: return
         var later = 0
+        dimNoted.clear()
         for (view in dressedViews.toList()) {
+            matNoteLimited("settle") {
+                "${matTag(view)} notif=${view in notificationDressedViews} " +
+                    "attached=${view.isAttachedToWindow} -> ${if (!view.isAttachedToWindow) "on attach"
+                        else if (home) "left as the last dim frame" else "redressed"}"
+            }
             if (view.isAttachedToWindow) {
                 if (!home) material(view, cl, view in notificationDressedViews)
             } else {
@@ -1970,7 +2030,7 @@ object MiniPlayerRuntime {
         val sb = StringBuilder("gone: " + synchronized(goneLog) { goneLog.joinToString(" ; ") } +
             " || material=$cardEffect gen=$materialGeneration same=$materialRepeats calls=${cardRecipe?.size} empty=$emptyEffect " +
             "${describeMaterial()} " +
-            "aod=${MiniPlayerScene.aodActive} ${describeAodDim()} || ${LockIslands.describe()} || touches: " +
+            "aod=${MiniPlayerScene.aodActive} ${describeAodDim()} ${describeMatLog()} || ${LockIslands.describe()} || touches: " +
             synchronized(touchLog) { touchLog.joinToString(" ; ") })
         synchronized(controllers) { controllers.values.toList() }.forEach { held ->
             sb.append(" || ").append(held.controller.describe())
@@ -2252,6 +2312,7 @@ object MiniPlayerRuntime {
     internal fun material(view: ImageView, classLoader: ClassLoader,
                           notificationStyle: Boolean = false) {
         val ctx = view.context
+        val missed = ArrayList<String>(0)
         if (notificationStyle) notificationDressedViews.add(view)
         else notificationDressedViews.remove(view)
         runCatching {
@@ -2307,7 +2368,7 @@ object MiniPlayerRuntime {
                         args[call.viewAt] = view
                         edit?.invoke(args)
                         runCatching { call.method.invoke(null, *args) }
-                            .onFailure { Xp.log("MCMini: notification $name not replayed: $it") }
+                            .onFailure { missed.add(name); Xp.log("MCMini: notification $name not replayed: $it") }
                     }
                     replay("setMiViewMaterialTypeCompat") { a ->
                         val i = a.indexOfFirst { it is Int }
@@ -2320,9 +2381,13 @@ object MiniPlayerRuntime {
                     setGlass?.invoke(null, view, glass)
                     replay("setMiViewMaterialTypeCompat")
                     replay("setMiGlassSdfMaxSizeCompat")
-                } }.onFailure { Xp.log("MCMini: notification glass unavailable: $it") }
+                    dressedExtras = extrasNow()
+                    if (blend == null) missed.add("blend")
+                    if (setGlass == null) missed.add("glass")
+                } }.onFailure { missed.add("look"); Xp.log("MCMini: notification glass unavailable: $it") }
             }
             dressedViews.add(view)
+            noteDressing(view, notificationStyle, recipe, missed)
             // Dressed in the AOD - a small island coming up there: dimmed as the rest are.
             aodDimArgs?.let { run { dimView(view, it) } }
         }.onFailure { error ->
@@ -2333,7 +2398,88 @@ object MiniPlayerRuntime {
             }
             view.background = null
             view.setImageDrawable(GradientDrawable().apply { setColor(0x9E1F2324.toInt()) })
+            matNoteLimited("dress") { "${matTag(view)} FAILED, plain fill: $cause" }
         }
+    }
+
+    // ---------------------------------------------------------------- the material log
+
+    /**
+     * What dressed the pill and the islands, and what changed under them, for "the pill turned
+     * frosted on a glass phone": the card's recipe and the row's look as they are replaced, a
+     * row's material type and blur steps as they change (the last one recorded is what the next
+     * dressing replays, and a change does not re-dress), each dressing whose outcome differs from
+     * that view's last, and what the AOD's dim did to each view and how it was let go. Logged
+     * and kept for `op mini` (matlog=); all but the rare ones at most a line a second of each
+     * kind (matNoteLimited).
+     */
+    private val matLog = ArrayDeque<String>()
+
+    /** Each dressed view's last outcome, so a refresh dressing it the same way says nothing. */
+    private val lastDressing = java.util.WeakHashMap<View, String>()
+
+    /** Views the current dim run has logged its first frame on. */
+    private val dimNoted = java.util.Collections.newSetFromMap(java.util.WeakHashMap<View, Boolean>())
+
+    private fun matNote(what: String) {
+        Xp.log("MCMini: mat $what")
+        synchronized(matLog) {
+            matLog.addLast("${android.os.SystemClock.uptimeMillis() % 1000000} $what")
+            while (matLog.size > 60) matLog.removeFirst()
+        }
+    }
+
+    /** Per kind of line: when it was last logged, and how many since went unlogged. */
+    private val matQuiet = HashMap<String, LongArray>()
+
+    /**
+     * One line a second of each [kind], with the count of the ones it stands for. A row's look
+     * changes on every frame of a wake, a rebind takes its type to 0 and back every second or
+     * two, and the dim and its settle come once for every dressed view on every doze.
+     */
+    private fun matNoteLimited(kind: String, what: () -> String) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val quiet = synchronized(matQuiet) {
+            val slot = matQuiet.getOrPut(kind) { longArrayOf(Long.MIN_VALUE / 2, 0L) }
+            if (now - slot[0] < 1000L) {
+                slot[1]++
+                return
+            }
+            slot[0] = now
+            slot[1].also { slot[1] = 0L }
+        }
+        matNote("$kind ${what()}" + if (quiet > 0) " (+$quiet unlogged)" else "")
+    }
+
+    private fun describeMatLog(): String = "matlog=[" + synchronized(matLog) { matLog.joinToString(" ; ") } + "]"
+
+    private fun matTag(v: View): String =
+        "${v.javaClass.simpleName}@${Integer.toHexString(System.identityHashCode(v))}/${v.width}x${v.height}"
+
+    private fun matArg(v: Any?): String = when (v) {
+        is IntArray -> v.joinToString(",", "[", "]") { Integer.toHexString(it) }
+        // The glass's 42 floats: its shape [34] and liquid factor [36] are what tell glass apart.
+        is FloatArray -> if (v.size > 36) "[n=${v.size} shape=${v[34]} liquid=${v[36]}]"
+            else v.joinToString(",", "[", "]") { "%.2f".format(it) }
+        is View -> "V"
+        is Context -> "ctx"
+        null -> "null"
+        else -> v.toString().take(24)
+    }
+
+    private fun matCall(name: String, args: Array<Any?>): String =
+        name + args.joinToString(",", "(", ")") { matArg(it) }
+
+    private fun noteDressing(view: ImageView, notificationStyle: Boolean, recipe: List<Recorded>?,
+                             missed: List<String>) {
+        val type = notificationExtras["setMiViewMaterialTypeCompat"]?.args?.firstOrNull { it is Int }
+        val blurMode = notificationExtras["setMiViewBlurModeCompat"]?.args?.firstOrNull { it is Int }
+        val outcome = "notif=$notificationStyle effect=$cardEffect recipe=${recipe?.size ?: "none"}" +
+            (if (notificationStyle) " look=${notificationLook() != null} type=$type blurMode=$blurMode" else "") +
+            (if (missed.isEmpty()) "" else " missed=$missed") +
+            (if (aodDimArgs != null) " dimNext" else "")
+        val changed = synchronized(lastDressing) { lastDressing.put(view, outcome) != outcome }
+        if (changed) matNoteLimited("dress") { "${matTag(view)} $outcome" }
     }
 }
 
