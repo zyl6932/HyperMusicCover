@@ -1308,8 +1308,6 @@ public class WallpaperProbe {
         Gen.markInstallScope();
     }
 
-    private static final String ART_FILE = "mc_art.jpg";
-
     /** The whole of a file, or null. Used for the art SystemUI hands over by path. */
     private static byte[] readBytes(String path) {
         try {
@@ -1516,12 +1514,12 @@ public class WallpaperProbe {
 
     private static void saveArt(Context ctx, byte[] jpg) {
         // Beside it, then renamed: killed half way, the process came back to a truncated JPEG.
-        File tmp = new File(ctx.getFilesDir(), ART_FILE + ".tmp");
+        File tmp = CoverStore.artTmp(ctx);
         try {
             try (FileOutputStream fos = new FileOutputStream(tmp)) {
                 fos.write(jpg);
             }
-            if (!tmp.renameTo(new File(ctx.getFilesDir(), ART_FILE))) {
+            if (!tmp.renameTo(CoverStore.art(ctx))) {
                 throw new java.io.IOException("rename failed");
             }
         } catch (Throwable t) {
@@ -1535,11 +1533,11 @@ public class WallpaperProbe {
      * until something recreated the surface.
      */
     private static void loadArt(Context ctx) {
-        File f = new File(ctx.getFilesDir(), ART_FILE);
+        File f = CoverStore.art(ctx);
         // The source, when the last cover came that way: the JPEG is deleted as soon as a
         // composed-here cover is shown, so whichever of the two is newer is the one on screen.
-        File src = new File(ctx.getFilesDir(), SRC_FILE);
-        sCardMode = new File(ctx.getFilesDir(), "mc_card_mode").exists();
+        File src = CoverStore.source(ctx);
+        sCardMode = CoverStore.cardMode(ctx).exists();
         if (src.exists() && (!f.exists() || src.lastModified() >= f.lastModified())) {
             try {
                 CoverCompose.Source s = CoverCompose.readSource(src);
@@ -2332,9 +2330,7 @@ public class WallpaperProbe {
                                 sLyricBlur = false;
                                 sLyricBlurWant = false;
                                 dropFrosted();
-                                new File(c.getFilesDir(), ART_FILE).delete();
-                                new File(c.getFilesDir(), SRC_FILE).delete();
-                                new File(c.getFilesDir(), "mc_card_mode").delete();
+                                CoverStore.clear(c);
                                 // The cover videos stay: coming back into cover mode on the same
                                 // album then reloads from the cache instead of encoding again.
                                 videoWindowTakeover(true);
@@ -2383,9 +2379,7 @@ public class WallpaperProbe {
                                         sArt = null;
                                         sFitted = null;
                                         sFittedOf = null;
-                                        new File(cc.getFilesDir(), ART_FILE).delete();
-                                        new File(cc.getFilesDir(), SRC_FILE).delete();
-                                        new File(cc.getFilesDir(), "mc_card_mode").delete();
+                                        CoverStore.clear(cc);
                                         Xp.log(TAG + "art cleared");
                                     }
                                 });
@@ -2398,9 +2392,7 @@ public class WallpaperProbe {
                                 sLyricBlurWant = false;
                                 dropFrosted();
                             }
-                            new File(c.getFilesDir(), ART_FILE).delete();
-                            new File(c.getFilesDir(), SRC_FILE).delete();
-                            new File(c.getFilesDir(), "mc_card_mode").delete();
+                            CoverStore.clear(c);
                             Xp.log(TAG + "art cleared");
                         } else if (i.hasExtra("prekey") && !i.hasExtra("src")) {
                             applyKept(i.getStringExtra("prekey"), reload, fade);
@@ -2522,14 +2514,14 @@ public class WallpaperProbe {
                         } else {
                             String path = i.getStringExtra("path");
                             if (path == null) {
-                                path = new File(c.getFilesDir(), "mc_video.mp4").getPath();
+                                path = CoverStore.video(c).getPath();
                             }
                             float bias = i.getFloatExtra("bias", -1f);
                             if (bias < 0f) {
                                 bias = 0.25f;
                                 try {
                                     CoverCompose.Source s = CoverCompose.readSource(
-                                            new File(c.getFilesDir(), SRC_FILE));
+                                            CoverStore.source(c));
                                     if (s != null) bias = s.bias;
                                 } catch (Throwable ignored) {
                                 }
@@ -3161,9 +3153,6 @@ public class WallpaperProbe {
         }
     }
 
-    /** Where this process keeps the last source, to compose again after its own restart. */
-    private static final String SRC_FILE = "mc_src.raw";
-
     private static Handler sComposer;
     /** The newest source asked for; a composition overtaken by a newer one is dropped. */
     private static volatile int sSrcSeq;
@@ -3260,7 +3249,7 @@ public class WallpaperProbe {
                                     + (SystemClock.uptimeMillis() - composed) + "ms");
                             applyArt(b, reload, fade);
                             // The JPEG from the old path is now older than what is on screen.
-                            new File(c.getFilesDir(), ART_FILE).delete();
+                            CoverStore.art(c).delete();
                         } finally {
                             sComposing.decrementAndGet();
                         }
@@ -3436,9 +3425,9 @@ public class WallpaperProbe {
         Gen.thread("mc-src-save", () -> {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
             try {
-                CoverCompose.writeSource(new File(c.getFilesDir(), SRC_FILE),
+                CoverCompose.writeSource(CoverStore.source(c),
                         s.src, s.w, s.h, s.bias);
-                File marker = new File(c.getFilesDir(), "mc_card_mode");
+                File marker = CoverStore.cardMode(c);
                 if (cardMode) marker.createNewFile();
                 else marker.delete();
             } catch (Throwable t) {
