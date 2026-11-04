@@ -668,8 +668,14 @@ internal class MiniCardMorph(
                         // out for the card's size, typeface and hyphenation, and setText throws on
                         // a TextView whose own differ - from a frame callback, so the whole of
                         // SystemUI went down with it (issue #11, 2026-09-26).
-                        val copy = if (words is android.text.Spanned) android.text.SpannedString(words)
-                            else words.toString()
+                        // And the characters only, not its spans: a timer row's are the plugin's
+                        // HyperChronometerEffectSpan, one per character and stateful (the last
+                        // text it drew, a number width and an effect paint taken from the first
+                        // paint it saw, its switch bitmaps). Copied, the same span objects were
+                        // drawn by both views, a second apart and in two paints, each restarting
+                        // the other's digit animation - and the row's minutes stayed garbled
+                        // after the switch (issue #131). The pill turns its own digits.
+                        val copy = words?.toString().orEmpty()
                         try {
                             tv.text = copy
                             piece.tookText = true

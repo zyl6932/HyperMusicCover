@@ -3531,6 +3531,15 @@ internal class MiniPlayerController(
 
     private var contentTopAt = 0L
     private var contentTop = Float.NaN
+    /** The same rows as [contentTop], where they are drawn this frame rather than headed. */
+    private var contentDrawnTop = Float.NaN
+
+    /**
+     * [stackContentTop]'s rows where they are drawn now, on screen: for what has to keep off them
+     * frame for frame - the countdown's disc - rather than make room for where they will be.
+     */
+    fun stackDrawnTop(): Float =
+        if (stackContentTop().isNaN()) Float.NaN else contentDrawnTop
 
     /**
      * See the static stackContentTop: every row and card in the stack, at the stack's own target -
@@ -3548,8 +3557,10 @@ internal class MiniPlayerController(
         if (now - contentTopAt < 6L) return contentTop
         contentTopAt = now
         val stack = notificationStack()
+        contentDrawnTop = Float.NaN
         contentTop = if (stack == null || !stack.isAttachedToWindow) Float.NaN else {
             var top = Float.POSITIVE_INFINITY
+            var drawnTop = Float.POSITIVE_INFINITY
             var from: View? = null
             var skipped = 0
             val stackY = IntArray(2).also(stack::getLocationOnScreen)[1]
@@ -3588,6 +3599,9 @@ internal class MiniPlayerController(
                     val at = from0 + (t - from0) * share
                     seen?.let { it.append(' ').append(shortName(c)).append(':').append((stackY + at).toInt()).append('S') }
                     if (at < top) { top = at; from = c }
+                    // Drawn by the morph, not the row: where the morph has it is the share's.
+                    val drawnAt = from0 + (c.top + c.translationY - from0) * share
+                    if (drawnAt < drawnTop) drawnTop = drawnAt
                     continue
                 }
                 val home = leaving.any { isInside(it, c) }
@@ -3616,7 +3630,10 @@ internal class MiniPlayerController(
                 if (home || c in hiddenRows && !coming || c.visibility != View.VISIBLE ||
                     c.alpha <= 0.01f && !coming || folded) { skipped++; continue }
                 if (t < top) { top = t; from = c }
+                val d = c.top + c.translationY
+                if (d < drawnTop) drawnTop = d
             }
+            contentDrawnTop = ClockRoomPolicy.contentTop(stackY.toFloat(), drawnTop)
             if (seen != null) {
                 contentDiagnosticAt = now
                 contentTopFrom = (from?.let(::shortName) ?: "-") + " skip=$skipped" +

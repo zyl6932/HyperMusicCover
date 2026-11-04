@@ -2163,6 +2163,10 @@ object MiniPlayerRuntime {
     @JvmStatic fun stackContentTop(): Float =
         live().map { it.stackContentTop() }.filterNot(Float::isNaN).minOrNull() ?: Float.NaN
 
+    /** [stackContentTop]'s rows where they are drawn this frame: see the controller's. */
+    @JvmStatic fun stackDrawnTop(): Float =
+        live().map { it.stackDrawnTop() }.filterNot(Float::isNaN).minOrNull() ?: Float.NaN
+
     /** Which row the last stackContentTop came from, and how many hidden rows it passed over, for `op mini`. */
     @JvmStatic fun stackContentSource(): String = live().firstOrNull()?.contentTopFrom ?: "-"
 
