@@ -115,7 +115,27 @@ public final class LyricSource {
             return !placeholder(raw);
         }
         String text = textOfLyricInfo(info);
-        return text != null && timedLines(text) >= MIN_SESSION_LINES && !placeholder(text);
+        return text != null && timedLines(text) >= MIN_SESSION_LINES && !placeholder(text)
+                && !oneStamp(text);
+    }
+
+    /**
+     * Every line stamped with the same time: an unsynced lyric dressed as LRC, which is what an
+     * Apple song with only static lyrics published as - every line [00:00.000] (2026-11-04).
+     * Not a lyric worth holding a timed one back for; see dropUntimed for the parsed form.
+     */
+    static boolean oneStamp(String text) {
+        java.util.regex.Matcher m = TIMED.matcher(text);
+        String first = null;
+        int n = 0;
+        while (m.find()) {
+            String t = m.group();
+            if (t.charAt(0) != '[') continue;
+            if (first == null) first = t;
+            else if (!first.equals(t)) return false;
+            n++;
+        }
+        return n >= 2;
     }
 
     /** How many LRC timestamps a payload carries, counted no further than the answer needs. */
@@ -471,6 +491,26 @@ public final class LyricSource {
     private static boolean dropPlaceholder(Rows r) {
         if (!placeholderLines(r.lines)) return false;
         r.why = "instrumental, by its lyric: " + r.why;
+        r.lines = java.util.Collections.emptyList();
+        r.source = SRC_NONE;
+        return true;
+    }
+
+    /**
+     * A lyric with no timing, from any source, taken for what it is to a lock screen: nothing it
+     * can play. Every line at one moment put the focus on the last line for the whole song, and
+     * the session's copy of it held back the word-timed lyric NetEase had for the same song
+     * (Apple's unsynced lyrics, 2026-11-04). Emptied, so the search goes on; a song whose every
+     * source is like this shows no lyrics. True when [r] was emptied.
+     */
+    private static boolean dropUntimed(Rows r) {
+        List<LyricLine> lines = r.lines;
+        if (lines.size() < 2) return false;
+        int first = lines.get(0).start;
+        for (LyricLine l : lines) {
+            if (l.start != first || l.hasWords()) return false;
+        }
+        r.why = "no timing on any line: " + r.why;
         r.lines = java.util.Collections.emptyList();
         r.source = SRC_NONE;
         return true;
@@ -878,6 +918,7 @@ public final class LyricSource {
                 boolean files = !streaming(pkg);
                 if (files) {
                     local(ctx, controller, r);
+                    dropUntimed(r);
                 }
                 // The sources after it, best first, each one asked only because the one before
                 // it came up empty. Every step falls through rather than stopping, which is the
@@ -901,6 +942,7 @@ public final class LyricSource {
                 // 2026-10-22). A file player's own file saying so is still believed, below.
                 if (r.source == SRC_LYRIC_INFO || r.source == SRC_LYRICON) {
                     dropPlaceholder(r);
+                    dropUntimed(r);
                 }
                 if (r.lines.isEmpty() && online && (id != null || q != null)) {
                     race(gen, pkg, ctx, id, dir, q, r);
@@ -908,6 +950,7 @@ public final class LyricSource {
                 // A catalogue that places the song and answers that it is instrumental has
                 // answered: the song has no words, and the next catalogue is not asked for some.
                 boolean instrumental = dropPlaceholder(r);
+                dropUntimed(r);
                 // The other two catalogues, in order, and only for a song the first three could
                 // not place. Sequential rather than raced: this is the slow path by definition,
                 // nothing above it is still running by the time it starts, and a song that
@@ -916,11 +959,13 @@ public final class LyricSource {
                 if (r.lines.isEmpty() && online && q != null && !instrumental) {
                     web(pkg, q, r);
                     instrumental = dropPlaceholder(r);
+                    dropUntimed(r);
                 }
                 // The file, for a streaming player, when nothing else had the song - and not
                 // when a catalogue placed it and said it has no words.
                 if (r.lines.isEmpty() && !files && !instrumental) {
                     local(ctx, controller, r);
+                    dropUntimed(r);
                 }
                 // A translation left on the line itself by its tag writer (#95) is hung on the
                 // line before anything reads it: borrow() must see it and not go and fetch a

@@ -239,6 +239,14 @@ public final class AppleLyrics {
             note("song " + id + " built with no lines");
             return;
         }
+        // Apple's unsynced lyric is lines with no time on them, every begin 0. Published, it
+        // stamped each line [00:00.000], the reader took that over the timed lyric the network
+        // had found, paired the lines off as translations of each other, and the lock screen
+        // sat on the last one for the whole song (2026-11-04). Not a lyric this can play.
+        if (untimed(lines)) {
+            note("song " + id + ": " + lines.size() + " lines with no timing, not published");
+            return;
+        }
         String payload = payload(id, lines, voices);
         sHeldId = id;
         sHeldPayload = payload;
@@ -343,6 +351,19 @@ public final class AppleLyrics {
     }
 
     /** How many lines carry a background vocal, for the account in the log. */
+    /**
+     * Every line at the same moment and no word timed: Apple's unsynced lyric. A getter this
+     * build does not have reads as 0 too (see num), which is the same lyric to a lock screen.
+     */
+    private static boolean untimed(List<Line> lines) {
+        if (lines.size() < 2) return false;
+        long first = lines.get(0).begin;
+        for (Line l : lines) {
+            if (l.begin != first || !l.words.isEmpty()) return false;
+        }
+        return true;
+    }
+
     private static int bgLines(List<Line> lines) {
         int n = 0;
         for (Line l : lines) {
