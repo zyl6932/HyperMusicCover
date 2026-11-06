@@ -35,3 +35,7 @@ local.properties
 # and Claude Code's per-user settings.
 /CLAUDE.local.md
 /.claude/settings.local.json
+
+# Screenshots and scratch output from on-device checks. Generated locally and only useful
+# while the check runs; the repo's readers have no use for them.
+/scratch/
