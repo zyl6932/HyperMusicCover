@@ -3,8 +3,7 @@
     <style name="Theme.HyperMusicCover" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/window_background</item>
         <item name="android:windowSplashScreenBackground">@color/window_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_animated</item>
-        <!-- The platform caps this at 1000ms and stops waiting for the icon past it. -->
-        <item name="android:windowSplashScreenAnimationDuration">700</item>
+        <!-- Static on purpose; see values/themes.xml. -->
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
     </style>
 </resources>

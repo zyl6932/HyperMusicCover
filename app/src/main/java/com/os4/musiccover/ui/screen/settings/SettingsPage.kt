@@ -42,6 +42,7 @@ import java.io.InputStreamReader
 fun SettingsPageView(
     isBlurEnabled: Boolean,
     extraBottomPadding: Dp = 0.dp,
+    onShowWelcome: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -112,6 +113,15 @@ fun SettingsPageView(
                         onClick = {
                             context.startActivity(Intent(context, ThemeActivity::class.java))
                         }
+                    )
+
+                    // The welcome page is shown by itself only on a first launch; this is how it
+                    // is seen again. It does not touch welcomeShown, so it never becomes a
+                    // second first launch.
+                    ArrowPreference(
+                        title = stringResource(R.string.welcome_show_again),
+                        summary = stringResource(R.string.welcome_show_again_summary),
+                        onClick = onShowWelcome,
                     )
 
                     var iconHidden by remember { mutableStateOf(LauncherIcon.isHidden(context)) }

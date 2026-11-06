@@ -16,6 +16,12 @@ data class AppSettings(
     val isLiquidGlass: Boolean = false,
     val isBlurEnabled: Boolean = true,
     val language: String = "",
+    /**
+     * Whether the welcome page has been through. It is not a setting anyone can switch off - the
+     * page is shown once on a first launch and again only from Settings - so it rides along here
+     * solely because this is where the app's own persisted state already lives.
+     */
+    val welcomeShown: Boolean = false,
 ) {
     fun toJson(): String = JSONObject().apply {
         put("themeMode", themeMode)
@@ -23,6 +29,7 @@ data class AppSettings(
         put("isLiquidGlass", isLiquidGlass)
         put("isBlurEnabled", isBlurEnabled)
         put("language", language)
+        put("welcomeShown", welcomeShown)
     }.toString(2)
 
     companion object {
@@ -31,6 +38,7 @@ data class AppSettings(
         private const val KEY_FLOATING_NAVBAR = "floating_navbar"
         private const val KEY_LIQUID_GLASS = "liquid_glass"
         private const val KEY_BLUR_ENABLED = "blur_enabled"
+        private const val KEY_WELCOME_SHOWN = "welcome_shown"
 
         fun fromJson(json: String): AppSettings = try {
             val obj = JSONObject(json)
@@ -40,6 +48,7 @@ data class AppSettings(
                 isLiquidGlass = obj.optBoolean("isLiquidGlass", false),
                 isBlurEnabled = obj.optBoolean("isBlurEnabled", true),
                 language = obj.optString("language", ""),
+                welcomeShown = obj.optBoolean("welcomeShown", true),
             )
         } catch (_: Exception) {
             AppSettings()
@@ -53,6 +62,14 @@ data class AppSettings(
                 isLiquidGlass = prefs.getBoolean(KEY_LIQUID_GLASS, false),
                 isBlurEnabled = prefs.getBoolean(KEY_BLUR_ENABLED, true),
                 language = LocaleHelper.getSavedLanguage(context).code,
+                // A first launch is the only one that has no settings at all. Anyone whose
+                // preferences predate this key has used the app for a while and should not be
+                // shown the welcome page just because it was added.
+                welcomeShown = if (prefs.contains(KEY_WELCOME_SHOWN)) {
+                    prefs.getBoolean(KEY_WELCOME_SHOWN, false)
+                } else {
+                    prefs.all.isNotEmpty()
+                },
             )
         }
 
@@ -62,6 +79,7 @@ data class AppSettings(
                 putBoolean(KEY_FLOATING_NAVBAR, settings.isFloatingNavbar)
                 putBoolean(KEY_LIQUID_GLASS, settings.isLiquidGlass)
                 putBoolean(KEY_BLUR_ENABLED, settings.isBlurEnabled)
+                putBoolean(KEY_WELCOME_SHOWN, settings.welcomeShown)
             }
             val lang = LocaleHelper.Language.entries.find { it.code == settings.language }
                 ?: LocaleHelper.Language.SYSTEM

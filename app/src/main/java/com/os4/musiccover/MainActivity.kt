@@ -55,6 +55,8 @@ import com.os4.musiccover.ui.screen.home.HomePageView
 import com.os4.musiccover.ui.screen.settings.SettingsPageView
 import com.os4.musiccover.ui.theme.AppTheme
 import com.os4.musiccover.ui.util.isInDarkTheme
+import com.os4.musiccover.ui.welcome.SplashIcon
+import com.os4.musiccover.ui.welcome.WelcomeScreen
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.FloatingNavigationBar
@@ -92,6 +94,24 @@ class MainActivity : ComponentActivity() {
     private var uiReady = false
 
     /**
+     * Where the system splash drew the app icon, read once as the splash goes away. The welcome
+     * page starts its own mark from there, so the hand-over does not jump; measured rather than
+     * assumed, because the platform draws that icon itself and a vendor can change where.
+     */
+    private val splashIcon = mutableStateOf<SplashIcon?>(null)
+
+    /**
+     * True once the system splash has actually gone. The welcome page waits for it instead of
+     * counting from the process start: the platform keeps the splash up past the icon animation,
+     * until the first frame is drawn and its own exit runs, so a timer started at launch played
+     * the page's entrance behind the splash and finished before it went.
+     */
+    private val splashGone = mutableStateOf<Boolean?>(null)
+
+    /** The platform splash object, kept only so the listener can be cleared on destroy. */
+    private var activitySplash: Any? = null
+
+    /**
      * Bumped every time this activity comes back to the front, read as a `remember` key in
      * `setContent` below, and handed to the home page as its resume signal.
      *
@@ -122,6 +142,19 @@ class MainActivity : ComponentActivity() {
         AppNightMode.apply(this, AppSettings.load(this).themeMode)
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        // The window usually takes the listener with it; clearing is for the times it does not
+        // (multi-window, a window kept alive past the activity). By reflection, like the rest of
+        // this: the type is SystemApi and not in the SDK this compiles against.
+        runCatching {
+            activitySplash?.let {
+                it.javaClass.getMethod("clearOnExitAnimationListener").invoke(it)
+            }
+        }
+        activitySplash = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         LsposedService.init(this)
@@ -141,9 +174,12 @@ class MainActivity : ComponentActivity() {
         // of this runs, so it can only be steered through the configuration. Normally a no-op -
         // it only does anything the first launch after the theme mode changes.
         AppNightMode.apply(this, savedSettings.themeMode)
-        // A config change (rotation, language) re-runs onCreate with no splash behind it,
-        // and holding a blank window then would be a delay the user just sees.
-        holdSplashUntilContentIsReady(splashIsShowing = savedInstanceState == null)
+        // A config change (rotation, language) re-runs onCreate with no splash behind it, but
+        // the hold only lasts until the composition is ready either way.
+        holdSplashUntilContentIsReady()
+        // Only a cold start has a splash to hand over; on a recreation the listener would wait
+        // for an exit that never comes, on a window that no longer exists.
+        if (savedInstanceState == null) readSplashIcon()
 
         setContent {
             // Re-read on the way back from the theme screen, which saves its own changes while
@@ -162,6 +198,16 @@ class MainActivity : ComponentActivity() {
             var isFloatingNavbar by remember(settingsEpoch) { mutableStateOf(settings.isFloatingNavbar) }
             var isLiquidGlass by remember(settingsEpoch) { mutableStateOf(settings.isLiquidGlass) }
             var isBlurEnabled by remember(settingsEpoch) { mutableStateOf(settings.isBlurEnabled) }
+            var welcomeShown by remember(settingsEpoch) { mutableStateOf(settings.welcomeShown) }
+            // Read once, not keyed on the epoch: a trip to Settings must not bring the page back
+            // by itself - only its own entry does that.
+            var showWelcome by remember { mutableStateOf(!settings.welcomeShown) }
+            // Whether this showing is the one that comes out of the splash: the first launch,
+            // and only then - not a replay from settings, not a recreation. Cleared when the
+            // page closes, so a later replay never flies the mark in from the old splash.
+            var welcomeFromSplash by remember {
+                mutableStateOf(!settings.welcomeShown && savedInstanceState == null)
+            }
 
             fun persistState() {
                 AppSettings.save(
@@ -172,6 +218,7 @@ class MainActivity : ComponentActivity() {
                         isLiquidGlass = isLiquidGlass,
                         isBlurEnabled = isBlurEnabled,
                         language = LocaleHelper.getSavedLanguage(this@MainActivity).code,
+                        welcomeShown = welcomeShown,
                     )
                 )
             }
@@ -191,19 +238,152 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     UpdateCheck.refresh(this@MainActivity)
                 }
-                MainScreen(
-                    themeMode = themeMode,
-                    isFloatingNavbar = isFloatingNavbar,
-                    isLiquidGlass = isLiquidGlass,
-                    isBlurEnabled = isBlurEnabled,
-                    resumeKey = settingsEpoch,
-                    onThemeModeChange = { themeMode = it; persistState() },
-                    onFloatingNavbarChange = { isFloatingNavbar = it; persistState() },
-                    onLiquidGlassChange = { isLiquidGlass = it; persistState() },
-                    onBlurEnabledChange = { isBlurEnabled = it; persistState() },
-                )
+                Box(Modifier.fillMaxSize()) {
+                    MainScreen(
+                        themeMode = themeMode,
+                        isFloatingNavbar = isFloatingNavbar,
+                        isLiquidGlass = isLiquidGlass,
+                        isBlurEnabled = isBlurEnabled,
+                        resumeKey = settingsEpoch,
+                        onThemeModeChange = { themeMode = it; persistState() },
+                        onFloatingNavbarChange = { isFloatingNavbar = it; persistState() },
+                        onLiquidGlassChange = { isLiquidGlass = it; persistState() },
+                        onBlurEnabledChange = { isBlurEnabled = it; persistState() },
+                        onShowWelcome = {
+                            welcomeFromSplash = false
+                            showWelcome = true
+                        },
+                    )
+                    // Over the home page rather than instead of it: the way out is the button
+                    // opening a circle onto what is already drawn underneath.
+                    if (showWelcome) {
+                        WelcomeScreen(
+                            splashIcon = splashIcon.value,
+                            splashGone = { splashGone.value },
+                            fromSplash = welcomeFromSplash,
+                            onDone = {
+                                welcomeShown = true
+                                welcomeFromSplash = false
+                                persistState()
+                                showWelcome = false
+                            },
+                        )
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * Takes over the splash's exit: reads the icon's place and size off the splash view, lets
+     * the composition see them, and only then lets the splash go. Past API 31 the splash hands
+     * its view out here instead of animating itself away.
+     */
+    private fun readSplashIcon() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        try {
+            // Built at run time: R8 rewrites constant Class.forName arguments into this app's
+            // own obfuscated names (see the module's notes on the same trap).
+            //
+            // From Android 15 the splash is an object reached through the activity -
+            // Activity.getSplashScreen() - and its listener is a method on that object; the old
+            // static SplashScreen.setOnExitAnimationListener(Window, listener) is gone, which is
+            // why asking for it threw NoSuchMethodException.
+            val activityClass = Class.forName(listOf("android", "app", "Activity").joinToString("."))
+            val splash = activityClass.getMethod("getSplashScreen").invoke(this) ?: return
+            activitySplash = splash
+            val splashClass = Class.forName(listOf("android", "window", "SplashScreen").joinToString("."))
+            // The listener is a nested interface: its binary name uses a dollar, not a dot.
+            val listenerClass = Class.forName(splashClass.name + "\$OnExitAnimationListener")
+            // The platform hands its splash view over here instead of animating it away. Both
+            // the listener and the provider are SystemApi: present at run time, missing from the
+            // public SDK that this compiles against.
+            val listener = java.lang.reflect.Proxy.newProxyInstance(
+                listenerClass.classLoader,
+                arrayOf(listenerClass),
+            ) { _, method, args ->
+                if (method.name == "onSplashScreenExit" && args != null && args.isNotEmpty()) {
+                    android.util.Log.i(SPLASH_LOG, "splash exit callback")
+                    // The argument is the splash's own view; its icon is asked for directly. On
+                    // a cold start the first frame can be asked before the icon has been laid
+                    // out, so an empty answer is retried a frame later.
+                    val splashView = args[0] as? View ?: return@newProxyInstance null
+                    var attempts = 0
+                    fun take() {
+                        val icon = runCatching {
+                            splashView.javaClass.getMethod("getIconView").invoke(splashView) as? View
+                        }.getOrNull()
+                        if ((icon == null || icon.width <= 0) && attempts < 3) {
+                            attempts++
+                            window.decorView.postDelayed({ take() }, 16)
+                            return
+                        }
+                        if (icon != null && icon.width > 0) {
+                            val at = IntArray(2)
+                            icon.getLocationOnScreen(at)
+                            android.util.Log.i(
+                                SPLASH_LOG,
+                                "icon w=${icon.width} h=${icon.height} at=${at[0]},${at[1]} (attempts=$attempts)",
+                            )
+                            splashIcon.value = SplashIcon(
+                                centerX = at[0] + icon.width / 2f,
+                                centerY = at[1] + icon.height / 2f,
+                                size = icon.width.toFloat(),
+                            )
+                        }
+                        // One frame for the welcome page to take the new place before the splash
+                        // goes, so the mark is never drawn in the wrong spot.
+                        window.decorView.postDelayed({
+                            val removed = runCatching { splashView.javaClass.getMethod("remove").invoke(splashView) }
+                            android.util.Log.i(SPLASH_LOG, "splash exit: removed=$removed")
+                            // The view letting go of the window is the splash going, and it is
+                            // what the page starts on. remove() takes effect on the next frame
+                            // or two - measured at 27ms - so there is nothing to wait for past
+                            // that. A fixed wait after remove() (300ms was tried) only left
+                            // the mark standing still on an empty screen before it flew.
+                            val removedAt = SystemClock.uptimeMillis()
+                            val done = object : Runnable {
+                                override fun run() {
+                                    val elapsed = SystemClock.uptimeMillis() - removedAt
+                                    // Not for ever: a view that never detaches would hold the
+                                    // page still for the rest of the launch.
+                                    if (splashView.isAttachedToWindow &&
+                                        elapsed < SPLASH_DETACH_MAX_MS
+                                    ) {
+                                        window.decorView.postDelayed(this, 16)
+                                        return
+                                    }
+                                    android.util.Log.i(SPLASH_LOG, "splash gone after ${elapsed}ms")
+                                    splashGone.value = true
+                                }
+                            }
+                            window.decorView.postDelayed(done, 16)
+                        }, 32)
+                    }
+                    take()
+                }
+                null
+            }
+            splashClass
+                .getMethod("setOnExitAnimationListener", listenerClass)
+                .invoke(splash, listener)
+            // There is a splash and it is being waited for. Without this the state stays null,
+            // which reads as "no signal" and lets the entrance play behind the splash.
+            splashGone.value = false
+        } catch (e: Throwable) {
+            // No listener: the splash goes by itself and the welcome page starts from the
+            // platform's own numbers instead - splashGone stays null, which the page reads as
+            // "no signal".
+            android.util.Log.w(SPLASH_LOG, "splash listener unavailable", e)
+        }
+        // The listener is the signal. This is only for a platform that takes the listener and
+        // never calls it, which would otherwise leave the page waiting for ever.
+        window.decorView.postDelayed({
+            if (splashGone.value != true) {
+                android.util.Log.w(SPLASH_LOG, "splash listener never fired; falling back")
+                splashGone.value = true
+            }
+        }, SPLASH_GONE_TIMEOUT_MS)
     }
 
     /**
@@ -215,20 +395,14 @@ class MainActivity : ComponentActivity() {
      * The timeout is the escape hatch: a launch must never be held hostage by a composition that
      * is slower than expected, so past it the window is shown with whatever it has.
      */
-    private fun holdSplashUntilContentIsReady(splashIsShowing: Boolean) {
+    private fun holdSplashUntilContentIsReady() {
         val content = findViewById<View>(android.R.id.content)
-        val start = SystemClock.uptimeMillis()
-        // Compose is usually ready before the record has finished spinning. Handing over then
-        // would cut the icon animation off mid-turn, so the splash also stays for as long as the
-        // animation lasts - it is the whole point of having drawn one.
-        val minimumHold = if (splashIsShowing) SPLASH_ANIMATION_MS else 0L
         content.viewTreeObserver.addOnPreDrawListener(
             object : ViewTreeObserver.OnPreDrawListener {
                 override fun onPreDraw(): Boolean {
                     // Cancelling the draw makes ViewRootImpl schedule another traversal, so this
-                    // re-asks every frame on its own until both conditions hold.
+                    // re-asks every frame on its own until the condition holds.
                     if (!uiReady) return false
-                    if (SystemClock.uptimeMillis() - start < minimumHold) return false
                     content.viewTreeObserver.removeOnPreDrawListener(this)
                     return true
                 }
@@ -238,9 +412,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
-        /** Matches windowSplashScreenAnimationDuration in themes.xml. */
-        const val SPLASH_ANIMATION_MS = 700L
         const val SPLASH_HOLD_MAX_MS = 1500L
+
+        /** How long to wait for a splash listener that was accepted but never called. */
+        const val SPLASH_GONE_TIMEOUT_MS = 2000L
+
+        const val SPLASH_LOG = "HMC-Splash"
+
+        /** The longest wait for the splash view to leave the window on its own. */
+        const val SPLASH_DETACH_MAX_MS = 1000L
     }
 }
 
@@ -255,6 +435,7 @@ private fun MainScreen(
     onFloatingNavbarChange: (Boolean) -> Unit,
     onLiquidGlassChange: (Boolean) -> Unit,
     onBlurEnabledChange: (Boolean) -> Unit,
+    onShowWelcome: () -> Unit,
 ) {
     val context = LocalContext.current
     val pagerState = rememberPagerState(pageCount = { 4 })
@@ -390,6 +571,7 @@ private fun MainScreen(
                     2 -> SettingsPageView(
                         isBlurEnabled = isBlurEnabled,
                         extraBottomPadding = navBarHeight,
+                        onShowWelcome = onShowWelcome,
                     )
 
                     3 -> AboutPageContent(

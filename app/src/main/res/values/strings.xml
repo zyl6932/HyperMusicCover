@@ -34,6 +34,8 @@
     <string name="settings_interface">界面</string>
     <string name="settings_theme">主题</string>
     <string name="settings_theme_summary">主题模式、导航栏样式与背景模糊</string>
+    <string name="welcome_show_again">查看欢迎页</string>
+    <string name="welcome_show_again_summary">重新播放首次启动时的开屏动画</string>
     <string name="settings_language">语言</string>
     <string name="settings_data">数据管理</string>
     <string name="theme_mode">主题模式</string>

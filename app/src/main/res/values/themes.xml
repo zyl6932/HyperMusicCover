@@ -9,8 +9,13 @@
     <style name="Theme.HyperMusicCover" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_background</item>
         <item name="android:windowSplashScreenBackground">@color/window_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_animated</item>
-        <!-- The platform caps this at 1000ms and stops waiting for the icon past it. -->
-        <item name="android:windowSplashScreenAnimationDuration">700</item>
+        <!--
+            A static vector, deliberately: HyperOS draws an animated splash icon on a
+            SurfaceView and, when the app takes over the splash exit, moves that SurfaceView into
+            the app window while the splash window above it is still an opaque black layer. For a
+            frame the icon is in neither and visibly blinks. Static-icon splash windows on this
+            build have no SurfaceView in the window logs, so there is nothing to move.
+        -->
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
     </style>
 </resources>

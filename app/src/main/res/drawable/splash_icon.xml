@@ -10,7 +10,9 @@
     scaled by 72/108 so it sits inside that square at the same proportions it has there.
 
     Nothing may animate outside the rounded square: growing the background ran it into the frame
-    and cut its edges off. Only the record turns; see splash_icon_animated.xml.
+    and cut its edges off. The record does not turn here - an animated icon is drawn on a
+    SurfaceView by HyperOS, and that SurfaceView is what blinks when the splash hands over (see
+    values/themes.xml). The welcome page picks the same artwork up at the same angle.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
@@ -20,28 +22,33 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <path android:pathData="M38,18h32a20,20 0 0 1 20,20v32a20,20 0 0 1 -20,20h-32a20,20 0 0 1 -20,-20v-32a20,20 0 0 1 20,-20z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="18" android:startY="18"
-                android:endX="90" android:endY="90"
-                android:type="linear">
-                <item android:offset="0" android:color="#FF2B3A8F" />
-                <item android:offset="0.55" android:color="#FF6C3BC4" />
-                <item android:offset="1" android:color="#FFC2478F" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
     <group
-        android:name="art"
+        android:name="mark"
         android:pivotX="54"
-        android:pivotY="54"
-        android:scaleX="0.6667"
-        android:scaleY="0.6667">
-        <clip-path
-            android:name="mask"
-            android:pathData="M38,18h32a20,20 0 0 1 20,20v32a20,20 0 0 1 -20,20h-32a20,20 0 0 1 -20,-20v-32a20,20 0 0 1 20,-20z" />
+        android:pivotY="54">
+
+        <path android:pathData="M38,18h32a20,20 0 0 1 20,20v32a20,20 0 0 1 -20,20h-32a20,20 0 0 1 -20,-20v-32a20,20 0 0 1 20,-20z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="18" android:startY="18"
+                    android:endX="90" android:endY="90"
+                    android:type="linear">
+                    <item android:offset="0" android:color="#FF2B3A8F" />
+                    <item android:offset="0.55" android:color="#FF6C3BC4" />
+                    <item android:offset="1" android:color="#FFC2478F" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <group
+            android:name="art"
+            android:pivotX="54"
+            android:pivotY="54"
+            android:scaleX="0.6667"
+            android:scaleY="0.6667">
+            <clip-path
+                android:name="mask"
+                android:pathData="M38,18h32a20,20 0 0 1 20,20v32a20,20 0 0 1 -20,20h-32a20,20 0 0 1 -20,-20v-32a20,20 0 0 1 20,-20z" />
 
         <!-- the sleeve, peeking out behind the record -->
         <path
@@ -95,6 +102,7 @@
             <path
                 android:pathData="M62,55.5m-5,0a5,5 0 1,0 10,0a5,5 0 1,0 -10,0"
                 android:fillColor="#FF6C3BC4" />
+        </group>
         </group>
     </group>
 </vector>
