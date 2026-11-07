@@ -336,6 +336,17 @@ public class Main extends XposedModule {
 
     /** The album cover is the wallpaper: depth cut-out hidden and the clock collapsed. */
     static volatile boolean sCoverMode;
+
+    /**
+     * The cover this module put up for a doze, because there was no card to put one up for it.
+     *
+     * Pressing power in an app goes straight to the AOD: the keyguard is never laid out, so the
+     * media card - which is what turns cover mode on everywhere else - is never bound, and the
+     * doze showed the OEM's full clock with no lyrics (#134; the same report read as "先进一下
+     * 锁屏再息屏就正常"). The cover is entered at the start of that sleep and taken back down at
+     * the wake, so it never outlives the one doze it was for.
+     */
+    static volatile boolean sCoverForDoze;
     /**
      * How tall the collapsed clock's digits are, in dp.
      *
@@ -636,6 +647,9 @@ public class Main extends XposedModule {
             Xp.hookAll(id, owner, method, chain -> {
                 LockLyrics.lockScreenLeaving(tag);
                 main().post(ImmersiveHost::onLockScreenLeaving);
+                // A cover the doze was given has no card to take it down again: the unlock is
+                // what does it (see coverForDoze). A card's own cover is unaffected.
+                main().post(Main::leaveDozeCover);
                 // At once rather than on the window's next pre-draw (coverCardVisible says why).
                 main().post(CoverCardLayer::hideNow);
                 CoverMorphLayer.cancel();
@@ -972,6 +986,10 @@ public class Main extends XposedModule {
                     @Override
                     public void run() {
                         CoverMorphLayer.cancel();
+                        // Nothing has the clock: no card was ever bound, because nothing laid
+                        // the keyguard out. Give the doze a cover before the hand-over below
+                        // asks whether the clock is held (#134).
+                        if (!clockHeld()) coverForDoze();
                         if (clockHeld()) ClockCollapse.toAod();
                     }
                 });
@@ -4279,6 +4297,56 @@ public class Main extends XposedModule {
         };
         if (Looper.myLooper() == Looper.getMainLooper()) r.run();
         else main().post(r);
+    }
+
+    /**
+     * The cover, for a doze nobody opened the lock screen for.
+     *
+     * See {@link #sCoverForDoze}: with the card as the only switch, pressing power in an app left
+     * the doze entirely the OEM's - its full clock and no lyrics - while the same phone showed
+     * both when the lock screen had been up first. Entered here at the start of the sleep, so the
+     * hand-over finds the clock held and the doze drawn in the cover's look from its first frame.
+     *
+     * Gated on the one condition that makes the doze the cover's business at all: the FULL-SCREEN
+     * AOD, which is the lock screen dimmed. The plain doze is the OEM's and is left alone, and so
+     * is anything the user has switched off.
+     */
+    static void coverForDoze() {
+        if (!Settings.COVER_FEATURE.on() || sCoverMode || sCoverForDoze) return;
+        // A card of its own is the ordinary switch; it is only missing when nothing laid the
+        // keyguard out, which is exactly the case this exists for.
+        if (MediaCard.sCardShowing) return;
+        if (!ClockCollapse.keepsFullAod()) return;
+        if (sContainer == null) return;
+        MediaController c = sWatched != null ? sWatched : pickController(sAppCtx);
+        boolean playing;
+        try {
+            playing = c != null && c.getPlaybackState() != null
+                    && c.getPlaybackState().getState() == android.media.session.PlaybackState.STATE_PLAYING;
+        } catch (Throwable t) {
+            return;
+        }
+        if (!playing) return;
+        sCoverForDoze = true;
+        sTrackKey = trackKey(c);
+        Xp.log(TAG + "cover for a doze with no card: " + sTrackKey);
+        enterCoverMode(false);
+        // Non-fresh: the artwork this song already put on the wallpaper is the one the doze
+        // wants, and asking for it again only costs the compose.
+        CoverPush.pushArtAsync(true, false);
+    }
+
+    /**
+     * The doze is over. Takes back the cover {@link #coverForDoze} put up, unless a card has come
+     * up in the meantime - then cover mode is the card's again and this must not touch it.
+     */
+    static void leaveDozeCover() {
+        if (!sCoverForDoze) return;
+        sCoverForDoze = false;
+        if (MediaCard.sCardShowing || !sCoverMode) return;
+        Xp.log(TAG + "the doze is over - leaving the cover it was given");
+        sTrackKey = "";
+        setCoverEnabled(false, false);
     }
 
     /**
