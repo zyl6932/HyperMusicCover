@@ -678,7 +678,7 @@ internal class MiniPlayerController(
         }
         // With one island out as its card, a tap on another opens it in that one's stead.
         if (key != MUSIC_ISLAND || expandedKey() != null) {
-            expandNote(key)
+            tapIsland(key)
             return
         }
         val oldBig = selectedIsland
@@ -1510,7 +1510,7 @@ internal class MiniPlayerController(
         schedulePosition()
         pendingExpand?.let { key ->
             pendingExpand = null
-            if (selectedIsland == key) expandNote(key)
+            if (selectedIsland == key) tapIsland(key)
         }
     }
 
@@ -4667,7 +4667,27 @@ internal class MiniPlayerController(
     }
 
     /** What a tap on an island does: the music opens the cover, a notification its row. */
+    private fun notificationClicker(row: View): View.OnClickListener? = runCatching {
+        Xp.getObjectField(Xp.callMethod(row, "getInjector"), "clickListener") as? View.OnClickListener
+    }.getOrNull()
+
     private fun tapIsland(key: String) {
+        val note = LockIslands.noteFor(key)
+        if (note != null && !note.redacted &&
+            (note.timer != null || note.category == android.app.Notification.CATEGORY_ALARM)) {
+            val row = rowFor(key)
+            val clicker = row?.let(::notificationClicker)
+            if (row != null && clicker != null && runCatching { clicker.onClick(row) }.isSuccess) {
+                MiniPlayerRuntime.noteTouch("clock entry: notification clicker invoked")
+                return
+            }
+            if (note.intent?.let { runCatching { it.send() }.isSuccess } == true) {
+                MiniPlayerRuntime.noteTouch("clock entry: content intent sent")
+                return
+            }
+            // No guessed Activity; keep the existing native controls as the fallback.
+            MiniPlayerRuntime.noteTouch("clock entry: native card fallback")
+        }
         if (key == MUSIC_ISLAND) openCover() else expandNote(key)
     }
 
@@ -8481,7 +8501,7 @@ internal class MiniPlayerController(
             {},
             {},
             {},
-            { expandNote(note.key) },
+            { tapIsland(note.key) },
         )
         showTimer(view, note.timer)
         showFocusAnim(view, note.anim, note.live)
