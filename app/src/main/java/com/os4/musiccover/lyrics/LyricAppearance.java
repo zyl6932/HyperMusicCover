@@ -4,7 +4,7 @@ import org.json.JSONObject;
 
 /** Persisted drawing preferences; defaults reproduce upstream colors and opacity. */
 public final class LyricAppearance {
-    public static final int OFFICIAL = 0, COVER = 1, CUSTOM = 2;
+    public static final int OFFICIAL = 0, COVER = 1, CUSTOM = 2, SYSTEM = 3;
     public static final LyricAppearance DEFAULT = new LyricAppearance(0, 0, -1, -1, 1f, 0.72f);
     public final int mainMode, bgMode, mainColor, bgColor;
     public final float mainOpacity, bgOpacity;
@@ -19,7 +19,7 @@ public final class LyricAppearance {
         this.bgOpacity = opacity(bgOpacity, 0.72f);
     }
 
-    private static int mode(int value) { return value >= OFFICIAL && value <= CUSTOM ? value : OFFICIAL; }
+    private static int mode(int value) { return value >= OFFICIAL && value <= SYSTEM ? value : OFFICIAL; }
     private static float opacity(float value, float fallback) {
         return Float.isFinite(value) ? Math.max(0f, Math.min(1f, value)) : fallback;
     }
