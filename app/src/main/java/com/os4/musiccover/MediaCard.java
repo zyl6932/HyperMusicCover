@@ -612,6 +612,9 @@ public final class MediaCard {
         }
         if (showing) {
             sCardShowing = true;
+            // The card is here now, so a cover the doze was given is the card's business from
+            // here on - it must not be taken down as if it belonged to the doze any more.
+            Main.sCoverForDoze = false;
             MiniPlayerRuntime.refresh();
             applyCardState();
         } else {
@@ -650,6 +653,15 @@ public final class MediaCard {
             return;
         }
         if (!sCardShowing) {
+            // A cover put up for a doze has no card to go away: it is the doze's, and the
+            // unlock (Main.leaveDozeCover) is what ends it. Reading "no card" as a dismissal
+            // here would take it down the moment any session callback ran.
+            if (Main.sCoverForDoze) {
+                // Belt and braces for a keyguard that went without the leaving hook firing:
+                // lit screen with nothing locked in front of it means the doze is over.
+                if (Main.screenOnCached() && !Main.keyguardShowing()) Main.leaveDozeCover();
+                if (Main.sCoverForDoze) return;
+            }
             Main.sTrackKey = "";
             // The card going away is what clears a tap-dismissed cover - but only when the music
             // went with it.

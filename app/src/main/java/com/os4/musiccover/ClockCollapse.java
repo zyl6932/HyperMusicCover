@@ -106,6 +106,15 @@ public final class ClockCollapse {
     }
 
     /**
+     * Whether the doze about to start is the full-screen one - the lock screen dimmed, which is
+     * the only doze this module draws in. Read before a sleep by whoever decides whether the
+     * doze is worth giving a cover to (Main.coverForDoze).
+     */
+    static boolean keepsFullAod() {
+        return keepInAod();
+    }
+
+    /**
      * Set on the binder thread the moment the keyguard hears it is waking, before the OEM lays
      * the lock screen out again. The pre-draw of the first lock screen frame reads it, so the
      * entry starts in the same frame and no frame of the OEM's own full-size clock is drawn.
@@ -574,6 +583,12 @@ public final class ClockCollapse {
                 sFromUnit = sDrawnUnit;
                 sFromDate = sDrawnDate;
                 fromDrawn = true;
+            } else if (Main.sCoverForDoze) {
+                // The cover was entered for this doze and has not drawn a frame yet (#134): the
+                // clock on screen is still the OEM's full-size one, and measuring it would hand
+                // that size to a doze meant to hold the cover's. Left empty on purpose - frame()
+                // derives the cover's own pose on the doze's box and writes it.
+                sFromTop = sFromUnit = sFromDate = Float.NaN;
             } else {
                 captureFrom();
             }
@@ -611,13 +626,23 @@ public final class ClockCollapse {
                 return;
             case OFF:
                 if (!Main.clockHeld()) return;
-                // Cover mode without our clock - unlocked, say. Nothing to walk back; watch the
-                // AOD so the wake has a start.
-                sAodHeld = false;
+                // Nothing of ours is on the clock yet. Two ways here, and the full-screen AOD
+                // says which:
+                //
+                // - That doze IS the lock screen dimmed, so it keeps the cover's clock whether or
+                //   not the keyguard was ever "shown" (pressing power in an app never shows it,
+                //   which is exactly the case this is for). Latched held, and the pose is put on
+                //   by frame() from the box the doze draws - there is none to keep yet (#134).
+                // - Anything else has no lock screen under the clock to hold it on. Nothing to
+                //   walk back; watch the AOD so the wake has a start.
+                boolean underKeyguard = keepInAod() && Main.sContainer != null;
+                sAodHeld = underKeyguard;
                 sPhase = Phase.AOD;
                 sAodTop = Float.NaN;
                 install();
-                Xp.log(TAG + "clock: watching the AOD");
+                Xp.log(TAG + (underKeyguard
+                        ? "clock: into the AOD with nothing placed, holding the cover pose"
+                        : "clock: watching the AOD"));
                 return;
             default:
                 break;
@@ -2303,19 +2328,47 @@ public final class ClockCollapse {
                 sAodDate = sFromDate;
                 return;
             } else if (sAodHeld) {
-                // A held doze whose pose went missing. Do NOT fall through to the hand-back
-                // below: clearTransforms() is exactly what gives the OEM its full-size clock
-                // back, which is the bug this branch exists to prevent. The transforms survived
-                // the hand-over and still describe the cover's clock, so they are kept; the y
-                // they were written against goes back on the OEM so its own relayout does not
-                // move them. sAodTop is cleared so the wake captures a fresh pose instead of
-                // starting from a doze pose that was never recorded.
+                // A held doze whose pose went missing.
+                //
+                // Two ways here, and they are not the same doze. One is a cover already on the
+                // lock screen whose pose could not be measured at sleep - the transforms on the
+                // clock are ours and still describe the cover's clock, so they must be kept and
+                // the hand-back below must not run.
+                //
+                // The other is #134: the cover came up while the display was already dozing (the
+                // first lock taken straight out of the player - the card is bound only once the
+                // keyguard is laid out, which is after the hand-over), so there is no pose AND no
+                // transform on the clock. Keeping "the cover's transforms" then keeps nothing, and
+                // the OEM's full-size clock is what the doze shows, with the lyrics left without a
+                // clock to sit under. The pose is derived here instead, from the box the doze is
+                // drawing - the pose the lock screen would have had - and written on.
                 AodColour.holdAodColour();
                 sCenterK = 1f;
                 if (!Float.isNaN(sAodHoldY)) hold(sAodHoldY);
                 sAodTop = Float.NaN;
                 sAodUnit = Float.NaN;
                 sAodDate = Float.NaN;
+                if (m.unit > 0f) {
+                    CoverPose p = coverPose(m, Phase.AOD);
+                    if (!Float.isNaN(p.top) && !Float.isNaN(p.unit) && p.unit > 0f) {
+                        sFromTop = p.top;
+                        sFromUnit = p.unit;
+                        sFromDate = p.date;
+                        // Recorded, not cleared: this pose IS what the doze is showing now, so
+                        // the wake starts from it rather than capturing a fresh one.
+                        sAodTop = p.top;
+                        sAodUnit = p.unit;
+                        sAodDate = p.date;
+                        writePose(m, p.top, p.unit, p.date, false);
+                        if (!sAodPoseWarned) {
+                            sAodPoseWarned = true;
+                            Xp.log(TAG + "clock: held doze had no pose, put the cover's on it (top="
+                                    + Main.r1(p.top) + " unit=" + Main.r1(p.unit) + " date="
+                                    + Main.r1(p.date) + ")");
+                        }
+                        return;
+                    }
+                }
                 if (!sAodPoseWarned) {
                     sAodPoseWarned = true;
                     Xp.w(TAG + "clock: held doze has no pose, keeping the cover's transforms");
@@ -2380,60 +2433,18 @@ public final class ClockCollapse {
             sFromDate = m.date == null ? Float.NaN : m.dateTop + m.date.getTranslationY();
         }
 
-        // The cover pose, live.
-        float d = Main.density();
-        float full;
-        android.os.Trace.beginSection("MC c.full");
-        try { full = fullUnitFor(phase, m); } finally { android.os.Trace.endSection(); }
-        float size = Settings.CLOCK_SIZE.get();
-        float base = sizeBase(m, full);
-        float coverUnit = Float.isNaN(size) ? Settings.CLOCK_HEIGHT.get() * d : size * base;
-        if (coverUnit > full) coverUnit = full;
-        if (coverUnit < Main.MIN_CLOCK_K * base) coverUnit = Main.MIN_CLOCK_K * base;
-        // The date and the clock move as one block.
-        float offset = Settings.CLOCK_OFFSET.get() * d;
-        float coverDate, coverTop;
-        if (m.anchored) {
-            coverDate = coverDateY(m.date) + offset;
-            coverTop = coverDate + m.dateH + Main.CLOCK_GAP_DP * d;
-        } else {
-            // The whole face - the time and its companions, in the OEM's own arrangement - starts
-            // on the line the anchored styles put their date on. NOT where the OEM has the ink:
-            // these styles answer the held y with a plain translation of the whole clock - 716px
-            // up on magazine C - and taking that as the pose put the clock off the top of the
-            // screen. The companions are placed from the clock in writePose; here only how far
-            // the topmost of them reaches above the time's ink.
-            coverTop = coverDateY(null) + offset + leadAbove(m, coverUnit / m.unit);
-            coverDate = Float.NaN;
-        }
-
-        // Notifications. The OEM squeezes its full clock out of their way - down to its minimum
-        // height, then up - and ours gets the same rule, off the same number: the notifY the OEM
-        // keeps reporting while we hold it is the screen y the stack starts at.
-        float room;
-        android.os.Trace.beginSection("MC c.room");
-        try { room = roomBelow(); } finally { android.os.Trace.endSection(); }
-        if (!Float.isNaN(room)) {
-            float ratio = m.box.height() / m.unit;
-            float bottom = coverTop + coverUnit * ratio;
-            if (bottom > room) {
-                float minUnit = coverUnit * minSqueeze();
-                float fit = (room - coverTop) / ratio;
-                float u = Math.max(minUnit, Math.min(coverUnit, fit));
-                float overflow = coverTop + u * ratio - room;
-                coverUnit = u;
-                if (overflow > 0f) {
-                    coverTop -= overflow;
-                    if (!Float.isNaN(coverDate)) coverDate -= overflow;
-                }
-            }
-        }
+        // The cover pose, live. Also what a held doze with no measured pose is given - see the
+        // AOD branch above and coverPose().
+        CoverPose cp = coverPose(m, phase);
+        float coverTop = cp.top, coverUnit = cp.unit, coverDate = cp.date;
+        float full = cp.full;
+        float room = cp.room;
 
         float top, unit, date, card, glass;
         if (phase == Phase.ON) {
-            top = coverTop;
-            unit = coverUnit;
-            date = coverDate;
+            top = cp.top;
+            unit = cp.unit;
+            date = cp.date;
             card = 1f;
             glass = 1f;
         } else {
@@ -2520,6 +2531,81 @@ public final class ClockCollapse {
         android.os.Trace.beginSection("MC c.glass"); try { ClockGlass.applyGlassMorph(glass); } finally { android.os.Trace.endSection(); }
         // The colour band describes the lock screen; the AOD's layout is not that.
         if (!(phase == Phase.EXIT && sExitToAod)) { android.os.Trace.beginSection("MC c.band"); try { Main.updateColorBand(); } finally { android.os.Trace.endSection(); } }
+    }
+
+    /** The cover's pose on one box: ink top, one row's height, date top, and how they were got. */
+    private static final class CoverPose {
+        float top, unit, date;
+        /** The style's full clock, and the room the rows leave - what notePose() reports. */
+        float full, room;
+    }
+
+    /** Reused: coverPose() runs on every frame of a transition and must not allocate. */
+    private static final CoverPose COVER_POSE = new CoverPose();
+
+    /**
+     * Where the cover draws its clock, on the box [m] describes.
+     *
+     * One place, because two things place it now: the settled look (Phase.ON), and a held doze
+     * whose pose was never measured when the screen went off. The second is #134 - the first
+     * lock taken straight out of the player, where the keyguard has not drawn a clock yet, so
+     * there is nothing to capture and the doze used to keep transforms that had never been
+     * written. The OEM's full-size clock is what showed. Derived from the live box rather than
+     * remembered, so what the doze gets is the pose the lock screen would have had.
+     */
+    private static CoverPose coverPose(Live m, Phase phase) {
+        CoverPose p = COVER_POSE;
+        float d = Main.density();
+        android.os.Trace.beginSection("MC c.full");
+        try { p.full = fullUnitFor(phase, m); } finally { android.os.Trace.endSection(); }
+        float size = Settings.CLOCK_SIZE.get();
+        float base = sizeBase(m, p.full);
+        float unit = Float.isNaN(size) ? Settings.CLOCK_HEIGHT.get() * d : size * base;
+        if (unit > p.full) unit = p.full;
+        if (unit < Main.MIN_CLOCK_K * base) unit = Main.MIN_CLOCK_K * base;
+        // The date and the clock move as one block.
+        float offset = Settings.CLOCK_OFFSET.get() * d;
+        float date, top;
+        if (m.anchored) {
+            date = coverDateY(m.date) + offset;
+            top = date + m.dateH + Main.CLOCK_GAP_DP * d;
+        } else {
+            // The whole face - the time and its companions, in the OEM's own arrangement - starts
+            // on the line the anchored styles put their date on. NOT where the OEM has the ink:
+            // these styles answer the held y with a plain translation of the whole clock - 716px
+            // up on magazine C - and taking that as the pose put the clock off the top of the
+            // screen. The companions are placed from the clock in writePose; here only how far
+            // the topmost of them reaches above the time's ink.
+            top = coverDateY(null) + offset + leadAbove(m, unit / m.unit);
+            date = Float.NaN;
+        }
+
+        // Notifications. The OEM squeezes its full clock out of their way - down to its minimum
+        // height, then up - and ours gets the same rule, off the same number: the notifY the OEM
+        // keeps reporting while we hold it is the screen y the stack starts at.
+        float room;
+        android.os.Trace.beginSection("MC c.room");
+        try { room = roomBelow(); } finally { android.os.Trace.endSection(); }
+        if (!Float.isNaN(room) && m.unit > 0f) {
+            float ratio = m.box.height() / m.unit;
+            float bottom = top + unit * ratio;
+            if (bottom > room) {
+                float minUnit = unit * minSqueeze();
+                float fit = (room - top) / ratio;
+                float u = Math.max(minUnit, Math.min(unit, fit));
+                float overflow = top + u * ratio - room;
+                unit = u;
+                if (overflow > 0f) {
+                    top -= overflow;
+                    if (!Float.isNaN(date)) date -= overflow;
+                }
+            }
+        }
+        p.top = top;
+        p.unit = unit;
+        p.date = date;
+        p.room = room;
+        return p;
     }
 
     /**
