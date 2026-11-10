@@ -207,6 +207,11 @@ object ModuleBridge {
         /** Whether the module found the quick-open menu on this phone. */
         val fpQuickOk: Boolean = false,
         /**
+         * The ids (`feature:xxx`) of what did not go into SystemUI at start: failed, hooked
+         * nothing, or skipped for a missing clock container. Empty from a module too old to say.
+         */
+        val featuresMissing: List<String> = emptyList(),
+        /**
          * The notification-shade settings, keyed exactly as the module's own CFG_KEYS.
          *
          * Read out of the reply by PREFIX rather than field by field. The module generates its
@@ -984,6 +989,7 @@ object ModuleBridge {
             fpQuick = b.getString("fpquick") ?: "{}",
             fpQuickSystem = b.getBoolean("fpquicksys", true),
             fpQuickOk = b.getBoolean("fpquickok", false),
+            featuresMissing = b.getStringArray("features_missing")?.toList().orEmpty(),
             pickup = b.bool(SettingSpec.PICKUP),
             rulesDate = b.getString("rulesdate") ?: "",
             rulesCount = b.getInt("rulescount", 0),

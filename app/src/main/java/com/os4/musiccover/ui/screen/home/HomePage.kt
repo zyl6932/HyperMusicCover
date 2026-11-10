@@ -171,6 +171,7 @@ fun HomePageView(
     // A restart blanks the screen and stops whatever the scoped apps were doing, so it asks.
     // Asked from the status card, which is the whole width of the page and where a scroll starts.
     var confirmRestart by remember { mutableStateOf(false) }
+    var showMissing by remember { mutableStateOf(false) }
     LaunchedEffect(current, resumeKey, service, state.inert) {
         if (current) stale = withContext(Dispatchers.IO) {
             // The other processes' inert answer first: LSPosed lists them as up to date.
@@ -343,6 +344,32 @@ fun HomePageView(
             }
         }
 
+        // Only when the module answered and something did not go in: a build of SystemUI that
+        // lacks what a feature hooks costs that feature alone now (FeatureHost), and this is
+        // where it shows rather than as a module that quietly does less.
+        val missing = if (state.alive) state.featuresMissing else emptyList()
+        if (missing.isNotEmpty()) {
+            item(key = "features_missing") {
+                Card(modifier = Modifier.nextCard()) {
+                    ArrowPreference(
+                        title = stringResource(R.string.home_features_missing, missing.size),
+                        summary = stringResource(R.string.home_features_missing_summary),
+                        startAction = {
+                            Icon(
+                                modifier = Modifier
+                                    .padding(end = 12.dp)
+                                    .size(28.dp),
+                                imageVector = Icons.Rounded.ErrorOutline,
+                                tint = Color(0xFFDC3545),
+                                contentDescription = null,
+                            )
+                        },
+                        onClick = { showMissing = true },
+                    )
+                }
+            }
+        }
+
         // No heading over this one. The four rows say what they are - a heading reading
         // "device information" over a list of device facts only repeated them - and the gap it
         // used to hold is now the card's own, so the card sits exactly where it always did.
@@ -400,6 +427,20 @@ fun HomePageView(
                 )
             }
         }
+    }
+
+    WindowDialog(
+        show = showMissing,
+        title = stringResource(R.string.home_features_missing_dialog),
+        summary = state.featuresMissing.map { featureName(it) }.joinToString("\n"),
+        onDismissRequest = { showMissing = false },
+    ) {
+        val dismiss = LocalDismissState.current
+        TextButton(
+            modifier = Modifier.fillMaxWidth(),
+            text = stringResource(R.string.home_features_missing_ok),
+            onClick = { dismiss?.invoke() },
+        )
     }
 
     WindowDialog(
@@ -530,4 +571,42 @@ private fun RestartMenu() {
             }
         }
     }
+}
+
+/** A feature id from the module (`feature:xxx`) as the user reads it; the id itself if unknown. */
+@Composable
+private fun featureName(id: String): String {
+    val res = when (id.removePrefix("feature:")) {
+        "tweaks" -> R.string.feature_tweaks
+        "pass_blur_scale" -> R.string.feature_pass_blur_scale
+        "mini_player" -> R.string.feature_mini_player
+        "palette_throttle" -> R.string.feature_palette_throttle
+        "date_status" -> R.string.feature_date_status
+        "amap_focus" -> R.string.feature_amap_focus
+        "ride_code_exit" -> R.string.feature_ride_code_exit
+        "pickup_code" -> R.string.feature_pickup_code
+        "notif_presence" -> R.string.feature_notif_presence
+        "unlock_swipe" -> R.string.feature_unlock_swipe
+        "cover_palette" -> R.string.feature_cover_palette
+        "clock_container" -> R.string.feature_clock_container
+        "sleep_wake" -> R.string.feature_sleep_wake
+        "transport_controls" -> R.string.feature_transport_controls
+        "aod_handover" -> R.string.feature_aod_handover
+        "depth" -> R.string.feature_depth
+        "aod_shrink" -> R.string.feature_aod_shrink
+        "wallpaper_black" -> R.string.feature_wallpaper_black
+        "fingerprint" -> R.string.feature_fingerprint
+        "fingerprint_quick" -> R.string.feature_fingerprint_quick
+        "keyguard_wallpaper_manager" -> R.string.feature_keyguard_wallpaper_manager
+        "media_card" -> R.string.feature_media_card
+        "lock_taps" -> R.string.feature_lock_taps
+        "charge_anim" -> R.string.feature_charge_anim
+        "shade_layer" -> R.string.feature_shade_layer
+        "notif_state_change" -> R.string.feature_notif_state_change
+        "time_view" -> R.string.feature_time_view
+        "clock_interactor" -> R.string.feature_clock_interactor
+        "plugin" -> R.string.feature_plugin
+        else -> return id
+    }
+    return stringResource(res)
 }
