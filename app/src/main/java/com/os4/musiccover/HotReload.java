@@ -700,7 +700,13 @@ public final class HotReload {
                     // Not a failure: the state carried no context, and the attach path will run
                     // boot when the keyguard comes back.
                     Xp.w(TAG + "no context yet; boot waits for the next container attach");
-                } else if (!step("boot", () -> Main.boot(ctx))) {
+                } else if (!step("boot", () -> {
+                    Main.boot(ctx);
+                    // What the state file restored, in the boot step as it was before boot and
+                    // putting it onto the keyguard were two (ModuleState.applyRestored): ahead of
+                    // the card, the island and the container, which build on it.
+                    ModuleState.applyRestored();
+                })) {
                     // Everything after this builds on boot; carrying on would run half of a
                     // generation. The pending marker stays (the delayed clear is refused once
                     // inert), so a restart inside the window blocks this build.

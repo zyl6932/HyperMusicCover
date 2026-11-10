@@ -304,6 +304,27 @@ public final class ModuleState {
         } finally {
             sLoading = false;
         }
+        Xp.log(Main.TAG + "state restored: cover=" + cover + " bias=" + Settings.BIAS.get());
+        sRestoredCover = cover;
+        sRestorePending = true;
+    }
+
+    /** loadState has read the file and its effects on the lock screen are still to come. */
+    private static boolean sRestorePending;
+    /** What the file said about cover mode, for applyRestored. */
+    private static boolean sRestoredCover;
+
+    /**
+     * What loadState read, put onto the lock screen: once per load, when the keyguard is there
+     * to take it. loadState itself only fills in values - it runs as soon as the process has a
+     * Context, which can be before any keyguard exists (architecture plan, stage 2) - and these
+     * are the four things it used to do at its end. Main.boot runs this right after loadState when
+     * the clock container is already known, as before; otherwise the first attach does, and an
+     * adoption right after its boot step, so the order of every path is what it was.
+     */
+    static void applyRestored() {
+        if (!sRestorePending) return;
+        sRestorePending = false;
         // The mode fpavoid has just come back to. A policy flow the OEM's combine already had
         // attached was made with whatever this process started at - 0, "leave it to the system" -
         // and NotificationSink.withAvoidance hands the decision to that flow whenever it carries
@@ -311,8 +332,7 @@ public final class ModuleState {
         // again. Nothing else refreshed this on the way up: 展开背景时下移通知 used to, by
         // accident, on its scene changes and only while it was switched on (2026-10-09).
         Main.refreshNotificationSink();
-        Xp.log(Main.TAG + "state restored: cover=" + cover + " bias=" + Settings.BIAS.get());
-        if (cover) {
+        if (sRestoredCover) {
             Main.enterCoverMode(false);
             // The composed cover the shade reveals does not survive a restart, and the wallpaper
             // process has no reason to ask for art again - it kept its own texture on disk and

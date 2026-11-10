@@ -730,6 +730,49 @@ public class Main extends XposedModule {
         }
         if (!"com.android.systemui".equals(pkg)) return;
         installSystemUi(param.getDefaultClassLoader());
+        bootAtStart();
+    }
+
+    /**
+     * Boots on the next turn of the main loop, once SystemUI has its Application, rather than
+     * waiting for the clock container to attach (architecture plan, stage 2): the receivers, the
+     * state file and the rest need a Context, not a keyguard, and a build whose container is never
+     * found never attached one, so the probe could not even be asked what went wrong. The attach
+     * still boots too, for a process where this finds no Application; whichever is first does it.
+     *
+     * <p>Cold start only, from onPackageLoaded and not from installSystemUi: a hot-reloaded
+     * generation runs installSystemUi as well, and boots as one of its adoption steps, in order.
+     * Posted after installSystemUi has returned, so what boot registers is still after
+     * Gen.markInstallScope's snapshot and a dry run takes it back as before.
+     */
+    private static void bootAtStart() {
+        main().post(new Runnable() {
+            @Override
+            public void run() {
+                Context app = currentApplication();
+                if (app == null) {
+                    Xp.log(TAG + "no Application at start; boot waits for the clock container");
+                    return;
+                }
+                Xp.log(TAG + "booting at process start, before the clock container");
+                try {
+                    boot(app);
+                } catch (Throwable t) {
+                    Xp.w(TAG + "boot failed: " + t);
+                }
+            }
+        });
+    }
+
+    /** ActivityThread.currentApplication(), read at run time; null before it exists. */
+    private static Context currentApplication() {
+        try {
+            Class<?> at = Class.forName("android.app.ActivityThread");
+            Object app = at.getMethod("currentApplication").invoke(null);
+            return app instanceof Context ? (Context) app : null;
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     /**
@@ -856,6 +899,14 @@ public class Main extends XposedModule {
     static void onContainerAttached(View container) {
         CoverMorphLayer.cancel();
         sContainer = container;
+        if (!sScreenCompared && sScreenW > 0) {
+            // Boot takes the size off the Application's Resources now, possibly before any
+            // keyguard; said once beside the clock's, to be sure the two are the same reading.
+            sScreenCompared = true;
+            Xp.log(TAG + "screen at boot " + sScreenW + "x" + sScreenH + ", from the clock "
+                    + container.getResources().getDisplayMetrics().widthPixels + "x"
+                    + container.getResources().getDisplayMetrics().heightPixels);
+        }
         captureScreenSize(sContainer);
         // The clock container attach is the first reliably-fired event after both
         // modules' onPackageLoaded, so arming the HyperLight counter-hook here - not
@@ -867,6 +918,14 @@ public class Main extends XposedModule {
             boot(sContainer.getContext().getApplicationContext());
         } catch (Throwable t) {
             Xp.w(TAG + "boot failed: " + t);
+        }
+        // Booted at process start, the state file was read with no keyguard to put it on; the
+        // first attach does that now. Booted just above, boot has done it already, and this is
+        // nothing (ModuleState.applyRestored runs once per load).
+        try {
+            ModuleState.applyRestored();
+        } catch (Throwable t) {
+            Xp.w(TAG + "restoring the saved state onto the lock screen failed: " + t);
         }
         // An immersive page's slot, if a rebuilt keyguard came with a new window.
         try {
@@ -1475,9 +1534,10 @@ public class Main extends XposedModule {
 
     /**
      * What the process needs once it has a Context: the receivers, the state file, the first
-     * hello to the wallpaper process. Called when the keyguard first attaches, which is the
-     * first moment there is one - and again by a hot-reloaded generation, which starts with
-     * every static field empty.
+     * hello to the wallpaper process. Called at process start once there is an Application
+     * (bootAtStart), else when the keyguard first attaches - and again by a hot-reloaded
+     * generation, which starts with every static field empty. Nothing here needs a keyguard:
+     * what the state file restored is put onto one by ModuleState.applyRestored.
      */
     static synchronized void boot(Context ctx) {
         if (sReceiverRegistered) {
@@ -1485,6 +1545,9 @@ public class Main extends XposedModule {
         }
         sReceiverRegistered = true;
         sAppCtx = ctx;
+        // Before loadState: cardrect's sanity check reads the screen's height, and boot can run
+        // before the clock container that used to be the only place it was measured.
+        captureScreenSize(ctx);
         // 取餐码的云端名单：上一次拉到的那份从这里读回来（存在 SystemUI 自己的 filesDir 里，
         // app 和它是两个 uid，所以不能由 app 下载）。
         PickupCloud.INSTANCE.load(ctx);
@@ -1521,6 +1584,10 @@ public class Main extends XposedModule {
             Xp.w(TAG + "hello to the wallpaper process failed: " + t);
         }
         ModuleState.loadState();
+        // What it restored goes onto the lock screen here when there is one - an attach, a dry
+        // run's re-entry - exactly where loadState used to do it. Booted at process start there
+        // is none yet; the attach does it then, and an adoption after its boot step.
+        if (sContainer != null) ModuleState.applyRestored();
         // 高德 running already has the 「高德公交地铁」 switch's default until it is told.
         AmapTransitScene.INSTANCE.tellAmap(ctx);
         // Again at startup, not only when the switch is touched: the flag the always-on display
@@ -1600,6 +1667,11 @@ public class Main extends XposedModule {
                     Xp.w(TAG + "immersive lifecycle failed: " + t);
                 }
                 if (Intent.ACTION_SCREEN_OFF.equals(a)) CoverMorphLayer.cancel();
+                // Boot can be before the keyguard is built now (bootAtStart). What is above goes
+                // through views that are null until then, and does nothing; what is below gives
+                // back the clock, the depth layer and the card, none of which exists yet - and was
+                // never run without a container before.
+                if (sContainer == null) return;
                 if (Intent.ACTION_SCREEN_ON.equals(a)) {
                     // The wake normally entered already, from the doAnimationToAod hook, before
                     // the first lit frame. This is the fallback for a build without that method.
@@ -2353,8 +2425,19 @@ public class Main extends XposedModule {
      * getWidth(): this runs at attach time, before the container has been laid out.
      */
     private static void captureScreenSize(View v) {
+        captureScreenSize(v.getResources());
+    }
+
+    private static void captureScreenSize(Context ctx) {
+        captureScreenSize(ctx.getResources());
+    }
+
+    /** Whether the first attach has logged its reading beside boot's. */
+    private static boolean sScreenCompared;
+
+    private static void captureScreenSize(android.content.res.Resources res) {
         try {
-            android.util.DisplayMetrics dm = v.getResources().getDisplayMetrics();
+            android.util.DisplayMetrics dm = res.getDisplayMetrics();
             if (dm.widthPixels > 0 && dm.heightPixels > 0) {
                 sScreenW = dm.widthPixels;
                 sScreenH = dm.heightPixels;
