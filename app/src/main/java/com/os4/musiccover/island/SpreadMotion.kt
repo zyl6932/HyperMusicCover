@@ -11,10 +11,25 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Moved out of MiniPlayerController as it was (MiniPlayerController plan, M1); `c` is the
- * controller. See the section comments below for what it is.
+ * Moved out of MiniPlayerController as it was (MiniPlayerController plan, M1), and given only
+ * what it uses of the controller (M2, MiniPlayerParts.kt). See the section comments below for
+ * what it is.
  */
-internal class SpreadMotion(private val c: MiniPlayerController) {
+internal class SpreadMotion(
+    private val views: RowViews,
+    private val rowState: RowState,
+    private val edits: RowEdits,
+    private val rowHost: RowHost,
+    private val motions: Motions,
+    // Made before this part: the stack it spreads into and the motions it ends or waits on.
+    private val stackHost: StackHost,
+    private val cardExchange: CardExchange,
+    private val groupMotion: GroupMotion,
+    private val swapMotion: SwapMotion,
+    /** Made after this part: read while the row spreads, not when this is built. */
+    private val noteMorphRef: () -> NoteMorphMotion,
+) {
+    private val noteMorphMotion get() = noteMorphRef()
 
     // ------------------------------------------------------------ the whole row out as the stack's list
 
@@ -83,14 +98,14 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
         if (!listKept) return
         val now = android.os.SystemClock.uptimeMillis()
         val awake = !MiniPlayerScene.aodActive && Main.screenOnCached()
-        if (!shown || !awake || spread != null || c.player?.visibility != View.VISIBLE) {
+        if (!shown || !awake || spread != null || views.player?.visibility != View.VISIBLE) {
             listKeptShownAt = 0L
             return
         }
-        if (STACK_ISLAND in c.islandKeys && LockIslands.foldsNatively()) {
+        if (STACK_ISLAND in rowState.islandKeys && LockIslands.foldsNatively()) {
             listKept = false
             listKeptShownAt = 0L
-            c.handler.post { if (spread == null) openSpread("kept over the unlock") }
+            views.handler.post { if (spread == null) openSpread("kept over the unlock") }
             return
         }
         // Up without the stack island - its notifications went meanwhile: nothing to open.
@@ -101,7 +116,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
     fun spreadCollapseAt(x: Float, y: Float): Boolean {
         val s = spread ?: return false
         if (s.phase != SPREAD_OPEN && s.phase != SPREAD_CLOSING) return false
-        val stack = c.stackHost.notificationStack() ?: return false
+        val stack = stackHost.notificationStack() ?: return false
         val rect = android.graphics.Rect()
         return (0 until stack.childCount).any { i ->
             val row = stack.getChildAt(i)
@@ -136,13 +151,13 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
      * and left the finger behind (#73, filmed 2026-10-14).
      */
     private fun collapseRange(s: Spread): Float {
-        val fallback = c.dp(220f).toFloat()
+        val fallback = views.dp(220f).toFloat()
         if (s.stacked) return fallback
-        val pill = c.player?.restBoxOnScreen() ?: return fallback
+        val pill = views.player?.restBoxOnScreen() ?: return fallback
         val row = (s.items.firstOrNull { it.lead } ?: s.items.firstOrNull { it.native != null })
             ?.native?.takeIf { it.isAttachedToWindow } ?: return fallback
         val xy = IntArray(2).also(row::getLocationOnScreen)
-        return kotlin.math.abs(pill.y - xy[1]).coerceAtLeast(c.dp(120f).toFloat())
+        return kotlin.math.abs(pill.y - xy[1]).coerceAtLeast(views.dp(120f).toFloat())
     }
 
     fun moveSpreadCollapse(y: Float) {
@@ -157,7 +172,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
         val s = spread ?: return
         val finger = s.collapseFinger?.takeIf { !it.ended } ?: return
         finger.target = if (MiniPlayerStackGesture.commits(
-                finger.y - finger.startY, velocityY, c.density(), cancelled)) 0f else 1f
+                finger.y - finger.startY, velocityY, views.density(), cancelled)) 0f else 1f
         // From the finger's last place and speed: down the screen is toward the islands (0).
         finger.motion.value = finger.progress()
         finger.motion.velocity = if (cancelled || finger.range <= 0f) 0f
@@ -189,25 +204,25 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
      * the subset as it was).
      */
     private fun busyForStackSpread(): Boolean = spread != null ||
-        c.morph != null || c.cardExchange.exchange != null || c.noteMorphMotion.noteMorphKey != null || c.groupMotion.group != null ||
-        c.noteMorphMotion.flight != null
+        rowState.morph != null || motions.exchanging || motions.noteMorphing || motions.grouping ||
+        motions.flying
 
     /** Even a lone stacked card uses the list whose downward pull returns it to its island. */
     fun beginStackSpread(startY: Float): Boolean {
-        if (!c.stackedStyle() || c.islandKeys.isEmpty() || busyForStackSpread() ||
-            c.player?.visibility != View.VISIBLE) return false
+        if (!views.stackedStyle() || rowState.islandKeys.isEmpty() || busyForStackSpread() ||
+            views.player?.visibility != View.VISIBLE) return false
         // The music alone, and no notification in the stack either: there is no list to spread
         // out to. The stack read its fold again a moment after the lift, the spread folded with
         // it, and the card went back into the pill by itself every time (Xiaomi 13, 2026-10-14).
         // Pulled up as the row style pulls it: into the card, and the card chosen.
-        if (c.islandKeys.all { it == MUSIC_ISLAND } && !stackHasRows()) return false
+        if (rowState.islandKeys.all { it == MUSIC_ISLAND } && !stackHasRows()) return false
         openSpread("stack swipe", SpreadFinger(startY))
         return spread != null
     }
 
     /** Any notification row in the lock screen's stack, folded away or not - the music's aside. */
     private fun stackHasRows(): Boolean {
-        val stack = c.stackHost.notificationStack() ?: return true
+        val stack = stackHost.notificationStack() ?: return true
         for (i in 0 until stack.childCount) {
             val row = stack.getChildAt(i)
             if (!row.javaClass.name.contains("ExpandableNotificationRow")) continue
@@ -230,13 +245,13 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
      */
     fun openSingleApp(why: String): Boolean {
         val key = LockIslands.stackSingleAppLead() ?: return false
-        val stack = c.stackHost.notificationStack() ?: return false
+        val stack = stackHost.notificationStack() ?: return false
         var row: View? = null
         for (i in 0 until stack.childCount) {
             val child = stack.getChildAt(i)
             if (!child.javaClass.name.contains("ExpandableNotificationRow")) continue
             // Its own row, never its group's: the group's click expands the group instead.
-            row = if (c.stackHost.rowKey(child) == key) child else c.stackHost.childRows(child).firstOrNull { c.stackHost.rowKey(it) == key }
+            row = if (stackHost.rowKey(child) == key) child else stackHost.childRows(child).firstOrNull { stackHost.rowKey(it) == key }
             if (row != null) break
         }
         if (row == null || !row.hasOnClickListeners()) {
@@ -259,8 +274,8 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
      * Busy for the whole row out as the stack's list (a spread already out is asked first, on its
      * own): the motions that keep it from starting (M0, the subset as it was).
      */
-    private fun busyForSpread(): Boolean = c.morph != null || c.cardExchange.exchange != null || c.noteMorphMotion.noteMorphKey != null || c.groupMotion.group != null ||
-        c.noteMorphMotion.flight != null
+    private fun busyForSpread(): Boolean = rowState.morph != null || motions.exchanging || motions.noteMorphing || motions.grouping ||
+        motions.flying
 
     /**
      * The stack island tapped or pulled open: the whole row out. With another motion under way -
@@ -269,17 +284,17 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
     fun openSpread(why: String, finger: SpreadFinger? = null) { android.os.Trace.beginSection("MC openSpread"); try {
         if (spread != null) return
         val busy = busyForSpread()
-        if (busy || c.player?.visibility != View.VISIBLE) {
+        if (busy || views.player?.visibility != View.VISIBLE) {
             MiniPlayerRuntime.noteTouch("spread refused ($why): busy=$busy; the stack alone")
             LockIslands.openStack(why)
             return
         }
-        c.swapMotion.endSwap()
-        c.endRow()
-        c.resetIslandDrag()
-        c.clearSmallNudge()
-        val big = c.selectedIsland
-        val small = c.smallKey
+        swapMotion.endSwap()
+        rowHost.endRow()
+        rowHost.resetIslandDrag()
+        views.clearSmallNudge()
+        val big = rowState.selectedIsland
+        val small = rowState.smallKey
         fun seatOf(key: String) = when (key) {
             big -> SEAT_BIG
             small -> SEAT_SMALL
@@ -291,28 +306,28 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
         // Out as their cards already: in the list as they are, and home with the rest when it
         // folds - into no place of the row's, fading with the list as the placeless ones do.
         val out = LockIslands.releasedKeys().filter {
-            it != STACK_ISLAND && it !in c.islandKeys && c.stackHost.rowFor(it) != null
+            it != STACK_ISLAND && it !in rowState.islandKeys && stackHost.rowFor(it) != null
         }
-        val items = c.islandKeys.filter { it != STACK_ISLAND }.flatMap { key ->
+        val items = rowState.islandKeys.filter { it != STACK_ISLAND }.flatMap { key ->
             listOf(SpreadItem(key, seatOf(key))) +
                 if (LockIslands.isAppGroup(key)) LockIslands.membersOf(key)
                     .map { SpreadItem(it, SEAT_HIDDEN) } else emptyList()
         } + out.map { SpreadItem(it, SEAT_HIDDEN, wasOut = true) }
-        val stackSeat = if (STACK_ISLAND in c.islandKeys) seatOf(STACK_ISLAND) else SEAT_NONE
+        val stackSeat = if (STACK_ISLAND in rowState.islandKeys) seatOf(STACK_ISLAND) else SEAT_NONE
         // The stack island goes out as the others do, into its newest notification's row as the
         // list opens. Without it the island only faded where it stood while the rows came out
         // of the fold (#73): the one island in the row with no way out.
         val lead = if (stackSeat == SEAT_BIG || stackSeat == SEAT_SMALL)
             listOf(SpreadItem(STACK_ISLAND, stackSeat)) else emptyList()
-        val s = Spread(lead + items, stackSeat, c.stackedStyle())
+        val s = Spread(lead + items, stackSeat, views.stackedStyle())
         s.since = android.os.SystemClock.uptimeMillis()
         // Read before the spread's rows come in (setSpread runs the pipeline on the next frame).
         s.focusBefore = NumState.focusCount()
         s.finger = finger
         spread = s
         // A card held where it landed goes with the list from here.
-        c.stackHost.releaseNativeScrollPin()
-        c.player?.setInteractionsEnabled(false)
+        stackHost.releaseNativeScrollPin()
+        views.player?.setInteractionsEnabled(false)
         // Every focus notification's row into the stack, out of sight till its morph takes it.
         LockIslands.setSpread(true)
         spreadTrace("spread asked ($why): " + describeSpread())
@@ -324,7 +339,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
     val spreadFrame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC spread"); try {
             val s = spread ?: return
-            if (c.destroyed || !Main.keyguardLocked() || MiniPlayerScene.keyguardGoingAway) {
+            if (rowState.destroyed || !Main.keyguardLocked() || MiniPlayerScene.keyguardGoingAway) {
                 // Open, it opens again on the next lock screen (the user, 2026-10-24).
                 listKept = s.phase == SPREAD_OPEN && s.progress >= 0.5f
                 endSpread(folded = s.progress < 0.5f, why = "lock screen gone")
@@ -356,12 +371,12 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
             // A card out already is in the list as it is.
             if (item.key == MUSIC_ISLAND || item.wasOut) continue
             if (LockIslands.noteFor(item.key)?.focus == true) coming++
-            val row = c.stackHost.rowFor(item.key)
+            val row = stackHost.rowFor(item.key)
             if (row == null || !row.isAttachedToWindow || !row.isLaidOut || row.width <= 0 || row.height <= 0) {
                 ready = false
                 continue
             }
-            c.stackHost.hideRow(row)
+            stackHost.hideRow(row)
         }
         // Laid out is not yet measured by the stack: its sample (the list's place is worked out
         // from it) counts them a layout pass later. Asked in between, the list's place left them
@@ -415,12 +430,12 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
      */
     private fun startSpreadMorphs(s: Spread, toCards: Boolean) {
         endLeadTail()
-        val pill = c.player
+        val pill = views.player
         val claimedRows = HashSet<View>()
         // Closing, the row is drawn again: its places fade in as the cards come down.
         if (!toCards) pill?.visibility = View.VISIBLE
         for (item in s.items) {
-            val native = c.nativeFor(item.key)
+            val native = rowState.nativeFor(item.key)
             // An app's several notification keys can resolve to one OEM group row. Only its
             // group island morphs that shared row; a second morph would fight its matrix.
             if (native != null && !claimedRows.add(native)) continue
@@ -430,19 +445,19 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
             if (toCards && item.wasOut) continue
             if (item.key == MUSIC_ISLAND) {
                 // The media card is the spread's: the OEM may show it (hardSuppressionActive).
-                c.updateNativeSuppression(false)
-                c.ensureNativeHeaderVisible()
+                rowHost.updateNativeSuppression(false)
+                rowHost.ensureNativeHeaderVisible()
             }
             if (item.seat == SEAT_HIDDEN && (!s.stacked || item.wasOut)) {
-                c.stackHost.hideRow(native)
+                stackHost.hideRow(native)
                 continue
             }
             // Out of sight while it waited: the morph saves the row's own alpha, not ours.
-            c.stackHost.showRow(native)
+            stackHost.showRow(native)
             val small = item.seat != SEAT_BIG
-            val view = if (small) c.prepareSmallView(item.key, pooled = true) else pill
+            val view = if (small) views.prepareSmallView(item.key, pooled = true) else pill
             if (view == null) {
-                c.stackHost.hideRow(native)
+                stackHost.hideRow(native)
                 continue
             }
             view.visibility = View.VISIBLE
@@ -454,18 +469,18 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
                 SEAT_HIDDEN -> 0f
                 else -> 1f
             } else 1f
-            val m = MiniCardMorph(view, native, toCards, spreadListener, c.noteMorphMotion.landingFor(item.key, native),
-                restBox = if (small) { { c.smallBoxOnScreen() } } else null,
+            val m = MiniCardMorph(view, native, toCards, spreadListener, noteMorphMotion.landingFor(item.key, native),
+                restBox = if (small) { { views.smallBoxOnScreen() } } else null,
                 circle = small && !s.stacked,
                 holdMaterial = item.lead && !s.stacked)
             if (!m.startDragging()) {
-                if (small) c.recycleSmallView(view)
+                if (small) views.recycleSmallView(view)
                 if (item.lead) {
                     // No morph: the island fades in its place, as before, and the row is the
                     // stack's own to unfold - not faded by the item's own path as well.
-                    c.stackHost.showRow(native)
+                    stackHost.showRow(native)
                     item.native = null
-                } else c.stackHost.hideRow(native)
+                } else stackHost.hideRow(native)
                 continue
             }
             item.view = view
@@ -473,16 +488,16 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
             item.morph = m
             if (item.lead) holdLeadThroughFold(native)
             // The stand-in is the small island's place from here, in its very shape.
-            if (item.seat == SEAT_SMALL) c.smallIsland?.visibility = View.GONE
+            if (item.seat == SEAT_SMALL) views.smallIsland?.visibility = View.GONE
         }
     }
 
     /** 0 at the islands' end, 1 at the cards'. */
     private fun spreadProgress(s: Spread, y: Int): Float {
         val span = (s.cardsY - s.islandsY).toFloat()
-        if (s.stacked && kotlin.math.abs(span) < c.dp(72f)) {
+        if (s.stacked && kotlin.math.abs(span) < views.dp(72f)) {
             s.finger?.takeIf { !it.ended && !it.base.isNaN() }?.let { finger ->
-                return ((finger.pulled() - finger.base) / c.dp(220f)).coerceIn(0f, 1f)
+                return ((finger.pulled() - finger.base) / views.dp(220f)).coerceIn(0f, 1f)
             }
         }
         if (kotlin.math.abs(span) < 1f) return if (s.phase == SPREAD_CLOSING) 0f else 1f
@@ -615,11 +630,11 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
 
     private fun fadeSeat(seat: Int, a: Float) {
         val v: View = when (seat) {
-            SEAT_BIG -> c.player
-            SEAT_SMALL -> c.smallIsland
+            SEAT_BIG -> views.player
+            SEAT_SMALL -> views.smallIsland
             else -> null
         } ?: return
-        val alpha = if (seat == SEAT_SMALL && c.stackedStyle())
+        val alpha = if (seat == SEAT_SMALL && views.stackedStyle())
             a * MiniPlayerGeometry.STACK_BACK_ALPHA else a
         if (alpha > 0f && v.visibility != View.VISIBLE) v.visibility = View.VISIBLE
         if (kotlin.math.abs(v.alpha - alpha) > 0.002f) v.alpha = alpha
@@ -719,7 +734,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
 
     /** The spread's own events, in `op mini` and in `op numstate`'s frames with its frames. */
     private fun spreadTrace(what: String) {
-        c.trace(what)
+        rowHost.trace(what)
         NumState.frame(what.take(160))
     }
 
@@ -793,7 +808,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
         val s = spread ?: return false
         val f = s.finger?.takeIf { !it.ended } ?: return false
         f.ended = true
-        val fling = SPREAD_FLING_DP * c.density()
+        val fling = SPREAD_FLING_DP * views.density()
         f.toList = !cancelled && when {
             velocityY < -fling -> true
             velocityY > fling -> false
@@ -824,24 +839,24 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
                 m.handOff {
                     if (leadTail === m) leadTail = null
                     if (spread?.phase == SPREAD_OPEN) {
-                        c.player?.visibility = View.INVISIBLE
-                        c.player?.alpha = 1f
+                        views.player?.visibility = View.INVISIBLE
+                        views.player?.alpha = 1f
                     }
                 }
             } else m?.cancel()
             item.morph = null
-            item.view?.let { if (item.standIn) c.recycleSmallView(it) }
+            item.view?.let { if (item.standIn) views.recycleSmallView(it) }
             item.view = null
             item.standIn = false
-            item.native?.let(c.stackHost::showRow)
+            item.native?.let(stackHost::showRow)
         }
         if (leadTail == null) {
-            c.player?.visibility = View.INVISIBLE
-            c.player?.alpha = 1f
+            views.player?.visibility = View.INVISIBLE
+            views.player?.alpha = 1f
         }
-        c.smallIsland?.visibility = View.GONE
-        c.smallIsland?.alpha = if (c.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
-        if (s.items.any { it.key == MUSIC_ISLAND }) c.ensureNativeHeaderVisible()
+        views.smallIsland?.visibility = View.GONE
+        views.smallIsland?.alpha = if (views.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
+        if (s.items.any { it.key == MUSIC_ISLAND }) rowHost.ensureNativeHeaderVisible()
         s.phase = SPREAD_OPEN
         s.cardsY = y
         s.still = 0
@@ -853,7 +868,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
         // are the stack's own from here, so the rest of the way is its scroll alone.
         val list = NumState.listScroll()
         val state = NumState.state()
-        if (!s.reaimed && list != null && kotlin.math.abs(list - y) > c.dp(2f) && state != "LIST") {
+        if (!s.reaimed && list != null && kotlin.math.abs(list - y) > views.dp(2f) && state != "LIST") {
             s.reaimed = true
             NumState.goTo("LIST", why = "spread re-aimed ($state at $y, list at $list)")
         }
@@ -862,7 +877,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
 
     /** The stack's own finger on it (NotificationStackScrollLayout.mIsBeingDragged). */
     private fun stackDragged(): Boolean = runCatching {
-        Xp.getObjectField(c.stackHost.notificationStack() ?: return false, "mIsBeingDragged") == true
+        Xp.getObjectField(stackHost.notificationStack() ?: return false, "mIsBeingDragged") == true
     }.getOrDefault(false)
 
     /**
@@ -904,7 +919,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
         val inNumber = NumState.inNumber
         val folded = s.lastInNumber == false && inNumber == true
         s.lastInNumber = inNumber
-        if (folded || listPulled() && toward > c.dp(SPREAD_PULL_DP)) {
+        if (folded || listPulled() && toward > views.dp(SPREAD_PULL_DP)) {
             s.islandsY = islandsY
             startSpreadMorphs(s, toCards = false)
             s.phase = SPREAD_CLOSING
@@ -942,37 +957,37 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
         for (item in s.items) {
             item.morph?.cancel()
             item.morph = null
-            item.view?.let { if (item.standIn) c.recycleSmallView(it) }
+            item.view?.let { if (item.standIn) views.recycleSmallView(it) }
             item.view = null
             val native = item.native
             if (folded && item.wasOut) {
                 // Folded with the rest: an island again. The stack gives it back a pipeline run
                 // later; till then it keeps its place in the row (returning).
-                native?.let { c.stackHost.hideRowUntilGone(it, item.key); it.transitionAlpha = 0f }
+                native?.let { stackHost.hideRowUntilGone(it, item.key); it.transitionAlpha = 0f }
                 LockIslands.recapture(item.key)
-                c.stackHost.markReturning(item.key)
-                c.noteMorphMotion.releasedFromPill -= item.key
-                c.noteMorphMotion.releasedFromSmall -= item.key
+                stackHost.markReturning(item.key)
+                noteMorphMotion.releasedFromPill -= item.key
+                noteMorphMotion.releasedFromSmall -= item.key
                 continue
             }
             if (native == null) continue
             // Folded natively the stack island's row never leaves the stack: the fold hides it.
             val stays = item.key == MUSIC_ISLAND || item.lead && LockIslands.foldsNatively()
-            if (folded && !stays) c.stackHost.hideRowUntilGone(native, item.key)
-            else c.stackHost.showRow(native)
+            if (folded && !stays) stackHost.hideRowUntilGone(native, item.key)
+            else stackHost.showRow(native)
         }
-        c.player?.alpha = 1f
-        if (folded) c.player?.visibility = View.VISIBLE
+        views.player?.alpha = 1f
+        if (folded) views.player?.visibility = View.VISIBLE
         // Let go before the rows were in: the pill was held where the finger lifted it.
-        c.player?.springNudgeBack(0f, 0f)
-        c.smallIsland?.alpha = if (c.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
+        views.player?.springNudgeBack(0f, 0f)
+        views.smallIsland?.alpha = if (views.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
         // The small island's place as the fold left it: whoever came down into it stays. Nobody
         // did, and a card out from before came home: that one comes up there, growing in (the
         // row's own appearing) - after the pill, next in the row, it would have been left out.
         val cameHome = if (folded) s.items.firstOrNull { it.wasOut }?.key else null
         val smallTaken = s.stackSeat == SEAT_SMALL || s.items.any { it.seat == SEAT_SMALL }
-        if (cameHome != null) c.preferredSmall = if (smallTaken) c.smallKey else cameHome
-        c.snapSmallOnce = smallTaken || cameHome == null
+        if (cameHome != null) edits.preferredSmall = if (smallTaken) rowState.smallKey else cameHome
+        edits.snapSmallOnce = smallTaken || cameHome == null
         spreadTrace("spread end ($why) folded=$folded")
         MiniPlayerRuntime.noteTouch("spread end ($why) folded=$folded")
         if (folded) listKept = false
@@ -981,7 +996,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
         // Folded home but the stack left at its pile (a let-go it read as the pile): folded too.
         if (folded) NumState.foldIfPiled("spread folded")
         // The row as it is now: the media card put away again, the small island in its place.
-        c.refresh()
-        c.schedulePosition()
+        rowHost.refresh()
+        rowHost.schedulePosition()
     }
 }

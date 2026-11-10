@@ -64,6 +64,9 @@ internal interface RowViews {
     fun restoreSmallIslandShape()
     fun setSmallShown(shown: Boolean, animate: Boolean)
     fun clearSmallNudge()
+    /** A small island's view for [key]; [pooled] takes one from [spareViews] when there is one. */
+    fun prepareSmallView(key: String, pooled: Boolean = false): MiniPlayerView?
+    fun recycleSmallView(v: MiniPlayerView)
     /** Where in the host the pill goes, over the lock screen's own layer. */
     fun lockScreenLayerIndex(): Int
     /** A view's centre as drawn, every ancestor's transform included, in host pixels. */
@@ -92,6 +95,12 @@ internal interface RowState {
     val rowHeldOff: Boolean
     val smallGrowing: Boolean
     val stackLeadKey: String?
+    /** The row's islands in order (refreshUnsafe). */
+    val islandKeys: List<String>
+    val preferredSmall: String?
+    val snapSmallOnce: Boolean
+    /** The lock screen's own view for an island: the media card's header, a notification row. */
+    fun nativeFor(key: String): View?
     fun expandedKey(): String?
     fun groupLead(key: String): String?
     val rowKnown: Boolean
@@ -107,6 +116,8 @@ internal interface RowEdits {
     var cachedCover: Bitmap?
     var rowHeldOff: Boolean
     var smallGrowing: Boolean
+    var preferredSmall: String?
+    var snapSmallOnce: Boolean
     var stackLeadKey: String?
     var followRoot: WeakReference<View>?
     /** The member an app group's island shows, by group key. */
@@ -127,6 +138,8 @@ internal interface RowHost {
     fun schedulePosition()
     fun endRow()
     fun resetIslandDrag()
+    fun updateNativeSuppression(suppress: Boolean)
+    fun ensureNativeHeaderVisible()
     /** One line in the row's landing trace (`op mini`). */
     fun trace(what: String)
     /** The pill's media buttons, sent to the session the row follows. */
@@ -143,6 +156,8 @@ internal interface Motions {
     val grouping: Boolean
     val exchanging: Boolean
     val noteMorphing: Boolean
+    /** The flying pill of a notification morph is up. */
+    val flying: Boolean
     /** Another motion is drawing the pill's frame (the controller's frameTaken). */
     fun frameTaken(): Boolean
 }

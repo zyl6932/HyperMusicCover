@@ -382,7 +382,7 @@ internal class MiniPlayerController(
     // ------------------------------------------------------------ the islands
 
     /** The row's islands in order: the focus ones that outrank the music, MUSIC_ISLAND, the rest. Set by refreshUnsafe. */
-    var islandKeys: List<String> = emptyList()
+    override var islandKeys: List<String> = emptyList()
 
     /** The islands wear the ordinary notification's colours and soft glass, always (2026-10-09). */
     override fun notificationMaterial(): Boolean = true
@@ -706,10 +706,10 @@ internal class MiniPlayerController(
     override val returning = LinkedHashMap<String, Long>()
 
     /** The notification last folded back in: it stays the small island until the row moves on. */
-    var preferredSmall: String? = null
+    override var preferredSmall: String? = null
 
     /** The next visibility pass shows the small island at once: a flight has just landed there. */
-    var snapSmallOnce = false
+    override var snapSmallOnce = false
 
     /**
      * The flight has left the small island's place for good - a tap, or a pull let go past
@@ -1103,6 +1103,7 @@ internal class MiniPlayerController(
     override val grouping: Boolean get() = groupMotion.group != null
     override val exchanging: Boolean get() = cardExchange.exchange != null
     override val noteMorphing: Boolean get() = noteMorphMotion.noteMorphKey != null
+    override val flying: Boolean get() = noteMorphMotion.flight != null
 
     override fun frameTaken(): Boolean = swapMotion.swap != null || morph != null || groupMotion.group != null || noteMorphMotion.flight != null ||
         cardExchange.exchange != null || noteMorphMotion.noteMorphKey != null || noteMorphMotion.pillLandingBox != null || spreadMotion.spread != null
@@ -1178,7 +1179,7 @@ internal class MiniPlayerController(
      * two, on the frame it starts: the frame dropped on every tap (traced 2026-09-25, 14 of the
      * frame's 19ms). Kept, its material is already on and only what changed is bound again.
      */
-    fun prepareSmallView(key: String, pooled: Boolean = false): MiniPlayerView? {
+    override fun prepareSmallView(key: String, pooled: Boolean): MiniPlayerView? {
         val pill = player ?: return null
         val music = controller?.takeIf(sessionSource::isUsable)
         val note = if (key == MUSIC_ISLAND) null
@@ -1251,7 +1252,7 @@ internal class MiniPlayerController(
     }
 
     /** Done with [v]: kept for the next switch, or let go if two are kept already. */
-    fun recycleSmallView(v: MiniPlayerView) {
+    override fun recycleSmallView(v: MiniPlayerView) {
         if (v.parent !== host || spareViews.size >= spareLimit() || v in spareViews) {
             runCatching { host.removeView(v) }
             return
@@ -1686,7 +1687,7 @@ internal class MiniPlayerController(
     fun tapDuringExchange(small: Boolean) = cardExchange.tapDuringExchange(small)
 
     /** [key]'s card: the media card for the music, the notification's own row in the stack. */
-    fun nativeFor(key: String): View? = if (key == MUSIC_ISLAND)
+    override fun nativeFor(key: String): View? = if (key == MUSIC_ISLAND)
         transitionHeader()?.takeIf { Main.miniPlayerMediaCardPresent() } else stackHost.rowFor(key)
 
     internal val stackHost: StackHost = StackHost(this, this, this, this, this, cardExchange, groupMotion,
@@ -1703,7 +1704,8 @@ internal class MiniPlayerController(
     fun stackDrawnTop(): Float = stackHost.stackDrawnTop()
     fun stackForProbe(): ViewGroup? = stackHost.stackForProbe()
 
-    internal val spreadMotion: SpreadMotion = SpreadMotion(this)
+    internal val spreadMotion: SpreadMotion = SpreadMotion(this, this, this, this, this, stackHost, cardExchange,
+        groupMotion, swapMotion) { noteMorphMotion }
     fun spreadCollapseAt(x: Float, y: Float): Boolean = spreadMotion.spreadCollapseAt(x, y)
     fun beginSpreadCollapse(startY: Float): Boolean = spreadMotion.beginSpreadCollapse(startY)
     fun moveSpreadCollapse(y: Float) = spreadMotion.moveSpreadCollapse(y)
@@ -2738,14 +2740,14 @@ internal class MiniPlayerController(
         view?.setSecondShown(shown && smallKey == null, animate = !noteMorphMotion.pillHeld() && !cardExchange.exchangeHoldsPill())
     } finally { android.os.Trace.endSection() } }
 
-    fun updateNativeSuppression(suppress: Boolean) {
+    override fun updateNativeSuppression(suppress: Boolean) {
         val wasRequested = nativeSuppressionRequested
         nativeSuppressionRequested = suppress
         if (suppress) updateHeader()
         else if (wasRequested || suppressedHeaders.hasOverrides) restoreHeader()
     }
 
-    fun ensureNativeHeaderVisible() {
+    override fun ensureNativeHeaderVisible() {
         // A dismissed card is the OEM's to take away, not ours to bring back.
         if (!Main.miniPlayerMediaCardPresent()) return
         val current = transitionHeader() ?: return
