@@ -313,7 +313,7 @@ internal class NoteMorphMotion(private val c: MiniPlayerController) {
         if (view.layoutParams.width != w || view.layoutParams.height != h) {
             view.layoutParams = view.layoutParams.apply { width = w; height = h }
         }
-        traced("MC pf.bind") { if (music != null) c.bindMusic(view, music, c.config) else c.bindNote(view, note!!, c.config) }
+        traced("MC pf.bind") { if (music != null) c.binding.bindMusic(view, music, c.config) else c.binding.bindNote(view, note!!, c.config) }
         // Laid out here and now, not on the next pass: a flight is a new view each time, and
         // its morph waited for that pass - the row stood still under a finger already pulling
         // it down, and the flight then jumped to where the finger had got to (filmed 2026-09-25).

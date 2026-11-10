@@ -60,10 +60,10 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
         val v = c.player ?: return islands + "no pill"
         val xy = IntArray(2).also(v::getLocationOnScreen)
         val icons = "pillArt=[${v.artworkState()}] smallIcon=[${c.smallIsland?.iconState()}] " +
-            c.focusLotties.entries.joinToString(" ") { (owner, held) ->
+            c.binding.focusLotties.entries.joinToString(" ") { (owner, held) ->
                 val d = held.second.drawable
                 val shownIn = when (owner) {
-                    is MiniPlayerView -> owner.artworkDrawable.let { it === d || it === c.lottieWatches[d] }
+                    is MiniPlayerView -> owner.artworkDrawable.let { it === d || it === c.binding.lottieWatches[d] }
                     else -> d?.callback != null
                 }
                 "lottie[${if (owner === v) "pill" else owner.javaClass.simpleName} ${held.first} " +
@@ -71,12 +71,12 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
                     "p=${runCatching { Xp.callMethod(held.second, "getProgress") }.getOrNull()} " +
                     "vis=${d?.isVisible} cb=${d?.callback?.javaClass?.simpleName} " +
                     "shown=$shownIn]"
-            } + c.liveArts.entries.joinToString(" ", prefix = " ") { (owner, held) ->
+            } + c.binding.liveArts.entries.joinToString(" ", prefix = " ") { (owner, held) ->
                 "live[${if (owner === v) "pill" else owner.javaClass.simpleName} ${held.first} " +
                     "attached=${held.second.isAttachedToWindow} shown=${held.second.isShown} " +
                     "${held.second.width}x${held.second.height}]"
-            } + " lottieWhy=[${c.focusLottieWhy}] failed=${c.focusLottieFailed} lottieLog=[" +
-            synchronized(c.lottieLog) { c.lottieLog.joinToString(" ; ") } + "] "
+            } + " lottieWhy=[${c.binding.focusLottieWhy}] failed=${c.binding.focusLottieFailed} lottieLog=[" +
+            synchronized(c.binding.lottieLog) { c.binding.lottieLog.joinToString(" ; ") } + "] "
         val h = c.header?.get()
         return islands + icons + "pill v=${v.visibility} a=${v.alpha} ta=${v.transitionAlpha} at=${xy[0]},${xy[1]} " +
             "${v.width}x${v.height} morph=${c.morph != null} header=" +

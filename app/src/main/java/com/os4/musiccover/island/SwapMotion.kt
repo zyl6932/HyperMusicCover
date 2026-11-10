@@ -491,8 +491,8 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         val note = if (key == MUSIC_ISLAND) null
             else LockIslands.notes.firstOrNull { it.key == key } ?: LockIslands.noteFor(key)
         when {
-            key == MUSIC_ISLAND && music != null -> c.bindMusic(view, music, c.config)
-            note != null -> c.bindNote(view, note, c.config)
+            key == MUSIC_ISLAND && music != null -> c.binding.bindMusic(view, music, c.config)
+            note != null -> c.binding.bindNote(view, note, c.config)
             else -> return false
         }
         view.setInteractionsEnabled(false)
@@ -573,7 +573,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         disc.dress(c.discMaterialGeneration()) {
             MiniPlayerRuntime.material(it, c.loader, c.notificationMaterial())
         }
-        val picture: Any? = if (key == MUSIC_ISLAND) (c.thumbShown ?: c.cachedCover)
+        val picture: Any? = if (key == MUSIC_ISLAND) (c.binding.thumbShown ?: c.cachedCover)
             else LockIslands.notes.firstOrNull { it.key == key }?.icon ?: LockIslands.noteFor(key)?.icon
         if (c.stackedStyle()) disc.copyCardTextFrom(c.smallIsland)
         else disc.setCardText(null, null)

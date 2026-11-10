@@ -87,7 +87,7 @@ internal class ShortcutDiscs(private val c: MiniPlayerController) {
     fun updateDiscs() {
         // First, so that the discs below see the buttons as they will be drawn.
         holdButtonsThroughDoze()
-        c.applyInk()
+        c.binding.applyInk()
         val d = discDiameter()
         val frame = discFrame(d)
         c.followHost.reset()
