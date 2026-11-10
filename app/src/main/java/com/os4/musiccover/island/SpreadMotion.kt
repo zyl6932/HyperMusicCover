@@ -63,6 +63,8 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
         /** The screen went off or into the doze while it was open; and when it came back on. */
         var slept = false
         var wokeAt = 0L
+        /** NumState.inNumber as watchOpen last read it, set when the list opened: a fold is its change to true. */
+        var lastInNumber: Boolean? = null
         var lastFrameAt = 0L
         /** The progress the clock was last asked to follow (ClockRoom.roomForRows). */
         var clockP = Float.NaN
@@ -843,6 +845,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
         s.phase = SPREAD_OPEN
         s.cardsY = y
         s.still = 0
+        s.lastInNumber = NumState.inNumber
         // A wake while it is open wakes to the list, not to the folded stack (watchOpen).
         NumState.wakeAsList(true)
         // The list's place read again, from the stack as it is now: asked from a sample still
@@ -893,7 +896,14 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
         val islandsY = NumState.scrollTo("NUMBER") ?: return
         s.lastY = y
         val toward = if (s.cardsY >= islandsY) s.cardsY - y else y - s.cardsY
-        val folded = NumState.inNumber == true
+        // The stack folding by itself is its change from the list to the fold (exitNumState then
+        // enterNumState), not its being folded. With no ordinary row in it - the row all focus
+        // islands and the music - it never leaves the fold for a list: read as a level, every
+        // spread went home 10ms after it had opened (three super islands, the user, 2026-11-10).
+        // Not read asleep or in the wake's window above, so the one before the doze stays the base.
+        val inNumber = NumState.inNumber
+        val folded = s.lastInNumber == false && inNumber == true
+        s.lastInNumber = inNumber
         if (folded || listPulled() && toward > c.dp(SPREAD_PULL_DP)) {
             s.islandsY = islandsY
             startSpreadMorphs(s, toCards = false)
