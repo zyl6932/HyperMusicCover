@@ -280,9 +280,13 @@ final class Fingerprint {
         }
         // Redrawn, not dimmed: whether a frame is painted is decided per draw and per surface
         // (fodForKeyguard). An alpha on the view hid the print in an app's own prompt as well.
+        // postInvalidate, not invalidate: the print's views are on a window of the fingerprint's
+        // own thread (MiuiGxzwAnimView), and invalidating them from ours is the
+        // CalledFromWrongThreadException ViewRootImpl logs - only a warning today, a throw in a
+        // future version (2026-11-11, seen at boot). The redraw lands on that thread's next turn.
         for (View v : views) {
             try {
-                v.invalidate();
+                v.postInvalidate();
             } catch (Throwable ignored) {
             }
         }
@@ -312,7 +316,8 @@ final class Fingerprint {
         }
         for (View v : views) {
             try {
-                v.invalidate();
+                // On the print's own thread, as applyHideFp does.
+                v.postInvalidate();
             } catch (Throwable ignored) {
             }
         }
