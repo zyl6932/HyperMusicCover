@@ -49,7 +49,7 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
         val sink = " nativeY=$nativeY nativeTy=${native?.translationY} nativeTarget=${native?.let(c.stackHost::stackTargetY)} " +
             "pin=${c.stackHost.pinned?.get() != null} frozen=${c.stackHost.pinnedAt} pinY=${c.stackHost.pinY.value} pinDy=${c.stackHost.pinnedDy} " +
             "stackTy=${c.stackHost.notificationStack()?.translationY} "
-        val islands = c.describeSession() + c.spreadMotion.describeSpread() + " rowAnim=${c.rowAnimating} swap=${c.swapMotion.swap != null} noteMorph=${c.noteMorphMotion.noteMorphKey != null} " +
+        val islands = c.sessionSource.describeSession() + c.spreadMotion.describeSpread() + " rowAnim=${c.rowAnimating} swap=${c.swapMotion.swap != null} noteMorph=${c.noteMorphMotion.noteMorphKey != null} " +
             "flight=${c.noteMorphMotion.flight != null} drag=${c.noteDragMotion.noteDrag != null} ${c.player?.touchState()} " +
             "out=${c.expandedKey()?.takeLast(12)} xchg=${c.cardExchange.exchange?.let { x -> "out=${x.expanded?.takeLast(6)} pend=${x.pending?.takeLast(6)} " +
                 "seats=${x.seats?.big?.takeLast(6)}/${x.seats?.small?.takeLast(6)} " +

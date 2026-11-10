@@ -296,7 +296,7 @@ internal class NoteMorphMotion(private val c: MiniPlayerController) {
     }
 
     fun prepareFlight(key: String): MiniPlayerView? { android.os.Trace.beginSection("MC prepareFlight"); try {
-        val music = if (key == MUSIC_ISLAND) c.controller?.takeIf(c::isUsable) ?: return null else null
+        val music = if (key == MUSIC_ISLAND) c.controller?.takeIf(c.sessionSource::isUsable) ?: return null else null
         val note = if (music == null) LockIslands.noteFor(key) ?: return null else null
         val pill = c.player ?: return null
         // One kept from an earlier flight or switch when there is one: made new, a flight cost

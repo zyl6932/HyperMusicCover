@@ -119,7 +119,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
      */
     /** Why prepareGroup gave none, read after it: the parts of its state that refuse one. */
     internal fun groupRefusal(toNative: Boolean): String =
-        "usable=${c.controller?.let(c::isUsable)} note=${c.noteMorphMotion.noteMorphKey != null} flight=${c.noteMorphMotion.flight != null} " +
+        "usable=${c.controller?.let(c.sessionSource::isUsable)} note=${c.noteMorphMotion.noteMorphKey != null} flight=${c.noteMorphMotion.flight != null} " +
             "xchg=${c.cardExchange.exchange != null} sel=${c.selectedIsland?.takeLast(6)} small=${c.smallKey?.takeLast(6)} " +
             "keys=${c.islandKeys.joinToString(",") { it.takeLast(6) }} toNative=$toNative"
 
@@ -140,7 +140,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
 
     private fun prepareGroupUnsafe(native: View, toNative: Boolean): MiniCardMorph? {
         val view = c.player ?: return null
-        if (c.controller?.takeIf(c::isUsable) == null || busyForGroup()) return null
+        if (c.controller?.takeIf(c.sessionSource::isUsable) == null || busyForGroup()) return null
         if (toNative && c.selectedIsland != MUSIC_ISLAND && c.smallKey != MUSIC_ISLAND) return null
         c.swapMotion.endSwap()
         c.endRow()

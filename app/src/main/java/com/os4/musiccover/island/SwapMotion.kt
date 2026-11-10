@@ -487,7 +487,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         if (view.layoutParams.width != w || view.layoutParams.height != h) {
             view.layoutParams = view.layoutParams.apply { width = w; height = h }
         }
-        val music = c.controller?.takeIf(c::isUsable)
+        val music = c.controller?.takeIf(c.sessionSource::isUsable)
         val note = if (key == MUSIC_ISLAND) null
             else LockIslands.notes.firstOrNull { it.key == key } ?: LockIslands.noteFor(key)
         when {

@@ -62,7 +62,7 @@ internal class MiniPlayerController(
 ) {
     val context = host.context
     val handler = Gen.handler()
-    private val sessions = context.getSystemService(MediaSessionManager::class.java)
+    internal val sessions = context.getSystemService(MediaSessionManager::class.java)
     private val audio = context.getSystemService(AudioManager::class.java)
     var player: MiniPlayerView? = null
     var controller: MediaController? = null
@@ -92,69 +92,11 @@ internal class MiniPlayerController(
     }
     /** The config is read from preferences only when they change, not on every refresh. */
     private var configStale = true
-    private val sessionListener = MediaSessionManager.OnActiveSessionsChangedListener { scheduleRefresh() }
-    private val mediaListener = object : MediaController.Callback() {
-        override fun onMetadataChanged(metadata: MediaMetadata?) {
-            metadataCalls++
-            lastMetadataAt = android.os.SystemClock.uptimeMillis()
-            liveMetadata = metadata
-            scheduleRefresh()
-        }
-        override fun onPlaybackStateChanged(state: PlaybackState?) {
-            // Usable up to this very change: the gap is counted from here. Counted from the
-            // last refresh that saw it usable, a track played through left that minutes old,
-            // and QQ Music's stop between two tracks ended the music every time (#26, log
-            // 2026-09-30: ended, and the same session back 220ms later).
-            if (playbackUsable(liveState?.state) && !playbackUsable(state?.state)) {
-                usableSeenAt = android.os.SystemClock.uptimeMillis()
-            }
-            liveState = state
-            scheduleRefresh()
-        }
-        override fun onSessionDestroyed() {
-            liveFor = null
-            usableSeenAt = 0L
-            scheduleRefresh()
-        }
-    }
-
-    /** When the row's session last read as usable (uptime); 0 since it was chosen or destroyed. */
-    private var usableSeenAt = 0L
-    private val usableGapEnd = Runnable { refresh() }
-
-    /**
-     * The registered session's state and metadata, as its callbacks last handed them over.
-     * Each read of a MediaController's own is a binder call into the system server - a refresh
-     * made four or five, and on the lock screen's slow cores they came to ~2ms of the frame a
-     * switch lands on (traced 2026-09-25). Another session's are still asked for.
-     */
-    private var liveFor: android.media.session.MediaSession.Token? = null
-    private var liveState: PlaybackState? = null
-    private var liveMetadata: MediaMetadata? = null
-    /** For `op mini`: the metadata callbacks the registered session has delivered. */
-    private var metadataCalls = 0
-    private var lastMetadataAt = 0L
-
-    /** For `op mini`: the session the pill follows, what it holds, and what is really there. */
-    fun describeSession(): String {
-        fun id(c: MediaController?) = c?.let { it.packageName + "@" + Integer.toHexString(it.sessionToken.hashCode()) }
-        fun title(m: MediaMetadata?) = m?.getString(MediaMetadata.METADATA_KEY_TITLE)
-        val c = controller
-        val w = Main.miniPlayerSession()
-        return "session=${id(c)} live=${c != null && c.sessionToken == liveFor} calls=$metadataCalls rearms=$rearms " +
-            "liveTitle=${title(liveMetadata)} binderTitle=${runCatching { title(c?.metadata) }.getOrNull()} " +
-            "state=${stateOf(c ?: return "session=null watched=${id(w)} ")?.state} seenAt=$usableSeenAt " +
-            "watched=${id(w)} watchedTitle=${runCatching { title(w?.metadata) }.getOrNull()} " +
-            "card=${Main.miniPlayerMediaCardPresent()} sameObj=${c === w} " +
-            "cbReg=${runCatching { Xp.getObjectField(c, "mCbRegistered") }.getOrNull()} " +
-            "cbs=${runCatching { (Xp.getObjectField(c, "mCallbacks") as List<*>).size }.getOrNull()} " +
-            "wCbs=${runCatching { (Xp.getObjectField(w, "mCallbacks") as List<*>).size }.getOrNull()} " +
-            "lastCallAgo=${android.os.SystemClock.uptimeMillis() - lastMetadataAt} track=$lastTrack " +
-            "ink=[${describeInk()}] "
-    }
+    internal val sessionSource = SessionSource(this)
+    fun cardTrackChanged() = sessionSource.cardTrackChanged()
 
     /** For `op mini`: the text colours the system gave its own card and rows, by view id. */
-    private fun describeInk(): String {
+    internal fun describeInk(): String {
         fun hex(v: View?) = (v as? android.widget.TextView)?.let { Integer.toHexString(it.currentTextColor) }
         val sb = StringBuilder("${binding.describeInkCounts()} cardTitle=${hex(Main.miniPairTitle())} cardArtist=${hex(Main.miniPairArtist())}")
         val seen = HashSet<String>()
@@ -171,52 +113,6 @@ internal class MiniPlayerController(
         return sb.toString()
     }
 
-    internal fun stateOf(c: MediaController): PlaybackState? =
-        if (liveFor != null && c.sessionToken == liveFor) liveState else c.playbackState
-
-    internal fun metadataOf(c: MediaController): MediaMetadata? =
-        if (liveFor != null && c.sessionToken == liveFor) liveMetadata else c.metadata
-
-    /**
-     * The media card has moved to another track: the callback is put on a controller of the
-     * pill's own and the session read again. The system server drops a controller callback for
-     * good the first time a call to it fails (MediaSessionRecord.performOnCallbackHolders), and
-     * says nothing to the controller, which goes on believing it is registered. Apple's metadata
-     * with its lyric attached runs to 50k characters, to every controller in SystemUI at once:
-     * skipping through tracks filled SystemUI's binder buffer, the pill's callback was dropped,
-     * and the pill showed one song while another played, until SystemUI restarted (2026-10-14).
-     * Its own controller because the one it was handed is often Main's: with Main's callback
-     * still on it, taking ours off and putting it back never registers anything again.
-     */
-    fun cardTrackChanged() {
-        handler.post {
-            val c = controller ?: return@post
-            if (destroyed) return@post
-            val own = runCatching { MediaController(context, c.sessionToken) }.getOrNull() ?: return@post
-            runCatching { Gen.unsessionCallback(c, mediaListener) }
-            controller = own
-            runCatching { Gen.sessionCallback(own, mediaListener, handler) }
-            // Not followLive: the gap a player between two tracks is given runs on (#26).
-            liveFor = null
-            liveState = own.playbackState
-            liveMetadata = own.metadata
-            liveFor = own.sessionToken
-            rearms++
-            refresh()
-        }
-    }
-    /** For `op mini`: how often the callback has been put back on a track change. */
-    private var rearms = 0
-
-    /** The callbacks are [c]'s from here: what it has now, and what they bring after. */
-    private fun followLive(c: MediaController?) {
-        liveFor = null
-        usableSeenAt = 0L
-        handler.removeCallbacks(usableGapEnd)
-        liveState = c?.playbackState
-        liveMetadata = c?.metadata
-        liveFor = c?.sessionToken
-    }
     /** The stack's content top the clock was last given room by (ClockRoom.roomForRows). */
     private var clockTopAsked = Float.NaN
 
@@ -780,7 +676,7 @@ internal class MiniPlayerController(
         // super island draws it.
         // Every notification's picture comes cut or whole already (LockIslands.roundIcon).
         if (stackedStyle()) {
-            val metadata = music?.let(::metadataOf)
+            val metadata = music?.let(sessionSource::metadataOf)
             view.setCardText(
                 note?.timer?.displayText() ?: note?.title ?: metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty().ifBlank { "正在播放" },
                 note?.text ?: metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty())
@@ -1291,7 +1187,7 @@ internal class MiniPlayerController(
      */
     fun prepareSmallView(key: String, pooled: Boolean = false): MiniPlayerView? {
         val pill = player ?: return null
-        val music = controller?.takeIf(::isUsable)
+        val music = controller?.takeIf(sessionSource::isUsable)
         val note = if (key == MUSIC_ISLAND) null
             else LockIslands.notes.firstOrNull { it.key == key } ?: LockIslands.noteFor(key)
         if (if (key == MUSIC_ISLAND) music == null else note == null) return null
@@ -1614,7 +1510,7 @@ internal class MiniPlayerController(
 
     /** There are islands other than the music's, in the row or out as their rows. */
     private fun othersBesideMusic(): Boolean {
-        if (controller?.takeIf(::isUsable) == null) return false
+        if (controller?.takeIf(sessionSource::isUsable) == null) return false
         // A notification out as its row counts: the music going out takes its place.
         return LockIslands.notes.isNotEmpty() || islandKeys.any { it != MUSIC_ISLAND } ||
             LockIslands.releasedKeys().any { stackHost.rowFor(it) != null }
@@ -1711,7 +1607,7 @@ internal class MiniPlayerController(
     /** The music is out as its card - the media card, or the cover - the row holding the others. */
     private fun musicExpanded(includeCover: Boolean): Boolean = MiniPlayerPresentationPolicy.mediaExpanded(
         cardPresent = Main.miniPlayerMediaCardPresent(),
-        sessionUsable = controller?.let(::isUsable) == true,
+        sessionUsable = controller?.let(sessionSource::isUsable) == true,
         musicInRow = MUSIC_ISLAND in islandKeys,
         nativeRequested = MiniPlayerRuntime.nativeRequested(controller?.sessionToken),
         coverActive = includeCover && Main.coverModeOn(),
@@ -1860,7 +1756,7 @@ internal class MiniPlayerController(
         Gen.preDraw(host, preDraw)
         Gen.layoutChange(left, leftLayoutListener)
         Gen.layoutChange(right, rightLayoutListener)
-        runCatching { sessions?.let { Gen.activeSessionsListener(it, sessionListener, handler) } }
+        runCatching { sessions?.let { Gen.activeSessionsListener(it, sessionSource.sessionListener, handler) } }
         LockIslands.addListener(islandListener)
         // Posted: run here, it came before the properties declared below this block were
         // made, and failed on the first of them (focusLotties) every time SystemUI started.
@@ -1873,9 +1769,9 @@ internal class MiniPlayerController(
         runCatching { Gen.unpreDraw(host, preDraw) }
         runCatching { Gen.unlayoutChange(left, leftLayoutListener) }
         runCatching { Gen.unlayoutChange(right, rightLayoutListener) }
-        runCatching { sessions?.let { Gen.unactiveSessionsListener(it, sessionListener) } }
-        runCatching { controller?.let { Gen.unsessionCallback(it, mediaListener) } }
-        followLive(null)
+        runCatching { sessions?.let { Gen.unactiveSessionsListener(it, sessionSource.sessionListener) } }
+        runCatching { controller?.let { Gen.unsessionCallback(it, sessionSource.mediaListener) } }
+        sessionSource.followLive(null)
         morph?.cancel()
         if (groupMotion.piles.isNotEmpty() || groupMotion.pileMoving) groupMotion.finishPile(true)
         // Each of these ends itself once its own state has, but some wait on a frame of a tree
@@ -2287,7 +2183,7 @@ internal class MiniPlayerController(
         // the stack and nothing folded.
         if (spreadMotion.spread != null) return false
         val current = controller ?: return false
-        if (!isUsable(current)) return false
+        if (!sessionSource.isUsable(current)) return false
         return Main.coverModeOn() || wantsNativeArtworkGesture()
     }
 
@@ -2471,16 +2367,16 @@ internal class MiniPlayerController(
         }
         // Active-session lists can be momentarily empty while a player advances its queue. Keep a
         // still-usable controller instead of flashing the vendor card during that bookkeeping gap.
-        val chosen = traced("MC r.choose") { chooseController() ?: controller?.takeIf(::isUsable) }
+        val chosen = traced("MC r.choose") { sessionSource.chooseController() ?: controller?.takeIf(sessionSource::isUsable) }
         if (chosen?.sessionToken != controller?.sessionToken) {
             val previous = controller
-            if (chosen == null && previous != null && !isUsable(previous)) {
+            if (chosen == null && previous != null && !sessionSource.isUsable(previous)) {
                 MiniPlayerRuntime.endSession(previous.sessionToken, "playback inactive")
             }
-            runCatching { previous?.let { Gen.unsessionCallback(it, mediaListener) } }
+            runCatching { previous?.let { Gen.unsessionCallback(it, sessionSource.mediaListener) } }
             controller = chosen
-            runCatching { chosen?.let { Gen.sessionCallback(it, mediaListener, handler) } }
-            followLive(chosen)
+            runCatching { chosen?.let { Gen.sessionCallback(it, sessionSource.mediaListener, handler) } }
+            sessionSource.followLive(chosen)
             musicSince = System.currentTimeMillis()
             cachedCover = null
             // Another player: its artwork, not the last one's.
@@ -2495,7 +2391,7 @@ internal class MiniPlayerController(
         // No music island without its card: a session outlives a dismissed card, and the row
         // kept an island for it that no card would ever be there to back.
         val music = traced("MC r.music") {
-            controller?.takeIf(::isUsable)?.takeIf { Main.miniPlayerMediaCardPresent() || musicMoving }
+            controller?.takeIf(sessionSource::isUsable)?.takeIf { Main.miniPlayerMediaCardPresent() || musicMoving }
         }
         val notes = traced("MC r.notes") { LockIslands.notes }
         // One island out as its card, the rest in the row (the super island's expanded state):
@@ -2649,57 +2545,6 @@ internal class MiniPlayerController(
 
     internal val binding = MiniPlayerBinding(this)
 
-    private fun chooseController(): MediaController? {
-        val platform = Main.miniPlayerSession()
-        if (platform != null && isUsable(platform)) return platform
-        val active = runCatching { sessions?.getActiveSessions(null).orEmpty() }.getOrDefault(emptyList())
-        return active.firstOrNull(::isUsable)
-    }
-
-    /**
-     * A player between two tracks can say STOPPED or NONE for a moment. Read as the music ending,
-     * the music island left the row, the card's suppression let go, and the whole media card
-     * came up where the pill was and went again (#26). The session the row is showing stays
-     * usable for USABLE_GAP_MS after it last was; a session destroyed gets no such grace.
-     */
-    fun isUsable(value: MediaController): Boolean {
-        if (playbackUsable(stateOf(value)?.state)) {
-            if (value.sessionToken == controller?.sessionToken) usableSeenAt = android.os.SystemClock.uptimeMillis()
-            return true
-        }
-        if (cardHolds(value)) return true
-        if (usableSeenAt == 0L || value.sessionToken != controller?.sessionToken ||
-            value.sessionToken != liveFor) return false
-        val left = usableSeenAt + USABLE_GAP_MS - android.os.SystemClock.uptimeMillis()
-        if (left <= 0L) return false
-        // Settled either way when the gap runs out: the state back, or the music gone for good.
-        handler.removeCallbacks(usableGapEnd)
-        handler.postDelayed(usableGapEnd, left + 1L)
-        return true
-    }
-
-    /**
-     * The session the lock screen's media card is showing, while the card is up, in a state that
-     * says nothing has played yet. QQ Music puts up its notification - and so the card - as soon
-     * as it is opened, with the session at NONE or STOPPED until the first play: read by state
-     * alone that was no music, so the card stayed a card on the lock screen and never went into
-     * the pill until something had been played. The card is what the lock screen shows as the
-     * music; once it goes, the state decides again.
-     */
-    private fun cardHolds(value: MediaController): Boolean {
-        val state = stateOf(value)?.state
-        if (state != PlaybackState.STATE_NONE && state != PlaybackState.STATE_STOPPED) return false
-        if (!Main.miniPlayerMediaCardPresent()) return false
-        return value.sessionToken == Main.miniPlayerSession()?.sessionToken
-    }
-
-    private fun playbackUsable(state: Int?): Boolean = when (state) {
-        PlaybackState.STATE_PLAYING, PlaybackState.STATE_PAUSED, PlaybackState.STATE_BUFFERING,
-        PlaybackState.STATE_FAST_FORWARDING, PlaybackState.STATE_REWINDING,
-        PlaybackState.STATE_CONNECTING, PlaybackState.STATE_SKIPPING_TO_PREVIOUS,
-        PlaybackState.STATE_SKIPPING_TO_NEXT, PlaybackState.STATE_SKIPPING_TO_QUEUE_ITEM -> true
-        else -> false
-    }
 
     internal fun updateVisibility() { android.os.Trace.beginSection("MC updateVisibility"); try {
         val view = player
@@ -3237,7 +3082,7 @@ internal class MiniPlayerController(
                         transport: (MediaController, Boolean) -> Unit) {
         handler.post {
             runCatching {
-                val current = chooseController() ?: controller
+                val current = sessionSource.chooseController() ?: controller
                 val playing = current?.playbackState?.state == PlaybackState.STATE_PLAYING
                 val action = if (playing) actionWhenPlaying else actionWhenPaused
                 val supported = current?.playbackState?.actions?.and(action) != 0L

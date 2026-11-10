@@ -97,7 +97,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
             thumbShown = null
             c.lastTrack = ""
         }
-        val metadata = c.metadataOf(current)
+        val metadata = c.sessionSource.metadataOf(current)
         // The song, not the title: Salt, 汽水, QQ and NetEase sing into TITLE, and every line
         // threw the artwork away as a track change (#47, #56).
         val track = TrackIdentity.of(current.packageName, metadata).songKey().ifEmpty {
@@ -131,7 +131,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
         view.skippable = true
         showTimer(view, null)
         showFocusAnim(view, null, null)
-        val metadata = c.metadataOf(current)
+        val metadata = c.sessionSource.metadataOf(current)
         val shown = traced("MC b.thumb") { thumbnailFor(musicCover(metadata), view) }
         view.setToggleShown(true)
         // A player singing into TITLE: the song and singer it spells into ARTIST instead, when
@@ -148,7 +148,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
             artist.orEmpty()
                 .ifBlank { metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty() },
             shown,
-            c.stateOf(current)?.state == PlaybackState.STATE_PLAYING,
+            c.sessionSource.stateOf(current)?.state == PlaybackState.STATE_PLAYING,
             config,
             c.materialKey(),
             { target -> MiniPlayerRuntime.material(target, c.loader, c.notificationMaterial()) },
