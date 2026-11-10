@@ -3571,12 +3571,12 @@ internal class MiniPlayerController(
             // row, not where the stack still has it. The media card going back to the pill for a
             // focus notification was pushed up the stack by the row let out under it, 1700 -> 1425,
             // and the clock shrank for it until it went (probe, 2026-09-26).
+            // The same for the music's own morph into the pill: pulled down out of the cover,
+            // the exit aimed at the card and then jumped to full size as it went (2026-09-26).
+            val retractingMusic = morph?.toNative == false &&
+                (noteMorphKey == null || noteMorphKey == MUSIC_ISLAND)
             val leaving = exchange?.movers?.values?.filter { it.headedHome }?.map { it.native }.orEmpty() +
-                // The same for the music's own morph into the pill: pulled down out of the cover,
-                // the exit aimed at the card and then jumped to full size as it went (2026-09-26).
-                listOfNotNull(transitionHeader()?.takeIf {
-                    morph?.toNative == false && (noteMorphKey == null || noteMorphKey == MUSIC_ISLAND)
-                })
+                listOfNotNull(if (retractingMusic) transitionHeader() else null)
             // The row spreading out as the list or folding back: where its islands start from.
             val spreadRest = spreadMoving()?.let {
                 player?.takeIf { v -> v.isAttachedToWindow }
