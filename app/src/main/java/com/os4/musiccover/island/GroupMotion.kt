@@ -93,7 +93,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
 
     /** The morph drawing the pill: the media card's, or in a group whichever has the pill. */
     fun pillMorph(): MiniCardMorph? {
-        val g = group ?: return c.morph?.takeIf { c.noteMorphMotion.flight == null }
+        val g = group ?: return c.morph?.takeIf { c.flightState.flight == null }
         return if (g.musicSmall) g.follower?.takeIf { !g.otherSmall } else c.morph
     }
 
@@ -119,7 +119,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
      */
     /** Why prepareGroup gave none, read after it: the parts of its state that refuse one. */
     internal fun groupRefusal(toNative: Boolean): String =
-        "usable=${c.controller?.let(c.sessionSource::isUsable)} note=${c.noteMorphMotion.noteMorphKey != null} flight=${c.noteMorphMotion.flight != null} " +
+        "usable=${c.controller?.let(c.sessionSource::isUsable)} note=${c.flightState.noteMorphKey != null} flight=${c.flightState.flight != null} " +
             "xchg=${c.cardExchange.exchange != null} sel=${c.selectedIsland?.takeLast(6)} small=${c.smallKey?.takeLast(6)} " +
             "keys=${c.islandKeys.joinToString(",") { it.takeLast(6) }} toNative=$toNative"
 
@@ -136,7 +136,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
      * Busy for a group - the row and the lock screen's cards moving as one: the motions that keep
      * it from starting (M0, the subset as it was).
      */
-    private fun busyForGroup(): Boolean = c.noteMorphMotion.noteMorphKey != null || c.noteMorphMotion.flight != null || c.cardExchange.exchange != null
+    private fun busyForGroup(): Boolean = c.flightState.noteMorphKey != null || c.flightState.flight != null || c.cardExchange.exchange != null
 
     private fun prepareGroupUnsafe(native: View, toNative: Boolean): MiniCardMorph? {
         val view = c.player ?: return null
@@ -320,8 +320,8 @@ internal class GroupMotion(private val c: MiniPlayerController) {
 
     /** Turned back before landing: the view has the small place to itself again. */
     private fun unlandSmall() {
-        if (c.landingBox != null) {
-            c.landingBox = null
+        if (c.flightState.landingBox != null) {
+            c.flightState.landingBox = null
             c.smallIsland?.iconAtStart = false
             c.restoreSmallIslandShape()
         }
@@ -338,7 +338,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
         group = null
         g.follower?.cancel()
         g.smallView?.let { runCatching { c.host.removeView(it) } }
-        c.landingBox = null
+        c.flightState.landingBox = null
         c.smallIsland?.iconAtStart = false
         if (g.inPlace) {
             c.player?.alpha = 1f
@@ -647,7 +647,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
     /** The stack island is on its way back into the row: by a switch, or a morph of its own. */
     internal fun stackGoingHome(): Boolean =
         c.cardExchange.exchange?.movers?.get(pileKey)?.headedHome == true ||
-            c.noteMorphMotion.noteMorphKey == pileKey && c.morph?.toNative == false
+            c.flightState.noteMorphKey == pileKey && c.morph?.toNative == false
 
     /** The last tenth of a pile's progress traced, so a pile is traced ten times, not every frame. */
     private var pileTraceBucket = -1

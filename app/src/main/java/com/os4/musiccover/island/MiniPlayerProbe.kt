@@ -14,10 +14,10 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
         if (c.swapMotion.swap != null) add("swap")
         if (c.morph != null) add("morph")
         if (c.groupMotion.group != null) add("group")
-        if (c.noteMorphMotion.flight != null) add("flight")
+        if (c.flightState.flight != null) add("flight")
         if (c.cardExchange.exchange != null) add("exchange")
-        c.noteMorphMotion.noteMorphKey?.let { add("noteMorph=${it.takeLast(6)}") }
-        if (c.noteMorphMotion.pillLandingBox != null) add("landing")
+        c.flightState.noteMorphKey?.let { add("noteMorph=${it.takeLast(6)}") }
+        if (c.flightState.pillLandingBox != null) add("landing")
         if (c.rowHeldOff) add("heldOff")
         if (c.followRowFade < 0.99f) add("fade=${"%.2f".format(c.followRowFade)}")
         if (MiniPlayerScene.aodActive) add("aod")
@@ -49,8 +49,8 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
         val sink = " nativeY=$nativeY nativeTy=${native?.translationY} nativeTarget=${native?.let(c.stackHost::stackTargetY)} " +
             "pin=${c.stackHost.pinned?.get() != null} frozen=${c.stackHost.pinnedAt} pinY=${c.stackHost.pinY.value} pinDy=${c.stackHost.pinnedDy} " +
             "stackTy=${c.stackHost.notificationStack()?.translationY} "
-        val islands = c.sessionSource.describeSession() + c.spreadMotion.describeSpread() + " rowAnim=${c.rowAnimating} swap=${c.swapMotion.swap != null} noteMorph=${c.noteMorphMotion.noteMorphKey != null} " +
-            "flight=${c.noteMorphMotion.flight != null} drag=${c.noteDragMotion.noteDrag != null} ${c.player?.touchState()} " +
+        val islands = c.sessionSource.describeSession() + c.spreadMotion.describeSpread() + " rowAnim=${c.rowAnimating} swap=${c.swapMotion.swap != null} noteMorph=${c.flightState.noteMorphKey != null} " +
+            "flight=${c.flightState.flight != null} drag=${c.noteDragMotion.noteDrag != null} ${c.player?.touchState()} " +
             "out=${c.expandedKey()?.takeLast(12)} xchg=${c.cardExchange.exchange?.let { x -> "out=${x.expanded?.takeLast(6)} pend=${x.pending?.takeLast(6)} " +
                 "seats=${x.seats?.big?.takeLast(6)}/${x.seats?.small?.takeLast(6)} " +
                 x.movers.values.joinToString(" ") { c.cardExchange.moverState(it) } }} " +

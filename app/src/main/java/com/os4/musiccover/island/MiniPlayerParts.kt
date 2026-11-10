@@ -91,7 +91,6 @@ internal interface RowState {
     val config: JSONObject
     val configuredHeightDp: Float
     val morph: MiniCardMorph?
-    val landingBox: CoverMorphMotion.Box?
     val rowHeldOff: Boolean
     val smallGrowing: Boolean
     val stackLeadKey: String?

@@ -23,6 +23,7 @@ internal class ShortcutDiscs(
     private val rowState: RowState,
     private val edits: RowEdits,
     private val rowHost: RowHost,
+    private val flightState: FlightState,
     private val motions: Motions,
     // Made before this part: the motions whose views the discs make way for.
     private val groupMotion: GroupMotion,
@@ -300,7 +301,7 @@ internal class ShortcutDiscs(
         // running). The list's own idiom for a small island really there (showing).
         // The pill only meets it while it gives (setScene); a morph in the pill's place does not.
         val small = views.smallIsland?.takeIf { !views.stackedStyle() && it.visibility == View.VISIBLE && !motions.swapping &&
-            rowState.landingBox == null && (!rowState.smallGrowing || views.smallGrow.atRest()) }
+            flightState.landingBox == null && (!rowState.smallGrowing || views.smallGrow.atRest()) }
             ?.let { CoverMorphMotion.Box(views.smallRest[0] - d / 2f + views.smallNudgeX(),
                 views.smallRest[1] - d / 2f + views.smallNudgeY(), d, d) }
         // Not the pill's, but no less in the way: a notification's island on its way up out of

@@ -20,6 +20,7 @@ internal class SpreadMotion(
     private val rowState: RowState,
     private val edits: RowEdits,
     private val rowHost: RowHost,
+    private val flightState: FlightState,
     private val motions: Motions,
     // Made before this part: the stack it spreads into and the motions it ends or waits on.
     private val stackHost: StackHost,
@@ -966,8 +967,8 @@ internal class SpreadMotion(
                 native?.let { stackHost.hideRowUntilGone(it, item.key); it.transitionAlpha = 0f }
                 LockIslands.recapture(item.key)
                 stackHost.markReturning(item.key)
-                noteMorphMotion.releasedFromPill -= item.key
-                noteMorphMotion.releasedFromSmall -= item.key
+                flightState.releasedFromPill -= item.key
+                flightState.releasedFromSmall -= item.key
                 continue
             }
             if (native == null) continue

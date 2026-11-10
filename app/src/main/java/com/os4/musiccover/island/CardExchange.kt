@@ -126,7 +126,7 @@ internal class CardExchange(private val c: MiniPlayerController) {
      * Busy for an exchange - one island out as its card, the expanded one home: the motions that
      * keep it from starting (M0, the subset as it was).
      */
-    private fun busyForExchange(): Boolean = exchange != null || c.morph != null || c.noteMorphMotion.noteMorphKey != null || c.noteMorphMotion.flight != null || c.groupMotion.group != null
+    private fun busyForExchange(): Boolean = exchange != null || c.morph != null || c.flightState.noteMorphKey != null || c.flightState.flight != null || c.groupMotion.group != null
 
     /** [up] - the pill's island or the small one - goes out in place of the one out now. */
     fun startExchange(up: String, toCover: Boolean = false): Boolean { android.os.Trace.beginSection("MC startExchange"); try {
@@ -300,8 +300,8 @@ internal class CardExchange(private val c: MiniPlayerController) {
         if (!m.landed) return
         m.landed = false
         if (m.place == LAND_PILL) c.noteMorphMotion.endPillLanding()
-        else if (c.landingBox != null) {
-            c.landingBox = null
+        else if (c.flightState.landingBox != null) {
+            c.flightState.landingBox = null
             c.smallIsland?.iconAtStart = false
             c.restoreSmallIslandShape()
         }
@@ -567,8 +567,8 @@ internal class CardExchange(private val c: MiniPlayerController) {
         if (toNative) {
             // Pulled down again, it comes back where it went from.
             when (m.origin) {
-                LAND_PILL -> { c.noteMorphMotion.releasedFromPill += key; c.noteMorphMotion.releasedFromSmall -= key }
-                LAND_SMALL -> { c.noteMorphMotion.releasedFromSmall += key; c.noteMorphMotion.releasedFromPill -= key }
+                LAND_PILL -> { c.flightState.releasedFromPill += key; c.flightState.releasedFromSmall -= key }
+                LAND_SMALL -> { c.flightState.releasedFromSmall += key; c.flightState.releasedFromPill -= key }
             }
             // Held where the stack is settling it until the stack has taken the others away.
             // Turned round, the card that came back up lands where it left, the rows that went
@@ -576,8 +576,8 @@ internal class CardExchange(private val c: MiniPlayerController) {
             // Where the stack has it: the rows going home are out of its layout already.
             c.stackHost.pinCard(m.native, x.homeKeys())
         } else {
-            c.noteMorphMotion.releasedFromPill -= key
-            c.noteMorphMotion.releasedFromSmall -= key
+            c.flightState.releasedFromPill -= key
+            c.flightState.releasedFromSmall -= key
             if (key != MUSIC_ISLAND) {
                 c.stackHost.rowFor(key)?.let { c.stackHost.hideRowUntilGone(it, key) }
                 c.stackHost.markReturning(key)
@@ -654,12 +654,12 @@ internal class CardExchange(private val c: MiniPlayerController) {
         // 2026-09-26). Taken into a switch as it is, it turns home while the music goes up, as
         // the super island does it: the next version waited for it to land and only then opened
         // the cover, one after the other.
-        val moving = c.noteMorphMotion.noteMorphKey?.takeIf { it != MUSIC_ISLAND }
+        val moving = c.flightState.noteMorphKey?.takeIf { it != MUSIC_ISLAND }
         when {
             moving != null && c.morph != null -> {
                 val m = c.morph!!
                 c.trace("cover takes ${moving.takeLast(6)} in: p=${"%.2f".format(m.progress)} toRow=${m.toNative} " +
-                    "out=${c.flightOut} drag=${c.noteDragMotion.noteDrag != null} " + c.smallState())
+                    "out=${c.flightState.flightOut} drag=${c.noteDragMotion.noteDrag != null} " + c.smallState())
                 val inPill = c.selectedIsland == MUSIC_ISLAND
                 val x = if (inPill || c.smallKey == MUSIC_ISLAND) adoptNote(moving) else null
                 if (x == null) {
@@ -669,7 +669,7 @@ internal class CardExchange(private val c: MiniPlayerController) {
                 requestUp(x, MUSIC_ISLAND, inPill, cover = true)
                 MiniPlayerRuntime.noteTouch("cover: ${moving.takeLast(6)} taken in, music up")
             }
-            moving != null && c.noteMorphMotion.rowWaitKey == moving -> {
+            moving != null && c.flightState.rowWaitKey == moving -> {
                 c.noteDragMotion.noteDrag = null
                 c.noteMorphMotion.abandonNoteMorph(moving)
                 MiniPlayerRuntime.noteTouch("cover: ${moving.takeLast(6)} not opened")
@@ -723,7 +723,7 @@ internal class CardExchange(private val c: MiniPlayerController) {
      * Busy for a running morph taken over as a notification's flight: the motions that keep it from
      * starting (M0, the subset as it was).
      */
-    private fun busyForAdoptNote(): Boolean = exchange != null || c.noteMorphMotion.rowWaitKey != null
+    private fun busyForAdoptNote(): Boolean = exchange != null || c.flightState.rowWaitKey != null
 
     /**
      * The notification opening or folding back as the flight, made a [Mover] of a new switch as
@@ -734,7 +734,7 @@ internal class CardExchange(private val c: MiniPlayerController) {
      */
     private fun adoptNote(key: String): Switch? {
         val running = c.morph ?: return null
-        val view = c.noteMorphMotion.flight ?: return null
+        val view = c.flightState.flight ?: return null
         if (busyForAdoptNote()) return null
         val native = running.card
         c.stackHost.flushTurn(key)
@@ -743,13 +743,13 @@ internal class CardExchange(private val c: MiniPlayerController) {
         c.noteDragMotion.noteDrag = null
         // Pulled and not let go, it was not out yet: its home is given up now, as a tap's is.
         if (running.toNative) c.noteMorphMotion.setFlightOut(true) else c.stackHost.takeInEarly(key)
-        val home = if (c.noteMorphMotion.flightHome == HOME_PILL) LAND_PILL else LAND_SMALL
+        val home = if (c.flightState.flightHome == HOME_PILL) LAND_PILL else LAND_SMALL
         val end = if (home == LAND_PILL) c.player?.restBoxOnScreen() else c.smallBoxOnScreen()
         // The flight's landing - the pill or the small island in its shape - is the switch's to
         // make again (moverFrame), once the seats have it.
         c.noteMorphMotion.endPillLanding()
-        if (c.landingBox != null) {
-            c.landingBox = null
+        if (c.flightState.landingBox != null) {
+            c.flightState.landingBox = null
             c.smallIsland?.iconAtStart = false
             c.restoreSmallIslandShape()
         }
@@ -768,12 +768,12 @@ internal class CardExchange(private val c: MiniPlayerController) {
         if (!running.toNative && home == LAND_PILL) c.fitToPill(view, c.smallKey != null)
         // Nothing is the flight's any more.
         c.morph = null
-        c.noteMorphMotion.noteMorphKey = null
-        c.noteMorphMotion.flight = null
-        c.noteMorphMotion.flightFromSmall = false
-        c.noteMorphMotion.flightHome = HOME_SMALL
-        c.flightOut = false
-        c.flightLanding = false
+        c.flightState.noteMorphKey = null
+        c.flightState.flight = null
+        c.flightState.flightFromSmall = false
+        c.flightState.flightHome = HOME_SMALL
+        c.flightState.flightOut = false
+        c.flightState.flightLanding = false
         exchange = x
         c.endRow()
         c.resetIslandDrag()

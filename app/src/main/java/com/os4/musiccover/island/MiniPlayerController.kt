@@ -92,6 +92,8 @@ internal class MiniPlayerController(
     }
     /** The config is read from preferences only when they change, not on every refresh. */
     private var configStale = true
+    /** The flight's state, which the morphs between the row and the stack share (FlightState). */
+    internal val flightState = FlightState()
     internal val sessionSource: SessionSource = SessionSource(this, this, this, this, sessions, ::describeInk)
     fun cardTrackChanged() = sessionSource.cardTrackChanged()
 
@@ -484,8 +486,8 @@ internal class MiniPlayerController(
     }
 
     /** For the touch log: why a notification could not be pulled out. */
-    fun noteBusy(): String = "noteMorph=${noteMorphMotion.noteMorphKey != null} morph=${morph != null} " +
-        "flight=${noteMorphMotion.flight != null} rowWait=${noteMorphMotion.rowWaitKey != null}"
+    fun noteBusy(): String = "noteMorph=${flightState.noteMorphKey != null} morph=${morph != null} " +
+        "flight=${flightState.flight != null} rowWait=${flightState.rowWaitKey != null}"
 
     /**
      * The row's first island, swiped to the row's right end: alone in the pill, the small
@@ -616,9 +618,9 @@ internal class MiniPlayerController(
         // on its way, and with none the pill takes the room back - the first version held the
         // place empty till the flight had settled, and the next one popped up half a second
         // after (filmed 2026-09-25).
-        val flying = noteMorphMotion.noteMorphKey?.takeIf { noteMorphMotion.flight != null }
-        val held = flying?.takeIf { !flightOut }
-        val keys = if (flying != null && flightOut) islandKeys - flying else islandKeys
+        val flying = flightState.noteMorphKey?.takeIf { flightState.flight != null }
+        val held = flying?.takeIf { !flightState.flightOut }
+        val keys = if (flying != null && flightState.flightOut) islandKeys - flying else islandKeys
         val preferred = preferredSmall?.takeIf { it in keys && it != selectedIsland }
         // A switch running: the small place is whoever the seats give it to - an island still on
         // its way there included, out of sight until it lands (exchangeHoldsSmall) - and nothing
@@ -655,13 +657,13 @@ internal class MiniPlayerController(
             MiniPlayerRuntime.material(it, loader, notificationMaterial())
         }
         view.setIconHidden(false)
-        if (swapMotion.swap == null && !islandDragging && !smallGrowing && landingBox == null)
+        if (swapMotion.swap == null && !islandDragging && !smallGrowing && flightState.landingBox == null)
             view.setShape(smallRestWidth(), smallRestHeight())
         // The one showing, going for a flight coming in, goes as itself: it keeps its picture
         // while it shrinks away. It used to take the incoming one's at once - and, asked only
         // while it still showed, took it anyway on the next refresh, mid-shrink. It takes the
         // flight's picture once the flight is landing on it (flightLanding).
-        if (key == held && !flightLanding) return
+        if (key == held && !flightState.flightLanding) return
         val showing = view.visibility == View.VISIBLE && !(smallGrowing && smallGrow.target == 0f)
         val note = if (key == MUSIC_ISLAND) null
             else notes.firstOrNull { it.key == key } ?: LockIslands.noteFor(key)
@@ -710,29 +712,6 @@ internal class MiniPlayerController(
 
     /** The next visibility pass shows the small island at once: a flight has just landed there. */
     override var snapSmallOnce = false
-
-    /**
-     * The flight has left the small island's place for good - a tap, or a pull let go past
-     * the threshold - and the place is the row's again. Until then it is the flight's to come
-     * back to.
-     */
-    internal var flightOut = false
-
-    /**
-     * The flight is on its last stretch home: the real small island is already in its place
-     * under it and the flight fades off it. Swapped only once it had landed, the glass's
-     * refraction and the picture both changed on that frame (filmed 2026-09-25).
-     */
-    internal var flightLanding = false
-
-    /**
-     * Landing, the small island is the flight's shape frame by frame - through the spring's
-     * overshoot and back - and not its own rest circle: the flight fades off an island moving
-     * exactly as it does. Put at rest under the flight, the small island stood still while the
-     * flight went through the overshoot invisible, and the landing had no give at all, where
-     * the pill's has (2026-09-25). On screen; null when not landing.
-     */
-    override var landingBox: CoverMorphMotion.Box? = null
 
     /**
      * The small island's pulse, the super island's smallIslandScaleAnimation: when the island out
@@ -793,7 +772,7 @@ internal class MiniPlayerController(
         // Its frame is centred on its rest place; a switch only widens the frame, never moves it.
         val fw = if (v.width > 0) v.width else v.layoutParams.width
         val fh = if (v.height > 0) v.height else v.layoutParams.height
-        landingBox?.let { box ->
+        flightState.landingBox?.let { box ->
             // The flight's shape, where the flight draws it: the morph places both.
             val xy = IntArray(2).also(host::getLocationOnScreen)
             val lw = maxOf(v.layoutParams.width, fw)
@@ -959,7 +938,7 @@ internal class MiniPlayerController(
         smallIconKey = null
     }
 
-    internal val swapMotion: SwapMotion = SwapMotion(this, this, this, this, sessionSource,
+    internal val swapMotion: SwapMotion = SwapMotion(this, this, this, this, flightState, sessionSource,
         { binding }, { noteMorphMotion }, { shortcutDiscs })
 
     /** The small island on screen, at rest. */
@@ -1054,7 +1033,7 @@ internal class MiniPlayerController(
         // A flight's morph moves the flight, not the pill: the pill still gives room on its
         // spring. Counted busy, it jumped to its new width the moment a flight set out.
         // A media card's morph lands on the row as it is laid out, so the row is put there at once.
-        val pillMorphing = morph != null && noteMorphMotion.flight == null || groupMotion.group != null
+        val pillMorphing = morph != null && flightState.flight == null || groupMotion.group != null
         val busy = swapMotion.swap != null || pillMorphing || view == null || view.visibility != View.VISIBLE
         if (!rowKnown || busy) {
             // Nothing drawn to move from, or another motion owns the frame: straight there.
@@ -1102,11 +1081,11 @@ internal class MiniPlayerController(
     override val swapping: Boolean get() = swapMotion.swap != null
     override val grouping: Boolean get() = groupMotion.group != null
     override val exchanging: Boolean get() = cardExchange.exchange != null
-    override val noteMorphing: Boolean get() = noteMorphMotion.noteMorphKey != null
-    override val flying: Boolean get() = noteMorphMotion.flight != null
+    override val noteMorphing: Boolean get() = flightState.noteMorphKey != null
+    override val flying: Boolean get() = flightState.flight != null
 
-    override fun frameTaken(): Boolean = swapMotion.swap != null || morph != null || groupMotion.group != null || noteMorphMotion.flight != null ||
-        cardExchange.exchange != null || noteMorphMotion.noteMorphKey != null || noteMorphMotion.pillLandingBox != null || spreadMotion.spread != null
+    override fun frameTaken(): Boolean = swapMotion.swap != null || morph != null || groupMotion.group != null || flightState.flight != null ||
+        cardExchange.exchange != null || flightState.noteMorphKey != null || flightState.pillLandingBox != null || spreadMotion.spread != null
 
 
 
@@ -1140,7 +1119,7 @@ internal class MiniPlayerController(
     override fun applyRow() {
         val view = player ?: return
         val rest = view.restBoxOnScreen() ?: return
-        if (noteMorphMotion.pillLandingBox != null) return
+        if (flightState.pillLandingBox != null) return
         // Coming up out of nothing: that frame carries the row's spring (applyAppear).
         if (appearMotion.appearing) return
         // Also after a media card's morph has handed the pill back mid-spring.
@@ -1352,7 +1331,7 @@ internal class MiniPlayerController(
         val visible = small.visibility == View.VISIBLE
         if (visible != shown) {
             trace("small ${if (shown) "show" else "hide"} animate=$animate key=${smallKey?.takeLast(6)} " +
-                "noteMorph=${noteMorphMotion.noteMorphKey?.takeLast(6)} out=$flightOut landing=$flightLanding group=${groupMotion.group != null}")
+                "noteMorph=${flightState.noteMorphKey?.takeLast(6)} out=${flightState.flightOut} landing=${flightState.flightLanding} group=${groupMotion.group != null}")
         }
         if (shown && visible && (!smallGrowing || smallGrow.target == 1f)) return
         if (!shown && (!visible || (smallGrowing && smallGrow.target == 0f))) return
@@ -1362,7 +1341,7 @@ internal class MiniPlayerController(
             smallGrow.value = if (shown) 1f else 0f
             smallGrow.target = smallGrow.value
             small.visibility = if (shown) View.VISIBLE else View.GONE
-            if (shown && landingBox == null) restoreSmallIslandShape()
+            if (shown && flightState.landingBox == null) restoreSmallIslandShape()
             return
         }
         if (shown && !visible) {
@@ -1514,7 +1493,7 @@ internal class MiniPlayerController(
      * Busy for a flight into or out of the cover or the lyrics: the motions that keep it from
      * starting (M0, the subset as it was).
      */
-    private fun busyForSceneFlight(): Boolean = noteMorphMotion.noteMorphKey != null || noteMorphMotion.flight != null || cardExchange.exchange != null
+    private fun busyForSceneFlight(): Boolean = flightState.noteMorphKey != null || flightState.flight != null || cardExchange.exchange != null
 
     /**
      * Into the cover or out of it with other islands in the row: the music goes as a flight, as
@@ -1534,17 +1513,17 @@ internal class MiniPlayerController(
             val fromSmall = selectedIsland != MUSIC_ISLAND
             if (fromSmall && smallKey != MUSIC_ISLAND) return false
             if (noteMorphMotion.prepareFlight(MUSIC_ISLAND) == null) return false
-            noteMorphMotion.noteMorphKey = MUSIC_ISLAND
-            noteMorphMotion.flightFromSmall = fromSmall
-            noteMorphMotion.flightHome = if (fromSmall) HOME_SMALL else HOME_PILL
-            flightOut = false
+            flightState.noteMorphKey = MUSIC_ISLAND
+            flightState.flightFromSmall = fromSmall
+            flightState.flightHome = if (fromSmall) HOME_SMALL else HOME_PILL
+            flightState.flightOut = false
         } else {
             if (noteMorphMotion.prepareFlight(MUSIC_ISLAND) == null) return false
-            noteMorphMotion.noteMorphKey = MUSIC_ISLAND
-            noteMorphMotion.flightFromSmall = false
-            flightOut = false
-            noteMorphMotion.flightHome = if (MUSIC_ISLAND in noteMorphMotion.releasedFromSmall) HOME_SMALL else HOME_PILL
-            if (noteMorphMotion.flightHome == HOME_PILL) {
+            flightState.noteMorphKey = MUSIC_ISLAND
+            flightState.flightFromSmall = false
+            flightState.flightOut = false
+            flightState.flightHome = if (MUSIC_ISLAND in flightState.releasedFromSmall) HOME_SMALL else HOME_PILL
+            if (flightState.flightHome == HOME_PILL) {
                 // The pill is the music's again: whatever took it forms into the small place.
                 val oldBig = selectedIsland
                 val oldSmall = smallKey
@@ -1558,7 +1537,7 @@ internal class MiniPlayerController(
         morphScene = true
         // The card is the flight's other end: out from under the pill's suppression.
         updateNativeSuppression(false)
-        trace("scene flight ${if (toNative) "in" else "out"} home=${if (noteMorphMotion.flightHome == HOME_PILL) "pill" else "small"} " +
+        trace("scene flight ${if (toNative) "in" else "out"} home=${if (flightState.flightHome == HOME_PILL) "pill" else "small"} " +
             smallState())
         if (!noteMorphMotion.startNoteMorph(MUSIC_ISLAND, native, toRow = toNative)) {
             morphScene = false
@@ -1587,10 +1566,10 @@ internal class MiniPlayerController(
             }
             if (x.pending == null && x.movers.isEmpty()) cardExchange.endSwitch(x)
         }
-        if (noteMorphMotion.noteMorphKey == MUSIC_ISLAND || morph != null && noteMorphMotion.noteMorphKey == null) morph?.cancel()
-        if (noteMorphMotion.rowWaitKey == MUSIC_ISLAND) noteMorphMotion.abandonNoteMorph(MUSIC_ISLAND)
-        noteMorphMotion.releasedFromPill -= MUSIC_ISLAND
-        noteMorphMotion.releasedFromSmall -= MUSIC_ISLAND
+        if (flightState.noteMorphKey == MUSIC_ISLAND || morph != null && flightState.noteMorphKey == null) morph?.cancel()
+        if (flightState.rowWaitKey == MUSIC_ISLAND) noteMorphMotion.abandonNoteMorph(MUSIC_ISLAND)
+        flightState.releasedFromPill -= MUSIC_ISLAND
+        flightState.releasedFromSmall -= MUSIC_ISLAND
         returning.remove(MUSIC_ISLAND)
         if (selectedIsland == MUSIC_ISLAND) selectedIsland = null
         if (preferredSmall == MUSIC_ISLAND) preferredSmall = null
@@ -1612,7 +1591,7 @@ internal class MiniPlayerController(
 
     /** A pull down on the media card brings the music home as a flight (musicFlies). */
     fun musicCollapses(): Boolean = config.getBoolean(MiniPlayerConfig.ENABLED) &&
-        musicFlies() && musicCarded() && morph == null && cardExchange.exchange == null && noteMorphMotion.noteMorphKey == null &&
+        musicFlies() && musicCarded() && morph == null && cardExchange.exchange == null && flightState.noteMorphKey == null &&
         spreadMotion.spread == null
 
     /**
@@ -1623,7 +1602,7 @@ internal class MiniPlayerController(
         // The cover is the music's card: another island opened there takes its place, and the
         // cover goes (2026-09-25) - not a row of its own in the cover's stack beside the card.
         if (musicExpanded(includeCover = true)) return MUSIC_ISLAND
-        return LockIslands.releasedKeys().firstOrNull { it != noteMorphMotion.noteMorphKey && stackHost.rowFor(it) != null }
+        return LockIslands.releasedKeys().firstOrNull { it != flightState.noteMorphKey && stackHost.rowFor(it) != null }
     }
 
     /**
@@ -1690,8 +1669,8 @@ internal class MiniPlayerController(
     override fun nativeFor(key: String): View? = if (key == MUSIC_ISLAND)
         transitionHeader()?.takeIf { Main.miniPlayerMediaCardPresent() } else stackHost.rowFor(key)
 
-    internal val stackHost: StackHost = StackHost(this, this, this, this, this, cardExchange, groupMotion,
-        { noteMorphMotion }, { spreadMotion })
+    internal val stackHost: StackHost = StackHost(this, this, this, this, flightState, this, cardExchange, groupMotion,
+        { spreadMotion })
     fun cardHeldDy(card: View): Float? = stackHost.cardHeldDy(card)
     val contentTopFrom: String get() = stackHost.contentTopFrom
     val lastScrollRead: String get() = stackHost.lastScrollRead
@@ -1704,7 +1683,7 @@ internal class MiniPlayerController(
     fun stackDrawnTop(): Float = stackHost.stackDrawnTop()
     fun stackForProbe(): ViewGroup? = stackHost.stackForProbe()
 
-    internal val spreadMotion: SpreadMotion = SpreadMotion(this, this, this, this, this, stackHost, cardExchange,
+    internal val spreadMotion: SpreadMotion = SpreadMotion(this, this, this, this, flightState, this, stackHost, cardExchange,
         groupMotion, swapMotion) { noteMorphMotion }
     fun spreadCollapseAt(x: Float, y: Float): Boolean = spreadMotion.spreadCollapseAt(x, y)
     fun beginSpreadCollapse(startY: Float): Boolean = spreadMotion.beginSpreadCollapse(startY)
@@ -1726,7 +1705,7 @@ internal class MiniPlayerController(
     fun noteDragEnd(velocityY: Float, cancelled: Boolean) = noteDragMotion.noteDragEnd(velocityY, cancelled)
 
     /** A released notification's row under a point on screen, by key. */
-    internal val shortcutDiscs: ShortcutDiscs = ShortcutDiscs(this, this, this, this, this, groupMotion, cardExchange) { binding }
+    internal val shortcutDiscs: ShortcutDiscs = ShortcutDiscs(this, this, this, this, flightState, this, groupMotion, cardExchange) { binding }
     fun press(side: Int, down: Boolean) = shortcutDiscs.press(side, down)
     fun discAt(x: Float, y: Float): Int? = shortcutDiscs.discAt(x, y)
     fun letGoOnDrag(dx: Float, dy: Float): Boolean = shortcutDiscs.letGoOnDrag(dx, dy)
@@ -1777,7 +1756,7 @@ internal class MiniPlayerController(
             groupMotion.pileSettle, spreadMotion.spreadFrame, cardExchange.switchWait, noteMorphMotion.rowWait).forEach { Gen.unframe(it) }
         // The waits for a row would otherwise go on to open it, on a controller already gone;
         // and a card still pinned is the stack's again, drawn where the stack has it.
-        noteMorphMotion.rowWaitKey = null
+        flightState.rowWaitKey = null
         stackHost.unpinCard()
         if (spreadMotion.spread != null) {
             spreadMotion.spread?.items?.forEach { it.morph?.cancel() }
@@ -1826,7 +1805,7 @@ internal class MiniPlayerController(
             "row=${rowLeft.value.toInt()}+${rowWidth.value.toInt()}>${rowWidth.target.toInt()} " +
             "grow=$smallGrowing:${"%.2f".format(smallGrow.value)} keys=${islandKeys.size} ret=${returning.size} " +
             "held=${noteMorphMotion.pillHeld()} pta=${"%.2f".format(pill?.transitionAlpha ?: -1f)} " +
-            "pca=${"%.2f".format(pill?.contentAlphaNow() ?: -1f)} fca=${"%.2f".format(noteMorphMotion.flight?.contentAlphaNow() ?: -1f)} " +
+            "pca=${"%.2f".format(pill?.contentAlphaNow() ?: -1f)} fca=${"%.2f".format(flightState.flight?.contentAlphaNow() ?: -1f)} " +
             "ghost=${swapMotion.ghostPill?.let { "${it.visibility}/${"%.2f".format(it.alpha)}/${it.width}" }} swap=${swapMotion.swap?.smallMode}"
     }
 
@@ -1841,7 +1820,7 @@ internal class MiniPlayerController(
      * Whose morph it is, is told the same way as cardMoving in updateVisibility.
      */
     fun hardSuppressionActive(): Boolean = nativeSuppressionRequested &&
-        (morph == null || noteMorphMotion.noteMorphKey != null && noteMorphMotion.noteMorphKey != MUSIC_ISLAND)
+        (morph == null || flightState.noteMorphKey != null && flightState.noteMorphKey != MUSIC_ISLAND)
 
     /** A morph into the cover or the lyrics landed on the card at this uptime, the scene not up yet. */
     private var sceneLandedAt = 0L
@@ -1911,7 +1890,7 @@ internal class MiniPlayerController(
             running.aim(toNative)
             morphScene = scene
             // A flight turned round holds its home again, or frees it.
-            if (noteMorphMotion.noteMorphKey == MUSIC_ISLAND) noteMorphMotion.setFlightOut(toNative)
+            if (flightState.noteMorphKey == MUSIC_ISLAND) noteMorphMotion.setFlightOut(toNative)
             return true
         }
         // The music exchanged into the cover with the island out, or out of it for an island
@@ -1996,7 +1975,7 @@ internal class MiniPlayerController(
     private fun canShow(): Boolean =
         // The music on its way in or out of its card or the cover is not the row's to gate: the
         // row takes taps meanwhile, to turn the switch round (2026-09-25).
-        if (MUSIC_ISLAND in islandKeys && cardExchange.exchange == null && noteMorphMotion.noteMorphKey != MUSIC_ISLAND)
+        if (MUSIC_ISLAND in islandKeys && cardExchange.exchange == null && flightState.noteMorphKey != MUSIC_ISLAND)
             Main.miniPlayerCanShow() else Main.miniPlayerIslandsCanShow()
 
     /** A morph moving on its springs under this point - the switch's, or a scene's. */
@@ -2009,14 +1988,14 @@ internal class MiniPlayerController(
     /** Lets go of a caught scene morph toward an end, the scene itself decided by the caller. */
     fun releaseMorph(toNative: Boolean, velocity: Float) {
         morph?.release(toNative, velocity)
-        if (noteMorphMotion.noteMorphKey == MUSIC_ISLAND) noteMorphMotion.setFlightOut(toNative)
+        if (flightState.noteMorphKey == MUSIC_ISLAND) noteMorphMotion.setFlightOut(toNative)
     }
 
     fun grabMorph(): MiniCardMorph.Grab? = morph?.grab()
 
     fun cardAbovePill(): Boolean {
         // A notification's row is always above its island.
-        if (noteMorphMotion.noteMorphKey != null) return true
+        if (flightState.noteMorphKey != null) return true
         val pill = player?.restBoxOnScreen() ?: return true
         val card = transitionHeader() ?: return true
         val xy = IntArray(2).also(card::getLocationOnScreen)
@@ -2061,7 +2040,7 @@ internal class MiniPlayerController(
         val small = groupMotion.group?.takeIf { it.musicSmall }?.smallView
         small?.setArtworkHidden(bridged)
         // The music as a flight: the flight's artwork is the one the cover's stands in for.
-        val flying = noteMorphMotion.flight?.takeIf { noteMorphMotion.noteMorphKey == MUSIC_ISLAND }
+        val flying = flightState.flight?.takeIf { flightState.noteMorphKey == MUSIC_ISLAND }
             ?: cardExchange.exchange?.movers?.get(MUSIC_ISLAND)?.view
         flying?.setArtworkHidden(bridged)
         // Where the music comes to rest, hidden too till the cover's copy has landed: the pill
@@ -2121,7 +2100,7 @@ internal class MiniPlayerController(
 
     /** How far apart the pill and the card are: what a full pull covers. */
     fun dragSpan(): Float? {
-        if (noteMorphMotion.noteMorphKey != null) return noteDragMotion.noteSpan.takeIf { it > 0f }
+        if (flightState.noteMorphKey != null) return noteDragMotion.noteSpan.takeIf { it > 0f }
         val pill = player?.restBoxOnScreen() ?: return null
         val card = transitionHeader() ?: return null
         val xy = IntArray(2).also(card::getLocationOnScreen)
@@ -2151,7 +2130,7 @@ internal class MiniPlayerController(
 
     /** The lift: the choice follows where the container is going, then the springs. */
     fun releaseDrag(toNative: Boolean, velocity: Float) {
-        if (noteMorphMotion.noteMorphKey != null) {
+        if (flightState.noteMorphKey != null) {
             noteDragMotion.releaseNote(toNative, velocity)
             return
         }
@@ -2304,8 +2283,8 @@ internal class MiniPlayerController(
      * Busy for the row switching to an island that has just taken the pill's place: the motions
      * that keep it from starting (M0, the subset as it was).
      */
-    private fun busyForTakerSwap(): Boolean = swapMotion.swap != null || morph != null || cardExchange.exchange != null || noteMorphMotion.flight != null ||
-        groupMotion.group != null || noteMorphMotion.rowWaitKey != null || islandDragging
+    private fun busyForTakerSwap(): Boolean = swapMotion.swap != null || morph != null || cardExchange.exchange != null || flightState.flight != null ||
+        groupMotion.group != null || flightState.rowWaitKey != null || islandDragging
 
     private fun refreshUnsafe() { android.os.Trace.beginSection("MC refresh"); try {
         binding.lottiesFollowDoze()
@@ -2350,8 +2329,8 @@ internal class MiniPlayerController(
         // The row is out as the stack's list: its views are the spread's till it folds back,
         // and it is put together again then (endSpread).
         if (spreadMotion.spread != null) return
-        val musicMoving = groupMotion.group != null || groupMotion.musicComingDown || morph != null && noteMorphMotion.noteMorphKey == null ||
-            noteMorphMotion.noteMorphKey == MUSIC_ISLAND || cardExchange.exchange?.has(MUSIC_ISLAND) == true
+        val musicMoving = groupMotion.group != null || groupMotion.musicComingDown || morph != null && flightState.noteMorphKey == null ||
+            flightState.noteMorphKey == MUSIC_ISLAND || cardExchange.exchange?.has(MUSIC_ISLAND) == true
         // No music island without its card: a session outlives a dismissed card, and the row
         // kept an island for it that no card would ever be there to back.
         val music = traced("MC r.music") {
@@ -2366,7 +2345,7 @@ internal class MiniPlayerController(
         val carded = music != null &&
             (MiniPlayerRuntime.nativeRequested(music.sessionToken) || Main.coverModeOn())
         val others = notes.isNotEmpty() || returning.isNotEmpty() || cardExchange.exchange != null ||
-            noteMorphMotion.noteMorphKey.let { it != null && it != MUSIC_ISLAND }
+            flightState.noteMorphKey.let { it != null && it != MUSIC_ISLAND }
         val musicInRow = music != null && (!carded || !others || musicMoving)
         // The row in the super island's order: the focus islands that take the big place from
         // the music (高德's navigation, islandProperty 1 against the music's 2) ahead of it, then
@@ -2382,7 +2361,7 @@ internal class MiniPlayerController(
         }
         for (key in returning.keys) islandKeys = keptInPlace(islandKeys, key)
         // A notification on its way out to its row, or in from it, stays in the pill till it lands.
-        noteMorphMotion.noteMorphKey?.let { key -> islandKeys = keptInPlace(islandKeys, key) }
+        flightState.noteMorphKey?.let { key -> islandKeys = keptInPlace(islandKeys, key) }
         // Every island of a switch holds its place in the row till it is over.
         cardExchange.exchange?.let { x -> for (key in x.keys()) islandKeys = keptInPlace(islandKeys, key) }
         // The time unlocked does not count against an island: the row comes back as it was left.
@@ -2416,10 +2395,10 @@ internal class MiniPlayerController(
         // Islands new to this lock screen's row, before they are counted as known below.
         val fresh = if (locked) order.filter { it !in islandKnown } else emptyList()
         if (locked) noteKnown(order - listOfNotNull(graced), now)
-        noteMorphMotion.noteMorphKey?.let { key ->
+        flightState.noteMorphKey?.let { key ->
             // The pill itself morphing: it keeps what it is showing. Under a flight it goes on
             // being the row's (the island beside the flight can take it).
-            if (noteMorphMotion.flight == null) {
+            if (flightState.flight == null) {
                 updateSmallIsland(music, notes)
                 applyArtBridge()
                 updateVisibility()
@@ -2507,7 +2486,7 @@ internal class MiniPlayerController(
         prewarmSpares()
     } finally { android.os.Trace.endSection() } }
 
-    internal val binding: MiniPlayerBinding = MiniPlayerBinding(this, this, this, this, swapMotion, noteMorphMotion, shortcutDiscs,
+    internal val binding: MiniPlayerBinding = MiniPlayerBinding(this, this, this, this, flightState, swapMotion, noteMorphMotion, shortcutDiscs,
         sessionSource, cardExchange)
 
 
@@ -2545,7 +2524,7 @@ internal class MiniPlayerController(
         // startSceneFlight puts it back first in the row a moment before its morph exists, and
         // for that refresh the cover still up read as "not presentable" - the row went and came
         // back within 2ms, a whole list rebuild each way, on every exit (probed 2026-09-25).
-        val presentable = if (MUSIC_ISLAND in islandKeys && noteMorphMotion.noteMorphKey != MUSIC_ISLAND)
+        val presentable = if (MUSIC_ISLAND in islandKeys && flightState.noteMorphKey != MUSIC_ISLAND)
             Main.miniPlayerPresentable() else Main.miniPlayerIslandsPresentable()
         val sceneVisible = keyguardOwned && presentable && !MiniPlayerScene.blocksMiniPlayer
         // Unlocking or a session ending mid-morph: straight to where it was going.
@@ -2566,12 +2545,12 @@ internal class MiniPlayerController(
         // The music's choice of card or pill is the row's only while the music is settled in
         // the row. Out as its card with other islands in the row, the row still shows, and the
         // card with it; on its way out or in, the card is its morph's.
-        val musicSettled = MUSIC_ISLAND in islandKeys && noteMorphMotion.noteMorphKey != MUSIC_ISLAND &&
+        val musicSettled = MUSIC_ISLAND in islandKeys && flightState.noteMorphKey != MUSIC_ISLAND &&
             cardExchange.exchange?.has(MUSIC_ISLAND) != true
         // A notification's morph is not the media card's: the card stays put away. The music's own
         // flight is: the row stays up under it, through a scene too.
         val cardMoving = (morph != null || groupMotion.group != null) &&
-            (noteMorphMotion.noteMorphKey == null || noteMorphMotion.noteMorphKey == MUSIC_ISLAND)
+            (flightState.noteMorphKey == null || flightState.noteMorphKey == MUSIC_ISLAND)
         fun presentationWith(transition: Boolean) = MiniPlayerPresentationPolicy.evaluate(
             MiniPlayerPresentationInput(
                 enabled = enabled,
@@ -2635,8 +2614,8 @@ internal class MiniPlayerController(
         // Coming in (a collapse), from the moment the flight exists: counted only once its morph
         // ran, the small island grew in its place for the frame before and then shrank for it.
         // Going out it waits for the morph, which takes it over in place.
-        val held = noteMorphMotion.flight != null && (morph != null || !noteMorphMotion.flightFromSmall) && !flightOut &&
-            smallKey == noteMorphMotion.noteMorphKey && !flightLanding
+        val held = flightState.flight != null && (morph != null || !flightState.flightFromSmall) && !flightState.flightOut &&
+            smallKey == flightState.noteMorphKey && !flightState.flightLanding
         // Under the media card's morph the group has the small island (groupShowsSmall).
         setSmallShown(shown && smallKey != null && !held && !cardExchange.exchangeHoldsSmall() &&
             (groupMotion.groupShowsSmall() ?: true),
@@ -2646,8 +2625,8 @@ internal class MiniPlayerController(
         // Cards still out across an unlock (LockIslands keeps the focus ones) go home where they
         // came from; the rest of the record is this lock screen's.
         if (!Main.keyguardLocked()) {
-            noteMorphMotion.releasedFromPill.retainAll { it != MUSIC_ISLAND && LockIslands.isReleased(it) }
-            noteMorphMotion.releasedFromSmall.retainAll { it != MUSIC_ISLAND && LockIslands.isReleased(it) }
+            flightState.releasedFromPill.retainAll { it != MUSIC_ISLAND && LockIslands.isReleased(it) }
+            flightState.releasedFromSmall.retainAll { it != MUSIC_ISLAND && LockIslands.isReleased(it) }
         }
         if (view != null) {
             val target = if (shown) View.VISIBLE else View.GONE

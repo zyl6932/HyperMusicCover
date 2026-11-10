@@ -26,15 +26,14 @@ internal class StackHost(
     private val rowState: RowState,
     private val edits: RowEdits,
     private val rowHost: RowHost,
+    private val flightState: FlightState,
     private val motions: Motions,
     // Made before this part: the motions whose rows it hides, holds and lets go.
     private val cardExchange: CardExchange,
     private val groupMotion: GroupMotion,
-    // Made after this part: read when the stack is walked, not when this is built.
-    private val noteMorphRef: () -> NoteMorphMotion,
+    /** Made after this part: read when the stack is walked, not when this is built. */
     private val spreadRef: () -> SpreadMotion,
 ) {
-    private val noteMorphMotion get() = noteMorphRef()
     private val spreadMotion get() = spreadRef()
 
     // ---- a card landing where the stack is settling it
@@ -198,7 +197,7 @@ internal class StackHost(
             // The same for the music's own morph into the pill: pulled down out of the cover,
             // the exit aimed at the card and then jumped to full size as it went (2026-09-26).
             val retractingMusic = rowState.morph?.toNative == false &&
-                (!motions.noteMorphing || noteMorphMotion.noteMorphKey == MUSIC_ISLAND)
+                (!motions.noteMorphing || flightState.noteMorphKey == MUSIC_ISLAND)
             // The retraction is asked before the header, not after it: this runs on every
             // pre-draw, and with no header to reuse transitionHeader() resolves the card's id and
             // walks the whole window - about a quarter of SystemUI's cycles opening and closing
@@ -304,7 +303,7 @@ internal class StackHost(
             MUSIC_ISLAND -> views.transitionHeader()
             else -> findRow(key)?.second
         }
-        if (noteMorphMotion.rowWaitKey != null && top(noteMorphMotion.rowWaitKey) === c) return true
+        if (flightState.rowWaitKey != null && top(flightState.rowWaitKey) === c) return true
         val pending = cardExchange.exchange?.pending
         if (pending != null && top(pending) === c) return true
         return c in groupMotion.pileRows && !groupMotion.stackGoingHome()
@@ -372,7 +371,7 @@ internal class StackHost(
      */
     fun onNativeListScroll(stack: View) {
         if (stack !== notificationStack() || !LockIslands.isReleased(STACK_ISLAND)) return
-        val opening = rowState.morph?.takeIf { noteMorphMotion.noteMorphKey == STACK_ISLAND && it.toNative }
+        val opening = rowState.morph?.takeIf { flightState.noteMorphKey == STACK_ISLAND && it.toNative }
         val moving = cardExchange.exchange?.movers?.get(STACK_ISLAND)?.morph?.takeIf { it.toNative }
         val held = pinned?.get() != null && pinnedAt == null
         if (opening == null && moving == null && groupMotion.piles.isEmpty() && !held) return
@@ -727,8 +726,8 @@ internal class StackHost(
                 if (!row.isShown || row.width <= 0) continue
                 row.getLocationOnScreen(xy)
                 if (x >= xy[0] && x < xy[0] + row.width && y >= xy[1] && y < xy[1] + row.height) {
-                    if (key == STACK_ISLAND && noteMorphMotion.noteMorphKey != STACK_ISLAND) edits.stackLeadKey = member
-                    else if (LockIslands.isAppGroup(key) && noteMorphMotion.noteMorphKey != key)
+                    if (key == STACK_ISLAND && flightState.noteMorphKey != STACK_ISLAND) edits.stackLeadKey = member
+                    else if (LockIslands.isAppGroup(key) && flightState.noteMorphKey != key)
                         edits.appLeadKeys[key] = member
                     return key
                 }
@@ -943,7 +942,7 @@ internal class StackHost(
         views.handler.postDelayed({
             // Released again meanwhile and waiting to be morphed: that morph gives it back.
             // Held for the media card's morph meanwhile: that morph's end gives it back.
-            if (noteMorphMotion.rowWaitKey != key && !(noteMorphMotion.noteMorphKey == key && rowState.morph != null) && !groupMotion.rowsHeld()) showRow(row)
+            if (flightState.rowWaitKey != key && !(flightState.noteMorphKey == key && rowState.morph != null) && !groupMotion.rowsHeld()) showRow(row)
         }, ROW_GONE_MS)
     }
 
@@ -1080,7 +1079,7 @@ internal class StackHost(
     private val listAsk = object : Runnable {
         override fun run() {
             // Only while the stack island is out, or on its way.
-            val out = noteMorphMotion.noteMorphKey == STACK_ISLAND && rowState.morph?.toNative != false ||
+            val out = flightState.noteMorphKey == STACK_ISLAND && rowState.morph?.toNative != false ||
                 cardExchange.exchange?.let { x -> x.expanded == STACK_ISLAND || x.pending == STACK_ISLAND } == true ||
                 !motions.noteMorphing && !motions.exchanging && rowState.expandedKey() == STACK_ISLAND
             if (!out) return

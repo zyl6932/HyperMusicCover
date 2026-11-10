@@ -60,8 +60,8 @@ internal class NoteDragMotion(private val c: MiniPlayerController) {
     /** A notification's morph, let go by a finger that caught it: to its row or its island. */
     fun releaseNote(toRow: Boolean, velocity: Float) {
         c.morph?.release(toRow, velocity)
-        c.noteMorphMotion.noteMorphKey?.let { c.stackHost.turnTo(it, toRow) }
-        if (toRow && c.noteMorphMotion.noteMorphKey == STACK_ISLAND) c.stackHost.showStackAsList("turned out")
+        c.flightState.noteMorphKey?.let { c.stackHost.turnTo(it, toRow) }
+        if (toRow && c.flightState.noteMorphKey == STACK_ISLAND) c.stackHost.showStackAsList("turned out")
         // A flight headed out frees its home; headed home, it holds it again.
         c.noteMorphMotion.setFlightOut(toRow)
     }
@@ -70,7 +70,7 @@ internal class NoteDragMotion(private val c: MiniPlayerController) {
      * Busy for a finger pulling a notification island out: the motions that keep it from starting
      * (M0, the subset as it was).
      */
-    private fun busyForNoteDrag(): Boolean = c.noteMorphMotion.noteMorphKey != null || c.morph != null || c.cardExchange.exchange != null
+    private fun busyForNoteDrag(): Boolean = c.flightState.noteMorphKey != null || c.morph != null || c.cardExchange.exchange != null
 
     fun beginNoteDrag(key: String, fromSmall: Boolean, startY: Float): Boolean {
         // Folded natively, a pull past the threshold opens the stack's list as a tap does; the
@@ -113,16 +113,16 @@ internal class NoteDragMotion(private val c: MiniPlayerController) {
         c.resetIslandDrag()
         // The island keeps following the finger until its row is there to morph into; its
         // nudge is handed to the morph then (startNoteMorph), as the pill's is to the card's.
-        c.noteMorphMotion.noteMorphKey = key
-        c.noteMorphMotion.flightFromSmall = fromSmall
-        c.noteMorphMotion.flightHome = if (fromSmall) HOME_SMALL else HOME_PILL
-        c.flightOut = false
+        c.flightState.noteMorphKey = key
+        c.flightState.flightFromSmall = fromSmall
+        c.flightState.flightHome = if (fromSmall) HOME_SMALL else HOME_PILL
+        c.flightState.flightOut = false
         noteDrag = NoteDrag(key, startY, opening = true,
             MiniPlayerRuntime.dragThresholdPx(c.density()), MiniPlayerRuntime.dragNudgePx(c.density()))
         c.stackHost.letOut(key)
-        c.noteMorphMotion.rowWaitKey = key
-        c.noteMorphMotion.rowWaitSince = android.os.SystemClock.uptimeMillis()
-        c.noteMorphMotion.appListAsked = false
+        c.flightState.rowWaitKey = key
+        c.flightState.rowWaitSince = android.os.SystemClock.uptimeMillis()
+        c.flightState.appListAsked = false
         Gen.frame(c.noteMorphMotion.rowWait)
         return true
     }
@@ -190,7 +190,7 @@ internal class NoteDragMotion(private val c: MiniPlayerController) {
         val pulled = drag.pulled()
         val up = if (pulled <= drag.threshold) MiniCardMorph.rubber(pulled.coerceAtLeast(0f), drag.nudgeLimit)
             else MiniCardMorph.rubber(drag.threshold, drag.nudgeLimit) + (pulled - drag.threshold)
-        if (c.noteMorphMotion.flightFromSmall) c.setSmallNudge(drag.nudgeX, -up) else c.player?.setNudge(drag.nudgeX, -up)
+        if (c.flightState.flightFromSmall) c.setSmallNudge(drag.nudgeX, -up) else c.player?.setNudge(drag.nudgeX, -up)
     }
 
     /** The row's arrival: how far the pull has to go, from the island's place to the row's. */

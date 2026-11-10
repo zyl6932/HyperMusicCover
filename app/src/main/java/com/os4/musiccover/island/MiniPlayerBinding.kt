@@ -26,6 +26,7 @@ internal class MiniPlayerBinding(
     private val rowState: RowState,
     private val edits: RowEdits,
     private val rowHost: RowHost,
+    private val flightState: FlightState,
     // Made before this part: the islands it colours, the session it reads, the cover it opens.
     private val swapMotion: SwapMotion,
     private val noteMorphMotion: NoteMorphMotion,
@@ -85,7 +86,7 @@ internal class MiniPlayerBinding(
         views.smallIsland?.setInk(color)
         swapMotion.ghostPill?.setInk(color)
         swapMotion.ghostDisc?.setInk(color)
-        noteMorphMotion.flight?.setInk(color)
+        flightState.flight?.setInk(color)
         for (v in views.spareViews) v.setInk(color)
         // The torch and the camera are white glyphs; on discs of the light frost they vanished.
         // Tinted as the card's own buttons are, only while the discs are under them, and given
