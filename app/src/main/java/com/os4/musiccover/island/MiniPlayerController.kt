@@ -66,7 +66,7 @@ internal class MiniPlayerController(
     private val audio = context.getSystemService(AudioManager::class.java)
     var player: MiniPlayerView? = null
     private var controller: MediaController? = null
-    private var header: WeakReference<View>? = null
+    var header: WeakReference<View>? = null
     private val suppressedHeaders = WeakViewOverrideRegistry<View>()
     private var nativeSuppressionRequested = false
     var morph: MiniCardMorph? = null
@@ -84,7 +84,7 @@ internal class MiniPlayerController(
     var configuredHeightDp = MiniPlayerConfig.DEFAULT_HEIGHT_DP
     var config = JSONObject(MiniPlayerConfig.defaultJson())
     private var forceHeaderRefresh = true
-    private var lastPresentationLog = ""
+    var lastPresentationLog = ""
     private var lastActive = false
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         configStale = true
@@ -136,7 +136,7 @@ internal class MiniPlayerController(
     private var lastMetadataAt = 0L
 
     /** For `op mini`: the session the pill follows, what it holds, and what is really there. */
-    private fun describeSession(): String {
+    fun describeSession(): String {
         fun id(c: MediaController?) = c?.let { it.packageName + "@" + Integer.toHexString(it.sessionToken.hashCode()) }
         fun title(m: MediaMetadata?) = m?.getString(MediaMetadata.METADATA_KEY_TITLE)
         val c = controller
@@ -430,8 +430,8 @@ internal class MiniPlayerController(
         shortcutRow?.get()?.let { editButtonShown(it) > 0.01f } == true
 
     /** What followShortcuts read and gave the pill last, for the doze trace and `op mini`. */
-    private var followBranch = "-"
-    private var followRowFade = 1f
+    var followBranch = "-"
+    var followRowFade = 1f
     private var followPillFade = 1f
 
     val hostInverse = Matrix()
@@ -488,7 +488,7 @@ internal class MiniPlayerController(
     // ------------------------------------------------------------ the islands
 
     /** The row's islands in order: the focus ones that outrank the music, MUSIC_ISLAND, the rest. Set by refreshUnsafe. */
-    private var islandKeys: List<String> = emptyList()
+    var islandKeys: List<String> = emptyList()
 
     /** The islands wear the ordinary notification's colours and soft glass, always (2026-10-09). */
     fun notificationMaterial(): Boolean = true
@@ -513,10 +513,10 @@ internal class MiniPlayerController(
     else shortcutDiscs.discDiameter()
 
     /** The island in the pill. The one after it is the small island beside the pill. */
-    private var selectedIsland: String? = null
+    var selectedIsland: String? = null
 
     var smallIsland: ShortcutDisc? = null
-    private var smallKey: String? = null
+    var smallKey: String? = null
     private var smallIconKey: Any? = null
     val smallRest = FloatArray(2)
     private val smallFollow = Matrix()
@@ -1747,7 +1747,7 @@ internal class MiniPlayerController(
     private val rowLeft = Jelly(SWAP_RESPONSE, ROW_DAMPING)
     private val rowWidth = Jelly(SWAP_RESPONSE, ROW_DAMPING)
     private var rowKnown = false
-    private var rowAnimating = false
+    var rowAnimating = false
     private var rowLast = 0L
 
     private val rowFrame = object : Choreographer.FrameCallback {
@@ -1854,7 +1854,7 @@ internal class MiniPlayerController(
                 android.os.SystemClock.uptimeMillis() - growHeldSince < BACK_WAIT_MS
             if (!held) appear.step(dt)
             val applied = applyAppear()
-            if (!applied && leaving()) MiniPlayerRuntime.noteGone("back cut at ${"%.2f".format(appear.value)}: ${quietWhy()}")
+            if (!applied && leaving()) MiniPlayerRuntime.noteGone("back cut at ${"%.2f".format(appear.value)}: ${probe.quietWhy()}")
             if (!applied || appear.atRest()) endAppear()
             else Gen.frame(this)
         } finally { android.os.Trace.endSection() } }
@@ -1864,20 +1864,10 @@ internal class MiniPlayerController(
     private fun rowQuiet(): Boolean = !frameTaken() &&
         !rowHeldOff && followRowFade >= 0.99f && !MiniPlayerScene.aodActive
 
-    /** What keeps the row from being quiet, for `op mini`'s gone lines; "quiet" when nothing does. */
-    private fun quietWhy(): String = buildList {
-        if (swap != null) add("swap")
-        if (morph != null) add("morph")
-        if (group != null) add("group")
-        if (flight != null) add("flight")
-        if (exchange != null) add("exchange")
-        noteMorphKey?.let { add("noteMorph=${it.takeLast(6)}") }
-        if (pillLandingBox != null) add("landing")
-        if (rowHeldOff) add("heldOff")
-        if (followRowFade < 0.99f) add("fade=${"%.2f".format(followRowFade)}")
-        if (MiniPlayerScene.aodActive) add("aod")
-        if (player?.visibility != View.VISIBLE) add("vis=${player?.visibility}")
-    }.joinToString(",").ifEmpty { "quiet" }
+    internal val probe = MiniPlayerProbe(this)
+    fun rowTree(match: String): String = probe.rowTree(match)
+    fun describe(): String = probe.describe()
+    fun describeFingerprint(): String = probe.describeFingerprint()
 
     /** Another motion is drawing the pill's frame, and ends its own morph when it is done. */
     private fun frameTaken(): Boolean = swap != null || morph != null || group != null || flight != null ||
@@ -2056,7 +2046,7 @@ internal class MiniPlayerController(
         val left = appear.target == 0f
         MiniPlayerRuntime.noteGone((if (left) "back" else "up") + " done ${android.os.SystemClock.uptimeMillis() - backStartedAt}ms " +
             "frames=$backFrames drawn=$backDrawn minW=${if (backMinW.isNaN()) "-" else backMinW.toInt().toString()} " +
-            "at=${"%.2f".format(appear.value)} row=${quietWhy()} pill=${player?.let { "${it.visibility}/t${"%.2f".format(it.transitionAlpha)}/a${"%.2f".format(it.alpha)}" }}")
+            "at=${"%.2f".format(appear.value)} row=${probe.quietWhy()} pill=${player?.let { "${it.visibility}/t${"%.2f".format(it.transitionAlpha)}/a${"%.2f".format(it.alpha)}" }}")
         appearing = false
         Gen.unframe(appearFrame)
         squeezeShortcuts(0f)
@@ -3301,7 +3291,7 @@ internal class MiniPlayerController(
      * The one island out as its card and settled there - the super island's expanded island.
      * Null with every island in the row. Only ever one: another asked out takes its place.
      */
-    private fun expandedKey(): String? {
+    fun expandedKey(): String? {
         // The cover is the music's card: another island opened there takes its place, and the
         // cover goes (2026-09-25) - not a row of its own in the cover's stack beside the card.
         if (musicExpanded(includeCover = true)) return MUSIC_ISLAND
@@ -3413,7 +3403,7 @@ internal class MiniPlayerController(
     }
 
     /** [key]'s card: the media card for the music, the notification's own row in the stack. */
-    private fun nativeFor(key: String): View? = if (key == MUSIC_ISLAND)
+    fun nativeFor(key: String): View? = if (key == MUSIC_ISLAND)
         transitionHeader()?.takeIf { Main.miniPlayerMediaCardPresent() } else rowFor(key)
 
     // ---- a card landing where the stack is settling it
@@ -3521,7 +3511,7 @@ internal class MiniPlayerController(
      * stack's animator runs translationY to (ViewState.startYTranslationAnimation) - else where
      * it is. Asked by the AOSP names first, it read where the row was every frame (2026-09-25).
      */
-    private fun stackTargetY(v: View): Float = runCatching {
+    fun stackTargetY(v: View): Float = runCatching {
         val state = Xp.callMethod(v, "getViewState")!!
         (Xp.getObjectField(state, "mYTranslation") as Number).toFloat().also { targetRead = true }
     }.getOrElse {
@@ -3706,7 +3696,7 @@ internal class MiniPlayerController(
      * A card that has landed where the stack is settling it stays there, drawn, while the stack
      * catches up: the rows under it go and it moves down to the same place underneath.
      */
-    private var pinned: WeakReference<View>? = null
+    var pinned: WeakReference<View>? = null
     private var pinnedLeaving: Collection<String> = emptyList()
     private var pinnedSince = 0L
 
@@ -3849,10 +3839,10 @@ internal class MiniPlayerController(
     }
 
     /** A frozen card's stack translation (freezeCard); null for one landing (pinCard). */
-    private var pinnedAt: Float? = null
+    var pinnedAt: Float? = null
 
     /** The pin's offset this frame, for a morph taking the card from where it is drawn. */
-    private var pinnedDy = 0f
+    var pinnedDy = 0f
 
     private val pinMatrix = Matrix()
 
@@ -3862,7 +3852,7 @@ internal class MiniPlayerController(
      * the stack's own target. The estimate can be a few pixels off the stack's final layout; held
      * at it until the hold ran out, the card then jumped those pixels (2026-09-25).
      */
-    private val pinY = Jelly(PIN_RESPONSE, HIDDEN_DAMPING)
+    val pinY = Jelly(PIN_RESPONSE, HIDDEN_DAMPING)
     private var pinWant = 0f
     private var pinLast = 0L
 
@@ -4496,7 +4486,7 @@ internal class MiniPlayerController(
         return true
     }
 
-    private fun moverState(m: Mover): String = "${m.key.takeLast(6)}:" +
+    fun moverState(m: Mover): String = "${m.key.takeLast(6)}:" +
         (if (m.morph?.toNative == true) "card" else "p${m.place}") + (if (m.landed) "L" else "") +
         "@${"%.2f".format(m.morph?.progress ?: -1f)}"
 
@@ -4974,7 +4964,7 @@ internal class MiniPlayerController(
     }
 
     /** For `op mini`. */
-    private fun describeSpread(): String = spread?.let { s ->
+    fun describeSpread(): String = spread?.let { s ->
         "spread ph=${s.phase} p=${"%.2f".format(s.rawProgress)}/${"%.2f".format(s.progress)} " +
             "y=${s.lastY} ${s.islandsY}->${s.cardsY} " +
             "stack=${s.stackSeat} focus=${s.focusBefore}->${NumState.focusCount()} items=" + s.items.joinToString(",") {
@@ -5788,7 +5778,7 @@ internal class MiniPlayerController(
      * The notification island on its way out into its row in the stack, or back in from it. The
      * pill keeps showing it until the morph lands, whatever the row's islands have become.
      */
-    private var noteMorphKey: String? = null
+    var noteMorphKey: String? = null
 
     /** A small island tapped: it takes the pill first, and opens once it has. */
     private var pendingExpand: String? = null
@@ -6002,7 +5992,7 @@ internal class MiniPlayerController(
     } finally { android.os.Trace.endSection() } }
 
     /** The flight: a pill of its own, bound to [key]'s notification, laid out at the pill's size. */
-    private var flight: MiniPlayerView? = null
+    var flight: MiniPlayerView? = null
     private var flightFromSmall = false
 
     /** Where the flight's island lives when it is in the row: the pill, or the small island. */
@@ -6015,7 +6005,7 @@ internal class MiniPlayerController(
     private val releasedFromSmall = HashSet<String>()
 
     /** The pill under a flight landing on it, taking the flight's shape; null otherwise. */
-    private var pillLandingBox: CoverMorphMotion.Box? = null
+    var pillLandingBox: CoverMorphMotion.Box? = null
 
     /** The pill's place is a flight's - out of it and not let go, or coming home to it. */
     private fun pillHeld(): Boolean = flight != null && flightHome == HOME_PILL &&
@@ -6354,7 +6344,7 @@ internal class MiniPlayerController(
      * followed from the start and the morph picks up wherever it has got to when the row is
      * there. Let go before then, the pull's own distance and speed decide.
      */
-    private class NoteDrag(
+    class NoteDrag(
         val key: String,
         val startY: Float,
         /** Up out of the island into its row; false for a row pulled down into its island. */
@@ -6377,7 +6367,7 @@ internal class MiniPlayerController(
         fun pulled() = if (opening) startY - y else y - startY
     }
 
-    private var noteDrag: NoteDrag? = null
+    var noteDrag: NoteDrag? = null
 
     /** The running notification morph's pull length: what a finger catching it moves over. */
     private var noteSpan = 0f
@@ -6627,7 +6617,7 @@ internal class MiniPlayerController(
     }.onFailure { MiniPlayerRuntime.noteTouch("list rest unread: $it") }.getOrNull()
 
     /** The lock screen's notification stack, found once in the window. */
-    private fun notificationStack(): ViewGroup? {
+    fun notificationStack(): ViewGroup? {
         (stackRef?.get() as? ViewGroup)?.takeIf { it.isAttachedToWindow }?.let { return it }
         val queue = ArrayDeque<View>()
         queue.add(host)
@@ -6651,28 +6641,8 @@ internal class MiniPlayerController(
     /** [notificationStack], for MiniPlayerRuntime.stackForProbe. */
     fun stackForProbe(): ViewGroup? = notificationStack()
 
-    fun rowTree(match: String): String {
-        val stack = notificationStack() ?: return "no stack"
-        val sb = StringBuilder()
-        fun rows(v: View): List<View> = listOf(v) + childRows(v)
-        for (i in 0 until stack.childCount) {
-            val child = stack.getChildAt(i)
-            if (!child.javaClass.name.contains("ExpandableNotificationRow")) continue
-            for (row in rows(child)) {
-                val key = rowKey(row) ?: continue
-                if (match.isNotEmpty() && !key.contains(match)) continue
-                val pub = runCatching { Xp.callMethod(row, "isShowingPublic") }.getOrNull()
-                val sens = runCatching { Xp.callMethod(row, "getSensitive") }.getOrNull()
-                sb.append("ROW ").append(key).append(" public=").append(pub).append(" sensitive=")
-                    .append(sens).append(" top=").append(row.translationY.toInt()).appendLine()
-                dumpTree(row, 1, sb)
-                if (sb.length > 60000) return sb.append("...cut").toString()
-            }
-        }
-        return if (sb.isEmpty()) "no row matches '$match'" else sb.toString()
-    }
 
-    private fun dumpTree(v: View, depth: Int, sb: StringBuilder) {
+    fun dumpTree(v: View, depth: Int, sb: StringBuilder) {
         if (depth > 22) return
         sb.append(" ".repeat(depth)).append(v.javaClass.simpleName)
         val id = runCatching { if (v.id > 0) v.resources.getResourceEntryName(v.id) else null }.getOrNull()
@@ -6726,12 +6696,12 @@ internal class MiniPlayerController(
         return null
     }
 
-    private fun rowKey(row: View): String? = runCatching {
+    fun rowKey(row: View): String? = runCatching {
         (Xp.getObjectField(Xp.callMethod(row, "getEntry"), "mSbn") as? android.service.notification.StatusBarNotification)?.key
     }.getOrNull()
 
     /** A group's rows for its children; none for a row that is not a group. */
-    private fun childRows(row: View): List<View> = runCatching {
+    fun childRows(row: View): List<View> = runCatching {
         (Xp.callMethod(row, "getAttachedChildren") as? List<*>)?.filterIsInstance<View>()
     }.getOrNull().orEmpty()
 
@@ -7067,7 +7037,7 @@ internal class MiniPlayerController(
 
     // ---- the landing, frame by frame, for `op mini`
 
-    private val landTrace = ArrayDeque<String>()
+    val landTrace = ArrayDeque<String>()
 
     /** Frames the running notification morph has spent at its island's end. */
     private var restFrames = 0
@@ -7092,46 +7062,6 @@ internal class MiniPlayerController(
             "ghost=${ghostPill?.let { "${it.visibility}/${"%.2f".format(it.alpha)}/${it.width}" }} swap=${swap?.smallMode}"
     }
 
-    fun describe(): String {
-        val native = expandedKey()?.let(::nativeFor)
-        val nativeY = native?.let { n -> IntArray(2).also(n::getLocationOnScreen)[1] }
-        val sink = " nativeY=$nativeY nativeTy=${native?.translationY} nativeTarget=${native?.let(::stackTargetY)} " +
-            "pin=${pinned?.get() != null} frozen=$pinnedAt pinY=${pinY.value} pinDy=$pinnedDy " +
-            "stackTy=${notificationStack()?.translationY} "
-        val islands = describeSession() + describeSpread() + " rowAnim=$rowAnimating swap=${swap != null} noteMorph=${noteMorphKey != null} " +
-            "flight=${flight != null} drag=${noteDrag != null} ${player?.touchState()} " +
-            "out=${expandedKey()?.takeLast(12)} xchg=${exchange?.let { x -> "out=${x.expanded?.takeLast(6)} pend=${x.pending?.takeLast(6)} " +
-                "seats=${x.seats?.big?.takeLast(6)}/${x.seats?.small?.takeLast(6)} " +
-                x.movers.values.joinToString(" ") { moverState(it) } }} " +
-            "row=${islandKeys.size} sel=${selectedIsland?.takeLast(24)} " +
-            "small=${smallKey?.takeLast(24)} smallShown=${smallIsland?.visibility == View.VISIBLE} " +
-            "follow=$followBranch " + sink
-        val v = player ?: return islands + "no pill"
-        val xy = IntArray(2).also(v::getLocationOnScreen)
-        val icons = "pillArt=[${v.artworkState()}] smallIcon=[${smallIsland?.iconState()}] " +
-            focusLotties.entries.joinToString(" ") { (owner, held) ->
-                val d = held.second.drawable
-                val shownIn = when (owner) {
-                    is MiniPlayerView -> owner.artworkDrawable.let { it === d || it === lottieWatches[d] }
-                    else -> d?.callback != null
-                }
-                "lottie[${if (owner === v) "pill" else owner.javaClass.simpleName} ${held.first} " +
-                    "anim=${runCatching { Xp.callMethod(held.second, "isAnimating") }.getOrNull()} " +
-                    "p=${runCatching { Xp.callMethod(held.second, "getProgress") }.getOrNull()} " +
-                    "vis=${d?.isVisible} cb=${d?.callback?.javaClass?.simpleName} " +
-                    "shown=$shownIn]"
-            } + liveArts.entries.joinToString(" ", prefix = " ") { (owner, held) ->
-                "live[${if (owner === v) "pill" else owner.javaClass.simpleName} ${held.first} " +
-                    "attached=${held.second.isAttachedToWindow} shown=${held.second.isShown} " +
-                    "${held.second.width}x${held.second.height}]"
-            } + " lottieWhy=[$focusLottieWhy] failed=$focusLottieFailed lottieLog=[" +
-            synchronized(lottieLog) { lottieLog.joinToString(" ; ") } + "] "
-        val h = header?.get()
-        return islands + icons + "pill v=${v.visibility} a=${v.alpha} ta=${v.transitionAlpha} at=${xy[0]},${xy[1]} " +
-            "${v.width}x${v.height} morph=${morph != null} header=" +
-            (if (h == null) "none" else "v=${h.visibility} a=${h.alpha} ta=${h.transitionAlpha}") +
-            " last=[$lastPresentationLog] || land: " + landTrace.joinToString(" ; ")
-    }
     fun nativeHeaderHidden(): Boolean = nativeSuppressionRequested
     fun visibleHeightDp(): Float = configuredHeightDp
 
@@ -8034,7 +7964,7 @@ internal class MiniPlayerController(
      * (LottieResUtils.getLottieRes) and its resources hold it - into a LottieAnimationView of
      * SystemUI's that is never attached, whose drawable the pill's artwork shows and runs.
      */
-    private val focusLotties = java.util.WeakHashMap<Any, Pair<String, android.widget.ImageView>>()
+    val focusLotties = java.util.WeakHashMap<Any, Pair<String, android.widget.ImageView>>()
 
     private fun showFocusAnim(view: MiniPlayerView, anim: LockIslands.Anim?, live: LockIslands.Live?) {
         val d = focusLottie(view, anim)
@@ -8046,7 +7976,7 @@ internal class MiniPlayerController(
      * Each place's own live picture ([LockIslands.Live]) and which one it is: a view has one
      * parent, so the pill, the small island and a flight each make their own.
      */
-    private val liveArts = java.util.WeakHashMap<Any, Pair<String, View>>()
+    val liveArts = java.util.WeakHashMap<Any, Pair<String, View>>()
     private val liveFailed = HashSet<String>()
 
     /**
@@ -8081,7 +8011,7 @@ internal class MiniPlayerController(
     }
 
     /** [owner]'s view of [live], made on first asking; null for none, or one that would not make. */
-    private fun liveArt(owner: Any, live: LockIslands.Live?): View? {
+    fun liveArt(owner: Any, live: LockIslands.Live?): View? {
         val held = liveArts[owner]
         if (live == null) {
             liveArts.remove(owner)?.let(::spareLive)
@@ -8157,7 +8087,7 @@ internal class MiniPlayerController(
      * [owner]'s player of [anim] - a pill, or the small island - its drawable to show, playing
      * or held as the template says; null, and [owner]'s player stopped, for none.
      */
-    private fun focusLottie(owner: Any, anim: LockIslands.Anim?): android.graphics.drawable.Drawable? {
+    fun focusLottie(owner: Any, anim: LockIslands.Anim?): android.graphics.drawable.Drawable? {
         if (anim == null) {
             focusLotties.remove(owner)?.let(::spareLottie)
             return null
@@ -8266,7 +8196,7 @@ internal class MiniPlayerController(
      * twenty times in a minute, 2026-09-25).
      */
     private val focusCompositions = HashMap<Int, Any>()
-    private val focusLottieFailed = HashSet<String>()
+    val focusLottieFailed = HashSet<String>()
 
     private fun loadFocusLottie(anim: LockIslands.Anim): android.widget.ImageView? {
         if (anim.src in focusLottieFailed) return null
@@ -8279,7 +8209,7 @@ internal class MiniPlayerController(
     }
 
     /** Why the last try gave nothing, said once until it changes. */
-    private var focusLottieWhy = ""
+    var focusLottieWhy = ""
 
     private fun lottieMiss(why: String): android.widget.ImageView? {
         if (why != focusLottieWhy) {
@@ -8376,7 +8306,7 @@ internal class MiniPlayerController(
     private val noteBitmaps = HashMap<String, Triple<Long, android.graphics.drawable.Drawable?, Bitmap?>>()
 
     /** For `op mini`: what the focus Lotties did, and who hid them - kept apart from the touches. */
-    private val lottieLog = ArrayDeque<String>()
+    val lottieLog = ArrayDeque<String>()
 
     private fun lottieNote(what: String, lottie: android.widget.ImageView?) {
         val p = lottie?.let { runCatching { Xp.callMethod(it, "getProgress") }.getOrNull() }
@@ -8390,7 +8320,7 @@ internal class MiniPlayerController(
      * The Lottie drawable as the pill's artwork shows it: passed straight through, but its
      * visibility changes - the only thing that pauses a Lottie drawable on its own - are noted.
      */
-    private inner class LottieWatch(inner: android.graphics.drawable.Drawable, val lottie: android.widget.ImageView) :
+    inner class LottieWatch(inner: android.graphics.drawable.Drawable, val lottie: android.widget.ImageView) :
         android.graphics.drawable.DrawableWrapper(inner) {
         override fun setVisible(visible: Boolean, restart: Boolean): Boolean {
             if (visible != isVisible) lottieNote("visible=$visible", lottie)
@@ -8398,7 +8328,7 @@ internal class MiniPlayerController(
         }
     }
 
-    private val lottieWatches = java.util.WeakHashMap<android.graphics.drawable.Drawable, LottieWatch>()
+    val lottieWatches = java.util.WeakHashMap<android.graphics.drawable.Drawable, LottieWatch>()
 
     /**
      * A focus button as the pill draws it, by the plugin's own rule (ModuleButtonViewHolder
@@ -8968,14 +8898,14 @@ internal class MiniPlayerController(
                 // Also the way back already running and cut here: the else below ends it in a frame.
                 if (target == View.VISIBLE) MiniPlayerRuntime.noteGone(
                     "UP grow=$growIn new=$newRow seen=${pillSeen()} sel=${selectedIsland?.takeLast(6)} keys=${islandKeys.joinToString(",") { it.takeLast(6) }} " +
-                    "owned=$keyguardOwned screen=${Main.screenOnCached()} aod=${MiniPlayerScene.aodActive} row=${quietWhy()}")
+                    "owned=$keyguardOwned screen=${Main.screenOnCached()} aod=${MiniPlayerScene.aodActive} row=${probe.quietWhy()}")
                 if (target == View.GONE && !waitBack && (!leaving() || !shrinkOut)) MiniPlayerRuntime.noteGone(
                     (if (shrinkOut) "back" else if (leaving()) "CUT mid-way" else "CUT") + " sel=${selectedIsland?.takeLast(6)} " +
                     "keys=${islandKeys.joinToString(",") { it.takeLast(6) }} pillMusic=$pillShowsMusic " +
                     "native=$nativeRequested on=$enabled away=${MiniPlayerScene.keyguardGoingAway} " +
                     "locked=${Main.keyguardLocked()} cover=${Main.coverSceneActive()} " +
                     "blocks=${MiniPlayerScene.blocksMiniPlayer} cc=$controlCenterOpen " +
-                    "screen=${Main.screenOnCached()} row=${quietWhy()}")
+                    "screen=${Main.screenOnCached()} row=${probe.quietWhy()}")
                 if (shrinkOut) startDisappear()
                 else if (waitBack) Unit
                 else if (rowGone && leaving()) Unit // on its way back already, seen or not
@@ -9071,7 +9001,7 @@ internal class MiniPlayerController(
      * layout (position), asked for another row than the one showing: an island landing in the
      * pill is laid out for the row it lands in (fitToPill).
      */
-    private fun pillRest(small: Boolean): PillRest? {
+    fun pillRest(small: Boolean): PillRest? {
         if (host.width <= 0 || host.height <= 0) return null
         // Where the buttons are laid out, not where they are drawn: whatever moves them on top
         // of their layout (the swipe, the doze) reaches the pill through followShortcuts.
@@ -9185,13 +9115,13 @@ internal class MiniPlayerController(
         return min(centerY, lifted)
     }
 
-    private var fodLiftedTo = Float.NaN
+    var fodLiftedTo = Float.NaN
 
     /**
      * How far up the row actually sits off the line the buttons lay it out on, in px - 0 while
      * nothing lifts it. From the last layout, as [pillRest] worked it out.
      */
-    private var fodLiftPx = 0f
+    var fodLiftPx = 0f
 
     /**
      * Where the keyguard's notifications must end for the row lifted off the sensor - the lifted
@@ -9227,20 +9157,12 @@ internal class MiniPlayerController(
     }
 
     /** The sensor in the host's coordinates, or null. */
-    private fun fingerprintInHost(): android.graphics.Rect? {
+    fun fingerprintInHost(): android.graphics.Rect? {
         val fod = MiniPlayerRuntime.fingerprintArea(context) ?: return null
         val at = IntArray(2).also(host::getLocationOnScreen)
         return android.graphics.Rect(fod).apply { offset(-at[0], -at[1]) }
     }
 
-    /** For `op fod`: the sensor as the row sees it, and where the row is. */
-    fun describeFingerprint(): String {
-        val fod = fingerprintInHost()
-        val rest = pillRest(smallKey != null)
-        return "sensor(host)=${fod ?: "none"} row centre=${rest?.centerY} height=${rest?.height}" +
-            " lifted=${if (fodLiftedTo.isNaN()) "never" else fodLiftedTo}" +
-            " liftPx=${fodLiftPx.toInt()}"
-    }
 
     /**
      * The row across the room a switched-off shortcut leaves (MiniPlayerConfig.ADAPTIVE_WIDTH):
