@@ -49,7 +49,7 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
         val sink = " nativeY=$nativeY nativeTy=${native?.translationY} nativeTarget=${native?.let(c::stackTargetY)} " +
             "pin=${c.pinned?.get() != null} frozen=${c.pinnedAt} pinY=${c.pinY.value} pinDy=${c.pinnedDy} " +
             "stackTy=${c.notificationStack()?.translationY} "
-        val islands = c.describeSession() + c.describeSpread() + " rowAnim=${c.rowAnimating} swap=${c.swapMotion.swap != null} noteMorph=${c.noteMorphKey != null} " +
+        val islands = c.describeSession() + c.spreadMotion.describeSpread() + " rowAnim=${c.rowAnimating} swap=${c.swapMotion.swap != null} noteMorph=${c.noteMorphKey != null} " +
             "flight=${c.flight != null} drag=${c.noteDrag != null} ${c.player?.touchState()} " +
             "out=${c.expandedKey()?.takeLast(12)} xchg=${c.exchange?.let { x -> "out=${x.expanded?.takeLast(6)} pend=${x.pending?.takeLast(6)} " +
                 "seats=${x.seats?.big?.takeLast(6)}/${x.seats?.small?.takeLast(6)} " +
