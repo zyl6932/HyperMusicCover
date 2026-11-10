@@ -3578,6 +3578,10 @@ internal class MiniPlayerController(
             // the exit aimed at the card and then jumped to full size as it went (2026-09-26).
             val retractingMusic = morph?.toNative == false &&
                 (noteMorphKey == null || noteMorphKey == MUSIC_ISLAND)
+            // The retraction is asked before the header, not after it: this runs on every
+            // pre-draw, and with no header to reuse transitionHeader() resolves the card's id and
+            // walks the whole window - about a quarter of SystemUI's cycles opening and closing
+            // the shade with no media session (simpleperf, #138).
             val leaving = exchange?.movers?.values?.filter { it.headedHome }?.map { it.native }.orEmpty() +
                 listOfNotNull(if (retractingMusic) transitionHeader() else null)
             // The row spreading out as the list or folding back: where its islands start from.
