@@ -390,14 +390,14 @@ internal class MiniPlayerController(
     override fun stackedStyle(): Boolean =
         config.optInt(MiniPlayerConfig.STYLE, MiniPlayerConfig.STYLE_ROW) == MiniPlayerConfig.STYLE_STACK
 
-    fun smallRestHeight(): Int = if (stackedStyle())
+    override fun smallRestHeight(): Int = if (stackedStyle())
         MiniPlayerGeometry.stackBackSizePx(shortcutDiscs.discDiameter()) else shortcutDiscs.discDiameter()
 
     /** Read first, the islands' material key: a new one is a new generation for every disc. */
     override fun discMaterialGeneration(): Int =
         MiniPlayerRuntime.islandGeneration() * 2 + if (notificationMaterial()) 1 else 0
 
-    fun smallRestWidth(): Int = if (stackedStyle())
+    override fun smallRestWidth(): Int = if (stackedStyle())
         MiniPlayerGeometry.stackBackSizePx(pillRest(false)?.width ?: player?.width ?: shortcutDiscs.discDiameter())
     else shortcutDiscs.discDiameter()
 
@@ -932,7 +932,7 @@ internal class MiniPlayerController(
      * springs: the next frame places it. Laying the row out from here brought the discs back
      * on a controller being destroyed, which removes them first.
      */
-    fun clearSmallNudge() {
+    override fun clearSmallNudge() {
         holdSmallNudge()
         for (spring in arrayOf(smallNudgeXs, smallNudgeYs)) {
             spring.value = 0f
@@ -959,10 +959,11 @@ internal class MiniPlayerController(
         smallIconKey = null
     }
 
-    internal val swapMotion: SwapMotion = SwapMotion(this)
+    internal val swapMotion: SwapMotion = SwapMotion(this, this, this, this, sessionSource,
+        { binding }, { noteMorphMotion }, { shortcutDiscs })
 
     /** The small island on screen, at rest. */
-    fun smallBoxOnScreen(): CoverMorphMotion.Box {
+    override fun smallBoxOnScreen(): CoverMorphMotion.Box {
         val xy = IntArray(2).also(host::getLocationOnScreen)
         val d = smallRestHeight().toFloat()
         val w = smallRestWidth().toFloat()
@@ -973,7 +974,7 @@ internal class MiniPlayerController(
 
 
     /** Room in the small island's frame for a shape as wide as the pill, where the pill is. */
-    fun widenSmallIsland(rest: CoverMorphMotion.Box) {
+    override fun widenSmallIsland(rest: CoverMorphMotion.Box) {
         val small = smallIsland ?: return
         val xy = IntArray(2).also(host::getLocationOnScreen)
         val reach = kotlin.math.abs(rest.cx() - xy[0] - smallRest[0]) + rest.w / 2f
@@ -1004,7 +1005,7 @@ internal class MiniPlayerController(
 
     internal var smallWide = false
 
-    fun restoreSmallIslandShape() {
+    override fun restoreSmallIslandShape() {
         val small = smallIsland ?: return
         val d = shortcutDiscs.discDiameter()
         val frame = maxOf(shortcutDiscs.discFrame(d), smallRestWidth() + dp(16f))
@@ -1156,7 +1157,7 @@ internal class MiniPlayerController(
     }
 
     /** The row's spring hands the frame back: at rest, or to another motion taking it. */
-    fun endRow() {
+    override fun endRow() {
         if (!rowAnimating) return
         rowAnimating = false
         Gen.unframe(rowFrame)
@@ -1325,7 +1326,7 @@ internal class MiniPlayerController(
     override var smallGrowing = false
     private var smallGrowLast = 0L
 
-    val smallGrowFrame = object : Choreographer.FrameCallback {
+    override val smallGrowFrame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC smallGrow"); try {
             if (!smallGrowing) return
             val dt = if (smallGrowLast == 0L) 1f / 120f
@@ -1345,7 +1346,7 @@ internal class MiniPlayerController(
      * The small island shown or not: coming up it grows out of nothing in its place, going it
      * shrinks away there - unless the row itself is going, when it just goes with it.
      */
-    fun setSmallShown(shown: Boolean, animate: Boolean) {
+    override fun setSmallShown(shown: Boolean, animate: Boolean) {
         val small = smallIsland ?: return
         val visible = small.visibility == View.VISIBLE
         if (visible != shown) {
@@ -1479,7 +1480,7 @@ internal class MiniPlayerController(
         restoreSmallIslandShape()
     }
 
-    fun resetIslandDrag() {
+    override fun resetIslandDrag() {
         if (!islandDragging) return
         islandDragging = false
         player?.let {
@@ -2242,7 +2243,7 @@ internal class MiniPlayerController(
      * and camera. Added last, the pill sat above both, sharp - and was hidden for them instead.
      * A morph lifts it over the card for as long as it runs (MiniPlayerView.beginMorph).
      */
-    fun lockScreenLayerIndex(): Int {
+    override fun lockScreenLayerIndex(): Int {
         val at = lockScreenLayerSlot()
         return if (at >= host.childCount) at else at + 1
     }
@@ -2785,7 +2786,7 @@ internal class MiniPlayerController(
     /** The row laid out again on the next frame, for `op fod`. */
     fun relayout() = schedulePosition()
 
-    fun schedulePosition() {
+    override fun schedulePosition() {
         if (positionPosted) return
         positionPosted = true
         host.postOnAnimation { positionPosted = false; position() }
@@ -2983,7 +2984,7 @@ internal class MiniPlayerController(
         return PillRest(pillWidth, height, (start + end) / 2f, centerY)
     }
 
-    fun position() {
+    override fun position() {
         // The buttons laid out again may have moved the floor; the pill need not be up for it.
         runCatching { MiniPlayerRuntime.checkStackFloor() }
         val view = player ?: return

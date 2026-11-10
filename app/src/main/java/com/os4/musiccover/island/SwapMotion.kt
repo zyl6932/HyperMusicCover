@@ -11,10 +11,24 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Moved out of MiniPlayerController as it was (MiniPlayerController plan, M1); `c` is the
- * controller. See the section comments below for what it is.
+ * Moved out of MiniPlayerController as it was (MiniPlayerController plan, M1), and given only
+ * what it uses of the controller (M2, MiniPlayerParts.kt). See the section comments below for
+ * what it is.
  */
-internal class SwapMotion(private val c: MiniPlayerController) {
+internal class SwapMotion(
+    private val views: RowViews,
+    private val rowState: RowState,
+    private val edits: RowEdits,
+    private val rowHost: RowHost,
+    private val sessionSource: SessionSource,
+    // Made after this part: read while a swap runs, not when this is built.
+    private val bindingRef: () -> MiniPlayerBinding,
+    private val noteMorphRef: () -> NoteMorphMotion,
+    private val discsRef: () -> ShortcutDiscs,
+) {
+    private val binding get() = bindingRef()
+    private val noteMorphMotion get() = noteMorphRef()
+    private val shortcutDiscs get() = discsRef()
 
     // ------------------------------------------------------------ islands in motion
 
@@ -90,8 +104,8 @@ internal class SwapMotion(private val c: MiniPlayerController) {
     val swapFrame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC swap"); try {
             val s = swap ?: return
-            if (s.kind == SWAP_STACK && (c.destroyed || !Main.keyguardLocked() ||
-                MiniPlayerScene.aodActive || !c.stackedStyle() || c.player?.visibility != View.VISIBLE)) {
+            if (s.kind == SWAP_STACK && (rowState.destroyed || !Main.keyguardLocked() ||
+                MiniPlayerScene.aodActive || !views.stackedStyle() || views.player?.visibility != View.VISIBLE)) {
                 endSwap()
                 return
             }
@@ -124,7 +138,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
                           smallFromSide: Float = 0f,
                           /** The finger's speed let go, px/s: the pill's frame starts at it. */
                           flingPx: Float = 0f) {
-        val view = c.player ?: return
+        val view = views.player ?: return
         // A switch cut short goes on from what it was drawing, at its speed - the super island's
         // folme.to from the current value and velocity. Restarted from rest, the pill lost its
         // speed at every tap mid-switch, and an island shrinking into the small place (its
@@ -134,41 +148,41 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         val ghosting = prev?.takeIf { it.smallMode == SMALL_FROM_GHOST && it.ghostFrom != null &&
             it.ghostKey != null && !it.small.atRest() }
         val ghostNow = ghosting?.let(::ghostSmallBox)
-        val ghostVel = ghosting?.let { velocityOf(it.ghostFrom!!, c.smallBoxOnScreen(), it.small) }
+        val ghostVel = ghosting?.let { velocityOf(it.ghostFrom!!, views.smallBoxOnScreen(), it.small) }
         // Still the small island's, it keeps its stand-in and its spring; decided below, once the
         // new switch's own stand-ins are known - there is one of each.
-        val keepGhost = ghosting != null && c.smallKey == ghosting.ghostKey && !holdSmall &&
-            kind != SWAP_NEXT && !intoSmall && !(kind == SWAP_PREV && oldSmall != null && oldSmall != c.smallKey)
+        val keepGhost = ghosting != null && rowState.smallKey == ghosting.ghostKey && !holdSmall &&
+            kind != SWAP_NEXT && !intoSmall && !(kind == SWAP_PREV && oldSmall != null && oldSmall != rowState.smallKey)
         endSwap(keepGhosts = keepGhost)
-        c.endRow()
-        c.resetIslandDrag()
-        c.clearSmallNudge()
+        rowHost.endRow()
+        rowHost.resetIslandDrag()
+        views.clearSmallNudge()
         if (kind == SWAP_STACK) view.clearNudge()
         // A flight's morph is the flight's: the pill still switches under it.
-        if (view.visibility != View.VISIBLE || c.morph != null && c.noteMorphMotion.flight == null) {
+        if (view.visibility != View.VISIBLE || rowState.morph != null && noteMorphMotion.flight == null) {
             if (keepGhost) endGhosts()
             return
         }
         // Where the old big island was, before position() lays the pill out for the new row.
         val oldRest = view.restBoxOnScreen()
-        val oldSmallBox = c.smallBoxOnScreen()
-        val oldSmallRest = c.smallRest.copyOf()
+        val oldSmallBox = views.smallBoxOnScreen()
+        val oldSmallRest = views.smallRest.copyOf()
         // The pill's size for the new row, as position() is about to lay it out. position() sets
         // the row's spring going toward it; the switch has the frame, so the spring stops again -
         // left running, it drew over the switch every frame and the pill went straight from its
         // old width to its new one instead of growing out of the small island (filmed 2026-09-25).
-        c.position()
-        c.endRow()
+        rowHost.position()
+        rowHost.endRow()
         val rest = view.restBoxOnScreen() ?: return
-        val d = c.shortcutDiscs.discDiameter().toFloat()
-        val fromSmall = oldSmall != null && c.selectedIsland == oldSmall
+        val d = shortcutDiscs.discDiameter().toFloat()
+        val fromSmall = oldSmall != null && rowState.selectedIsland == oldSmall
         // The stand-in shrinking into the small place is the one growing into the pill now:
         // it grows from where it has got to.
-        val fromGhost = fromSmall && ghostNow != null && c.selectedIsland == ghosting?.ghostKey
+        val fromGhost = fromSmall && ghostNow != null && rowState.selectedIsland == ghosting?.ghostKey
         val from = when {
             pillStays -> pillFrom ?: rest
             fromGhost -> ghostNow!!
-            c.stackedStyle() -> if (fromSmall) oldSmallBox else rest
+            views.stackedStyle() -> if (fromSmall) oldSmallBox else rest
             // Out of hiding, the super island's HiddenToBigIsland: out of the middle.
             kind == SWAP_PREV -> cutoutBox(rest)
             fromSmall -> oldSmallBox
@@ -181,20 +195,20 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         }
         // Growing out of the small island's own circle with nothing to take its place: the circle
         // is the pill from here, not something left behind to shrink away under it.
-        if (fromSmall && c.smallKey == null) c.setSmallShown(false, animate = false)
+        if (fromSmall && rowState.smallKey == null) views.setSmallShown(false, animate = false)
         // The pill held for a flight landing on it shows nothing of the island leaving it: that
         // island goes to the small place as a stand-in of itself, content and all, and the
         // small island takes over from it there. Formed out of the pill's place as a bare
         // circle, the island's picture came in only at the end - the music vanished from the
         // pill the moment the row was pulled and came back beside it (filmed 2026-09-25).
-        val ghostToSmall = intoSmall && oldBig != null && c.smallKey == oldBig && oldRest != null
+        val ghostToSmall = intoSmall && oldBig != null && rowState.smallKey == oldBig && oldRest != null
         val mode = when {
             kind == SWAP_STACK -> SMALL_STACK
             keepGhost -> SMALL_FROM_GHOST
-            c.smallKey == null || holdSmall -> SMALL_KEPT
+            rowState.smallKey == null || holdSmall -> SMALL_KEPT
             ghostToSmall -> SMALL_FROM_GHOST
-            c.smallKey == oldBig -> SMALL_FROM_PILL
-            c.smallKey != oldSmall -> if (kind == SWAP_NEXT) SMALL_EMERGE else SMALL_POP
+            rowState.smallKey == oldBig -> SMALL_FROM_PILL
+            rowState.smallKey != oldSmall -> if (kind == SWAP_NEXT) SMALL_EMERGE else SMALL_POP
             else -> SMALL_KEPT
         }
         val s = Swap(from, rest, mode, kind, holdPill, pillKept)
@@ -247,11 +261,11 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         // The old small island into hiding (SmallIslandToHidden): a stand-in of it, where it is.
         // Also when the island leaving the pill takes the small place from it: with three
         // islands, the small one was simply replaced there, gone in a frame (2026-09-25).
-        if ((kind == SWAP_PREV || ghostToSmall) && oldSmall != null && oldSmall != c.smallKey &&
+        if ((kind == SWAP_PREV || ghostToSmall) && oldSmall != null && oldSmall != rowState.smallKey &&
             startGhostDisc(oldSmall)) {
             s.disc = true
             s.discFromSide = smallFromSide
-            if (c.smallKey == null) {
+            if (rowState.smallKey == null) {
                 // The first island left alone: the pill widens over the place the small island
                 // had, which goes into hiding there - its stand-in where it was, the island itself
                 // off at once rather than shrinking away a second time under it.
@@ -259,19 +273,19 @@ internal class SwapMotion(private val c: MiniPlayerController) {
                     it.translationX = oldSmallRest[0] - it.layoutParams.width / 2f - it.left
                     it.translationY = oldSmallRest[1] - it.layoutParams.height / 2f - it.top
                 }
-                c.setSmallShown(false, animate = false)
+                views.setSmallShown(false, animate = false)
             }
         }
         view.beginMorph(layoutOnly = true)
         if (mode != SMALL_KEPT) {
             // The switch has the small island now: whatever it was growing into, it stops.
-            c.smallGrowing = false
-            Gen.unframe(c.smallGrowFrame)
-            c.smallGrow.value = 1f
-            c.smallGrow.target = 1f
-            c.smallGrow.velocity = 0f
-            c.smallIsland?.let { if (it.visibility != View.VISIBLE) it.visibility = View.VISIBLE }
-            c.widenSmallIsland(rest)
+            edits.smallGrowing = false
+            Gen.unframe(views.smallGrowFrame)
+            views.smallGrow.value = 1f
+            views.smallGrow.target = 1f
+            views.smallGrow.velocity = 0f
+            views.smallIsland?.let { if (it.visibility != View.VISIBLE) it.visibility = View.VISIBLE }
+            views.widenSmallIsland(rest)
         }
         applySwap(s)
         Gen.frame(swapFrame)
@@ -289,7 +303,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         val dx = to.cx() - from.cx()
         val dw = to.w - from.w
         val span = if (kotlin.math.abs(dw) >= kotlin.math.abs(dx)) dw else dx
-        if (kotlin.math.abs(span) < c.dp(4f)) return 0f
+        if (kotlin.math.abs(span) < views.dp(4f)) return 0f
         val px = if (span == dw) v[1] else v[0]
         return (px / span).coerceIn(-SWAP_CARRY_MAX, SWAP_CARRY_MAX)
     }
@@ -300,10 +314,10 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         return CoverMorphMotion.Box(rest.cx() - side / 2f, rest.cy() - side / 2f, side, side)
     }
 
-    private fun swapBlurPx() = c.dp(SWAP_BLUR_DP).toFloat()
+    private fun swapBlurPx() = views.dp(SWAP_BLUR_DP).toFloat()
 
     private fun applySwap(s: Swap) {
-        val view = c.player ?: return
+        val view = views.player ?: return
         if (s.kind == SWAP_STACK) {
             applyStackSwap(s, view)
             return
@@ -317,17 +331,17 @@ internal class SwapMotion(private val c: MiniPlayerController) {
             .coerceIn(-ROW_SQUASH_MAX, ROW_SQUASH_MAX)
         val h = grown.h * (1f - squash)
         val box = CoverMorphMotion.Box(grown.x, grown.y + (grown.h - h) / 2f, maxOf(grown.w, h), h)
-        if (c.noteMorphMotion.pillLandingBox != null || s.holdPill) {
+        if (noteMorphMotion.pillLandingBox != null || s.holdPill) {
             // The pill is under a flight landing on it, or waiting for a card to: that has its frame.
         } else if (s.pillKept) {
             view.setMorphFrame(box, box.h / 2f, 1f)
             view.setContentAlpha(1f)
-        } else if (s.kind == SWAP_PREV || c.stackedStyle()) {
+        } else if (s.kind == SWAP_PREV || views.stackedStyle()) {
             view.setMorphFrame(box, box.h / 2f, 1f)
             // Out of the middle: the content comes into focus as it arrives.
             val c = if (s.kind == SWAP_PREV) s.contentIn.value.coerceIn(0f, 1f)
                 else MiniCardMorph.smooth(0f, 1f, p)
-            view.setContentAlpha(if (this.c.stackedStyle()) 1f else c)
+            view.setContentAlpha(if (views.stackedStyle()) 1f else c)
             view.setContentBlur((1f - c) * swapBlurPx())
         } else {
             view.setMorphFrame(box, box.h / 2f, 1f)
@@ -336,11 +350,11 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         applyGhost(s)
         applyGhostDisc(s)
         if (s.smallMode == SMALL_KEPT) return
-        val small = c.smallIsland?.takeIf { it.visibility == View.VISIBLE && c.smallKey != null } ?: return
-        val d = c.shortcutDiscs.discDiameter().toFloat()
-        val targetH = c.smallRestHeight().toFloat()
-        val rearAlpha = if (c.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
-        val targetW = c.smallRestWidth().toFloat()
+        val small = views.smallIsland?.takeIf { it.visibility == View.VISIBLE && rowState.smallKey != null } ?: return
+        val d = shortcutDiscs.discDiameter().toFloat()
+        val targetH = views.smallRestHeight().toFloat()
+        val rearAlpha = if (views.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
+        val targetW = views.smallRestWidth().toFloat()
         val q = s.small.value
         if (s.smallMode == SMALL_FROM_GHOST) {
             // Under the stand-in, in its very shape, and in its place once it is there - through
@@ -348,9 +362,9 @@ internal class SwapMotion(private val c: MiniPlayerController) {
             // the small island hid the overshoot and the landing had no give (2026-09-25).
             val box = ghostSmallBox(s)
             if (box != null) {
-                val xy = IntArray(2).also(c.host::getLocationOnScreen)
+                val xy = IntArray(2).also(views.host::getLocationOnScreen)
                 small.setShape(box.w.roundToInt().coerceAtLeast(1), box.h.roundToInt().coerceAtLeast(1),
-                    (box.cx() - xy[0] - c.smallRest[0]).roundToInt())
+                    (box.cx() - xy[0] - views.smallRest[0]).roundToInt())
             } else small.setShape(targetW.roundToInt(), targetH.roundToInt(), 0)
             small.setIconAlpha(1f)
             small.alpha = MiniCardMorph.smooth(GHOST_HANDOFF, 1f, q) * rearAlpha
@@ -364,19 +378,19 @@ internal class SwapMotion(private val c: MiniPlayerController) {
             small.setIconAlpha(MiniCardMorph.smooth(0.15f, 0.7f, q))
             small.alpha = MiniCardMorph.smooth(0f, 0.12f, q) * rearAlpha
             smallDx = lerp(emergeDx(), 0f, q)
-            c.followShortcuts()
+            rowHost.followShortcuts()
             return
         }
         if (s.smallMode == SMALL_FROM_PILL) {
             val p = q
             // The pill's old island shrinking into the small island's place, under the new one.
-            val xy = IntArray(2).also(c.host::getLocationOnScreen)
+            val xy = IntArray(2).also(views.host::getLocationOnScreen)
             val restCx = s.pillTo.cx() - xy[0]
             val w = lerp(s.pillTo.w, targetW, p).coerceAtLeast(d * 0.5f)
-            val cx = lerp(restCx, c.smallRest[0], p)
+            val cx = lerp(restCx, views.smallRest[0], p)
             small.setShape(w.roundToInt(),
                 lerp(s.pillFrom.h, targetH, p).roundToInt(),
-                (cx - c.smallRest[0]).roundToInt())
+                (cx - views.smallRest[0]).roundToInt())
             small.setIconAlpha(MiniCardMorph.smooth(0.55f, 1f, p))
             small.alpha = lerp(1f, rearAlpha, p)
         } else {
@@ -399,7 +413,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         view.setContentAlpha(1f)
         view.setContentBlur(kotlin.math.sin(Math.PI.toFloat() * q) * swapBlurPx())
         view.alpha = lerp(MiniPlayerGeometry.STACK_BACK_ALPHA, 1f, q)
-        val rear = c.smallBoxOnScreen()
+        val rear = views.smallBoxOnScreen()
         val from = s.ghostFrom
         if (from != null) ghostPill?.let { ghost ->
             val shrunk = lerpBox(from, rear, p)
@@ -407,13 +421,13 @@ internal class SwapMotion(private val c: MiniPlayerController) {
             val box = CoverMorphMotion.Box(shrunk.x, shrunk.y + drop, shrunk.w, shrunk.h)
             ghost.setMorphFrame(box, box.h / 2f, 1f)
             // Changing draw order with zero opacity avoids a visible jump at the crossing.
-            ghost.translationZ = if (q < 0.5f) view.translationZ + c.dp(1f) else 0f
+            ghost.translationZ = if (q < 0.5f) view.translationZ + views.dp(1f) else 0f
             ghost.alpha = if (q < 0.5f) 1f - MiniCardMorph.smooth(0.15f, 0.45f, q)
                 else MiniPlayerGeometry.STACK_BACK_ALPHA *
                     MiniCardMorph.smooth(0.55f, 0.8f, q) *
                     (1f - MiniCardMorph.smooth(GHOST_HANDOFF, 1f, q))
         }
-        c.smallIsland?.let { small ->
+        views.smallIsland?.let { small ->
             small.setShape(rear.w.roundToInt(), rear.h.roundToInt(), 0)
             small.setIconAlpha(1f)
             small.alpha = MiniPlayerGeometry.STACK_BACK_ALPHA *
@@ -429,12 +443,12 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         val s = swap ?: return
         swap = null
         Gen.unframe(swapFrame)
-        c.player?.let {
+        views.player?.let {
             // A card morph that has taken the pill since keeps its frame: handed back to rest
             // under it, the pill stood bare in its place with the morph still running - its
             // content cleared by the morph, its glass whole (2026-09-25, `op mini` scene trace).
             // One landing on it has its frame, and hands it back itself (endPillLanding).
-            if ((c.morph == null || c.noteMorphMotion.flight != null) && c.noteMorphMotion.pillLandingBox == null) it.endMorph()
+            if ((rowState.morph == null || noteMorphMotion.flight != null) && noteMorphMotion.pillLandingBox == null) it.endMorph()
             it.setContentAlpha(1f)
             it.setContentBlur(0f)
             if (s.kind == SWAP_STACK) it.alpha = 1f
@@ -442,14 +456,14 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         if (!keepGhosts) endGhosts()
         if (smallDx != 0f) {
             smallDx = 0f
-            c.followShortcuts()
+            rowHost.followShortcuts()
         }
         // A small island the switch left alone may be mid-grow on its own spring: not cut short.
-        if (s.smallMode != SMALL_KEPT) c.restoreSmallIslandShape()
-        c.schedulePosition()
-        c.noteMorphMotion.pendingExpand?.let { key ->
-            c.noteMorphMotion.pendingExpand = null
-            if (c.selectedIsland == key) c.noteMorphMotion.expandNote(key)
+        if (s.smallMode != SMALL_KEPT) views.restoreSmallIslandShape()
+        rowHost.schedulePosition()
+        noteMorphMotion.pendingExpand?.let { key ->
+            noteMorphMotion.pendingExpand = null
+            if (rowState.selectedIsland == key) noteMorphMotion.expandNote(key)
         }
     }
     // ---- the islands going into hiding
@@ -465,34 +479,34 @@ internal class SwapMotion(private val c: MiniPlayerController) {
 
     /** Where an emerging small island starts: its centre under the pill's end. */
     private fun emergeDx(): Float {
-        val d = c.shortcutDiscs.discDiameter().toFloat()
-        return -(d * 0.8f + c.dp(MiniPlayerGeometry.DISC_GAP_DP))
+        val d = shortcutDiscs.discDiameter().toFloat()
+        return -(d * 0.8f + views.dp(MiniPlayerGeometry.DISC_GAP_DP))
     }
 
     /** Lowest in the row: under the small island, which is under the pill. */
     private fun ghostIndex(): Int {
-        val small = c.smallIsland?.let { c.host.indexOfChild(it) }?.takeIf { it >= 0 }
-        val pill = c.player?.let { c.host.indexOfChild(it) }?.takeIf { it >= 0 }
-        return small ?: pill ?: c.lockScreenLayerIndex()
+        val small = views.smallIsland?.let { views.host.indexOfChild(it) }?.takeIf { it >= 0 }
+        val pill = views.player?.let { views.host.indexOfChild(it) }?.takeIf { it >= 0 }
+        return small ?: pill ?: views.lockScreenLayerIndex()
     }
 
     private fun startGhost(key: String, from: CoverMorphMotion.Box): Boolean {
-        val view = ghostPill ?: MiniPlayerView(c.context).also {
+        val view = ghostPill ?: MiniPlayerView(views.context).also {
             ghostPill = it
-            c.host.addView(it, ghostIndex(), ViewGroup.LayoutParams(1, 1))
-            Gen.ownView(c.host, it)
+            views.host.addView(it, ghostIndex(), ViewGroup.LayoutParams(1, 1))
+            Gen.ownView(views.host, it)
         }
         val w = from.w.roundToInt().coerceAtLeast(1)
         val h = from.h.roundToInt().coerceAtLeast(1)
         if (view.layoutParams.width != w || view.layoutParams.height != h) {
             view.layoutParams = view.layoutParams.apply { width = w; height = h }
         }
-        val music = c.controller?.takeIf(c.sessionSource::isUsable)
+        val music = rowState.controller?.takeIf(sessionSource::isUsable)
         val note = if (key == MUSIC_ISLAND) null
             else LockIslands.notes.firstOrNull { it.key == key } ?: LockIslands.noteFor(key)
         when {
-            key == MUSIC_ISLAND && music != null -> c.binding.bindMusic(view, music, c.config)
-            note != null -> c.binding.bindNote(view, note, c.config)
+            key == MUSIC_ISLAND && music != null -> binding.bindMusic(view, music, rowState.config)
+            note != null -> binding.bindNote(view, note, rowState.config)
             else -> return false
         }
         view.setInteractionsEnabled(false)
@@ -518,7 +532,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
      */
     fun ghostSmallBox(s: Swap): CoverMorphMotion.Box? {
         val from = s.ghostFrom ?: return null
-        val to = c.smallBoxOnScreen()
+        val to = views.smallBoxOnScreen()
         val g = s.small.value
         val shrunk = lerpBox(from, to, g)
         val narrowing = s.small.velocity * (to.w - from.w)
@@ -541,8 +555,8 @@ internal class SwapMotion(private val c: MiniPlayerController) {
             // Made without it, the stand-in dropped the button the moment the switch began: the
             // stopwatch's left button gone in a frame as the cover was pulled down (2026-09-26).
             view.setSecondProgress(s.ghostSecond * (1f - MiniCardMorph.smooth(0f, 0.5f, g)))
-            view.setTextAlpha(if (c.stackedStyle()) 1f else 1f - MiniCardMorph.smooth(0f, 0.5f, g))
-            if (c.stackedStyle()) view.setContentBlur(kotlin.math.sin(Math.PI.toFloat() * g.coerceIn(0f, 1f)) * swapBlurPx())
+            view.setTextAlpha(if (views.stackedStyle()) 1f else 1f - MiniCardMorph.smooth(0f, 0.5f, g))
+            if (views.stackedStyle()) view.setContentBlur(kotlin.math.sin(Math.PI.toFloat() * g.coerceIn(0f, 1f)) * swapBlurPx())
             view.alpha = 1f - MiniCardMorph.smooth(GHOST_HANDOFF, 1f, g)
             return
         }
@@ -558,37 +572,37 @@ internal class SwapMotion(private val c: MiniPlayerController) {
     }
 
     private fun startGhostDisc(key: String): Boolean {
-        val d = c.shortcutDiscs.discDiameter()
-        val width = c.smallRestWidth()
-        val frame = maxOf(c.shortcutDiscs.discFrame(d), width + c.dp(16f))
-        val frameHeight = c.shortcutDiscs.discFrame(d)
-        val disc = ghostDisc ?: ShortcutDisc(c.context).also {
+        val d = shortcutDiscs.discDiameter()
+        val width = views.smallRestWidth()
+        val frame = maxOf(shortcutDiscs.discFrame(d), width + views.dp(16f))
+        val frameHeight = shortcutDiscs.discFrame(d)
+        val disc = ghostDisc ?: ShortcutDisc(views.context).also {
             ghostDisc = it
-            c.host.addView(it, ghostIndex(), ViewGroup.LayoutParams(frame, frameHeight))
-            Gen.ownView(c.host, it)
+            views.host.addView(it, ghostIndex(), ViewGroup.LayoutParams(frame, frameHeight))
+            Gen.ownView(views.host, it)
         }
         if (disc.layoutParams.width != frame || disc.layoutParams.height != frameHeight) {
             disc.layoutParams = disc.layoutParams.apply { this.width = frame; height = frameHeight }
         }
-        disc.dress(c.discMaterialGeneration()) {
-            MiniPlayerRuntime.material(it, c.loader, c.notificationMaterial())
+        disc.dress(views.discMaterialGeneration()) {
+            MiniPlayerRuntime.material(it, views.loader, views.notificationMaterial())
         }
-        val picture: Any? = if (key == MUSIC_ISLAND) (c.binding.thumbShown ?: c.cachedCover)
+        val picture: Any? = if (key == MUSIC_ISLAND) (binding.thumbShown ?: rowState.cachedCover)
             else LockIslands.notes.firstOrNull { it.key == key }?.icon ?: LockIslands.noteFor(key)?.icon
-        if (c.stackedStyle()) disc.copyCardTextFrom(c.smallIsland)
+        if (views.stackedStyle()) disc.copyCardTextFrom(views.smallIsland)
         else disc.setCardText(null, null)
         disc.setIconBare(key != MUSIC_ISLAND)
         disc.setIcon(when (picture) {
-            is Bitmap -> android.graphics.drawable.BitmapDrawable(c.context.resources, picture)
+            is Bitmap -> android.graphics.drawable.BitmapDrawable(views.context.resources, picture)
             is android.graphics.drawable.Drawable -> picture
             else -> null
         })
         disc.setIconHidden(false)
-        disc.setShape(width, c.smallRestHeight())
+        disc.setShape(width, views.smallRestHeight())
         disc.setIconAlpha(1f)
-        disc.alpha = if (c.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
-        disc.translationX = c.smallRest[0] - frame / 2f - disc.left
-        disc.translationY = c.smallRest[1] - frameHeight / 2f - disc.top
+        disc.alpha = if (views.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
+        disc.translationX = views.smallRest[0] - frame / 2f - disc.left
+        disc.translationY = views.smallRest[1] - frameHeight / 2f - disc.top
         disc.visibility = View.VISIBLE
         return true
     }
@@ -596,15 +610,15 @@ internal class SwapMotion(private val c: MiniPlayerController) {
     private fun applyGhostDisc(s: Swap) {
         if (!s.disc) return
         val disc = ghostDisc ?: return
-        val d = c.smallRestHeight().toFloat()
-        val w = c.smallRestWidth().toFloat()
+        val d = views.smallRestHeight().toFloat()
+        val w = views.smallRestWidth().toFloat()
         val h = s.ghostDisc.value.coerceIn(0f, 1f)
         val start = if (s.discFromSide > 0f) s.discFromSide else w
         val width = lerp(start, w * HIDDEN_SCALE, h).coerceAtLeast(1f).roundToInt()
         val height = lerp(d, d * HIDDEN_SCALE, h).coerceAtLeast(1f).roundToInt()
         disc.setShape(width, height)
         disc.alpha = (1f - h) *
-            if (c.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
+            if (views.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
     }
 
     private fun endGhosts() {

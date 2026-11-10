@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.media.session.MediaController
 import android.os.Handler
+import android.view.Choreographer
 import android.view.View
 import android.view.ViewGroup
 import com.os4.musiccover.CoverMorphMotion
@@ -37,6 +38,8 @@ internal interface RowViews {
     /** The small island's resting centre in host pixels, and its grow spring. */
     val smallRest: FloatArray
     val smallGrow: Jelly
+    /** Steps [smallGrow] each frame while it runs. */
+    val smallGrowFrame: Choreographer.FrameCallback
     /** The lock screen root the buttons are followed in, and host-to-screen matrices. */
     val followRoot: WeakReference<View>?
     val followHost: Matrix
@@ -54,6 +57,15 @@ internal interface RowViews {
     fun smallNudgeX(): Float
     fun smallNudgeY(): Float
     fun resizeSmallIsland(small: ShortcutDisc, width: Int, height: Int)
+    fun smallRestWidth(): Int
+    fun smallRestHeight(): Int
+    fun smallBoxOnScreen(): CoverMorphMotion.Box
+    fun widenSmallIsland(rest: CoverMorphMotion.Box)
+    fun restoreSmallIslandShape()
+    fun setSmallShown(shown: Boolean, animate: Boolean)
+    fun clearSmallNudge()
+    /** Where in the host the pill goes, over the lock screen's own layer. */
+    fun lockScreenLayerIndex(): Int
     /** A view's centre as drawn, every ancestor's transform included, in host pixels. */
     fun drawnCentre(v: View, out: FloatArray, inverse: Matrix = hostInverse): Boolean
     /** The same centre with no transform anywhere: layout positions only. */
@@ -94,6 +106,7 @@ internal interface RowEdits {
     var lastTrack: String
     var cachedCover: Bitmap?
     var rowHeldOff: Boolean
+    var smallGrowing: Boolean
     var stackLeadKey: String?
     var followRoot: WeakReference<View>?
     /** The member an app group's island shows, by group key. */
@@ -110,6 +123,10 @@ internal interface RowHost {
     /** Moves the pill and the discs with the buttons, as the preDraw does. */
     fun followShortcuts()
     fun updateVisibility()
+    fun position()
+    fun schedulePosition()
+    fun endRow()
+    fun resetIslandDrag()
     /** One line in the row's landing trace (`op mini`). */
     fun trace(what: String)
     /** The pill's media buttons, sent to the session the row follows. */
