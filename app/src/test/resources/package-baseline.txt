@@ -1,0 +1,40 @@
+# Imports that break PackageDirectionTest's rules today, kept until they are undone.
+# One per line: rule, file under src/main/java/com/os4/musiccover, the import after com.os4.musiccover.
+# A line that no longer happens fails the test: take it out when the import goes.
+
+# The settings app's icon list, read by the lock screen islands.
+hook-imports-app island/LockIslands.kt -> app.AppsIcon
+
+# The app reads the islands' and the metro card's configuration through the hook side's own
+# classes; to go with the settings source moving to the app (stage 5).
+app-imports-hook app/MiniPlayerActivity.kt -> island.MiniPlayerConfig
+app-imports-hook app/ModuleBridge.kt -> island.MiniPlayerConfig
+app-imports-hook app/ModuleBridge.kt -> transit.MetroCodeIsland
+app-imports-hook ui/screen/features/FeaturesPage.kt -> island.MiniPlayerConfig
+app-imports-hook ui/screen/features/LyricStylePage.kt -> lyrics.HdrDisplay
+app-imports-hook ui/screen/features/LyricStylePage.kt -> lyrics.LyricAppearance
+
+# island, immersive and transit import each other round: one cycle of three (stage 7b).
+feature-cycle island/LockIslands.kt -> immersive.CountdownScene
+feature-cycle island/LockIslands.kt -> immersive.ImmersiveHost
+feature-cycle island/LockIslands.kt -> immersive.ImmersiveScene
+feature-cycle island/MiniPlayerController.kt -> immersive.ImmersiveHost
+feature-cycle island/MiniPlayerRuntime.kt -> immersive.ImmersiveHost
+feature-cycle immersive/CountdownScene.java -> island.LockIslands
+feature-cycle immersive/ImmersiveHost.java -> island.LockIslands
+feature-cycle immersive/ImmersiveHost.java -> island.MiniPlayerRuntime
+feature-cycle immersive/ImmersiveHost.java -> transit.AmapNavScene
+feature-cycle immersive/ImmersiveHost.java -> transit.AmapTransitScene
+feature-cycle transit/AmapNavScene.java -> immersive.LiveAlertScene
+feature-cycle transit/AmapTransitScene.java -> immersive.CountdownScene
+feature-cycle transit/AmapTransitScene.java -> immersive.ImmersiveHost
+feature-cycle transit/AmapTransitScene.java -> immersive.ImmersiveScene
+feature-cycle transit/AmapTransitScene.java -> island.LockIslands
+feature-cycle transit/AmapTransitScene.java -> island.MiniPlayerRuntime
+
+# The settings table names the features it applies to (stage 5.1 has them register instead).
+settings-imports-feature Settings.java -> lyrics.LockLyrics
+settings-imports-feature Settings.java -> lyrics.LyricStyle
+settings-imports-feature Settings.java -> lyrics.LyricAppearance
+settings-imports-feature Settings.java -> pickup.PickupCodeIsland
+settings-imports-feature Settings.java -> transit.AmapTransitScene
