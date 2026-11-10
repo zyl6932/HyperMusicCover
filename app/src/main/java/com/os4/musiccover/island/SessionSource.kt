@@ -9,18 +9,27 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 
 /**
- * Moved out of MiniPlayerController as it was (MiniPlayerController plan, M1); `c` is the
- * controller. See the section comments below for what it is.
+ * Moved out of MiniPlayerController as it was (MiniPlayerController plan, M1), and given only
+ * what it uses of the controller (M2, MiniPlayerParts.kt). See the section comments below for
+ * what it is.
  */
-internal class SessionSource(private val c: MiniPlayerController) {
+internal class SessionSource(
+    private val views: RowViews,
+    private val state: RowState,
+    private val edits: RowEdits,
+    private val row: RowHost,
+    private val sessions: MediaSessionManager?,
+    /** The controller's `describeInk`, for `op mini`: it reads the card and the stack, not the session. */
+    private val describeInk: () -> String,
+) {
 
-    internal val sessionListener = MediaSessionManager.OnActiveSessionsChangedListener { c.scheduleRefresh() }
+    internal val sessionListener = MediaSessionManager.OnActiveSessionsChangedListener { row.scheduleRefresh() }
     internal val mediaListener = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) {
             metadataCalls++
             lastMetadataAt = android.os.SystemClock.uptimeMillis()
             liveMetadata = metadata
-            c.scheduleRefresh()
+            row.scheduleRefresh()
         }
         override fun onPlaybackStateChanged(state: PlaybackState?) {
             // Usable up to this very change: the gap is counted from here. Counted from the
@@ -31,18 +40,18 @@ internal class SessionSource(private val c: MiniPlayerController) {
                 usableSeenAt = android.os.SystemClock.uptimeMillis()
             }
             liveState = state
-            c.scheduleRefresh()
+            row.scheduleRefresh()
         }
         override fun onSessionDestroyed() {
             liveFor = null
             usableSeenAt = 0L
-            c.scheduleRefresh()
+            row.scheduleRefresh()
         }
     }
 
     /** When the row's session last read as usable (uptime); 0 since it was chosen or destroyed. */
     private var usableSeenAt = 0L
-    private val usableGapEnd = Runnable { c.refresh() }
+    private val usableGapEnd = Runnable { row.refresh() }
 
     /**
      * The registered session's state and metadata, as its callbacks last handed them over.
@@ -61,7 +70,7 @@ internal class SessionSource(private val c: MiniPlayerController) {
     fun describeSession(): String {
         fun id(c: MediaController?) = c?.let { it.packageName + "@" + Integer.toHexString(it.sessionToken.hashCode()) }
         fun title(m: MediaMetadata?) = m?.getString(MediaMetadata.METADATA_KEY_TITLE)
-        val c = this@SessionSource.c.controller
+        val c = state.controller
         val w = Main.miniPlayerSession()
         return "session=${id(c)} live=${c != null && c.sessionToken == liveFor} calls=$metadataCalls rearms=$rearms " +
             "liveTitle=${title(liveMetadata)} binderTitle=${runCatching { title(c?.metadata) }.getOrNull()} " +
@@ -71,8 +80,8 @@ internal class SessionSource(private val c: MiniPlayerController) {
             "cbReg=${runCatching { Xp.getObjectField(c, "mCbRegistered") }.getOrNull()} " +
             "cbs=${runCatching { (Xp.getObjectField(c, "mCallbacks") as List<*>).size }.getOrNull()} " +
             "wCbs=${runCatching { (Xp.getObjectField(w, "mCallbacks") as List<*>).size }.getOrNull()} " +
-            "lastCallAgo=${android.os.SystemClock.uptimeMillis() - lastMetadataAt} track=${this@SessionSource.c.lastTrack} " +
-            "ink=[${this@SessionSource.c.describeInk()}] "
+            "lastCallAgo=${android.os.SystemClock.uptimeMillis() - lastMetadataAt} track=${state.lastTrack} " +
+            "ink=[${describeInk()}] "
     }
     internal fun stateOf(c: MediaController): PlaybackState? =
         if (liveFor != null && c.sessionToken == liveFor) liveState else c.playbackState
@@ -92,20 +101,20 @@ internal class SessionSource(private val c: MiniPlayerController) {
      * still on it, taking ours off and putting it back never registers anything again.
      */
     fun cardTrackChanged() {
-        this@SessionSource.c.handler.post {
-            val c = this@SessionSource.c.controller ?: return@post
-            if (this@SessionSource.c.destroyed) return@post
-            val own = runCatching { MediaController(this@SessionSource.c.context, c.sessionToken) }.getOrNull() ?: return@post
+        views.handler.post {
+            val c = state.controller ?: return@post
+            if (state.destroyed) return@post
+            val own = runCatching { MediaController(views.context, c.sessionToken) }.getOrNull() ?: return@post
             runCatching { Gen.unsessionCallback(c, mediaListener) }
-            this@SessionSource.c.controller = own
-            runCatching { Gen.sessionCallback(own, mediaListener, this@SessionSource.c.handler) }
+            edits.controller = own
+            runCatching { Gen.sessionCallback(own, mediaListener, views.handler) }
             // Not followLive: the gap a player between two tracks is given runs on (#26).
             liveFor = null
             liveState = own.playbackState
             liveMetadata = own.metadata
             liveFor = own.sessionToken
             rearms++
-            this@SessionSource.c.refresh()
+            row.refresh()
         }
     }
     /** For `op mini`: how often the callback has been put back on a track change. */
@@ -115,7 +124,7 @@ internal class SessionSource(private val c: MiniPlayerController) {
     internal fun followLive(c: MediaController?) {
         liveFor = null
         usableSeenAt = 0L
-        this@SessionSource.c.handler.removeCallbacks(usableGapEnd)
+        views.handler.removeCallbacks(usableGapEnd)
         liveState = c?.playbackState
         liveMetadata = c?.metadata
         liveFor = c?.sessionToken
@@ -123,7 +132,7 @@ internal class SessionSource(private val c: MiniPlayerController) {
     internal fun chooseController(): MediaController? {
         val platform = Main.miniPlayerSession()
         if (platform != null && isUsable(platform)) return platform
-        val active = runCatching { c.sessions?.getActiveSessions(null).orEmpty() }.getOrDefault(emptyList())
+        val active = runCatching { sessions?.getActiveSessions(null).orEmpty() }.getOrDefault(emptyList())
         return active.firstOrNull(::isUsable)
     }
 
@@ -135,17 +144,17 @@ internal class SessionSource(private val c: MiniPlayerController) {
      */
     fun isUsable(value: MediaController): Boolean {
         if (playbackUsable(stateOf(value)?.state)) {
-            if (value.sessionToken == c.controller?.sessionToken) usableSeenAt = android.os.SystemClock.uptimeMillis()
+            if (value.sessionToken == state.controller?.sessionToken) usableSeenAt = android.os.SystemClock.uptimeMillis()
             return true
         }
         if (cardHolds(value)) return true
-        if (usableSeenAt == 0L || value.sessionToken != c.controller?.sessionToken ||
+        if (usableSeenAt == 0L || value.sessionToken != state.controller?.sessionToken ||
             value.sessionToken != liveFor) return false
         val left = usableSeenAt + USABLE_GAP_MS - android.os.SystemClock.uptimeMillis()
         if (left <= 0L) return false
         // Settled either way when the gap runs out: the state back, or the music gone for good.
-        c.handler.removeCallbacks(usableGapEnd)
-        c.handler.postDelayed(usableGapEnd, left + 1L)
+        views.handler.removeCallbacks(usableGapEnd)
+        views.handler.postDelayed(usableGapEnd, left + 1L)
         return true
     }
 

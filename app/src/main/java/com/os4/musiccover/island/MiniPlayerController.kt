@@ -59,13 +59,13 @@ internal class MiniPlayerController(
     val right: View,
     private val prefs: SharedPreferences,
     val loader: ClassLoader,
-) {
-    val context = host.context
-    val handler = Gen.handler()
+) : RowViews, RowState, RowEdits, RowHost {
+    override val context = host.context
+    override val handler = Gen.handler()
     internal val sessions = context.getSystemService(MediaSessionManager::class.java)
     private val audio = context.getSystemService(AudioManager::class.java)
     var player: MiniPlayerView? = null
-    var controller: MediaController? = null
+    override var controller: MediaController? = null
     var header: WeakReference<View>? = null
     private val suppressedHeaders = WeakViewOverrideRegistry<View>()
     internal var nativeSuppressionRequested = false
@@ -76,11 +76,11 @@ internal class MiniPlayerController(
     private var pillShowsMusic = false
     /** Refresh had nothing to bind the pill's island to: it still holds another's picture. */
     internal var pillUnbound = false
-    internal var lastTrack = ""
+    override var lastTrack = ""
     var cachedCover: Bitmap? = null
     private var refreshPosted = false
     private var positionPosted = false
-    var destroyed = false
+    override var destroyed = false
     var configuredHeightDp = MiniPlayerConfig.DEFAULT_HEIGHT_DP
     var config = JSONObject(MiniPlayerConfig.defaultJson())
     private var forceHeaderRefresh = true
@@ -92,7 +92,7 @@ internal class MiniPlayerController(
     }
     /** The config is read from preferences only when they change, not on every refresh. */
     private var configStale = true
-    internal val sessionSource = SessionSource(this)
+    internal val sessionSource = SessionSource(this, this, this, this, sessions, ::describeInk)
     fun cardTrackChanged() = sessionSource.cardTrackChanged()
 
     /** For `op mini`: the text colours the system gave its own card and rows, by view id. */
@@ -2320,7 +2320,7 @@ internal class MiniPlayerController(
         controller?.sessionToken?.let(MiniPlayerRuntime::selectMini)
     }
 
-    fun refresh() {
+    override fun refresh() {
         if (Looper.myLooper() != Looper.getMainLooper()) { scheduleRefresh(); return }
         if (destroyed) return
         runCatching { refreshUnsafe() }.onFailure { Xp.w("MCMini: refresh failed: $it") }
@@ -2330,7 +2330,7 @@ internal class MiniPlayerController(
     }
 
     /** One refresh on the next turn of the main loop, however many ask for it before then. */
-    internal fun scheduleRefresh() {
+    override fun scheduleRefresh() {
         if (refreshPosted) return
         refreshPosted = true
         handler.post { refreshPosted = false; refresh() }
