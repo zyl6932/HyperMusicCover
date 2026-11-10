@@ -286,7 +286,7 @@ internal class ShortcutDiscs(private val c: MiniPlayerController) {
         // end (measured 2026-09-29, `op mini` islandDrag: sq 0.999 -> 0.934 in 6ms, five pulls
         // running). The list's own idiom for a small island really there (showing).
         // The pill only meets it while it gives (setScene); a morph in the pill's place does not.
-        val small = c.smallIsland?.takeIf { !c.stackedStyle() && it.visibility == View.VISIBLE && c.swap == null &&
+        val small = c.smallIsland?.takeIf { !c.stackedStyle() && it.visibility == View.VISIBLE && c.swapMotion.swap == null &&
             c.landingBox == null && (!c.smallGrowing || c.smallGrow.atRest()) }
             ?.let { CoverMorphMotion.Box(c.smallRest[0] - d / 2f + c.smallNudgeX(),
                 c.smallRest[1] - d / 2f + c.smallNudgeY(), d, d) }

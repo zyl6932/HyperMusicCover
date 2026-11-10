@@ -234,7 +234,7 @@ internal class AppearMotion(private val c: MiniPlayerController) {
         // doze, the wake's fade, the row held off - nobody draws it again, and asked whether the
         // row was quiet the pill was left as that frame had it: a circle's width with the title
         // laid out past its end (screenshot 2026-09-29 20:20). It goes to its whole width.
-        if (c.rowAnimating && c.group == null && c.swap == null) c.applyRow()
+        if (c.rowAnimating && c.group == null && c.swapMotion.swap == null) c.applyRow()
         else if (!c.frameTaken() && !c.rowAnimating) view.endMorph()
     }
 }
