@@ -58,7 +58,7 @@ internal class MiniPlayerController(
     override val left: View,
     override val right: View,
     private val prefs: SharedPreferences,
-    val loader: ClassLoader,
+    override val loader: ClassLoader,
 ) : RowViews, RowState, RowEdits, RowHost, Motions {
     override val context = host.context
     override val handler = Gen.handler()
@@ -68,7 +68,7 @@ internal class MiniPlayerController(
     override var controller: MediaController? = null
     var header: WeakReference<View>? = null
     private val suppressedHeaders = WeakViewOverrideRegistry<View>()
-    internal var nativeSuppressionRequested = false
+    override var nativeSuppressionRequested = false
     var morph: MiniCardMorph? = null
     internal var morphScene = false
     internal var artBridged = false
@@ -77,7 +77,7 @@ internal class MiniPlayerController(
     /** Refresh had nothing to bind the pill's island to: it still holds another's picture. */
     internal var pillUnbound = false
     override var lastTrack = ""
-    var cachedCover: Bitmap? = null
+    override var cachedCover: Bitmap? = null
     private var refreshPosted = false
     private var positionPosted = false
     override var destroyed = false
@@ -387,18 +387,13 @@ internal class MiniPlayerController(
     var islandKeys: List<String> = emptyList()
 
     /** The islands wear the ordinary notification's colours and soft glass, always (2026-10-09). */
-    fun notificationMaterial(): Boolean = true
+    override fun notificationMaterial(): Boolean = true
 
     override fun stackedStyle(): Boolean =
         config.optInt(MiniPlayerConfig.STYLE, MiniPlayerConfig.STYLE_ROW) == MiniPlayerConfig.STYLE_STACK
 
     fun smallRestHeight(): Int = if (stackedStyle())
         MiniPlayerGeometry.stackBackSizePx(shortcutDiscs.discDiameter()) else shortcutDiscs.discDiameter()
-
-    internal fun materialKey(): String {
-        MiniPlayerRuntime.islandGeneration()
-        return "${if (notificationMaterial()) "notification" else "media"}:${MiniPlayerRuntime.materialStyleKey}"
-    }
 
     /** Read first, the islands' material key: a new one is a new generation for every disc. */
     fun discMaterialGeneration(): Int =
@@ -409,10 +404,10 @@ internal class MiniPlayerController(
     else shortcutDiscs.discDiameter()
 
     /** The island in the pill. The one after it is the small island beside the pill. */
-    var selectedIsland: String? = null
+    override var selectedIsland: String? = null
 
-    var smallIsland: ShortcutDisc? = null
-    var smallKey: String? = null
+    override var smallIsland: ShortcutDisc? = null
+    override var smallKey: String? = null
     private var smallIconKey: Any? = null
     val smallRest = FloatArray(2)
     private val smallFollow = Matrix()
@@ -1241,7 +1236,7 @@ internal class MiniPlayerController(
     }
 
     /** Views a switch has finished with, kept out of sight in the host for the next one. */
-    internal val spareViews = ArrayList<MiniPlayerView>()
+    override val spareViews = ArrayList<MiniPlayerView>()
 
     /** A stack can spread several cards at once; prepare their views across idle frames. */
     private fun spareLimit(): Int = if (stackedStyle()) STACK_SPARE_VIEWS else SPARE_VIEWS
@@ -2540,7 +2535,8 @@ internal class MiniPlayerController(
         prewarmSpares()
     } finally { android.os.Trace.endSection() } }
 
-    internal val binding = MiniPlayerBinding(this)
+    internal val binding = MiniPlayerBinding(this, this, this, this, swapMotion, noteMorphMotion, shortcutDiscs,
+        sessionSource, cardExchange)
 
 
     internal fun updateVisibility() { android.os.Trace.beginSection("MC updateVisibility"); try {
@@ -3060,14 +3056,14 @@ internal class MiniPlayerController(
         }
     }
 
-    internal fun togglePlayback() = command(
+    override fun togglePlayback() = command(
         PlaybackState.ACTION_PAUSE, PlaybackState.ACTION_PLAY,
         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
     ) { current, playing ->
         if (playing) current.transportControls.pause() else current.transportControls.play()
     }
 
-    internal fun skip(next: Boolean) = command(
+    override fun skip(next: Boolean) = command(
         if (next) PlaybackState.ACTION_SKIP_TO_NEXT else PlaybackState.ACTION_SKIP_TO_PREVIOUS,
         if (next) PlaybackState.ACTION_SKIP_TO_NEXT else PlaybackState.ACTION_SKIP_TO_PREVIOUS,
         if (next) KeyEvent.KEYCODE_MEDIA_NEXT else KeyEvent.KEYCODE_MEDIA_PREVIOUS,
@@ -3101,7 +3097,7 @@ internal class MiniPlayerController(
         }
     }
 
-    fun dp(value: Float) = (value * context.resources.displayMetrics.density + .5f).toInt()
+    override fun dp(value: Float) = (value * context.resources.displayMetrics.density + .5f).toInt()
 
 }
 

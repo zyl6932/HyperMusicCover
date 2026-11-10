@@ -17,10 +17,28 @@ import java.util.WeakHashMap
 import org.json.JSONObject
 
 /**
- * Moved out of MiniPlayerController as it was (MiniPlayerController plan, M1); `c` is the
- * controller. See the section comments below for what it is.
+ * Moved out of MiniPlayerController as it was (MiniPlayerController plan, M1), and given only
+ * what it uses of the controller (M2, MiniPlayerParts.kt). See the section comments below for
+ * what it is.
  */
-internal class MiniPlayerBinding(private val c: MiniPlayerController) {
+internal class MiniPlayerBinding(
+    private val views: RowViews,
+    private val state: RowState,
+    private val edits: RowEdits,
+    private val row: RowHost,
+    // Made before this part: the islands it colours, the session it reads, the cover it opens.
+    private val swapMotion: SwapMotion,
+    private val noteMorphMotion: NoteMorphMotion,
+    private val shortcutDiscs: ShortcutDiscs,
+    private val sessionSource: SessionSource,
+    private val cardExchange: CardExchange,
+) {
+
+    /** What the islands' material is keyed by; moved here from the controller, its only reader (M2). */
+    private fun materialKey(): String {
+        MiniPlayerRuntime.islandGeneration()
+        return "${if (views.notificationMaterial()) "notification" else "media"}:${MiniPlayerRuntime.materialStyleKey}"
+    }
 
     /**
      * The words' colour, as SystemUI colours its own media card's (IslandMaterial.ink, after
@@ -31,7 +49,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
      * and a fallback of our own used to, #87 and #91).
      */
     private fun ink(title: Boolean = true): Int {
-        val ctx = Main.sAppCtx ?: c.context
+        val ctx = Main.sAppCtx ?: views.context
         val color = IslandMaterial.ink(ctx)[if (title) 0 else 1]
         // The AOD darkens the plate under the light frost, and the frost's near black, kept on
         // it, could not be read on the lock screen (2026-10-24). Toward white as deep as the
@@ -55,7 +73,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
     internal fun describeInkCounts(): String =
         "inkChanges=$inkChanges buttonInk=${buttonInk?.let(Integer::toHexString)} " +
             "buttonChanges=$buttonInkChanges layerWrites=$buttonLayerWrites " +
-            "buttons=${c.left.javaClass.simpleName}/${c.right.javaClass.simpleName}"
+            "buttons=${views.left.javaClass.simpleName}/${views.right.javaClass.simpleName}"
 
     fun applyInk() {
         val color = ink()
@@ -63,22 +81,22 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
             lastInk = color
             inkChanges++
         }
-        c.player?.setInk(color)
-        c.smallIsland?.setInk(color)
-        c.swapMotion.ghostPill?.setInk(color)
-        c.swapMotion.ghostDisc?.setInk(color)
-        c.noteMorphMotion.flight?.setInk(color)
-        for (v in c.spareViews) v.setInk(color)
+        views.player?.setInk(color)
+        views.smallIsland?.setInk(color)
+        swapMotion.ghostPill?.setInk(color)
+        swapMotion.ghostDisc?.setInk(color)
+        noteMorphMotion.flight?.setInk(color)
+        for (v in views.spareViews) v.setInk(color)
         // The torch and the camera are white glyphs; on discs of the light frost they vanished.
         // Tinted as the card's own buttons are, only while the discs are under them, and given
         // back as they were after.
         val want = ink(title = false).takeIf {
-            c.shortcutDiscs.discsWanted && c.shortcutDiscs.discs.any { d -> d?.visibility == View.VISIBLE } && it != android.graphics.Color.WHITE
+            shortcutDiscs.discsWanted && shortcutDiscs.discs.any { d -> d?.visibility == View.VISIBLE } && it != android.graphics.Color.WHITE
         }
         if (want == buttonInk) return
         buttonInk = want
         buttonInkChanges++
-        for (side in 0..1) tintButton(c.shortcutDiscs.button(side), want)
+        for (side in 0..1) tintButton(shortcutDiscs.button(side), want)
     }
 
     private fun tintButton(v: View, color: Int?) {
@@ -92,24 +110,24 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
     /** The session and track the music island is showing; a new one starts its artwork afresh. */
     internal fun trackMusic(current: MediaController) {
         if (MiniPlayerRuntime.observeSession(current.sessionToken, current.packageName)) {
-            c.cachedCover = null
+            edits.cachedCover = null
             // Another player: its artwork, not the last one's.
             thumbShown = null
-            c.lastTrack = ""
+            edits.lastTrack = ""
         }
-        val metadata = c.sessionSource.metadataOf(current)
+        val metadata = sessionSource.metadataOf(current)
         // The song, not the title: Salt, 汽水, QQ and NetEase sing into TITLE, and every line
         // threw the artwork away as a track change (#47, #56).
         val track = TrackIdentity.of(current.packageName, metadata).songKey().ifEmpty {
             current.packageName + "|" + metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
         }
-        if (track != c.lastTrack) {
-            if (c.lastTrack.isNotEmpty()) {
+        if (track != state.lastTrack) {
+            if (state.lastTrack.isNotEmpty()) {
                 Xp.log("MCMini: track changed; preserving dynamic choice=" +
                     if (MiniPlayerRuntime.nativeRequested(current.sessionToken)) "native" else "mini")
             }
-            c.lastTrack = track
-            c.cachedCover = null
+            edits.lastTrack = track
+            edits.cachedCover = null
         }
     }
 
@@ -118,9 +136,9 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
         val cover = metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
-            ?: c.cachedCover?.takeUnless { it.isRecycled }
-            ?: (if (!c.nativeSuppressionRequested) AlbumArt.cardThumbnail() else null)
-        if (cover != null && !cover.isRecycled) c.cachedCover = cover
+            ?: state.cachedCover?.takeUnless { it.isRecycled }
+            ?: (if (!state.nativeSuppressionRequested) AlbumArt.cardThumbnail() else null)
+        if (cover != null && !cover.isRecycled) edits.cachedCover = cover
         return cover
     }
 
@@ -131,7 +149,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
         view.skippable = true
         showTimer(view, null)
         showFocusAnim(view, null, null)
-        val metadata = c.sessionSource.metadataOf(current)
+        val metadata = sessionSource.metadataOf(current)
         val shown = traced("MC b.thumb") { thumbnailFor(musicCover(metadata), view) }
         view.setToggleShown(true)
         // A player singing into TITLE: the song and singer it spells into ARTIST instead, when
@@ -148,19 +166,19 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
             artist.orEmpty()
                 .ifBlank { metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty() },
             shown,
-            c.sessionSource.stateOf(current)?.state == PlaybackState.STATE_PLAYING,
+            sessionSource.stateOf(current)?.state == PlaybackState.STATE_PLAYING,
             config,
-            c.materialKey(),
-            { target -> MiniPlayerRuntime.material(target, c.loader, c.notificationMaterial()) },
-            c::togglePlayback,
-            { c.skip(next = false) },
-            { c.skip(next = true) },
+            materialKey(),
+            { target -> MiniPlayerRuntime.material(target, views.loader, views.notificationMaterial()) },
+            row::togglePlayback,
+            { row.skip(next = false) },
+            { row.skip(next = true) },
             {
                 // Up undoes down: out of the cover or lyrics by a swipe, back into it by one.
                 if (MiniPlayerRuntime.takeRestoreScene()) Main.miniPlayerEnterCover()
                 else MiniPlayerRuntime.selectNative(current.sessionToken)
             },
-            { c.cardExchange.openCover() },
+            { cardExchange.openCover() },
         )
     }
 
@@ -196,13 +214,13 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
             noteBitmap(note),
             false,
             config,
-            c.materialKey(),
-            { target -> MiniPlayerRuntime.material(target, c.loader, c.notificationMaterial()) },
+            materialKey(),
+            { target -> MiniPlayerRuntime.material(target, views.loader, views.notificationMaterial()) },
             {},
             {},
             {},
             {},
-            { c.noteMorphMotion.expandNote(note.key) },
+            { noteMorphMotion.expandNote(note.key) },
         )
         showTimer(view, note.timer)
         showFocusAnim(view, note.anim, note.live)
@@ -310,7 +328,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
                 (Xp.callMethod(v, "getFlashLightOffset") as? FloatArray)?.let { o ->
                     o[0] = 0f; o[1] = 0.14f; o[2] = -50f; o[3] = 0f
                 }
-                LiveArtHost(c.context, v, dimen("focus_notify_profile_container_size"))
+                LiveArtHost(views.context, v, dimen("focus_notify_profile_container_size"))
             }
             LockIslands.Live.VIDEO -> {
                 val v = plugin.loader.loadClass("miui.systemui.widget.TextureVideoView")
@@ -328,7 +346,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
                     true
                 })
                 Xp.callMethod(v, "setVideoURI", android.net.Uri.parse(uri))
-                LiveArtHost(c.context, v, 0)
+                LiveArtHost(views.context, v, 0)
             }
             else -> null
         }
@@ -476,7 +494,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
      */
     private val pluginContext: android.content.Context? by lazy {
         runCatching {
-            c.context.createPackageContext("miui.systemui.plugin",
+            views.context.createPackageContext("miui.systemui.plugin",
                 android.content.Context.CONTEXT_INCLUDE_CODE or android.content.Context.CONTEXT_IGNORE_SECURITY)
         }.onFailure { MiniPlayerRuntime.noteTouch("focus lottie: no plugin package: $it") }.getOrNull()
     }
@@ -491,7 +509,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
      */
     private fun compositionFor(res: Int, plugin: android.content.Context): Any? {
         focusCompositions[res]?.let { return it }
-        val systemui = c.host.javaClass.classLoader ?: return null
+        val systemui = views.host.javaClass.classLoader ?: return null
         val factory = systemui.loadClass("com.airbnb.lottie.LottieCompositionFactory")
         val load = factory.methods.first { m ->
             m.name == "fromRawResSync" && m.parameterTypes.any { it == Int::class.javaPrimitiveType } &&
@@ -520,7 +538,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
 
     private fun lottieView(res: Int, plugin: android.content.Context): android.widget.ImageView? {
         val composition = compositionFor(res, plugin) ?: return null
-        return newLottie(composition, plugin, c.host.javaClass.classLoader ?: return null)
+        return newLottie(composition, plugin, views.host.javaClass.classLoader ?: return null)
     }
 
     private fun makeFocusLottie(anim: LockIslands.Anim): android.widget.ImageView? {
@@ -534,7 +552,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
         val res = utils.methods.first { it.name == "getLottieRes" && it.parameterTypes.size == 2 }
             .invoke(instance, anim.src, anim.number) as Int
         if (res <= 0) return lottieMiss("no res for ${anim.src}")
-        val systemui = c.host.javaClass.classLoader ?: return lottieMiss("no systemui loader")
+        val systemui = views.host.javaClass.classLoader ?: return lottieMiss("no systemui loader")
         val composition = compositionFor(res, plugin)
             ?: return lottieMiss("load ${anim.src}: $lottieLoadError")
         val view = newLottie(composition, plugin, systemui)
@@ -595,7 +613,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
             when (b.type) {
                 // setActionTextData: its title, in its title colour, on its plate.
                 2 -> TextFaceDrawable(b.label?.toString().orEmpty(), b.titleColor ?: android.graphics.Color.WHITE,
-                    13f * c.context.resources.displayMetrics.scaledDensity)
+                    13f * views.context.resources.displayMetrics.scaledDensity)
                 // setActionProgressData: its picture inside its ring.
                 1 -> progressFace(b, timer)
                 else -> buttonIcon(b)
@@ -619,7 +637,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
         val spec = b.progress
         val auto = spec?.auto == true && timer != null && timer.totalMs > 0L
         val ring = ProgressRingDrawable(
-            stroke = c.dp(2.5f).toFloat(),
+            stroke = views.dp(2.5f).toFloat(),
             color = spec?.color ?: android.graphics.Color.WHITE,
             colorEnd = spec?.colorEnd,
             ccw = spec?.ccw == true,
@@ -667,7 +685,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
                 runCatching { plugin.first.getDrawable(res) }.getOrNull()?.let { return it }
             }
         }
-        return runCatching { (b.picture ?: b.action?.getIcon())?.loadDrawable(c.context) }.getOrNull()
+        return runCatching { (b.picture ?: b.action?.getIcon())?.loadDrawable(views.context) }.getOrNull()
     }
 
     private fun buttonPlate(b: LockIslands.Button): android.graphics.drawable.Drawable {
@@ -709,9 +727,9 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
                 val i = android.content.Intent.parseUri(uri, android.content.Intent.URI_INTENT_SCHEME)
                 val flags = android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
                 when (b.intentType) {
-                    2 -> android.app.PendingIntent.getBroadcast(c.context, b.postTime.toInt(), i, flags)
-                    3 -> android.app.PendingIntent.getService(c.context, b.postTime.toInt(), i, flags)
-                    else -> android.app.PendingIntent.getActivity(c.context, b.postTime.toInt(), i, flags)
+                    2 -> android.app.PendingIntent.getBroadcast(views.context, b.postTime.toInt(), i, flags)
+                    3 -> android.app.PendingIntent.getService(views.context, b.postTime.toInt(), i, flags)
+                    else -> android.app.PendingIntent.getActivity(views.context, b.postTime.toInt(), i, flags)
                 }
             }
             intent?.send()
@@ -757,12 +775,12 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
         // Bound again to the timer it already shows (every refresh): the line is set again over
         // what bind wrote, but a tick still coming goes on where it was rather than starting
         // over. One that stopped - every view it had detached - is started again. PR #15.
-        val same = timerViews[view] === timer && c.handler.hasCallbacks(timerTick)
+        val same = timerViews[view] === timer && views.handler.hasCallbacks(timerTick)
         timerViews[view] = timer
         if (view.titleView.fontFeatureSettings != "tnum") view.titleView.fontFeatureSettings = "tnum"
         timerText(view, timer, timer.displayText())
         if (same) return
-        c.handler.removeCallbacks(timerTick)
+        views.handler.removeCallbacks(timerTick)
         timerTick.run()
     }
 
@@ -794,7 +812,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
                 next = minOf(next, wait)
             }
             autoRings.keys.toList().forEach { it.invalidateSelf() }
-            if (next != Long.MAX_VALUE) c.handler.postDelayed(this, next + 5L)
+            if (next != Long.MAX_VALUE) views.handler.postDelayed(this, next + 5L)
         }
     }
 
@@ -803,7 +821,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
         // The picture too: the stack island's changes with its apps while its newest stays.
         noteBitmaps[note.key]?.let { (time, icon, bitmap) -> if (time == note.time && icon === note.icon) return bitmap }
         val drawable = note.icon
-        val side = c.dp(56f)
+        val side = views.dp(56f)
         val bitmap = drawable?.let {
             runCatching {
                 Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888).also { b ->
@@ -831,7 +849,7 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
     }
 
     private fun appLabel(pkg: String): String = runCatching {
-        val pm = c.context.packageManager
+        val pm = views.context.packageManager
         pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
     }.getOrDefault(pkg)
 
@@ -859,9 +877,9 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
         // the pill's, else this one's - never less than the pill's default. A flight or spare
         // bound before its first layout has an artwork 1px wide: the thumbnail came out 2x2,
         // was kept for the track, and the pill drew it as a blurred blob (filmed 2026-09-25).
-        val minSide = c.dp(40f)
-        val side = (listOf(c.player?.artworkView?.width ?: 0, view.artworkView.width)
-            .firstOrNull { it >= minSide } ?: c.dp(48f)) * 2
+        val minSide = views.dp(40f)
+        val side = (listOf(views.player?.artworkView?.width ?: 0, view.artworkView.width)
+            .firstOrNull { it >= minSide } ?: views.dp(48f)) * 2
         thumbKey = key
         if (cover.width <= side && cover.height <= side) {
             thumb = cover
@@ -874,13 +892,13 @@ internal class MiniPlayerBinding(private val c: MiniPlayerController) {
                 Bitmap.createScaledBitmap(cover, (cover.width * k).toInt().coerceAtLeast(1),
                     (cover.height * k).toInt().coerceAtLeast(1), true)
             }.getOrNull()
-            c.handler.post {
+            views.handler.post {
                 if (thumbKey != key || scaled == null) return@post
                 thumb = scaled
                 // Straight onto the pill: a refresh here fetched the metadata again for nothing.
                 val ready = shown(scaled)
-                if (c.selectedIsland == MUSIC_ISLAND) c.player?.showArtwork(ready)
-                else if (c.smallKey == MUSIC_ISLAND) c.refresh()
+                if (state.selectedIsland == MUSIC_ISLAND) views.player?.showArtwork(ready)
+                else if (state.smallKey == MUSIC_ISLAND) row.refresh()
             }
         }
         return shown(null)

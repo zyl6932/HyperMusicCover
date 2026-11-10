@@ -1,6 +1,7 @@
 package com.os4.musiccover.island
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.session.MediaController
 import android.os.Handler
 import android.view.View
@@ -25,12 +26,18 @@ internal interface RowViews {
     val host: ViewGroup
     val left: View
     val right: View
+    val loader: ClassLoader
     val player: MiniPlayerView?
+    val smallIsland: ShortcutDisc?
+    /** Views kept from earlier switches for the next one to take. */
+    val spareViews: List<MiniPlayerView>
     /** The pill's place in the row, sprung (controller, "the row's layout, animated"). */
     val rowLeft: Jelly
     val rowWidth: Jelly
     fun density(): Float
     fun stackedStyle(): Boolean
+    fun dp(value: Float): Int
+    fun notificationMaterial(): Boolean
 }
 
 /** The row's state, read only. What a part writes is in [RowEdits]. */
@@ -38,6 +45,10 @@ internal interface RowState {
     val controller: MediaController?
     val destroyed: Boolean
     val lastTrack: String
+    val cachedCover: Bitmap?
+    val nativeSuppressionRequested: Boolean
+    val selectedIsland: String?
+    val smallKey: String?
     val rowKnown: Boolean
     val rowAnimating: Boolean
     fun pillSeen(): Boolean
@@ -47,6 +58,8 @@ internal interface RowState {
 internal interface RowEdits {
     var controller: MediaController?
     var rowKnown: Boolean
+    var lastTrack: String
+    var cachedCover: Bitmap?
 }
 
 /** What a part asks the controller to do to the row: refresh it, lay it out, apply its frame. */
@@ -54,6 +67,9 @@ internal interface RowHost {
     fun refresh()
     fun scheduleRefresh()
     fun applyRow()
+    /** The pill's media buttons, sent to the session the row follows. */
+    fun togglePlayback()
+    fun skip(next: Boolean)
 }
 
 /**
