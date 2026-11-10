@@ -75,7 +75,7 @@ internal class MiniPlayerController(
     /** Whether the pill is bound to the music as refresh last bound it, not to a notification. */
     private var pillShowsMusic = false
     /** Refresh had nothing to bind the pill's island to: it still holds another's picture. */
-    internal var pillUnbound = false
+    override var pillUnbound = false
     override var lastTrack = ""
     override var cachedCover: Bitmap? = null
     private var refreshPosted = false
@@ -495,7 +495,7 @@ internal class MiniPlayerController(
      */
     private var aloneFirst: String? = null
 
-    internal fun firstAlone(keys: List<String>, selected: String?): Boolean =
+    override fun firstAlone(keys: List<String>, selected: String?): Boolean =
         selected != null && aloneFirst == selected && keys.firstOrNull() == selected
 
     /**
@@ -1148,7 +1148,8 @@ internal class MiniPlayerController(
         if (groupMotion.group == null && !appearMotion.appearing) player?.endMorph()
     }
 
-    internal val groupMotion: GroupMotion = GroupMotion(this)
+    internal val groupMotion: GroupMotion = GroupMotion(this, this, this, this, flightState, this, swapMotion, sessionSource,
+        { stackHost }, { noteMorphMotion }, { cardExchange })
     fun anticipateRows(small: Boolean) = groupMotion.anticipateRows(small)
     fun stopAnticipating() = groupMotion.stopAnticipating()
     /**
@@ -1270,9 +1271,6 @@ internal class MiniPlayerController(
 
     private var prewarmPosted = false
 
-    /** The notifications' keys behind the row's islands: the stack island's each, the others themselves. */
-    internal fun rowKeys(): List<String> = LockIslands.notes.flatMap { LockIslands.membersOf(it.key) }
-
     /**
      * The stack island's notification whose row it opens into and comes home from: the one
      * pulled down (releasedRowAt), else the newest - the one it shows.
@@ -1371,7 +1369,7 @@ internal class MiniPlayerController(
         applySmallGrow()
     }
 
-    internal fun applySmallGrow() {
+    override fun applySmallGrow() {
         val small = smallIsland ?: return
         val w = smallRestWidth().toFloat()
         val v = smallGrow.value
@@ -1796,7 +1794,7 @@ internal class MiniPlayerController(
     }
 
     /** The small island and the row as they stand this frame, in host pixels. */
-    internal fun smallState(): String {
+    override fun smallState(): String {
         val v = smallIsland ?: return "no small"
         val pill = player
         return "sk=${smallKey?.takeLast(6)} v=${v.visibility} a=${"%.2f".format(v.alpha)} " +
@@ -1826,7 +1824,7 @@ internal class MiniPlayerController(
     /** A morph into the cover or the lyrics landed on the card at this uptime, the scene not up yet. */
     private var sceneLandedAt = 0L
 
-    internal val morphListener = object : MiniCardMorph.Listener {
+    override val morphListener = object : MiniCardMorph.Listener {
         /** A scene exit hands the pill back only once the cover has let go of the lock screen. */
         override fun canSettle(morph: MiniCardMorph, toNative: Boolean) =
             toNative || !morphScene || !Main.coverSceneActive()
@@ -2075,7 +2073,7 @@ internal class MiniPlayerController(
     private fun busyForDrag(): Boolean = morph != null || spreadMotion.spread != null
 
     /** The dynamic switch can be pulled from this end right now. */
-    fun canDrag(fromNative: Boolean, small: Boolean = false): Boolean {
+    override fun canDrag(fromNative: Boolean, small: Boolean): Boolean {
         if (!config.getBoolean(MiniPlayerConfig.ENABLED) || busyForDrag()) return false
         // With other islands in the row the music goes out and back as a flight, as they do.
         if (musicFlies() || cardExchange.exchange != null) return false
