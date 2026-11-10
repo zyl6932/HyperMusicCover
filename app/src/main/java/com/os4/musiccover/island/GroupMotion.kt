@@ -157,7 +157,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
             if (MUSIC_ISLAND !in keys) return null
             val selected = c.selectedIsland?.takeIf { it in keys } ?: MUSIC_ISLAND
             c.selectedIsland = if (selected != MUSIC_ISLAND && smallAfter(keys, selected) == MUSIC_ISLAND &&
-                c.rowFor(selected)?.let(::rowReady) == true) selected else MUSIC_ISLAND
+                c.stackHost.rowFor(selected)?.let(::rowReady) == true) selected else MUSIC_ISLAND
         }
         val g = Group(musicSmall = c.selectedIsland != MUSIC_ISLAND, down = !toNative)
         // Coming down the other rows are there, whole; going up they come out of the fold.
@@ -205,7 +205,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
         // has; going up, only if the pull was seen coming (rowsAnticipated). Otherwise the music
         // sets out alone and the other island joins it the moment its row is there (groupFrame).
         g.other?.let { key ->
-            val row = c.rowFor(key)?.takeIf(::rowReady)
+            val row = c.stackHost.rowFor(key)?.takeIf(::rowReady)
             if (row != null) {
                 if (!startFollower(g, row, fromIsland = toNative, joining = false)) g.inPlace = true
             } else if (!toNative) g.inPlace = true
@@ -218,7 +218,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
 
     /** A notification's row, laid out and on screen above the row of islands. */
     internal fun rowReady(row: View): Boolean = row.isAttachedToWindow && row.isLaidOut &&
-        row.width > 0 && row.height > 0 && c.rowOnScreen(row)
+        row.width > 0 && row.height > 0 && c.stackHost.rowOnScreen(row)
 
     /**
      * The other island goes with the music's morph from here, between its place and [row]:
@@ -229,13 +229,13 @@ internal class GroupMotion(private val c: MiniPlayerController) {
         val key = g.other ?: return false
         val view = (if (g.otherSmall) c.prepareSmallView(key) else c.player) ?: return false
         // Out of sight while it waited (holdRows): the morph saves the row's own alpha.
-        c.showRow(row)
+        c.stackHost.showRow(row)
         val f = MiniCardMorph(view, row, fromIsland, followerListener, c.noteMorphMotion.rowLanding(row),
             restBox = if (g.otherSmall) { { c.smallBoxOnScreen() } } else null,
             circle = g.otherSmall && !c.stackedStyle())
         if (!f.startDragging()) {
             if (g.otherSmall) runCatching { c.host.removeView(view) }
-            c.hideRow(row)
+            c.stackHost.hideRow(row)
             return false
         }
         if (g.otherSmall) {
@@ -265,7 +265,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
         // Going up, the other island's row may come a few frames after the music set out. Coming
         // back before it has, the island never left its place and needs none.
         if (other != null && g.follower == null && !g.inPlace && lead.toNative) {
-            val row = traced("MC g.findRow") { c.rowFor(other) }
+            val row = traced("MC g.findRow") { c.stackHost.rowFor(other) }
             if (row != null && rowReady(row)) {
                 if (!traced("MC g.startFollower") { startFollower(g, row, fromIsland = true, joining = true) }) g.inPlace = true
             } else if (now - g.waitSince > ROW_WAIT_MS) {
@@ -348,11 +348,11 @@ internal class GroupMotion(private val c: MiniPlayerController) {
         c.restoreSmallIslandShape()
         for (row in g.folded.keys) row.setAnimationMatrix(null)
         for (key in c.rowKeys()) {
-            val (row, top) = c.findRow(key) ?: continue
+            val (row, top) = c.stackHost.findRow(key) ?: continue
             if (toNative) {
-                c.showRow(row)
-                c.showRow(top)
-            } else c.hideRowUntilGone(top, key)
+                c.stackHost.showRow(row)
+                c.stackHost.showRow(top)
+            } else c.stackHost.hideRowUntilGone(top, key)
         }
         if (!toNative) {
             c.snapSmallOnce = true
@@ -373,22 +373,22 @@ internal class GroupMotion(private val c: MiniPlayerController) {
         val holding = rowsHeld()
         if (!holding && android.os.SystemClock.uptimeMillis() > rowsHeldUntil) return
         // The row the other island is morphing with: a group holding it is not folded whole.
-        val keep = g?.other?.let(c::rowFor)
+        val keep = g?.other?.let(c.stackHost::rowFor)
         val done = HashSet<View>()
         val pile = ArrayList<View>()
         for (key in c.rowKeys()) {
             if (g != null && key == g.other && g.follower != null) continue
-            val row = (if (g != null && key == g.other) keep else c.wholeRowFor(key, keep)) ?: continue
+            val row = (if (g != null && key == g.other) keep else c.stackHost.wholeRowFor(key, keep)) ?: continue
             // Another notification of the app the morph is taking: the same row, which is the morph's.
             if (row === keep && (g == null || key != g.other)) continue
             if (!done.add(row)) continue
             if (!holding) {
-                if (row !in c.hiddenRows) c.hideRowUntilGone(row, key)
+                if (row !in c.stackHost.hiddenRows) c.stackHost.hideRowUntilGone(row, key)
                 continue
             }
-            c.hideRow(row)
+            c.stackHost.hideRow(row)
             val folds = g != null && key != g.other
-            val ta = if (folds) (c.hiddenRows[row] ?: 1f) * g!!.foldAlpha.value.coerceIn(0f, 1f) else 0f
+            val ta = if (folds) (c.stackHost.hiddenRows[row] ?: 1f) * g!!.foldAlpha.value.coerceIn(0f, 1f) else 0f
             if (kotlin.math.abs(row.transitionAlpha - ta) > 0.002f) row.transitionAlpha = ta
             if (folds) pile += row
         }
@@ -500,23 +500,23 @@ internal class GroupMotion(private val c: MiniPlayerController) {
         pileFoundAt = now
         val lead = c.groupLead(key) ?: return@traced
         val members = LockIslands.membersOf(key)
-        val stack = c.notificationStack() ?: return@traced
+        val stack = c.stackHost.notificationStack() ?: return@traced
         val children = (0 until stack.childCount).map { stack.getChildAt(it) }
             .filter { it.javaClass.name.contains("ExpandableNotificationRow") }
-        val index = MiniPlayerRowIndex.build(children, c::rowKey, c::childRows,
-            c.kept.filterValues { it.row.isAttachedToWindow }.mapValues { it.value.row })
+        val index = MiniPlayerRowIndex.build(children, c.stackHost::rowKey, c.stackHost::childRows,
+            c.stackHost.kept.filterValues { it.row.isAttachedToWindow }.mapValues { it.value.row })
         val keep = index[lead] ?: return@traced
         val rows = members.asSequence().filter { it != lead }
             .mapNotNull { index[it] }
-            .filter { it !== keep && !c.isInside(keep, it) }.distinct().toList()
-        if (pileTraceNext) c.trace("pile p=${"%.2f".format(progress)} lead=${shortKey(lead)} keep=${c.shortName(keep)}" +
+            .filter { it !== keep && !c.stackHost.isInside(keep, it) }.distinct().toList()
+        if (pileTraceNext) c.trace("pile p=${"%.2f".format(progress)} lead=${shortKey(lead)} keep=${c.stackHost.shortName(keep)}" +
             "@${(keep.translationY).toInt()} members=${members.joinToString(",") { shortKey(it) }} " +
-            "rows=${rows.joinToString(",") { c.shortName(it) + "@" + it.translationY.toInt() }} " +
+            "rows=${rows.joinToString(",") { c.stackHost.shortName(it) + "@" + it.translationY.toInt() }} " +
             "missing=${members.filter { it != lead && it !in index }.joinToString(",") { shortKey(it) }}")
         if (rows.isEmpty()) return@traced
         // Their turns: the nearest to the lead in the stack first.
-        val at = c.stackTargetY(keep) + keep.top
-        rows.map { it to kotlin.math.abs(c.stackTargetY(it) + it.top - at) }
+        val at = c.stackHost.stackTargetY(keep) + keep.top
+        rows.map { it to kotlin.math.abs(c.stackHost.stackTargetY(it) + it.top - at) }
             .sortedBy { it.second }.forEachIndexed { i, (row, _) ->
             val pile = piles.getOrPut(row) {
                 // First seen where the lead is: nothing moves at once.
@@ -551,7 +551,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
         pileObserved?.let { Gen.unpreDraw(it, pilePreDraw) }
         pileObserved = null
         if (!on) return
-        val stack = c.notificationStack() ?: return
+        val stack = c.stackHost.notificationStack() ?: return
         Gen.preDraw(stack, pilePreDraw)
         pileObserved = stack
     }
@@ -579,13 +579,13 @@ internal class GroupMotion(private val c: MiniPlayerController) {
                 it.remove()
                 continue
             }
-            c.hideRow(row)
+            c.stackHost.hideRow(row)
             pileRows += row
             pile.out.target = pileTarget(pileAt, pile.turn)
             pile.out.step(dt)
             if (!pile.out.atRest()) moving = true
             val u = pile.out.value
-            val base = c.hiddenRows[row] ?: 1f
+            val base = c.stackHost.hiddenRows[row] ?: 1f
             val ta = base * MiniCardMorph.smooth(PILE_IN_FROM, PILE_IN_TO, u)
             if (kotlin.math.abs(row.transitionAlpha - ta) > 0.002f) row.transitionAlpha = ta
             // Where the stack draws it: its own place and scale in the pile, on its render node.
@@ -614,7 +614,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
                 m.postTranslate(box.x - native.x, box.y - native.y)
             }
             row.setAnimationMatrix(m)
-            if (traceIt) c.trace("  pile ${c.shortName(row)} #${pile.turn} u=${"%.2f".format(u)}>" +
+            if (traceIt) c.trace("  pile ${c.stackHost.shortName(row)} #${pile.turn} u=${"%.2f".format(u)}>" +
                 "${"%.2f".format(pile.out.target)} ta=${"%.2f".format(ta)} at=${native.y.toInt()} " +
                 "s=${"%.3f".format(s)} from=${island?.let { "${it.cx().toInt()},${it.cy().toInt()} w${it.w.toInt()}" }}")
         }
@@ -663,7 +663,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
      * go on to theirs, a turn behind; home, whatever is left of them goes with it.
      */
     internal fun endPile(toRow: Boolean) {
-        c.trace("pile end toRow=$toRow rows=${pileRows.joinToString(",") { c.shortName(it) }}")
+        c.trace("pile end toRow=$toRow rows=${pileRows.joinToString(",") { c.stackHost.shortName(it) }}")
         pileTraceBucket = -1
         pileAt = if (toRow) 1f else 0f
         if (toRow && piles.values.any { !it.out.atRest() || it.out.value != 1f }) {
@@ -683,10 +683,10 @@ internal class GroupMotion(private val c: MiniPlayerController) {
         pileFoundAt = 0L
         for (row in pileRows) {
             row.setAnimationMatrix(null)
-            if (toRow) c.showRow(row)
+            if (toRow) c.stackHost.showRow(row)
             else {
                 row.transitionAlpha = 0f
-                c.hideRowUntilGone(row, pileKey)
+                c.stackHost.hideRowUntilGone(row, pileKey)
             }
         }
         pileRows.clear()
@@ -753,7 +753,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
         rowsAnticipated = false
         if (group != null) return
         rowsHeldUntil = android.os.SystemClock.uptimeMillis() + ROW_GONE_MS
-        for (key in c.rowKeys()) c.findRow(key)?.let { c.hideRowUntilGone(it.second, key) }
+        for (key in c.rowKeys()) c.stackHost.findRow(key)?.let { c.stackHost.hideRowUntilGone(it.second, key) }
         c.updateVisibility()
     }
 }

@@ -24,20 +24,20 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
         if (c.player?.visibility != View.VISIBLE) add("vis=${c.player?.visibility}")
     }.joinToString(",").ifEmpty { "quiet" }
     fun rowTree(match: String): String {
-        val stack = c.notificationStack() ?: return "no stack"
+        val stack = c.stackHost.notificationStack() ?: return "no stack"
         val sb = StringBuilder()
-        fun rows(v: View): List<View> = listOf(v) + c.childRows(v)
+        fun rows(v: View): List<View> = listOf(v) + c.stackHost.childRows(v)
         for (i in 0 until stack.childCount) {
             val child = stack.getChildAt(i)
             if (!child.javaClass.name.contains("ExpandableNotificationRow")) continue
             for (row in rows(child)) {
-                val key = c.rowKey(row) ?: continue
+                val key = c.stackHost.rowKey(row) ?: continue
                 if (match.isNotEmpty() && !key.contains(match)) continue
                 val pub = runCatching { Xp.callMethod(row, "isShowingPublic") }.getOrNull()
                 val sens = runCatching { Xp.callMethod(row, "getSensitive") }.getOrNull()
                 sb.append("ROW ").append(key).append(" public=").append(pub).append(" sensitive=")
                     .append(sens).append(" top=").append(row.translationY.toInt()).appendLine()
-                c.dumpTree(row, 1, sb)
+                c.stackHost.dumpTree(row, 1, sb)
                 if (sb.length > 60000) return sb.append("...cut").toString()
             }
         }
@@ -46,9 +46,9 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
     fun describe(): String {
         val native = c.expandedKey()?.let(c::nativeFor)
         val nativeY = native?.let { n -> IntArray(2).also(n::getLocationOnScreen)[1] }
-        val sink = " nativeY=$nativeY nativeTy=${native?.translationY} nativeTarget=${native?.let(c::stackTargetY)} " +
-            "pin=${c.pinned?.get() != null} frozen=${c.pinnedAt} pinY=${c.pinY.value} pinDy=${c.pinnedDy} " +
-            "stackTy=${c.notificationStack()?.translationY} "
+        val sink = " nativeY=$nativeY nativeTy=${native?.translationY} nativeTarget=${native?.let(c.stackHost::stackTargetY)} " +
+            "pin=${c.stackHost.pinned?.get() != null} frozen=${c.stackHost.pinnedAt} pinY=${c.stackHost.pinY.value} pinDy=${c.stackHost.pinnedDy} " +
+            "stackTy=${c.stackHost.notificationStack()?.translationY} "
         val islands = c.describeSession() + c.spreadMotion.describeSpread() + " rowAnim=${c.rowAnimating} swap=${c.swapMotion.swap != null} noteMorph=${c.noteMorphMotion.noteMorphKey != null} " +
             "flight=${c.noteMorphMotion.flight != null} drag=${c.noteDragMotion.noteDrag != null} ${c.player?.touchState()} " +
             "out=${c.expandedKey()?.takeLast(12)} xchg=${c.exchange?.let { x -> "out=${x.expanded?.takeLast(6)} pend=${x.pending?.takeLast(6)} " +

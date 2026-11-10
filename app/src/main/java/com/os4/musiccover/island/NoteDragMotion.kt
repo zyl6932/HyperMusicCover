@@ -60,8 +60,8 @@ internal class NoteDragMotion(private val c: MiniPlayerController) {
     /** A notification's morph, let go by a finger that caught it: to its row or its island. */
     fun releaseNote(toRow: Boolean, velocity: Float) {
         c.morph?.release(toRow, velocity)
-        c.noteMorphMotion.noteMorphKey?.let { c.turnTo(it, toRow) }
-        if (toRow && c.noteMorphMotion.noteMorphKey == STACK_ISLAND) c.showStackAsList("turned out")
+        c.noteMorphMotion.noteMorphKey?.let { c.stackHost.turnTo(it, toRow) }
+        if (toRow && c.noteMorphMotion.noteMorphKey == STACK_ISLAND) c.stackHost.showStackAsList("turned out")
         // A flight headed out frees its home; headed home, it holds it again.
         c.noteMorphMotion.setFlightOut(toRow)
     }
@@ -119,7 +119,7 @@ internal class NoteDragMotion(private val c: MiniPlayerController) {
         c.flightOut = false
         noteDrag = NoteDrag(key, startY, opening = true,
             MiniPlayerRuntime.dragThresholdPx(c.density()), MiniPlayerRuntime.dragNudgePx(c.density()))
-        c.letOut(key)
+        c.stackHost.letOut(key)
         c.noteMorphMotion.rowWaitKey = key
         c.noteMorphMotion.rowWaitSince = android.os.SystemClock.uptimeMillis()
         c.noteMorphMotion.appListAsked = false
@@ -153,7 +153,7 @@ internal class NoteDragMotion(private val c: MiniPlayerController) {
         // Flung open short of the threshold: the list now, not once the card is there.
         if (toRow && drag.opening && drag.key == STACK_ISLAND && !drag.listAsked) {
             drag.listAsked = true
-            c.showStackAsList("flung")
+            c.stackHost.showStackAsList("flung")
         }
         val running = c.morph
         if (running != null) {
@@ -175,7 +175,7 @@ internal class NoteDragMotion(private val c: MiniPlayerController) {
         // clock down and let it back up for nothing.
         if (drag.key == STACK_ISLAND && drag.opening && !drag.listAsked && drag.pulled() > drag.threshold) {
             drag.listAsked = true
-            c.showStackAsList("pulled")
+            c.stackHost.showStackAsList("pulled")
         }
         if (drag.ended) return
         val running = c.morph
