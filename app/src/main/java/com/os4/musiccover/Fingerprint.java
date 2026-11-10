@@ -148,55 +148,6 @@ final class Fingerprint {
         return ring;
     }
 
-    /** Set once the state file has been consulted for Settings.HIDE_FP, whether or not it had a value. */
-    private static volatile boolean sHideFpPeeked;
-
-    /**
-     * Reads the fingerprint setting out of the state file before loadState() would.
-     *
-     * The print is not part of the keyguard's own tree. It lives in a window of its own -
-     * `gxzw_touch`, 206x206, the module's report names it - which SystemUI paints as the
-     * keyguard comes up, and that paint happens BEFORE KeyguardClockContainer attaches. Since
-     * attaching is what gives the module a context, and the context is what lets it read the
-     * state file, the first frame of the print was always decided with the setting still at its
-     * default. The hook let it through, the window was never asked to draw again for as long as
-     * the keyguard stayed up, and the print sat there for the whole session - which is what
-     * "restarting SystemUI turns the hiding off until you lock the phone a second time" was.
-     *
-     * Only this one key, and only until the real load has happened: the rest of the file belongs
-     * to loadState, which applies values through setters that want a built keyguard. A file
-     * caught mid-write costs the key its default for this one read, the same exposure loadState
-     * has always had.
-     */
-    static void peekHideFp() {
-        if (sHideFpPeeked || Main.sAppCtx != null) return;
-        sHideFpPeeked = true;
-        try {
-            // Reflection because ActivityThread is not in the SDK to compile against. This is
-            // the process's own Application - there is no other context to be had this early,
-            // and the hooks that call this run on SystemUI's main thread, where it is set.
-            Context c = (Context) Class.forName("android.app.ActivityThread")
-                    .getMethod("currentApplication").invoke(null);
-            if (c == null) {
-                // Nothing to read it with yet; the next draw tries again.
-                sHideFpPeeked = false;
-                return;
-            }
-            android.util.AtomicFile f = new android.util.AtomicFile(
-                    new java.io.File(c.getFilesDir(), ModuleState.STATE_FILE));
-            if (!ModuleState.stateExists(f)) return;
-            for (String line : new String(f.readFully()).split("\n")) {
-                if (line.startsWith("hidefp=")) {
-                    Settings.HIDE_FP.set("1".equals(line.substring(7).trim()));
-                    Xp.log(Main.TAG + "fingerprint setting read early: hide=" + Settings.HIDE_FP.on());
-                    return;
-                }
-            }
-        } catch (Throwable t) {
-            Xp.w(Main.TAG + "reading the fingerprint setting early failed: " + t);
-        }
-    }
-
     /**
      * The root view of every window that belongs to the print, through WindowManagerGlobal.
      *
@@ -401,15 +352,15 @@ final class Fingerprint {
         // effect on the next draw rather than on the next SystemUI restart. And both are on
         // their own terms: a build that renamed one still gets the other.
         //
-        // Per call is not by itself enough, because the first call can come before the module
-        // has read its settings at all - see peekHideFp, which is what both of them start with.
+        // Per call is enough because the first call comes after the settings are read: Main boots
+        // as the process starts (bootAtStart), before the print's window first paints - measured
+        // 2026-11-11, boot 1.6s after SystemUI loaded and the clock 6.7s after that. Boot used to
+        // wait for the clock container, which attaches after that paint, and an early read of
+        // this one key from the state file (peekHideFp) covered the gap until then.
         try {
             Class<?> anim = Xp.findClass(CLS_FOD_ANIM, cl);
             Xp.hookAll("sysui.fp.anim_draw", anim, "draw", chain -> {
                 Object[] args = chain.getArgs().toArray();
-                // The print's own window is painted before the keyguard's clock container
-                // attaches, so the setting has to be fetched here rather than waited for.
-                peekHideFp();
                 // draw(int resId) is the frame. Any other overload is not ours to touch, which
                 // the argument check below says without having to name the signature.
                 if (Settings.HIDE_FP.on() && args.length == 1 && args[0] instanceof Integer
@@ -438,9 +389,6 @@ final class Fingerprint {
                 Object result = chain.proceed();
                 try {
                     View v = (View) chain.getThisObject();
-                    // Built before the keyguard attaches on the same builds the ring is, and
-                    // this is the one chance to dim it before it is ever seen.
-                    peekHideFp();
                     sFodIcons.put(v, Boolean.TRUE);
                 } catch (Throwable ignored) {
                     // A view we cannot dim is a visible print, not a broken keyguard.
@@ -454,7 +402,6 @@ final class Fingerprint {
             for (String name : new String[] {"onDraw", "draw"}) {
                 try {
                     Xp.hookAll("sysui.fp.icon_paint." + Xp.slug(name), iconCls, name, chain -> {
-                        peekHideFp();
                         if (Settings.HIDE_FP.on() && fodForKeyguard(chain.getThisObject())) return null;
                         return chain.proceed();
                     });
@@ -479,7 +426,6 @@ final class Fingerprint {
             for (String name : new String[] {"onDraw", "draw", "dispatchDraw"}) {
                 try {
                     Xp.hookAll("sysui.fp.print_paint." + Xp.slug(name), animView, name, chain -> {
-                        peekHideFp();
                         // Painting nothing, rather than dimming: the alpha on this view is the
                         // OEM's to animate, and a frame it never paints cannot be animated back.
                         if (Settings.HIDE_FP.on() && fodForKeyguard(chain.getThisObject())) return null;

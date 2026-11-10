@@ -769,8 +769,7 @@ public final class Settings {
     /**
      * Hide the lock screen fingerprint ring. Unlike the card switches, this one is not tied to cover
      * mode: an icon that appeared and vanished as the music started and stopped would read as a glitch
-     * rather than as a setting. Also read on its own, before the state file is, by
-     * Fingerprint.peekHideFp.
+     * rather than as a setting.
      */
     public static final Bool HIDE_FP = new Bool(SettingSpec.HIDE_FP)
             .op("hidefp", "on", Absent.TOGGLE)
