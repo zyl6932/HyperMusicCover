@@ -877,7 +877,7 @@ internal class MiniPlayerController(
     }
 
     /** Where the finger has pulled the small island to, in pixels; the caller rubber-bands it. */
-    fun setSmallNudge(x: Float, y: Float) {
+    override fun setSmallNudge(x: Float, y: Float) {
         holdSmallNudge()
         smallNudgeXs.value = x / 100f; smallNudgeXs.target = smallNudgeXs.value; smallNudgeXs.velocity = 0f
         smallNudgeYs.value = y / 100f; smallNudgeYs.target = smallNudgeYs.value; smallNudgeYs.velocity = 0f
@@ -893,7 +893,7 @@ internal class MiniPlayerController(
     val smallNudgeNow: Pair<Float, Float> get() = smallNudgeX() to smallNudgeY()
 
     /** Home with the finger's own speed, so a fling carries past the place and back. */
-    fun springSmallNudgeBack(vx: Float, vy: Float) {
+    override fun springSmallNudgeBack(vx: Float, vy: Float) {
         if (smallNudgeXs.value == 0f && smallNudgeYs.value == 0f) return
         smallNudgeXs.target = 0f
         smallNudgeYs.target = 0f
@@ -1698,7 +1698,8 @@ internal class MiniPlayerController(
 
     internal val noteMorphMotion: NoteMorphMotion = NoteMorphMotion(this)
     fun collapseRow(key: String, startY: Float): Boolean = noteMorphMotion.collapseRow(key, startY)
-    internal val noteDragMotion: NoteDragMotion = NoteDragMotion(this)
+    internal val noteDragMotion: NoteDragMotion = NoteDragMotion(this, this, this, flightState, this, noteMorphMotion,
+        spreadMotion, cardExchange, stackHost, swapMotion)
     fun beginNoteDrag(key: String, fromSmall: Boolean, startY: Float): Boolean =
         noteDragMotion.beginNoteDrag(key, fromSmall, startY)
     fun noteDragMove(y: Float, nudgeX: Float = 0f) = noteDragMotion.noteDragMove(y, nudgeX)

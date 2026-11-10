@@ -64,6 +64,8 @@ internal interface RowViews {
     fun restoreSmallIslandShape()
     fun setSmallShown(shown: Boolean, animate: Boolean)
     fun clearSmallNudge()
+    fun setSmallNudge(x: Float, y: Float)
+    fun springSmallNudgeBack(vx: Float, vy: Float)
     /** A small island's view for [key]; [pooled] takes one from [spareViews] when there is one. */
     fun prepareSmallView(key: String, pooled: Boolean = false): MiniPlayerView?
     fun recycleSmallView(v: MiniPlayerView)
