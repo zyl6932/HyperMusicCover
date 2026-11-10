@@ -54,22 +54,22 @@ import org.json.JSONObject
  * else changed.
  */
 internal class MiniPlayerController(
-    private val host: ViewGroup,
-    private val left: View,
-    private val right: View,
+    val host: ViewGroup,
+    val left: View,
+    val right: View,
     private val prefs: SharedPreferences,
-    private val loader: ClassLoader,
+    val loader: ClassLoader,
 ) {
-    private val context = host.context
+    val context = host.context
     private val handler = Gen.handler()
     private val sessions = context.getSystemService(MediaSessionManager::class.java)
     private val audio = context.getSystemService(AudioManager::class.java)
-    private var player: MiniPlayerView? = null
+    var player: MiniPlayerView? = null
     private var controller: MediaController? = null
     private var header: WeakReference<View>? = null
     private val suppressedHeaders = WeakViewOverrideRegistry<View>()
     private var nativeSuppressionRequested = false
-    private var morph: MiniCardMorph? = null
+    var morph: MiniCardMorph? = null
     private var morphScene = false
     private var artBridged = false
     /** Whether the pill is bound to the music as refresh last bound it, not to a notification. */
@@ -81,8 +81,8 @@ internal class MiniPlayerController(
     private var refreshPosted = false
     private var positionPosted = false
     private var destroyed = false
-    private var configuredHeightDp = MiniPlayerConfig.DEFAULT_HEIGHT_DP
-    private var config = JSONObject(MiniPlayerConfig.defaultJson())
+    var configuredHeightDp = MiniPlayerConfig.DEFAULT_HEIGHT_DP
+    var config = JSONObject(MiniPlayerConfig.defaultJson())
     private var forceHeaderRefresh = true
     private var lastPresentationLog = ""
     private var lastActive = false
@@ -235,15 +235,15 @@ internal class MiniPlayerController(
             position()
             followShortcuts()
         }
-        updateDiscs()
+        shortcutDiscs.updateDiscs()
         lottiesFollowSight()
         true
     } finally { android.os.Trace.endSection() } }
 
     private val followRelative = Matrix()
-    private val followHost = Matrix()
-    private var followRoot: WeakReference<View>? = null
-    private var rowHeldOff = false
+    val followHost = Matrix()
+    var followRoot: WeakReference<View>? = null
+    var rowHeldOff = false
     private var shortcutRow: WeakReference<View>? = null
 
     /**
@@ -261,7 +261,7 @@ internal class MiniPlayerController(
      * faded all the way back in after the wake - switching earlier, it dropped with their fade
      * and came back: a flash.
      */
-    private fun followShortcuts() {
+    fun followShortcuts() {
         val view = player ?: return
         // The spread's morphs place the pill; out as the list, it is not drawn.
         if (spread != null) {
@@ -298,7 +298,7 @@ internal class MiniPlayerController(
         // each frame, and rowFade is whatever was last written - the wake's 0.04, or the 1 the
         // hold wrote a frame ago. Waking, the pill let go on one and took the other: the row
         // dropped to nothing and faded in beside buttons that stayed (filmed 2026-09-26).
-        if (MiniPlayerScene.fullScreenAodActive || holdButtons) rowHeldOff = true
+        if (MiniPlayerScene.fullScreenAodActive || shortcutDiscs.holdButtons) rowHeldOff = true
         // ...or until the PIN pad is up, which keeps the row's fade down for as long as it is.
         else if (rowHeldOff && (rowFade >= 0.99f || Main.bouncerShown())) rowHeldOff = false
         followRowFade = rowFade
@@ -344,7 +344,7 @@ internal class MiniPlayerController(
             // Moved as its centre is, and zoomed about it as it is.
             if (!drawnCentre(single, drawnL)) return
             restCentre(single, restL)
-            var scale = drawnZoom(single)
+            var scale = shortcutDiscs.drawnZoom(single)
             var mx = drawnL[0] - restL[0]
             var my = drawnL[1] - restL[1]
             if (kotlin.math.abs(scale - 1f) < 0.0005f) scale = 1f
@@ -375,7 +375,7 @@ internal class MiniPlayerController(
             followBranch = "none"
             matrix.reset()
         }
-        fade = unheldInDoze(fade)
+        fade = shortcutDiscs.unheldInDoze(fade)
         placeSmallIsland(matrix, fade)
         // Into the pill's own frame: conjugated by its slot in the host.
         matrix.preTranslate(view.left.toFloat(), view.top.toFloat())
@@ -383,9 +383,9 @@ internal class MiniPlayerController(
         // The squeeze, inside that: about the pill's own centre in its slot, its nudge included.
         // In pixels, not shares: with a small island the row the squeeze measured is wider
         // than the pill, and its shares of the row are not the pill's.
-        val sx = squeeze.pillScaleX(view.width.toFloat())
-        val sy = squeeze.pillScaleY()
-        val shift = squeeze.pillShiftPx()
+        val sx = shortcutDiscs.squeeze.pillScaleX(view.width.toFloat())
+        val sy = shortcutDiscs.squeeze.pillScaleY()
+        val shift = shortcutDiscs.squeeze.pillShiftPx()
         if (kotlin.math.abs(sx - 1f) > 0.0005f || kotlin.math.abs(sy - 1f) > 0.0005f
             || kotlin.math.abs(shift) > 0.25f) {
             pillSqueeze.setScale(sx, sy, view.translationX + view.width / 2f,
@@ -434,10 +434,10 @@ internal class MiniPlayerController(
     private var followRowFade = 1f
     private var followPillFade = 1f
 
-    private val hostInverse = Matrix()
-    private val discToScreen = Matrix()
-    private val discInverse = Matrix()
-    private val scratch = Matrix()
+    val hostInverse = Matrix()
+    val discToScreen = Matrix()
+    val discInverse = Matrix()
+    val scratch = Matrix()
     private val pillSqueeze = Matrix()
     private val drawnL = FloatArray(2)
     private val drawnR = FloatArray(2)
@@ -452,7 +452,7 @@ internal class MiniPlayerController(
             button.width > 0 && button.height > 0
 
     /** A view's centre as drawn, every ancestor's transform included, in host pixels. */
-    private fun drawnCentre(v: View, out: FloatArray, inverse: Matrix = hostInverse): Boolean {
+    fun drawnCentre(v: View, out: FloatArray, inverse: Matrix = hostInverse): Boolean {
         if (!v.isAttachedToWindow || v.width <= 0) return false
         scratch.reset()
         v.transformMatrixToGlobal(scratch)
@@ -464,7 +464,7 @@ internal class MiniPlayerController(
     }
 
     /** The same centre with no transform anywhere: layout positions only. */
-    private fun restCentre(v: View, out: FloatArray = FloatArray(2)): FloatArray {
+    fun restCentre(v: View, out: FloatArray = FloatArray(2)): FloatArray {
         restOrigin(v, out)
         out[0] += v.width / 2f
         out[1] += v.height / 2f
@@ -491,13 +491,13 @@ internal class MiniPlayerController(
     private var islandKeys: List<String> = emptyList()
 
     /** The islands wear the ordinary notification's colours and soft glass, always (2026-10-09). */
-    private fun notificationMaterial(): Boolean = true
+    fun notificationMaterial(): Boolean = true
 
-    private fun stackedStyle(): Boolean =
+    fun stackedStyle(): Boolean =
         config.optInt(MiniPlayerConfig.STYLE, MiniPlayerConfig.STYLE_ROW) == MiniPlayerConfig.STYLE_STACK
 
     private fun smallRestHeight(): Int = if (stackedStyle())
-        MiniPlayerGeometry.stackBackSizePx(discDiameter()) else discDiameter()
+        MiniPlayerGeometry.stackBackSizePx(shortcutDiscs.discDiameter()) else shortcutDiscs.discDiameter()
 
     private fun materialKey(): String {
         MiniPlayerRuntime.islandGeneration()
@@ -505,20 +505,20 @@ internal class MiniPlayerController(
     }
 
     /** Read first, the islands' material key: a new one is a new generation for every disc. */
-    private fun discMaterialGeneration(): Int =
+    fun discMaterialGeneration(): Int =
         MiniPlayerRuntime.islandGeneration() * 2 + if (notificationMaterial()) 1 else 0
 
     private fun smallRestWidth(): Int = if (stackedStyle())
-        MiniPlayerGeometry.stackBackSizePx(pillRest(false)?.width ?: player?.width ?: discDiameter())
-    else discDiameter()
+        MiniPlayerGeometry.stackBackSizePx(pillRest(false)?.width ?: player?.width ?: shortcutDiscs.discDiameter())
+    else shortcutDiscs.discDiameter()
 
     /** The island in the pill. The one after it is the small island beside the pill. */
     private var selectedIsland: String? = null
 
-    private var smallIsland: ShortcutDisc? = null
+    var smallIsland: ShortcutDisc? = null
     private var smallKey: String? = null
     private var smallIconKey: Any? = null
-    private val smallRest = FloatArray(2)
+    val smallRest = FloatArray(2)
     private val smallFollow = Matrix()
     private val smallFollowValues = FloatArray(9)
     private val lastSmallFollow = FloatArray(9)
@@ -708,7 +708,7 @@ internal class MiniPlayerController(
             return x >= rear.x && x <= rear.x + rear.w &&
                 y >= front.y + front.h && y <= front.y + front.h + dp(12f)
         }
-        val r = discDiameter() / 2f + minOf(dp(6f), dp(MiniPlayerGeometry.DISC_GAP_DP) * 3 / 4)
+        val r = shortcutDiscs.discDiameter() / 2f + minOf(dp(6f), dp(MiniPlayerGeometry.DISC_GAP_DP) * 3 / 4)
         val dx = x - (xy[0] + smallRest[0])
         val dy = y - (xy[1] + smallRest[1])
         return dx * dx + dy * dy <= r * r
@@ -751,15 +751,15 @@ internal class MiniPlayerController(
         smallKey = key
         // Gone from the row: updateVisibility shrinks it away rather than cutting it.
         if (key == null) return
-        val d = discDiameter()
-        val frame = maxOf(discFrame(d), smallRestWidth() + dp(16f))
+        val d = shortcutDiscs.discDiameter()
+        val frame = maxOf(shortcutDiscs.discFrame(d), smallRestWidth() + dp(16f))
         val view = smallIsland ?: ShortcutDisc(context).also {
             smallIsland = it
             // Right after the lock screen's layer, which puts it just under the pill.
-            host.addView(it, lockScreenLayerIndex(), ViewGroup.LayoutParams(frame, discFrame(d)))
+            host.addView(it, lockScreenLayerIndex(), ViewGroup.LayoutParams(frame, shortcutDiscs.discFrame(d)))
             Gen.ownView(host, it)
         }
-        val frameHeight = discFrame(d)
+        val frameHeight = shortcutDiscs.discFrame(d)
         if (!smallWide && (view.layoutParams.width != frame || view.layoutParams.height != frameHeight))
             resizeSmallIsland(view, frame, frameHeight)
         view.dress(discMaterialGeneration()) {
@@ -843,7 +843,7 @@ internal class MiniPlayerController(
      * flight went through the overshoot invisible, and the landing had no give at all, where
      * the pill's has (2026-09-25). On screen; null when not landing.
      */
-    private var landingBox: CoverMorphMotion.Box? = null
+    var landingBox: CoverMorphMotion.Box? = null
 
     /**
      * The small island's pulse, the super island's smallIslandScaleAnimation: when the island out
@@ -927,29 +927,29 @@ internal class MiniPlayerController(
         }
         // The camera pushing on the row takes the small island back first: it is the row's end.
         // A push on it moves it aside.
-        val d = discDiameter().toFloat()
+        val d = shortcutDiscs.discDiameter().toFloat()
         val stacked = stackedStyle()
         // A stacked rear card shares the front card's slot. It is not a second place in the
         // squeeze chain, and follows the front card's pressure instead of reserving space right.
-        val offX = if (stacked) squeeze.pillShiftPx() + smallDx + smallNudgeX()
-            else -squeeze.rowGivePx(1) + smallDx + smallNudgeX() +
-                squeeze.smallShift() * d + squeeze.smallPushPx()
+        val offX = if (stacked) shortcutDiscs.squeeze.pillShiftPx() + smallDx + smallNudgeX()
+            else -shortcutDiscs.squeeze.rowGivePx(1) + smallDx + smallNudgeX() +
+                shortcutDiscs.squeeze.smallShift() * d + shortcutDiscs.squeeze.smallPushPx()
         val offY = smallNudgeY()
         var tx = smallRest[0] - fw / 2f - v.left + offX
         var ty = smallRest[1] - fh / 2f - v.top + offY
         // Flattened by the pill, by its shape - a scale would draw its edge jagged - when nothing
         // else is shaping it this frame.
         if (swap == null && !smallGrowing && !islandDragging && group?.inPlace != true) {
-            val shapeX = if (stacked) squeeze.pillScaleX(player?.width?.toFloat() ?: 0f)
-                else squeeze.smallShapeX()
-            val shapeY = if (stacked) squeeze.pillScaleY() else squeeze.smallShapeY()
+            val shapeX = if (stacked) shortcutDiscs.squeeze.pillScaleX(player?.width?.toFloat() ?: 0f)
+                else shortcutDiscs.squeeze.smallShapeX()
+            val shapeY = if (stacked) shortcutDiscs.squeeze.pillScaleY() else shortcutDiscs.squeeze.smallShapeY()
             v.setShape((smallRestWidth() * shapeX).roundToInt().coerceAtLeast(1),
                 (smallRestHeight() * shapeY).roundToInt().coerceAtLeast(1), 0)
             v.alpha = if (stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
         }
         // A finger on it sinks it about its centre, which is its frame's centre; the pulse
         // swells it the same way.
-        val swell = squeeze.smallSwell() * smallPulse()
+        val swell = shortcutDiscs.squeeze.smallSwell() * smallPulse()
         if (kotlin.math.abs(v.scaleX - swell) > 0.0005f) {
             v.scaleX = swell
             v.scaleY = swell
@@ -991,8 +991,8 @@ internal class MiniPlayerController(
     private var smallNudging = false
     private var smallNudgeLast = 0L
 
-    private fun smallNudgeX() = smallNudgeXs.value * 100f
-    private fun smallNudgeY() = smallNudgeYs.value * 100f
+    fun smallNudgeX() = smallNudgeXs.value * 100f
+    fun smallNudgeY() = smallNudgeYs.value * 100f
 
     private val smallNudgeFrame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC smallNudge"); try {
@@ -1054,7 +1054,7 @@ internal class MiniPlayerController(
 
     /** The row again, this frame: the squeeze first, then the small island placed by it. */
     private fun nudgedSmall() {
-        updateDiscs()
+        shortcutDiscs.updateDiscs()
         if (player?.visibility == View.VISIBLE) followShortcuts()
     }
 
@@ -1079,7 +1079,7 @@ internal class MiniPlayerController(
      * while the island it held shrinks under it into the small island's place. Both are frames
      * changing size, never a scale, so the glass stays at its own pixels.
      */
-    private class Swap(
+    class Swap(
         val pillFrom: CoverMorphMotion.Box,
         val pillTo: CoverMorphMotion.Box,
         /**
@@ -1139,7 +1139,7 @@ internal class MiniPlayerController(
             (!ghost || (ghostBox.atRest() && ghostContent.atRest())) && (!disc || ghostDisc.atRest())
     }
 
-    private var swap: Swap? = null
+    var swap: Swap? = null
 
     private val swapFrame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC swap"); try {
@@ -1224,7 +1224,7 @@ internal class MiniPlayerController(
         position()
         endRow()
         val rest = view.restBoxOnScreen() ?: return
-        val d = discDiameter().toFloat()
+        val d = shortcutDiscs.discDiameter().toFloat()
         val fromSmall = oldSmall != null && selectedIsland == oldSmall
         // The stand-in shrinking into the small place is the one growing into the pill now:
         // it grows from where it has got to.
@@ -1401,7 +1401,7 @@ internal class MiniPlayerController(
         applyGhostDisc(s)
         if (s.smallMode == SMALL_KEPT) return
         val small = smallIsland?.takeIf { it.visibility == View.VISIBLE && smallKey != null } ?: return
-        val d = discDiameter().toFloat()
+        val d = shortcutDiscs.discDiameter().toFloat()
         val targetH = smallRestHeight().toFloat()
         val rearAlpha = if (stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
         val targetW = smallRestWidth().toFloat()
@@ -1530,7 +1530,7 @@ internal class MiniPlayerController(
 
     /** Where an emerging small island starts: its centre under the pill's end. */
     private fun emergeDx(): Float {
-        val d = discDiameter().toFloat()
+        val d = shortcutDiscs.discDiameter().toFloat()
         return -(d * 0.8f + dp(MiniPlayerGeometry.DISC_GAP_DP))
     }
 
@@ -1623,10 +1623,10 @@ internal class MiniPlayerController(
     }
 
     private fun startGhostDisc(key: String): Boolean {
-        val d = discDiameter()
+        val d = shortcutDiscs.discDiameter()
         val width = smallRestWidth()
-        val frame = maxOf(discFrame(d), width + dp(16f))
-        val frameHeight = discFrame(d)
+        val frame = maxOf(shortcutDiscs.discFrame(d), width + dp(16f))
+        val frameHeight = shortcutDiscs.discFrame(d)
         val disc = ghostDisc ?: ShortcutDisc(context).also {
             ghostDisc = it
             host.addView(it, ghostIndex(), ViewGroup.LayoutParams(frame, frameHeight))
@@ -1689,7 +1689,7 @@ internal class MiniPlayerController(
         val small = smallIsland ?: return
         val xy = IntArray(2).also(host::getLocationOnScreen)
         val reach = kotlin.math.abs(rest.cx() - xy[0] - smallRest[0]) + rest.w / 2f
-        val wide = maxOf(discFrame(discDiameter()), (reach * 2f + dp(16f)).roundToInt())
+        val wide = maxOf(shortcutDiscs.discFrame(shortcutDiscs.discDiameter()), (reach * 2f + dp(16f)).roundToInt())
         resizeSmallIsland(small, wide, small.layoutParams.height)
         smallWide = true
     }
@@ -1700,7 +1700,7 @@ internal class MiniPlayerController(
      * island was placed by one size and drawn at the other - a jump sideways as it grew for a
      * flight or went back to its circle. From TakeKazeX's PR #15.
      */
-    private fun resizeSmallIsland(small: ShortcutDisc, width: Int, height: Int) {
+    fun resizeSmallIsland(small: ShortcutDisc, width: Int, height: Int) {
         if (small.layoutParams.width != width || small.layoutParams.height != height) {
             small.layoutParams = small.layoutParams.apply { this.width = width; this.height = height }
         }
@@ -1718,9 +1718,9 @@ internal class MiniPlayerController(
 
     private fun restoreSmallIslandShape() {
         val small = smallIsland ?: return
-        val d = discDiameter()
-        val frame = maxOf(discFrame(d), smallRestWidth() + dp(16f))
-        val frameHeight = discFrame(d)
+        val d = shortcutDiscs.discDiameter()
+        val frame = maxOf(shortcutDiscs.discFrame(d), smallRestWidth() + dp(16f))
+        val frameHeight = shortcutDiscs.discFrame(d)
         if (smallWide || small.layoutParams.width != frame || small.layoutParams.height != frameHeight)
             resizeSmallIsland(small, frame, frameHeight)
         smallWide = false
@@ -2132,7 +2132,7 @@ internal class MiniPlayerController(
      * narrow it, while the rows went into their islands on the stack's own animation - one
      * motion after another, where each was to go home at once (2026-09-25).
      */
-    private class Group(val musicSmall: Boolean, val down: Boolean) {
+    class Group(val musicSmall: Boolean, val down: Boolean) {
         /** The view drawing the small island's place through the morph: the music's, or [other]'s. */
         var smallView: MiniPlayerView? = null
         /** The notification in the row's other place, when there is one. */
@@ -2168,7 +2168,7 @@ internal class MiniPlayerController(
         val folded = java.util.WeakHashMap<View, Boolean>()
     }
 
-    private var group: Group? = null
+    var group: Group? = null
 
     /**
      * A finger is pulling the music up and has not reached the threshold yet: the stack is
@@ -2190,7 +2190,7 @@ internal class MiniPlayerController(
     private var musicComingDown = false
 
     /** The morph drawing the pill: the media card's, or in a group whichever has the pill. */
-    private fun pillMorph(): MiniCardMorph? {
+    fun pillMorph(): MiniCardMorph? {
         val g = group ?: return morph?.takeIf { flight == null }
         return if (g.musicSmall) g.follower?.takeIf { !g.otherSmall } else morph
     }
@@ -3005,8 +3005,8 @@ internal class MiniPlayerController(
     // ---- the small island coming and going
 
     /** The small island's presence, 0 gone to 1 there, sprung the same way. */
-    private val smallGrow = Jelly(SWAP_RESPONSE, SWAP_DAMPING)
-    private var smallGrowing = false
+    val smallGrow = Jelly(SWAP_RESPONSE, SWAP_DAMPING)
+    var smallGrowing = false
     private var smallGrowLast = 0L
 
     private val smallGrowFrame = object : Choreographer.FrameCallback {
@@ -3129,7 +3129,7 @@ internal class MiniPlayerController(
         view.scaleX = 1f - p
         view.scaleY = 1f - p * 0.25f
         val small = smallIsland?.takeIf { it.visibility == View.VISIBLE } ?: return
-        val d = discDiameter().toFloat()
+        val d = shortcutDiscs.discDiameter().toFloat()
         val w = view.width.toFloat()
         if (towardSmall) {
             view.setNudge((smallRest[0] - (view.left + view.translationX + w / 2f)) * p, 0f)
@@ -4096,7 +4096,7 @@ internal class MiniPlayerController(
      * it the other way; a tap on the place turned the two round, a tap anywhere else finished the
      * pair where it was headed at once and started the next - a jump on every such tap.
      */
-    private class Mover(val key: String, val view: MiniPlayerView, val native: View) {
+    class Mover(val key: String, val view: MiniPlayerView, val native: View) {
         var morph: MiniCardMorph? = null
         /** Its place in the row, from the seats: where it lands once it is headed home. */
         var place = LAND_PILL
@@ -4127,7 +4127,7 @@ internal class MiniPlayerController(
         val headedHome: Boolean get() = morph?.toNative == false
     }
 
-    private class Switch {
+    class Switch {
         val movers = LinkedHashMap<String, Mover>()
         /** The island out as its card, or on its way there: the last one tapped. */
         var expanded: String? = null
@@ -4143,7 +4143,7 @@ internal class MiniPlayerController(
         fun homeKeys(): List<String> = movers.values.filter { it.headedHome }.map { it.key }
     }
 
-    private var exchange: Switch? = null
+    var exchange: Switch? = null
 
     /** The island a place holds is still on its way to it: the place is out of sight till it lands. */
     private fun switchHolds(key: String?): Boolean {
@@ -6332,8 +6332,8 @@ internal class MiniPlayerController(
     private fun landOn(box: CoverMorphMotion.Box) {
         val small = smallIsland ?: return
         val pad = dp(16f)
-        val w = maxOf(discFrame(discDiameter()), (box.w + pad).roundToInt())
-        val h = maxOf(discFrame(discDiameter()), (box.h + pad).roundToInt())
+        val w = maxOf(shortcutDiscs.discFrame(shortcutDiscs.discDiameter()), (box.w + pad).roundToInt())
+        val h = maxOf(shortcutDiscs.discFrame(shortcutDiscs.discDiameter()), (box.h + pad).roundToInt())
         // Only ever widened while landing: the shape shrinks inside the room it was given.
         if (landingBox == null || small.layoutParams.width < w || small.layoutParams.height < h) {
             resizeSmallIsland(small, maxOf(small.layoutParams.width, w),
@@ -6976,385 +6976,11 @@ internal class MiniPlayerController(
         }
     }
 
-    // ------------------------------------------------------------ the shortcut discs
-
-    private val discs = arrayOfNulls<ShortcutDisc>(2)
-
-    /** The lock screen is locked with the mini player on: the discs go behind the buttons. updateVisibility. */
-    private var discsWanted = false
-
-    /**
-     * There is a row - an island, or one out as its row - and so something for the full-screen
-     * AOD to keep the buttons for (holdButtonsThroughDoze). With none, the doze takes the buttons
-     * and their discs out as it always has.
-     */
-    private var rowWanted = false
-
-    private val squeeze = MiniSqueeze(dp(MiniPlayerGeometry.DISC_GAP_DP).toFloat()) { onSqueezeFrame() }
-    private val buttonSqueeze = arrayOf(Matrix(), Matrix())
-    private val buttonSqueezeSet = BooleanArray(2)
-    /** What each button's matrix was last written as: a write invalidates the button, so only a change is written. */
-    private val buttonSqueezeLast = arrayOf(FloatArray(9), FloatArray(9))
-    private val buttonSqueezeValues = FloatArray(9)
-    private val discPoint = FloatArray(2)
-    private val discUnit = FloatArray(4)
-    private val discRest = FloatArray(2)
-
-    private fun button(side: Int) = if (side == 0) left else right
-
-    /** A disc is a circle as tall as the pill. */
-    private fun discDiameter(): Int = dp(MiniPlayerConfig.visibleHeightDp(config.toString()))
-
-    /** The disc's frame: room for its widest swelling and squeeze around the circle. */
-    private fun discFrame(d: Int): Int = (d * DISC_FRAME).toInt()
-
-    private fun onSqueezeFrame() {
-        if (player?.visibility == View.VISIBLE) followShortcuts()
-        updateDiscs()
-    }
-
-    /** A finger down on, or off, the pill ([side] PRESS_PILL) or a disc. */
-    fun press(side: Int, down: Boolean) {
-        when (side) {
-            MiniPlayerRuntime.PRESS_PILL -> squeeze.pressPill(down)
-            MiniPlayerRuntime.PRESS_SMALL -> squeeze.pressSmall(down)
-            else -> squeeze.pressDisc(side, down)
-        }
-    }
-
-    /**
-     * Which disc's button a point is on, if its disc is showing: the icon, or the
-     * shortcut_view_*_layout around it, which is what takes the tap.
-     */
-    fun discAt(x: Float, y: Float): Int? = (0..1).firstOrNull {
-        if (discs[it]?.visibility != View.VISIBLE) return@firstOrNull false
-        val icon = button(it)
-        val frame = (icon.parent as? View)?.takeIf { p ->
-            runCatching { p.resources.getResourceEntryName(p.id) }.getOrNull()?.endsWith("_layout") == true
-        }
-        onButton(icon, x, y) || frame != null && onButton(frame, x, y)
-    }
-
-    /**
-     * Each disc on its button as the button is drawn - its centre, zoom and fade through
-     * everything the OEM animates it with (the swipe away, the doze) - then flattened or swollen
-     * by the squeeze. The button takes the same squeeze on top of its own motion through its
-     * animation matrix, which the OEM does not write and drawnCentre does not read.
-     */
-    private fun updateDiscs() {
-        // First, so that the discs below see the buttons as they will be drawn.
-        holdButtonsThroughDoze()
-        applyInk()
-        val d = discDiameter()
-        val frame = discFrame(d)
-        followHost.reset()
-        host.transformMatrixToGlobal(followHost)
-        val parent = discParent()
-        discToScreen.reset()
-        parent.transformMatrixToGlobal(discToScreen)
-        val placed = followHost.invert(hostInverse) && discToScreen.invert(discInverse)
-        for (side in 0..1) {
-            val button = button(side)
-            val shown = placed && discsWanted && button.isShown && button.width > 0 && button.height > 0
-            var disc = discs[side]
-            if (!shown) {
-                if (disc != null && disc.visibility != View.GONE) disc.visibility = View.GONE
-                clearButtonSqueeze(side)
-                continue
-            }
-            if (disc == null) {
-                disc = ShortcutDisc(context)
-                discs[side] = disc
-            }
-            if (!discInPlace(disc, parent)) {
-                (disc.parent as? ViewGroup)?.removeView(disc)
-                parent.addView(disc, layerSlot(parent), ViewGroup.LayoutParams(frame, frame))
-                Gen.ownView(parent, disc)
-            }
-            if (disc.layoutParams.width != frame || disc.layoutParams.height != frame)
-                resizeSmallIsland(disc, frame, frame)
-            disc.dress(discMaterialGeneration()) {
-                MiniPlayerRuntime.material(it, loader, notificationMaterial())
-            }
-            if (disc.visibility != View.VISIBLE) disc.visibility = View.VISIBLE
-        }
-        // The squeeze from this frame's row, then the discs from the squeeze - in that order, or
-        // the discs are a frame behind the pill that is pushing them.
-        squeezeScene(d.toFloat())
-        for (side in 0..1) {
-            val button = button(side)
-            val disc = discs[side]?.takeIf { it.visibility == View.VISIBLE } ?: continue
-            // In the disc's own parent's pixels: whatever that parent is doing - the doze's zoom
-            // on keyguard_root_view - the disc is already drawn with.
-            if (!drawnCentre(button, discPoint, discInverse)) continue
-            val zoom = drawnZoom(button, discInverse)
-            val outward = if (side == 0) -1f else 1f
-            val cx = discPoint[0] + outward * squeeze.discShift(side) * d * zoom
-            // The doze's "gone" is judged on the fade on screen; what is written is the part
-            // below the parent, which applies the rest itself.
-            val fade = if (unheldInDoze(chainFade(button)) == 0f) 0f
-                else chainFade(button, disc.parent as? View ?: host)
-            // Placed and zoomed with the button; its squeeze is its shape, at its own pixels.
-            var tx = cx - frame / 2f - disc.left
-            var ty = discPoint[1] - frame / 2f - disc.top
-            // At rest on whole pixels, as the pill (MiniPlayerView.rest): the glass is drawn on
-            // the pixel grid and the outline clip is not, so a disc left on a half pixel had its
-            // rim cut into steps on one side - a button centre at x.5 on a 1280px screen
-            // (warsaw, 2026-09-30), while the pill beside it on whole pixels was smooth.
-            if (kotlin.math.abs(zoom - 1f) < 0.0005f && squeeze.discShift(side) == 0f) {
-                tx = kotlin.math.round(tx)
-                ty = kotlin.math.round(ty)
-                if (disc.translationX != tx) disc.translationX = tx
-                if (disc.translationY != ty) disc.translationY = ty
-            }
-            setIfChanged(disc, tx, ty, zoom, zoom, fade)
-            disc.setShape((d * squeeze.discScaleX(side)).roundToInt().coerceIn(1, frame),
-                (d * squeeze.discScaleY(side)).roundToInt().coerceIn(1, frame))
-            squeezeButton(side, button, d)
-        }
-    }
-
-    // ---- the torch and the camera through the doze
-
-    /**
-     * The doze does not put the torch and the camera away: it leaves them shown and fades
-     * their chain out to a hundredth (`op mini` discs trace, 2026-09-25). The row keeps them:
-     * every frame of the doze, before it is drawn, each view from a button's image up to the
-     * keyguard's root is put back to full alpha over whatever the doze's animation wrote there
-     * this frame - so the buttons are the lock screen's own, drawn as ever, and their discs
-     * simply stay on them. The first version drew the glyphs itself onto the discs instead:
-     * too big, the torch's half clear, and a flash at every hand-over.
-     *
-     * After the wake it lets go only once the lock screen's own alpha has been back at full
-     * for a moment: it can show a button whole for a frame and then start fading it in from
-     * nothing, and let go on that frame the buttons would drop with it.
-     *
-     * None of that runs in the full-screen doze any more (2026-10-09): 息屏时隐藏锁屏快捷功能 is
-     * always on, so the shortcuts are left to the doze's own fade rather than held at full - the
-     * torch and the camera dim to a hundredth with the rest of the chain, and the discs follow
-     * them down (unheldInDoze). The row this holds for is the one the doze leaves alone.
-     */
-    private var holdButtons = false
-    private var holdSince = 0L
-    private var backSince = 0L
-
-    private fun holdButtonsThroughDoze() {
-        if (config.optBoolean(MiniPlayerConfig.HIDE_AOD_SHORTCUTS) &&
-            MiniPlayerScene.fullScreenAodActive) return
-        val root = followRoot?.get()
-        val now = android.os.SystemClock.uptimeMillis()
-        if (MiniPlayerScene.fullScreenAodActive && rowWanted && root != null) {
-            holdButtons = true
-            holdSince = now
-        }
-        if (!holdButtons) return
-        // Any other AOD is the OEM's: its fade is let through (unheldInDoze).
-        if (MiniPlayerScene.customAodActive) {
-            holdButtons = false
-            backSince = 0L
-            return
-        }
-        // The pad up with the hold still on, put up by something other than a swipe (letGoOnDrag).
-        if (!MiniPlayerScene.aodActive && Main.bouncerShown()) {
-            letGoOfButtons("bouncer")
-            return
-        }
-        // The lower of the two chains as the doze left it this frame, before it is put back.
-        var natural = 1f
-        for (side in 0..1) {
-            var v: View? = findImage(button(side)) ?: button(side)
-            while (v != null && v !== root && v !== host) {
-                natural = min(natural, v.alpha * v.transitionAlpha)
-                if (v.alpha < 1f) v.alpha = 1f
-                if (v.transitionAlpha < 1f) v.transitionAlpha = 1f
-                v = v.parent as? View
-            }
-        }
-        if (MiniPlayerScene.aodActive) {
-            backSince = 0L
-            return
-        }
-        if (natural < 0.99f) backSince = 0L
-        else if (backSince == 0L) backSince = now
-        if (backSince != 0L && now - backSince > HOLD_SETTLE_MS || now - holdSince > HOLD_MAX_MS ||
-            !discsWanted) {
-            holdButtons = false
-            backSince = 0L
-        }
-    }
-
-    /**
-     * The swipe up within the wake's hold: it let go only once the buttons had been back at full
-     * for a while, or two seconds on - and while the swipe faded them it never was, so every
-     * frame it wrote them back to 1 and the pill stayed on the held branch, deaf to the row's
-     * fade. The torch, the camera and the pill stood over the PIN pad on the first swipe after
-     * the wake, and were gone on the next (reported 2026-10-07). A drag past the slop, not the
-     * DOWN: a double tap to wake lands in the wake's fade-in, and letting go there drops the
-     * buttons to it. True once past the slop, whether or not there was a hold.
-     */
-    fun letGoOnDrag(dx: Float, dy: Float): Boolean {
-        if (kotlin.math.hypot(dx, dy) <= ViewConfiguration.get(context).scaledTouchSlop) return false
-        letGoOfButtons("swipe")
-        return true
-    }
-
-    /**
-     * The lock screen is leaving: the buttons are the OEM's again, and the pill follows the row's
-     * fade from this frame rather than waiting for it to come back to full - it will not, until
-     * the pad is put away.
-     */
-    private fun letGoOfButtons(why: String) {
-        if (MiniPlayerScene.aodActive || !holdButtons && !rowHeldOff) return
-        holdButtons = false
-        backSince = 0L
-        rowHeldOff = false
-        MiniPlayerRuntime.noteTouch("buttons let go: $why")
-    }
-
-    /**
-     * The row at rest, in host pixels, for the squeeze: the pill's rest frame with its nudge
-     * (or a morph's container as drawn) and each showing disc on its button's laid-out centre.
-     */
-    private fun squeezeScene(d: Float) {
-        fun disc(side: Int): CoverMorphMotion.Box? {
-            if (discs[side]?.visibility != View.VISIBLE) return null
-            restCentre(button(side), discRest)
-            return CoverMorphMotion.Box(discRest[0] - d / 2f, discRest[1] - d / 2f, d, d)
-        }
-        val hostXY = IntArray(2).also(host::getLocationOnScreen)
-        // A flight's morph is the flight's, and the small island's view in a group is not the
-        // pill's: the row pressing on the discs is still the pill's.
-        val running = pillMorph()
-        val view = player
-        val pill: CoverMorphMotion.Box? = when {
-            running != null -> running.containerBox()?.let {
-                CoverMorphMotion.Box(it.x - hostXY[0], it.y - hostXY[1], it.w, it.h)
-            }
-            view != null && view.visibility == View.VISIBLE -> view.restBoxOnScreen()?.let {
-                CoverMorphMotion.Box(it.x - hostXY[0] + view.nudgeX, it.y - hostXY[1] + view.nudgeY,
-                    it.w, it.h)
-            }
-            else -> null
-        }
-        // The small island at rest where the finger has it; the row is worked out from the two.
-        // Only one that has settled counts: one still appearing or leaving sits in the place the
-        // pill is taking over from it, and by design the two overlap there - read as a press, the
-        // pill's give snapped to its 6% cap in a single frame every time a pull reached the row's
-        // end (measured 2026-09-29, `op mini` islandDrag: sq 0.999 -> 0.934 in 6ms, five pulls
-        // running). The list's own idiom for a small island really there (showing).
-        // The pill only meets it while it gives (setScene); a morph in the pill's place does not.
-        val small = smallIsland?.takeIf { !stackedStyle() && it.visibility == View.VISIBLE && swap == null &&
-            landingBox == null && (!smallGrowing || smallGrow.atRest()) }
-            ?.let { CoverMorphMotion.Box(smallRest[0] - d / 2f + smallNudgeX(),
-                smallRest[1] - d / 2f + smallNudgeY(), d, d) }
-        // Not the pill's, but no less in the way: a notification's island on its way up out of
-        // the row or down into it - a flight, the other half of a group, an exchange's movers -
-        // swept through the discs, the pill and the small island without touching them (reported
-        // 2026-09-30). It pushes each away from the place it leaves or comes home to, and not
-        // the one whose place that is: that one is its own.
-        squeezePushers.clear()
-        fun mover(m: MiniCardMorph?) {
-            if (m == null || m === running) return
-            val it = m.containerBox() ?: return
-            val box = CoverMorphMotion.Box(it.x - hostXY[0], it.y - hostXY[1], it.w, it.h)
-            val endX = m.miniEndBox()?.cx()?.minus(hostXY[0]) ?: box.cx()
-            fun away(b: CoverMorphMotion.Box?) = b != null && (endX < b.x || endX > b.x + b.w)
-            squeezePushers += MiniSqueeze.Pusher(box, endX, away(pill), away(small))
-        }
-        mover(morph)
-        mover(group?.follower)
-        exchange?.movers?.values?.forEach { if (it.morph !== morph) mover(it.morph) }
-        squeeze.setScene(pill, running == null, disc(0), disc(1), small, squeezePushers)
-    }
-
-    private val squeezePushers = ArrayList<MiniSqueeze.Pusher>(4)
-
-    /**
-     * The button rides on its disc in its own slot: moved with it, and swollen or shrunk about
-     * its drawn centre there. Both count - a disc only pushed aside, not flattened, left its
-     * icon behind when only the scale was checked.
-     */
-    private fun squeezeButton(side: Int, button: View, d: Int) {
-        val k = squeeze.iconScale(side) *
-            (configuredHeightDp / MiniPlayerConfig.DEFAULT_HEIGHT_DP)
-        val outward = if (side == 0) -1f else 1f
-        // The disc's shift in the button's own pixels: the button's own scale, not its row's.
-        val shift = outward * squeeze.discShift(side) * d * button.scaleX
-        if (kotlin.math.abs(k - 1f) < 0.0005f && kotlin.math.abs(shift) < 0.25f) {
-            clearButtonSqueeze(side)
-            return
-        }
-        val m = buttonSqueeze[side]
-        m.setScale(k, k, button.translationX + button.width / 2f,
-            button.translationY + button.height / 2f)
-        m.postTranslate(shift, 0f)
-        // A disc held flattened at rest is the same matrix every frame; written each time, it
-        // redrew the lock screen every vsync with nothing moving.
-        m.getValues(buttonSqueezeValues)
-        if (buttonSqueezeSet[side] && buttonSqueezeValues.contentEquals(buttonSqueezeLast[side])) return
-        System.arraycopy(buttonSqueezeValues, 0, buttonSqueezeLast[side], 0, 9)
-        button.setAnimationMatrix(m)
-        buttonSqueezeSet[side] = true
-    }
-
-    private fun clearButtonSqueeze(side: Int) {
-        if (!buttonSqueezeSet[side]) return
-        buttonSqueezeSet[side] = false
-        button(side).setAnimationMatrix(null)
-    }
-
-    /** How much a view is scaled on screen, every ancestor's transform included. */
-    private fun drawnZoom(v: View, inverse: Matrix = hostInverse): Float {
-        scratch.reset()
-        v.transformMatrixToGlobal(scratch)
-        scratch.postConcat(inverse)
-        discUnit[0] = 0f
-        discUnit[1] = 0f
-        discUnit[2] = 1f
-        discUnit[3] = 0f
-        scratch.mapPoints(discUnit)
-        return kotlin.math.hypot(discUnit[2] - discUnit[0], discUnit[3] - discUnit[1])
-    }
-
-    /** A view's fade on screen: its own and every ancestor's, up to the host. */
-    /**
-     * A doze that does not hold the buttons (holdButtonsThroughDoze) - any AOD but the
-     * full-screen one, or that one with no row - takes the pill, the small island and the discs
-     * out on the lock screen's own fade, with the buttons. That fade ends near a hundredth, not
-     * at nothing; the rest is taken to nothing, so no glass is left on the AOD. Their islands
-     * stay as they are - hiding the pill instead let every island's notification back into the
-     * stack for the doze and out again at the wake.
-     */
-    private fun unheldInDoze(fade: Float): Float =
-        if (MiniPlayerScene.aodActive && !holdButtons && fade < DOZE_GONE) 0f else fade
-
-    private fun chainFade(v: View, upTo: View = host): Float {
-        var fade = 1f
-        var cur: View? = v
-        while (cur != null && cur !== upTo && cur !== host) {
-            fade *= cur.alpha * cur.transitionAlpha
-            cur = cur.parent as? View
-        }
-        return fade
-    }
-
-    /** Only real changes: each write invalidates, and a disc at rest must not redraw. */
-    private fun setIfChanged(v: View, tx: Float, ty: Float, sx: Float, sy: Float, alpha: Float) {
-        if (kotlin.math.abs(v.translationX - tx) > 0.25f) v.translationX = tx
-        if (kotlin.math.abs(v.translationY - ty) > 0.25f) v.translationY = ty
-        if (kotlin.math.abs(v.scaleX - sx) > 0.0005f) v.scaleX = sx
-        if (kotlin.math.abs(v.scaleY - sy) > 0.0005f) v.scaleY = sy
-        if (kotlin.math.abs(v.alpha - alpha) > 0.002f) v.alpha = alpha
-    }
-
-    private fun removeDiscs() {
-        squeeze.reset()
-        for (side in 0..1) {
-            clearButtonSqueeze(side)
-            discs[side]?.let { d -> runCatching { (d.parent as? ViewGroup)?.removeView(d) } }
-            discs[side] = null
-        }
-    }
+    internal val shortcutDiscs = ShortcutDiscs(this)
+    fun press(side: Int, down: Boolean) = shortcutDiscs.press(side, down)
+    fun discAt(x: Float, y: Float): Int? = shortcutDiscs.discAt(x, y)
+    fun letGoOnDrag(dx: Float, dy: Float): Boolean = shortcutDiscs.letGoOnDrag(dx, dy)
+    fun shortcutGeometry(): FloatArray? = shortcutDiscs.shortcutGeometry()
 
     /** keyguard_bottom_area above the torch, and keyguard_root_view above that. */
     private fun findRow(): View? {
@@ -7424,7 +7050,7 @@ internal class MiniPlayerController(
         holdLeadThroughFold(null)
         endLeadTail()
         restoreHeader()
-        removeDiscs()
+        shortcutDiscs.removeDiscs()
         LockIslands.removeListener(islandListener)
         LockIslands.setActive(false)
         LockIslands.stopFolding()
@@ -7438,72 +7064,6 @@ internal class MiniPlayerController(
         handler.removeCallbacksAndMessages(null)
     }
 
-    fun shortcutGeometry(): FloatArray? {
-        if (host.width <= 0 || left.width <= 0 || right.width <= 0) return null
-        val l = restCentre(left)
-        val r = restCentre(right)
-        val li = iconSize(left)
-        val ri = iconSize(right)
-        return floatArrayOf(host.width.toFloat(), l[0], l[1], li[0], li[1], r[0], r[1], ri[0], ri[1])
-    }
-
-    /**
-     * The glyph inside a shortcut button, as drawn: its image fitted into the padded box, then
-     * only the part that has ink. The drawable's own box carries a wide transparent margin -
-     * taken whole, the preview drew the icons several times too big. 0 if there is none.
-     */
-    private fun iconSize(v: View): FloatArray {
-        val image = findImage(v) ?: return floatArrayOf(0f, 0f)
-        val w = (image.width - image.paddingLeft - image.paddingRight).toFloat()
-        val h = (image.height - image.paddingTop - image.paddingBottom).toFloat()
-        val d = image.drawable
-        val iw = d.intrinsicWidth.toFloat()
-        val ih = d.intrinsicHeight.toFloat()
-        if (w <= 0f || h <= 0f || iw <= 0f || ih <= 0f) return floatArrayOf(0f, 0f)
-        val k = min(w / iw, h / ih)
-        return runCatching { inkSize(d, (iw * k).toInt(), (ih * k).toInt()) }.getOrNull()
-            ?: floatArrayOf(0f, 0f)
-    }
-
-    /** The opaque extent of a drawable drawn at this size, in pixels. */
-    private fun inkSize(d: android.graphics.drawable.Drawable, w: Int, h: Int): FloatArray? {
-        if (w <= 0 || h <= 0) return null
-        val copy = d.constantState?.newDrawable(context.resources)?.mutate() ?: return null
-        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        try {
-            copy.setBounds(0, 0, w, h)
-            copy.draw(android.graphics.Canvas(bitmap))
-            val row = IntArray(w)
-            var minX = w
-            var maxX = -1
-            var minY = h
-            var maxY = -1
-            for (y in 0 until h) {
-                bitmap.getPixels(row, 0, w, 0, y, w, 1)
-                for (x in 0 until w) {
-                    if ((row[x] ushr 24) < INK_ALPHA) continue
-                    if (x < minX) minX = x
-                    if (x > maxX) maxX = x
-                    if (y < minY) minY = y
-                    if (y > maxY) maxY = y
-                }
-            }
-            if (maxX < minX || maxY < minY) return null
-            return floatArrayOf((maxX - minX + 1).toFloat(), (maxY - minY + 1).toFloat())
-        } finally {
-            bitmap.recycle()
-        }
-    }
-
-    /** A pixel this opaque counts as the glyph's ink. */
-    private val INK_ALPHA = 40
-
-    private fun findImage(v: View): ImageView? {
-        if (v is ImageView && v.drawable != null && v.visibility == View.VISIBLE) return v
-        if (v !is ViewGroup) return null
-        for (i in 0 until v.childCount) findImage(v.getChildAt(i))?.let { return it }
-        return null
-    }
 
     // ---- the landing, frame by frame, for `op mini`
 
@@ -7996,7 +7556,7 @@ internal class MiniPlayerController(
     private fun lockScreenLayerSlot(): Int = layerSlot(host)
 
     /** Where in [parent] the child holding the buttons is: the discs go right before it. */
-    private fun layerSlot(parent: ViewGroup): Int {
+    fun layerSlot(parent: ViewGroup): Int {
         var v: View = left
         while (true) {
             val up = v.parent as? View ?: return parent.childCount
@@ -8020,7 +7580,7 @@ internal class MiniPlayerController(
      * before the buttons' own branch in keyguard_root_view it is over the subject and under the
      * icon, and otherwise stacked exactly as the buttons are, the shade's blur included.
      */
-    private fun discParent(): ViewGroup {
+    fun discParent(): ViewGroup {
         val root = followRoot?.get() as? ViewGroup ?: return host
         var v: View? = left
         while (v != null && v !== host) {
@@ -8031,7 +7591,7 @@ internal class MiniPlayerController(
     }
 
     /** Right before the buttons' branch in [parent], with nothing but the other disc between. */
-    private fun discInPlace(disc: View, parent: ViewGroup): Boolean {
+    fun discInPlace(disc: View, parent: ViewGroup): Boolean {
         if (disc.parent !== parent) return false
         val slot = layerSlot(parent)
         val at = parent.indexOfChild(disc)
@@ -8047,7 +7607,7 @@ internal class MiniPlayerController(
         return if (inner) (xy[0] + button.width).toFloat() else xy[0].toFloat()
     }
 
-    private fun onButton(button: View, x: Float, y: Float): Boolean {
+    fun onButton(button: View, x: Float, y: Float): Boolean {
         if (!button.isShown || button.width <= 0) return false
         val xy = IntArray(2).also(button::getLocationOnScreen)
         return x >= xy[0] && x < xy[0] + button.width && y >= xy[1] && y < xy[1] + button.height
@@ -8087,7 +7647,7 @@ internal class MiniPlayerController(
             configStale = false
             val wasStacked = stackedStyle()
             config = JSONObject(MiniPlayerConfig.fromPreferences(prefs))
-            if (wasStacked != stackedStyle()) squeeze.reset()
+            if (wasStacked != stackedStyle()) shortcutDiscs.squeeze.reset()
             configuredHeightDp = MiniPlayerConfig.visibleHeightDp(config.toString())
         }
         val config = this.config
@@ -8316,7 +7876,7 @@ internal class MiniPlayerController(
             "buttonChanges=$buttonInkChanges layerWrites=$buttonLayerWrites " +
             "buttons=${left.javaClass.simpleName}/${right.javaClass.simpleName}"
 
-    private fun applyInk() {
+    fun applyInk() {
         val color = ink()
         if (color != lastInk) {
             lastInk = color
@@ -8332,12 +7892,12 @@ internal class MiniPlayerController(
         // Tinted as the card's own buttons are, only while the discs are under them, and given
         // back as they were after.
         val want = ink(title = false).takeIf {
-            discsWanted && discs.any { d -> d?.visibility == View.VISIBLE } && it != android.graphics.Color.WHITE
+            shortcutDiscs.discsWanted && shortcutDiscs.discs.any { d -> d?.visibility == View.VISIBLE } && it != android.graphics.Color.WHITE
         }
         if (want == buttonInk) return
         buttonInk = want
         buttonInkChanges++
-        for (side in 0..1) tintButton(button(side), want)
+        for (side in 0..1) tintButton(shortcutDiscs.button(side), want)
     }
 
     private fun tintButton(v: View, color: Int?) {
@@ -9265,8 +8825,8 @@ internal class MiniPlayerController(
         // The discs are the lock screen's, not the row's: with no island at all - no music, no
         // notification, or the last one pulled out as its row - the torch and camera kept losing
         // their glass (2026-09-25, and #10/#17 after it). They stay wherever the row could be.
-        discsWanted = enabled && !MiniPlayerScene.keyguardGoingAway && Main.keyguardLocked()
-        rowWanted = keyguardOwned || discsWanted && LockIslands.releasedKeys().isNotEmpty()
+        shortcutDiscs.discsWanted = enabled && !MiniPlayerScene.keyguardGoingAway && Main.keyguardLocked()
+        shortcutDiscs.rowWanted = keyguardOwned || shortcutDiscs.discsWanted && LockIslands.releasedKeys().isNotEmpty()
         // The control centre stands in for the lock screen's scene block, not for the row being
         // presentable at all. Tapped into the cover, the music is still the pill's choice - the
         // scene only borrows the card - so pulling the centre down put the pill up beside the
@@ -9727,8 +9287,8 @@ internal class MiniPlayerController(
                 smallRest[1] = MiniPlayerGeometry.stackBackCenterYPx(centerY, height,
                     dp(MiniPlayerGeometry.STACK_EDGE_DP))
                 if (!smallWide) smallIsland?.let {
-                    resizeSmallIsland(it, maxOf(discFrame(height), smallRestWidth() + dp(16f)),
-                        discFrame(height))
+                    resizeSmallIsland(it, maxOf(shortcutDiscs.discFrame(height), smallRestWidth() + dp(16f)),
+                        shortcutDiscs.discFrame(height))
                 }
             } else {
                 smallRest[0] = groupLeft + pillWidth + gap + height / 2f
@@ -9789,7 +9349,7 @@ internal class MiniPlayerController(
         }
     }
 
-    private fun dp(value: Float) = (value * context.resources.displayMetrics.density + .5f).toInt()
+    fun dp(value: Float) = (value * context.resources.displayMetrics.density + .5f).toInt()
 
 }
 
