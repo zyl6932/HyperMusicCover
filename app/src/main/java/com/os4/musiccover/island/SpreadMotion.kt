@@ -189,8 +189,8 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
      * the subset as it was).
      */
     private fun busyForStackSpread(): Boolean = spread != null ||
-        c.morph != null || c.exchange != null || c.noteMorphKey != null || c.group != null ||
-        c.flight != null
+        c.morph != null || c.exchange != null || c.noteMorphMotion.noteMorphKey != null || c.group != null ||
+        c.noteMorphMotion.flight != null
 
     /** Even a lone stacked card uses the list whose downward pull returns it to its island. */
     fun beginStackSpread(startY: Float): Boolean {
@@ -259,8 +259,8 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
      * Busy for the whole row out as the stack's list (a spread already out is asked first, on its
      * own): the motions that keep it from starting (M0, the subset as it was).
      */
-    private fun busyForSpread(): Boolean = c.morph != null || c.exchange != null || c.noteMorphKey != null || c.group != null ||
-        c.flight != null
+    private fun busyForSpread(): Boolean = c.morph != null || c.exchange != null || c.noteMorphMotion.noteMorphKey != null || c.group != null ||
+        c.noteMorphMotion.flight != null
 
     /**
      * The stack island tapped or pulled open: the whole row out. With another motion under way -
@@ -454,7 +454,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
                 SEAT_HIDDEN -> 0f
                 else -> 1f
             } else 1f
-            val m = MiniCardMorph(view, native, toCards, spreadListener, c.landingFor(item.key, native),
+            val m = MiniCardMorph(view, native, toCards, spreadListener, c.noteMorphMotion.landingFor(item.key, native),
                 restBox = if (small) { { c.smallBoxOnScreen() } } else null,
                 circle = small && !s.stacked,
                 holdMaterial = item.lead && !s.stacked)
@@ -951,8 +951,8 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
                 native?.let { c.hideRowUntilGone(it, item.key); it.transitionAlpha = 0f }
                 LockIslands.recapture(item.key)
                 c.markReturning(item.key)
-                c.releasedFromPill -= item.key
-                c.releasedFromSmall -= item.key
+                c.noteMorphMotion.releasedFromPill -= item.key
+                c.noteMorphMotion.releasedFromSmall -= item.key
                 continue
             }
             if (native == null) continue

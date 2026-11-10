@@ -14,10 +14,10 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
         if (c.swapMotion.swap != null) add("swap")
         if (c.morph != null) add("morph")
         if (c.group != null) add("group")
-        if (c.flight != null) add("flight")
+        if (c.noteMorphMotion.flight != null) add("flight")
         if (c.exchange != null) add("exchange")
-        c.noteMorphKey?.let { add("noteMorph=${it.takeLast(6)}") }
-        if (c.pillLandingBox != null) add("landing")
+        c.noteMorphMotion.noteMorphKey?.let { add("noteMorph=${it.takeLast(6)}") }
+        if (c.noteMorphMotion.pillLandingBox != null) add("landing")
         if (c.rowHeldOff) add("heldOff")
         if (c.followRowFade < 0.99f) add("fade=${"%.2f".format(c.followRowFade)}")
         if (MiniPlayerScene.aodActive) add("aod")
@@ -49,8 +49,8 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
         val sink = " nativeY=$nativeY nativeTy=${native?.translationY} nativeTarget=${native?.let(c::stackTargetY)} " +
             "pin=${c.pinned?.get() != null} frozen=${c.pinnedAt} pinY=${c.pinY.value} pinDy=${c.pinnedDy} " +
             "stackTy=${c.notificationStack()?.translationY} "
-        val islands = c.describeSession() + c.spreadMotion.describeSpread() + " rowAnim=${c.rowAnimating} swap=${c.swapMotion.swap != null} noteMorph=${c.noteMorphKey != null} " +
-            "flight=${c.flight != null} drag=${c.noteDragMotion.noteDrag != null} ${c.player?.touchState()} " +
+        val islands = c.describeSession() + c.spreadMotion.describeSpread() + " rowAnim=${c.rowAnimating} swap=${c.swapMotion.swap != null} noteMorph=${c.noteMorphMotion.noteMorphKey != null} " +
+            "flight=${c.noteMorphMotion.flight != null} drag=${c.noteDragMotion.noteDrag != null} ${c.player?.touchState()} " +
             "out=${c.expandedKey()?.takeLast(12)} xchg=${c.exchange?.let { x -> "out=${x.expanded?.takeLast(6)} pend=${x.pending?.takeLast(6)} " +
                 "seats=${x.seats?.big?.takeLast(6)}/${x.seats?.small?.takeLast(6)} " +
                 x.movers.values.joinToString(" ") { c.moverState(it) } }} " +

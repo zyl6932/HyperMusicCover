@@ -145,7 +145,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         c.clearSmallNudge()
         if (kind == SWAP_STACK) view.clearNudge()
         // A flight's morph is the flight's: the pill still switches under it.
-        if (view.visibility != View.VISIBLE || c.morph != null && c.flight == null) {
+        if (view.visibility != View.VISIBLE || c.morph != null && c.noteMorphMotion.flight == null) {
             if (keepGhost) endGhosts()
             return
         }
@@ -317,7 +317,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
             .coerceIn(-ROW_SQUASH_MAX, ROW_SQUASH_MAX)
         val h = grown.h * (1f - squash)
         val box = CoverMorphMotion.Box(grown.x, grown.y + (grown.h - h) / 2f, maxOf(grown.w, h), h)
-        if (c.pillLandingBox != null || s.holdPill) {
+        if (c.noteMorphMotion.pillLandingBox != null || s.holdPill) {
             // The pill is under a flight landing on it, or waiting for a card to: that has its frame.
         } else if (s.pillKept) {
             view.setMorphFrame(box, box.h / 2f, 1f)
@@ -434,7 +434,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
             // under it, the pill stood bare in its place with the morph still running - its
             // content cleared by the morph, its glass whole (2026-09-25, `op mini` scene trace).
             // One landing on it has its frame, and hands it back itself (endPillLanding).
-            if ((c.morph == null || c.flight != null) && c.pillLandingBox == null) it.endMorph()
+            if ((c.morph == null || c.noteMorphMotion.flight != null) && c.noteMorphMotion.pillLandingBox == null) it.endMorph()
             it.setContentAlpha(1f)
             it.setContentBlur(0f)
             if (s.kind == SWAP_STACK) it.alpha = 1f
@@ -447,9 +447,9 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         // A small island the switch left alone may be mid-grow on its own spring: not cut short.
         if (s.smallMode != SMALL_KEPT) c.restoreSmallIslandShape()
         c.schedulePosition()
-        c.pendingExpand?.let { key ->
-            c.pendingExpand = null
-            if (c.selectedIsland == key) c.expandNote(key)
+        c.noteMorphMotion.pendingExpand?.let { key ->
+            c.noteMorphMotion.pendingExpand = null
+            if (c.selectedIsland == key) c.noteMorphMotion.expandNote(key)
         }
     }
     // ---- the islands going into hiding
