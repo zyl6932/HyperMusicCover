@@ -6,12 +6,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * [HotReloadPolicy.SUPPORTED] is what the retirement lets go of; [HotReload.install] is what the
- * adoption puts back. A process on one list and not the other retires and then adopts nothing -
- * the process ends up inert until a restart, which is exactly the failure this scans for.
+ * [HotReloadPolicy.SUPPORTED] is what the retirement lets go of; the process names in
+ * [FeatureRegistry] are what the adoption puts back (HotReload.install looks the process up
+ * there). A process on one list and not the other retires and then adopts nothing - the process
+ * ends up inert until a restart, which is exactly the failure this scans for.
  *
- * The scan is coarse, like HookIdTest: string literals compared against `proc`, plus the one
- * branch that names its package through a constant.
+ * Read off the source, like HookIdTest: FeatureRegistry cannot be loaded in a JVM test (its
+ * features reference Main, which needs the Xposed API), so its process names are literals inside
+ * `processes(...)`, and this collects them.
  */
 class HotReloadProcessTest {
 
@@ -29,24 +31,33 @@ class HotReloadProcessTest {
         return literal.findAll(block).map { it.groupValues[1] }.filter { it.isNotEmpty() }.toSet()
     }
 
-    private fun installBranches(): Set<String> {
-        val source = read("HotReload.java")
-        val body = Regex("private static void install\\(String proc, ClassLoader cl\\) \\{(.*?)\\n    \\}",
-            RegexOption.DOT_MATCHES_ALL).find(source)?.groupValues?.get(1)
-            ?: throw AssertionError("install() not found in HotReload.java")
-        val out = literal.findAll(body).map { it.groupValues[1] }
-            .filter { idShape.matches(it) }.toMutableSet()
-        // Apple's branch matches its package constant rather than a literal.
-        if (body.contains("AppleLyrics.PKG.equals(proc)")) out += "com.apple.android.music"
+    private fun registryProcesses(): List<String> {
+        val source = read("FeatureRegistry.java")
+        val blocks = Regex("processes\\(([^)]*)\\)").findAll(source).map { it.groupValues[1] }
+            .toList()
+        assertTrue("no processes(...) found in FeatureRegistry.java", blocks.size > 1)
+        val out = blocks.flatMap { b ->
+            literal.findAll(b).map { it.groupValues[1] }.filter { idShape.matches(it) }.toList()
+        }
+        // A constant in there would be read as nothing at all; the names have to be literals.
+        for (b in blocks) {
+            val stripped = literal.replace(b, "").replace(",", "").trim()
+            assertTrue("processes($b) holds something other than literals",
+                stripped.isEmpty() || stripped == "String... names")
+        }
         return out
     }
 
     @Test
-    fun everySupportedProcessHasAnInstaller() {
-        val supported = supported()
-        val installers = installBranches()
-        assertEquals("SUPPORTED and HotReload.install disagree",
-            supported.sorted(), installers.sorted())
+    fun everySupportedProcessHasATarget() {
+        assertEquals("SUPPORTED and FeatureRegistry's processes disagree",
+            supported().sorted(), registryProcesses().toSet().sorted())
+    }
+
+    @Test
+    fun noProcessIsClaimedTwice() {
+        val all = registryProcesses()
+        assertEquals("a process is listed under two targets", all.size, all.toSet().size)
     }
 
     @Test

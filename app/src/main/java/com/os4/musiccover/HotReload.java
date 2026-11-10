@@ -8,7 +8,6 @@ import com.os4.musiccover.immersive.ImmersiveHost;
 import com.os4.musiccover.island.MiniPlayerRuntime;
 import com.os4.musiccover.lyrics.AppleLyrics;
 import com.os4.musiccover.pickup.PickupIsland;
-import com.os4.musiccover.pickup.RearScreen;
 import com.os4.musiccover.shade.ShadeLayer;
 import com.os4.musiccover.transit.AmapFocus;
 import com.os4.musiccover.transit.AmapImmerse;
@@ -60,6 +59,11 @@ public final class HotReload {
 
     /** This generation's number; the new code starts at 1 and adoption writes the old one + 1. */
     private static volatile int sGen = 1;
+
+    /** This generation's number: 1 from a cold start, one more for every hot reload since. */
+    static int generation() {
+        return sGen;
+    }
     /** Distinguishes two class loaders whose counters both start at 1. */
     private static final String sClassId = Integer.toHexString(System.identityHashCode(HotReload.class));
 
@@ -544,27 +548,16 @@ public final class HotReload {
         }
     }
 
-    private static void install(String proc, ClassLoader cl) {
-        if ("com.android.systemui".equals(proc)) {
-            Main.installSystemUi(cl);
-        } else if (AppleLyrics.PKG.equals(proc)) {
-            AppleLyrics.handle(cl);
-        } else if ("com.xiaomi.subscreencenter".equals(proc)) {
-            RearScreen.handle(cl);
-        } else if ("com.autonavi.minimap".equals(proc)
-                || "com.autonavi.minimap:locationservice".equals(proc)
-                || "com.autonavi.minimap:widgetProvider".equals(proc)) {
-            // Named one by one, like SUPPORTED: HotReloadProcessTest holds the two lists equal.
-            AmapImmerse.handle(cl);
-        } else if ("com.miui.aod".equals(proc)) {
-            HyperTweaks.aod(cl);
-        } else if ("com.miui.personalassistant".equals(proc)) {
-            MetroCodeIsland.INSTANCE.install(cl);
-        } else if ("com.miui.miwallpaper".equals(proc)) {
-            WallpaperProbe.install(cl);
-        } else {
-            throw new IllegalStateException("no installer for " + proc);
-        }
+    /**
+     * The same table a cold start reads (FeatureRegistry), by process name rather than package.
+     * Adoption mode: the first feature to throw is rethrown, and the generation goes inert
+     * (architecture plan, decision D). HotReloadProcessTest holds the table's process names
+     * equal to SUPPORTED.
+     */
+    private static void install(String proc, ClassLoader cl) throws Throwable {
+        FeatureRegistry.Target t = FeatureRegistry.forProcess(proc);
+        if (t == null) throw new IllegalStateException("no installer for " + proc);
+        FeatureHost.installAll(t, t.ctx(cl), true);
     }
 
     /** How long adoption waits for the previous generation's teardown; see Gen.awaitPredecessor. */
@@ -596,7 +589,7 @@ public final class HotReload {
         }
     }
 
-    private static String sysProp(String key) {
+    static String sysProp(String key) {
         try {
             Object v = Class.forName("android.os.SystemProperties")
                     .getMethod("get", String.class, String.class).invoke(null, key, "");
@@ -796,7 +789,7 @@ public final class HotReload {
      * the control-centre plugin, mostly. That loader was constructed long ago, so the watcher
      * that found it will not fire again; the new generation re-runs the same soft installs
      * against the loader the old handles name. Everything else either re-arms from the attach
-     * path or is installed by {@link Main#installSystemUi}.
+     * path or is installed by SystemUI's feature list ({@link Main#systemUiFeatures}).
      */
     private static void backfill(ClassLoader host, List<XposedInterface.HookHandle> old) {
         // A framework class answers BootClassLoader, not null, on Android (Object's included);

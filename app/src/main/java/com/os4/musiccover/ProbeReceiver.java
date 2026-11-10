@@ -254,6 +254,9 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
         out.putString("fpquick", FingerprintQuick.configJson(c));
         out.putBoolean("fpquicksys", FingerprintQuick.systemSwitch(c));
         out.putBoolean("fpquickok", FingerprintQuick.installed());
+        // The features that did not go in at start - failed, hooked nothing, or skipped for a
+        // missing clock container - for the home page's "N features not installed".
+        out.putStringArray("features_missing", FeatureHost.missing());
         // 设置页那行「手动刷新取餐码云端规则」的副标题，和这一份名单有几个小程序。
         out.putString("rulesdate", PickupCloud.INSTANCE.stamp(PickupCloud.INSTANCE.getUpdatedAt()));
         out.putInt("rulescount", PickupCloud.INSTANCE.count());
@@ -723,6 +726,12 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
                 }
             });
             setResultData("searching -> " + out.getAbsolutePath());
+        } else if ("features".equals(op)) {
+            // What went in at start and what did not, one line per feature (FeatureHost):
+            // answered and logged, like diag, so adb can read it without the app.
+            String report = FeatureHost.describe();
+            setResultData(report);
+            for (String line : report.split("\n")) Xp.log(Main.TAG + line);
         } else if ("tweaks".equals(op)) {
             // Which of the HyperOS restrictions actually came off in this process.
             // Over the probe rather than the log because the module's INFO lines are

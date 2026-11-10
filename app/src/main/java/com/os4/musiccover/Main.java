@@ -1,7 +1,6 @@
 package com.os4.musiccover;
 import com.os4.musiccover.Gen;
 
-import com.os4.musiccover.lyrics.AppleLyrics;
 import com.os4.musiccover.lyrics.LocalLyrics;
 import com.os4.musiccover.lyrics.LockLyrics;
 import com.os4.musiccover.lyrics.LyricSource;
@@ -20,15 +19,12 @@ import com.os4.musiccover.island.NumStateProbe;
 import com.os4.musiccover.immersive.ImmersiveHost;
 import com.os4.musiccover.shade.ShadeLayer;
 import com.os4.musiccover.transit.AmapFocus;
-import com.os4.musiccover.transit.AmapImmerse;
 import com.os4.musiccover.transit.AmapNavScene;
 import com.os4.musiccover.transit.AmapTransitScene;
-import com.os4.musiccover.transit.MetroCodeIsland;
 import com.os4.musiccover.transit.RideCodeExit;
 import com.os4.musiccover.pickup.PickupCloud;
 import com.os4.musiccover.pickup.PickupCodeIsland;
 import com.os4.musiccover.pickup.PickupPark;
-import com.os4.musiccover.pickup.RearScreen;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.content.BroadcastReceiver;
@@ -688,49 +684,17 @@ public class Main extends XposedModule {
         // A hot-reload refusal has no process name to read - HotReloadingParam carries only
         // extras - so this is where the process remembers what it was asked to do.
         HotReload.onPackageLoaded(pkg, param.getDefaultClassLoader());
-        if ("com.miui.miwallpaper".equals(pkg)) {
-            WallpaperProbe.install(param.getDefaultClassLoader());
-            return;
+        // What goes in where is FeatureRegistry's; a hot-reloaded generation reads the same table
+        // by process name (HotReload.install).
+        FeatureRegistry.Target t = FeatureRegistry.forPackage(pkg);
+        if (t == null) return;
+        try {
+            // Cold start: each feature on its own, a failure costs only that one.
+            FeatureHost.installAll(t, t.ctx(param.getDefaultClassLoader()), false);
+        } catch (Throwable e) {
+            Xp.w(TAG + "installing " + t.name + " failed: " + e);
         }
-        // The lock screen editor and the always-on display, which judge a wallpaper's depth with
-        // their own copies of the same classes and hold the ceiling on saved lock screens.
-        if ("com.miui.aod".equals(pkg)) {
-            HyperTweaks.aod(param.getDefaultClassLoader());
-            return;
-        }
-        // The back screen's app. Its own allow-list decides what it draws, and SystemUI is not on
-        // it - see RearScreen.
-        if ("com.xiaomi.subscreencenter".equals(pkg)) {
-            RearScreen.handle(param.getDefaultClassLoader());
-            return;
-        }
-        // The control centre plugin. Usually loaded into SystemUI's own loader, in which case
-        // this never fires and the attempt below is the one that lands.
-        if ("miui.systemui.plugin".equals(pkg)) {
-            HyperTweaks.plugin(param.getDefaultClassLoader());
-            return;
-        }
-        // The one player we hook. Its lyric never reaches the session on its own, so it is
-        // fetched and published from inside the app - see AppleLyrics. Nothing else about the
-        // module runs in this process.
-        if (AppleLyrics.PKG.equals(pkg)) {
-            AppleLyrics.handle(param.getDefaultClassLoader());
-            return;
-        }
-        // 高德, for the navigation map on the lock screen: only watching whether its page is ready
-        // to draw one. See AmapImmerse and AmapNavScene.
-        if (AmapImmerse.PKG.equals(pkg)) {
-            AmapImmerse.handle(param.getDefaultClassLoader());
-            return;
-        }
-        // 小爱建议, for its subway ride-code card on the island. See MetroCodeIsland.
-        if (MetroCodeIsland.PKG.equals(pkg)) {
-            MetroCodeIsland.INSTANCE.install(param.getDefaultClassLoader());
-            return;
-        }
-        if (!"com.android.systemui".equals(pkg)) return;
-        installSystemUi(param.getDefaultClassLoader());
-        bootAtStart();
+        if ("com.android.systemui".equals(pkg)) bootAtStart();
     }
 
     /**
@@ -740,9 +704,9 @@ public class Main extends XposedModule {
      * found never attached one, so the probe could not even be asked what went wrong. The attach
      * still boots too, for a process where this finds no Application; whichever is first does it.
      *
-     * <p>Cold start only, from onPackageLoaded and not from installSystemUi: a hot-reloaded
-     * generation runs installSystemUi as well, and boots as one of its adoption steps, in order.
-     * Posted after installSystemUi has returned, so what boot registers is still after
+     * <p>Cold start only, from onPackageLoaded and not from SystemUI's feature list: a
+     * hot-reloaded generation installs that list as well, and boots as one of its adoption
+     * steps, in order. Posted after the features are in, so what boot registers is still after
      * Gen.markInstallScope's snapshot and a dry run takes it back as before.
      */
     private static void bootAtStart() {
@@ -776,52 +740,128 @@ public class Main extends XposedModule {
     }
 
     /**
-     * SystemUI's cold start, and a hot-reloaded generation's: everything this module installs
-     * in that process, given the host's loader. onPackageLoaded only dispatches.
+     * Everything this module installs in SystemUI, in install order - a cold start's and a
+     * hot-reloaded generation's alike. FeatureHost installs it, one feature at a time; the
+     * clock container class is looked up (findContainer) where the first feature that needs it
+     * comes, and only those features are skipped when it is missing.
+     *
+     * <p>Nothing here runs a second time: a dry run puts the attach path back up without
+     * reinstalling this list, which is why FeatureHost marks Gen's install scope after it.
      */
-    static void installSystemUi(ClassLoader cl) {
-        Xp.log(TAG + "loaded into SystemUI");
+    static List<Feature> systemUiFeatures() {
+        return java.util.Arrays.asList(
+                Feature.of("feature:tweaks", false, c -> HyperTweaks.systemUi(c.host)),
+                // The home screen magnified behind the shade, after the lock screen.
+                Feature.of("feature:pass_blur_scale", false, c -> PassBlurScaleFix.install()),
+                // The mini player hangs off the shortcut row, not the clock container.
+                Feature.of("feature:mini_player", false, c -> MiniPlayerRuntime.install(c.host)),
+                // The clock's colour extraction once it is still, not on every step.
+                Feature.of("feature:palette_throttle", false,
+                        c -> PaletteThrottle.INSTANCE.install(c.host)),
+                // 勿扰 and charging drawn after the date, out from under the pill.
+                Feature.of("feature:date_status", false, c -> DateStatus.INSTANCE.install(c.host)),
+                // 高德's ride card is a focus notification of its own only once the cloud list
+                // that decides who may have one answers for it.
+                Feature.of("feature:amap_focus", false, c -> AmapFocus.install(c.host)),
+                // A ride code opened or a card's fare taken, for the trip card's 到站.
+                Feature.of("feature:ride_code_exit", false,
+                        c -> RideCodeExit.INSTANCE.install(c.host)),
+                // A 微信 order page's pickup code, as an island.
+                Feature.of("feature:pickup_code", false,
+                        c -> PickupCodeIsland.INSTANCE.install(c.host)),
+                // "Has notifications" as the clock faces are told it, less the rows nobody can
+                // see.
+                Feature.of("feature:notif_presence", false, c -> NotifPresence.install(c.host)),
+                // A swipe up on the blank above the rows unlocks, not scrolls the stack, though
+                // the media card behind the pill still lies there laid out (#101).
+                Feature.of("feature:unlock_swipe", false, c -> UnlockSwipeRegion.install(c.host)),
+                // The lock screen's per-region palettes read again when the cover changes.
+                Feature.of("feature:cover_palette", false, c -> CoverPalette.install(c.host)),
 
-        // Before the clock container lookup below, which returns early when it fails: none of
-        // these have anything to do with the clock, and a build that renamed the container must
-        // not cost them too.
-        HyperTweaks.systemUi(cl);
-        // The home screen magnified behind the shade, after the lock screen (PassBlurScaleFix).
-        PassBlurScaleFix.install();
-        // The mini player hangs off the shortcut row, not the clock container.
-        MiniPlayerRuntime.install(cl);
-        // The clock's colour extraction once it is still, not on every step (PaletteThrottle).
-        PaletteThrottle.INSTANCE.install(cl);
-        // 勿扰 and charging drawn after the date, out from under the pill (DateStatus).
-        DateStatus.INSTANCE.install(cl);
-        // 高德's ride card is a focus notification of its own only once the cloud list that
-        // decides who may have one answers for it (AmapFocus).
-        AmapFocus.install(cl);
-        // A ride code opened or a card's fare taken, for the trip card's 到站 (RideCodeExit).
-        RideCodeExit.INSTANCE.install(cl);
-        // A 微信 order page's pickup code, as an island (PickupCodeIsland).
-        PickupCodeIsland.INSTANCE.install(cl);
-        // "Has notifications" as the clock faces are told it, less the rows nobody can see
-        // (NotifPresence).
-        NotifPresence.install(cl);
-        // A swipe up on the blank above the rows unlocks, not scrolls the stack, though the
-        // media card behind the pill still lies there laid out (UnlockSwipeRegion, #101).
-        UnlockSwipeRegion.install(cl);
-        // The lock screen's per-region palettes read again when the cover changes (CoverPalette).
-        CoverPalette.install(cl);
+                Feature.of("feature:clock_container", true, c -> {
+                    hookContainerAttach();
+                    hookContainerDetach();
+                }),
 
+                // The lyrics' HDR highlight no longer has a hook here: it needs a colour mode, a
+                // colour mode is a whole window's, and the lyrics have a window of their own now
+                // (LyricWindow). It used to be written into the shade window's mLpChanged from
+                // inside the OEM's own apply, which is where the media card got dragged into HDR
+                // with it.
+
+                // Not the container's: KeyguardService's. Its clock half checks clockHeld(), and
+                // the lyrics' leave hooks are in it too.
+                Feature.of("feature:sleep_wake", false, c -> hookSleepAndWake(c.host)),
+                Feature.of("feature:transport_controls", false,
+                        c -> hookTransportControls(c.host)),
+                Feature.of("feature:aod_handover", true, c -> hookAodHandover()),
+                Feature.of("feature:depth", false, c -> {
+                    hookDepthOwnership(c.host);
+                    hookCutOutVisibility();
+                }),
+                Feature.of("feature:aod_shrink", false, c -> hookAodShrink(c.host)),
+                Feature.of("feature:wallpaper_black", false, c -> hookWallpaperBlack(c.host)),
+                Feature.of("feature:fingerprint", false, c -> {
+                    Fingerprint.hookFingerprintAnimation(c.host);
+                    Fingerprint.hookFingerprintIcon(c.host);
+                    Fingerprint.hookFingerprintPrintView(c.host);
+                    Fingerprint.hookFingerprintAvoidance(c.host);
+                }),
+                Feature.of("feature:fingerprint_quick", false,
+                        c -> FingerprintQuick.install(c.host)),
+                Feature.of("feature:keyguard_wallpaper_manager", false,
+                        c -> hookKeyguardWallpaperManager(c.host)),
+                Feature.of("feature:media_card", false, c -> MediaCard.hookMediaCard(c.host)),
+                Feature.of("feature:lock_taps", false, c -> LockTaps.hookLockScreenTap(c.host)),
+                Feature.of("feature:charge_anim", false,
+                        c -> ChargeAnim.hookChargingAnimation(c.host)),
+                // The notification shade's cover background. Its hooks and logic are
+                // ShadeLayer's own.
+                Feature.of("feature:shade_layer", false, c -> ShadeLayer.install(c.host)),
+
+                Feature.of("feature:notif_state_change", true, c -> hookNotifStateChange()),
+                // These two install without the container class, but they are the clock squeeze:
+                // with no container to drive, setNotifY would still run the OEM's y through
+                // ClockRoom.roomForRows - a clock moved for the island by a module that cannot
+                // put it back. Off with the rest of the clock instead.
+                Feature.of("feature:time_view", true, c -> hookTimeView(c.host)),
+
+                // The date line above the clock is deliberately left to the OEM. On the glass
+                // styles it is blur-blend rendered: setDateTextColor keeps only the green and
+                // blue of what it is given and forces red to 0xff, and those channels weight the
+                // blend layers against the backdrop rather than name a colour. Swapping in the
+                // cover's hue moved those weights, so the date went dark on a light cover and
+                // light on a dark one - and our recolour, which fed getCurrentTextColor() back
+                // in, left it that way after cover mode ended.
+
+                Feature.of("feature:clock_interactor", true, c -> hookClockInteractor(c.host)));
+    }
+
+    /**
+     * SystemUI's clock container class and its notifStateChange, for the features that need
+     * them; false when the class is not there, and then only those features are skipped.
+     *
+     * <p>A test build (-PmcHrFaults=true) treats the class as missing while
+     * {@code debug.mc.hr_fault} is {@code nocontainer}, which is how the skip is checked on a
+     * phone that has it.
+     */
+    static boolean findContainer(Feature.Ctx c) {
+        if ((BuildConfig.DEBUG || BuildConfig.HR_FAULTS)
+                && "nocontainer".equals(HotReload.sysProp("debug.mc.hr_fault"))) {
+            Xp.log(TAG + "KeyguardClockContainer treated as missing (fault injection)");
+            return false;
+        }
         try {
-            sContainerCls = Xp.findClass(CLS_CONTAINER, cl);
+            sContainerCls = Xp.findClass(CLS_CONTAINER, c.host);
         } catch (Throwable t) {
-            Xp.log(TAG + "KeyguardClockContainer not found, nothing to hook: " + t);
-            // Everything installed above is still here; it has to outlive a dry run too.
-            Gen.markInstallScope();
-            return;
+            Xp.log(TAG + "KeyguardClockContainer not found, the clock's features are skipped: "
+                    + t);
+            return false;
         }
         // Not fatal, and it used to be. A HyperOS 3 report had no class under the name the
         // enum has here, the lookup threw, and the whole of SystemUI went unhooked - no cover,
         // no media card, no depth - over one enum only the clock squeeze needs. Every hook
-        // below now installs on its own terms, and each failure says which feature it cost.
+        // installs on its own terms, and each failure says which feature it cost.
         sNotifStateChange = findNotifStateChange(sContainerCls);
         if (sNotifStateChange != null) {
             sTypeCls = sNotifStateChange.getParameterTypes()[2];
@@ -829,51 +869,7 @@ public class Main extends XposedModule {
             Xp.log(TAG + "no notifStateChange(float, boolean, enum) on " + CLS_CONTAINER
                     + " - the clock squeeze cannot be driven on this build");
         }
-
-        hookContainerAttach();
-        hookContainerDetach();
-
-        // The lyrics' HDR highlight no longer has a hook here: it needs a colour mode, a colour
-        // mode is a whole window's, and the lyrics have a window of their own now (LyricWindow).
-        // It used to be written into the shade window's mLpChanged from inside the OEM's own
-        // apply, which is where the media card got dragged into HDR with it.
-
-        hookSleepAndWake(cl);
-        hookTransportControls(cl);
-        hookAodHandover();
-        hookDepthOwnership(cl);
-        hookCutOutVisibility();
-        hookAodShrink(cl);
-        hookWallpaperBlack(cl);
-        Fingerprint.hookFingerprintAnimation(cl);
-        Fingerprint.hookFingerprintIcon(cl);
-        Fingerprint.hookFingerprintPrintView(cl);
-        Fingerprint.hookFingerprintAvoidance(cl);
-        FingerprintQuick.install(cl);
-        hookKeyguardWallpaperManager(cl);
-        MediaCard.hookMediaCard(cl);
-        LockTaps.hookLockScreenTap(cl);
-        ChargeAnim.hookChargingAnimation(cl);
-
-        // The notification shade's cover background. Its hooks and logic are ShadeLayer's own.
-        ShadeLayer.install(cl);
-
-        hookNotifStateChange();
-        hookTimeView(cl);
-
-        // The date line above the clock is deliberately left to the OEM. On the glass styles it
-        // is blur-blend rendered: setDateTextColor keeps only the green and blue of what it is
-        // given and forces red to 0xff, and those channels weight the blend layers against the
-        // backdrop rather than name a colour. Swapping in the cover's hue moved those weights,
-        // so the date went dark on a light cover and light on a dark one - and our recolour,
-        // which fed getCurrentTextColor() back in, left it that way after cover mode ended.
-
-        hookClockInteractor(cl);
-
-        // Everything above was installed once, before the keyguard was ever attached. A dry run
-        // takes back the attach path's registrations only, because it puts that path back up
-        // without running this method again; see Gen.markInstallScope.
-        Gen.markInstallScope();
+        return true;
     }
 
     private static void hookContainerAttach() {
@@ -884,11 +880,11 @@ public class Main extends XposedModule {
                 return result;
             });
         } catch (Throwable t) {
-            // Everything downstream hangs off this one: it is where the container is captured
-            // and where the broadcast receiver is registered, so without it there is not even
-            // an adb channel to ask what went wrong. Say so plainly rather than throwing out
-            // of onPackageLoaded, which loses the message.
-            Xp.log(TAG + "onAttachedToWindow hook FAILED, the module is inert in SystemUI: " + t);
+            // Everything on the lock screen hangs off this one: it is where the container is
+            // captured. The probe still answers - boot no longer waits for the attach
+            // (bootAtStart) - and op features shows this feature with no hooks.
+            Xp.log(TAG + "onAttachedToWindow hook FAILED, nothing on the lock screen is driven: "
+                    + t);
         }
     }
 
@@ -1713,7 +1709,7 @@ public class Main extends XposedModule {
 
     /**
      * Puts the module back up after a dry run took it down, in the same generation and without
-     * running installSystemUi - the hooks were never touched. This is the boot-time work plus
+     * reinstalling SystemUI's features - the hooks were never touched. This is the boot-time work plus
      * the attach path, exactly what a keyguard rebuild does.
      *
      * <p>Only the guard that makes boot one-shot is cleared. The state file, the container and

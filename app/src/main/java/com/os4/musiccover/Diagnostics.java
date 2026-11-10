@@ -103,8 +103,15 @@ final class Diagnostics {
      * the modes instead of guessing at integers.
      */
     static void dumpClockStyleInfo() {
+        // The container class is missing on a build that renamed it, and then so are the
+        // clock's features (FeatureHost skips them); there is nothing of the clock to dump.
+        Class<?> container = Main.sContainerCls;
+        if (container == null) {
+            Xp.log(Main.TAG + "ClockStyleInfo: no clock container class on this build");
+            return;
+        }
         try {
-            Class<?> tv = Xp.findClass(Main.CLS_TIME_VIEW, Main.sContainerCls.getClassLoader());
+            Class<?> tv = Xp.findClass(Main.CLS_TIME_VIEW, container.getClassLoader());
             Class<?> info = tv.getDeclaredMethod("getClockStyleInfo").getReturnType();
             Xp.log(Main.TAG + "ClockStyleInfo = " + info.getName());
             for (Class<?> c = info; c != null && c != Object.class; c = c.getSuperclass()) {
@@ -752,8 +759,13 @@ final class Diagnostics {
             public void run() {
                 Class<?> cvt;
                 Object[] all;
+                Class<?> container = Main.sContainerCls;
+                if (container == null) {
+                    Xp.log(Main.TAG + "viewtypes: no clock container class on this build");
+                    return;
+                }
                 try {
-                    cvt = Xp.findClass(Main.CLS_CLOCK_VIEW_TYPE, Main.sContainerCls.getClassLoader());
+                    cvt = Xp.findClass(Main.CLS_CLOCK_VIEW_TYPE, container.getClassLoader());
                     all = cvt.getEnumConstants();
                 } catch (Throwable t) {
                     Xp.log(Main.TAG + "viewtypes: no ClockViewType (" + Main.CLS_CLOCK_VIEW_TYPE + "): " + t);

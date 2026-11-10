@@ -283,13 +283,16 @@ public final class Gen {
 
     /**
      * Registrations made before the first container attach. A dry run re-runs boot and the
-     * attach path, not installSystemUi, so anything recorded here would otherwise be taken back
-     * and never put back.
+     * attach path, not SystemUI's feature list, so anything recorded here would otherwise be
+     * taken back and never put back.
      */
     private static final java.util.Set<Object> INSTALL_KEPT =
             java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
 
-    /** Called at the end of installSystemUi: from here on, these registrations outlive a dry run. */
+    /**
+     * Called once SystemUI's features are all in (FeatureHost.installAll, skipped and failed ones
+     * included): from here on, these registrations outlive a dry run.
+     */
     static void markInstallScope() {
         INSTALL_KEPT.clear();
         INSTALL_KEPT.addAll(receivers);
@@ -1344,9 +1347,9 @@ public final class Gen {
     }
 
     /**
-     * The same, for a value written after installSystemUi from a path a dry run does not run
-     * again (the control-centre plugin's watch): [outlivesDryRun] keeps a dry run from giving
-     * it back, as markInstallScope does for what install wrote.
+     * The same, for a value written after SystemUI's features are in, from a path a dry run
+     * does not run again (the control-centre plugin's watch): [outlivesDryRun] keeps a dry run
+     * from giving it back, as markInstallScope does for what install wrote.
      */
     public static <T> void swap(Object owner, String what, T original, Runnable restore,
                                 boolean outlivesDryRun) {
