@@ -23,9 +23,9 @@ import org.json.JSONObject
  */
 internal class MiniPlayerBinding(
     private val views: RowViews,
-    private val state: RowState,
+    private val rowState: RowState,
     private val edits: RowEdits,
-    private val row: RowHost,
+    private val rowHost: RowHost,
     // Made before this part: the islands it colours, the session it reads, the cover it opens.
     private val swapMotion: SwapMotion,
     private val noteMorphMotion: NoteMorphMotion,
@@ -121,8 +121,8 @@ internal class MiniPlayerBinding(
         val track = TrackIdentity.of(current.packageName, metadata).songKey().ifEmpty {
             current.packageName + "|" + metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
         }
-        if (track != state.lastTrack) {
-            if (state.lastTrack.isNotEmpty()) {
+        if (track != rowState.lastTrack) {
+            if (rowState.lastTrack.isNotEmpty()) {
                 Xp.log("MCMini: track changed; preserving dynamic choice=" +
                     if (MiniPlayerRuntime.nativeRequested(current.sessionToken)) "native" else "mini")
             }
@@ -136,8 +136,8 @@ internal class MiniPlayerBinding(
         val cover = metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
-            ?: state.cachedCover?.takeUnless { it.isRecycled }
-            ?: (if (!state.nativeSuppressionRequested) AlbumArt.cardThumbnail() else null)
+            ?: rowState.cachedCover?.takeUnless { it.isRecycled }
+            ?: (if (!rowState.nativeSuppressionRequested) AlbumArt.cardThumbnail() else null)
         if (cover != null && !cover.isRecycled) edits.cachedCover = cover
         return cover
     }
@@ -170,9 +170,9 @@ internal class MiniPlayerBinding(
             config,
             materialKey(),
             { target -> MiniPlayerRuntime.material(target, views.loader, views.notificationMaterial()) },
-            row::togglePlayback,
-            { row.skip(next = false) },
-            { row.skip(next = true) },
+            rowHost::togglePlayback,
+            { rowHost.skip(next = false) },
+            { rowHost.skip(next = true) },
             {
                 // Up undoes down: out of the cover or lyrics by a swipe, back into it by one.
                 if (MiniPlayerRuntime.takeRestoreScene()) Main.miniPlayerEnterCover()
@@ -897,8 +897,8 @@ internal class MiniPlayerBinding(
                 thumb = scaled
                 // Straight onto the pill: a refresh here fetched the metadata again for nothing.
                 val ready = shown(scaled)
-                if (state.selectedIsland == MUSIC_ISLAND) views.player?.showArtwork(ready)
-                else if (state.smallKey == MUSIC_ISLAND) row.refresh()
+                if (rowState.selectedIsland == MUSIC_ISLAND) views.player?.showArtwork(ready)
+                else if (rowState.smallKey == MUSIC_ISLAND) rowHost.refresh()
             }
         }
         return shown(null)

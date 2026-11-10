@@ -703,7 +703,7 @@ internal class MiniPlayerController(
     }
 
     /** A notification just folded back in, not yet given back by the stack: it keeps its place. */
-    internal val returning = LinkedHashMap<String, Long>()
+    override val returning = LinkedHashMap<String, Long>()
 
     /** The notification last folded back in: it stays the small island until the row moves on. */
     var preferredSmall: String? = null
@@ -1100,6 +1100,8 @@ internal class MiniPlayerController(
     /** Another motion is drawing the pill's frame, and ends its own morph when it is done. */
     override val swapping: Boolean get() = swapMotion.swap != null
     override val grouping: Boolean get() = groupMotion.group != null
+    override val exchanging: Boolean get() = cardExchange.exchange != null
+    override val noteMorphing: Boolean get() = noteMorphMotion.noteMorphKey != null
 
     override fun frameTaken(): Boolean = swapMotion.swap != null || morph != null || groupMotion.group != null || noteMorphMotion.flight != null ||
         cardExchange.exchange != null || noteMorphMotion.noteMorphKey != null || noteMorphMotion.pillLandingBox != null || spreadMotion.spread != null
@@ -1294,10 +1296,10 @@ internal class MiniPlayerController(
      * The stack island's notification whose row it opens into and comes home from: the one
      * pulled down (releasedRowAt), else the newest - the one it shows.
      */
-    internal var stackLeadKey: String? = null
-    internal val appLeadKeys = HashMap<String, String>()
+    override var stackLeadKey: String? = null
+    override val appLeadKeys = HashMap<String, String>()
 
-    internal fun groupLead(key: String): String? {
+    override fun groupLead(key: String): String? {
         val members = LockIslands.membersOf(key)
         val preferred = (if (key == STACK_ISLAND) stackLeadKey else appLeadKeys[key])
             ?.takeIf { it in members }
@@ -1615,7 +1617,7 @@ internal class MiniPlayerController(
      * The one island out as its card and settled there - the super island's expanded island.
      * Null with every island in the row. Only ever one: another asked out takes its place.
      */
-    fun expandedKey(): String? {
+    override fun expandedKey(): String? {
         // The cover is the music's card: another island opened there takes its place, and the
         // cover goes (2026-09-25) - not a row of its own in the cover's stack beside the card.
         if (musicExpanded(includeCover = true)) return MUSIC_ISLAND
@@ -1686,7 +1688,8 @@ internal class MiniPlayerController(
     fun nativeFor(key: String): View? = if (key == MUSIC_ISLAND)
         transitionHeader()?.takeIf { Main.miniPlayerMediaCardPresent() } else stackHost.rowFor(key)
 
-    internal val stackHost: StackHost = StackHost(this)
+    internal val stackHost: StackHost = StackHost(this, this, this, this, this, cardExchange, groupMotion,
+        { noteMorphMotion }, { spreadMotion })
     fun cardHeldDy(card: View): Float? = stackHost.cardHeldDy(card)
     val contentTopFrom: String get() = stackHost.contentTopFrom
     val lastScrollRead: String get() = stackHost.lastScrollRead
@@ -1804,7 +1807,7 @@ internal class MiniPlayerController(
     /** Frames the running notification morph has spent at its island's end. */
     internal var restFrames = 0
 
-    fun trace(what: String) {
+    override fun trace(what: String) {
         landTrace.addLast("${android.os.SystemClock.uptimeMillis() % 100000} $what")
         while (landTrace.size > 600) landTrace.removeFirst()
     }
@@ -2066,7 +2069,7 @@ internal class MiniPlayerController(
         smallIsland?.setIconHidden(bridged && smallKey == MUSIC_ISLAND)
     }
 
-    internal fun transitionHeader(): View? {
+    override fun transitionHeader(): View? {
         val current = header?.get()?.takeIf { it.isAttachedToWindow }
             ?: Main.miniPlayerMediaHeader()
         if (current != null) header = WeakReference(current)
@@ -2505,7 +2508,7 @@ internal class MiniPlayerController(
         sessionSource, cardExchange)
 
 
-    internal fun updateVisibility() { android.os.Trace.beginSection("MC updateVisibility"); try {
+    override fun updateVisibility() { android.os.Trace.beginSection("MC updateVisibility"); try {
         val view = player
         // Spread out as the stack's list, the row, the small island and the media card are the
         // spread's (endSpread hands them back).

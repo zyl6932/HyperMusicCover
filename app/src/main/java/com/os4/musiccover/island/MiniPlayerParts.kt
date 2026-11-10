@@ -60,6 +60,8 @@ internal interface RowViews {
     fun restCentre(v: View, out: FloatArray = FloatArray(2)): FloatArray
     fun layerSlot(parent: ViewGroup): Int
     fun onButton(button: View, x: Float, y: Float): Boolean
+    /** The media card's header the music morphs into, if it is in the stack. */
+    fun transitionHeader(): View?
 }
 
 /** The row's state, read only. What a part writes is in [RowEdits]. */
@@ -77,6 +79,9 @@ internal interface RowState {
     val landingBox: CoverMorphMotion.Box?
     val rowHeldOff: Boolean
     val smallGrowing: Boolean
+    val stackLeadKey: String?
+    fun expandedKey(): String?
+    fun groupLead(key: String): String?
     val rowKnown: Boolean
     val rowAnimating: Boolean
     fun pillSeen(): Boolean
@@ -89,6 +94,12 @@ internal interface RowEdits {
     var lastTrack: String
     var cachedCover: Bitmap?
     var rowHeldOff: Boolean
+    var stackLeadKey: String?
+    var followRoot: WeakReference<View>?
+    /** The member an app group's island shows, by group key. */
+    val appLeadKeys: MutableMap<String, String>
+    /** Islands on their way home, by key, with when they set off. */
+    val returning: MutableMap<String, Long>
 }
 
 /** What a part asks the controller to do to the row: refresh it, lay it out, apply its frame. */
@@ -98,6 +109,9 @@ internal interface RowHost {
     fun applyRow()
     /** Moves the pill and the discs with the buttons, as the preDraw does. */
     fun followShortcuts()
+    fun updateVisibility()
+    /** One line in the row's landing trace (`op mini`). */
+    fun trace(what: String)
     /** The pill's media buttons, sent to the session the row follows. */
     fun togglePlayback()
     fun skip(next: Boolean)
@@ -110,6 +124,8 @@ internal interface RowHost {
 internal interface Motions {
     val swapping: Boolean
     val grouping: Boolean
+    val exchanging: Boolean
+    val noteMorphing: Boolean
     /** Another motion is drawing the pill's frame (the controller's frameTaken). */
     fun frameTaken(): Boolean
 }

@@ -13,9 +13,9 @@ import android.view.ViewGroup
  */
 internal class AppearMotion(
     private val views: RowViews,
-    private val state: RowState,
+    private val rowState: RowState,
     private val edits: RowEdits,
-    private val row: RowHost,
+    private val rowHost: RowHost,
     private val motions: Motions,
     /** Made after this part: read when a line is logged, not when this is built. */
     private val probeRef: () -> MiniPlayerProbe,
@@ -68,7 +68,7 @@ internal class AppearMotion(
             appearLast = frameTimeNanos
             // A new row come up while the screen is still coming back: it waits out of sight
             // and rises once it can be seen doing so.
-            val held = appear.target == 1f && appear.value == 0f && !state.pillSeen() &&
+            val held = appear.target == 1f && appear.value == 0f && !rowState.pillSeen() &&
                 android.os.SystemClock.uptimeMillis() - growHeldSince < BACK_WAIT_MS
             if (!held) appear.step(dt)
             val applied = applyAppear()
@@ -161,8 +161,8 @@ internal class AppearMotion(
         val rest = view.restBoxOnScreen() ?: return true
         val xy = IntArray(2).also(views.host::getLocationOnScreen)
         // The row as its own spring has it, grown from its left end.
-        val fullW = (if (state.rowKnown) views.rowWidth.value else rest.w).coerceAtLeast(rest.h)
-        val left = if (state.rowKnown) xy[0] + views.rowLeft.value else rest.x
+        val fullW = (if (rowState.rowKnown) views.rowWidth.value else rest.w).coerceAtLeast(rest.h)
+        val left = if (rowState.rowKnown) xy[0] + views.rowLeft.value else rest.x
         val p = appear.value
         backFrames++
         // setMorphFrame does nothing to a pill out of its morph: the way is then not drawn.
@@ -236,7 +236,7 @@ internal class AppearMotion(
             lastShownKeys = emptyList()
             view.endMorph()
             view.visibility = View.GONE
-            row.scheduleRefresh()
+            rowHost.scheduleRefresh()
             return
         }
         // Handed on: the row's spring, still running, draws the frame and ends the morph itself;
@@ -244,7 +244,7 @@ internal class AppearMotion(
         // doze, the wake's fade, the row held off - nobody draws it again, and asked whether the
         // row was quiet the pill was left as that frame had it: a circle's width with the title
         // laid out past its end (screenshot 2026-09-29 20:20). It goes to its whole width.
-        if (state.rowAnimating && !motions.grouping && !motions.swapping) row.applyRow()
-        else if (!motions.frameTaken() && !state.rowAnimating) view.endMorph()
+        if (rowState.rowAnimating && !motions.grouping && !motions.swapping) rowHost.applyRow()
+        else if (!motions.frameTaken() && !rowState.rowAnimating) view.endMorph()
     }
 }

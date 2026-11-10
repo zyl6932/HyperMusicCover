@@ -20,9 +20,9 @@ import kotlin.math.roundToInt
  */
 internal class ShortcutDiscs(
     private val views: RowViews,
-    private val state: RowState,
+    private val rowState: RowState,
     private val edits: RowEdits,
-    private val row: RowHost,
+    private val rowHost: RowHost,
     private val motions: Motions,
     // Made before this part: the motions whose views the discs make way for.
     private val groupMotion: GroupMotion,
@@ -59,13 +59,13 @@ internal class ShortcutDiscs(
     fun button(side: Int) = if (side == 0) views.left else views.right
 
     /** A disc is a circle as tall as the pill. */
-    fun discDiameter(): Int = views.dp(MiniPlayerConfig.visibleHeightDp(state.config.toString()))
+    fun discDiameter(): Int = views.dp(MiniPlayerConfig.visibleHeightDp(rowState.config.toString()))
 
     /** The disc's frame: room for its widest swelling and squeeze around the circle. */
     fun discFrame(d: Int): Int = (d * DISC_FRAME).toInt()
 
     private fun onSqueezeFrame() {
-        if (views.player?.visibility == View.VISIBLE) row.followShortcuts()
+        if (views.player?.visibility == View.VISIBLE) rowHost.followShortcuts()
         updateDiscs()
     }
 
@@ -195,7 +195,7 @@ internal class ShortcutDiscs(
     private var backSince = 0L
 
     private fun holdButtonsThroughDoze() {
-        if (state.config.optBoolean(MiniPlayerConfig.HIDE_AOD_SHORTCUTS) &&
+        if (rowState.config.optBoolean(MiniPlayerConfig.HIDE_AOD_SHORTCUTS) &&
             MiniPlayerScene.fullScreenAodActive) return
         val root = views.followRoot?.get()
         val now = android.os.SystemClock.uptimeMillis()
@@ -260,7 +260,7 @@ internal class ShortcutDiscs(
      * the pad is put away.
      */
     private fun letGoOfButtons(why: String) {
-        if (MiniPlayerScene.aodActive || !holdButtons && !state.rowHeldOff) return
+        if (MiniPlayerScene.aodActive || !holdButtons && !rowState.rowHeldOff) return
         holdButtons = false
         backSince = 0L
         edits.rowHeldOff = false
@@ -300,7 +300,7 @@ internal class ShortcutDiscs(
         // running). The list's own idiom for a small island really there (showing).
         // The pill only meets it while it gives (setScene); a morph in the pill's place does not.
         val small = views.smallIsland?.takeIf { !views.stackedStyle() && it.visibility == View.VISIBLE && !motions.swapping &&
-            state.landingBox == null && (!state.smallGrowing || views.smallGrow.atRest()) }
+            rowState.landingBox == null && (!rowState.smallGrowing || views.smallGrow.atRest()) }
             ?.let { CoverMorphMotion.Box(views.smallRest[0] - d / 2f + views.smallNudgeX(),
                 views.smallRest[1] - d / 2f + views.smallNudgeY(), d, d) }
         // Not the pill's, but no less in the way: a notification's island on its way up out of
@@ -317,9 +317,9 @@ internal class ShortcutDiscs(
             fun away(b: CoverMorphMotion.Box?) = b != null && (endX < b.x || endX > b.x + b.w)
             squeezePushers += MiniSqueeze.Pusher(box, endX, away(pill), away(small))
         }
-        mover(state.morph)
+        mover(rowState.morph)
         mover(groupMotion.group?.follower)
-        cardExchange.exchange?.movers?.values?.forEach { if (it.morph !== state.morph) mover(it.morph) }
+        cardExchange.exchange?.movers?.values?.forEach { if (it.morph !== rowState.morph) mover(it.morph) }
         squeeze.setScene(pill, running == null, disc(0), disc(1), small, squeezePushers)
     }
 
@@ -332,7 +332,7 @@ internal class ShortcutDiscs(
      */
     private fun squeezeButton(side: Int, button: View, d: Int) {
         val k = squeeze.iconScale(side) *
-            (state.configuredHeightDp / MiniPlayerConfig.DEFAULT_HEIGHT_DP)
+            (rowState.configuredHeightDp / MiniPlayerConfig.DEFAULT_HEIGHT_DP)
         val outward = if (side == 0) -1f else 1f
         // The disc's shift in the button's own pixels: the button's own scale, not its row's.
         val shift = outward * squeeze.discShift(side) * d * button.scaleX

@@ -17,10 +17,25 @@ import java.util.WeakHashMap
 import kotlin.math.abs
 
 /**
- * Moved out of MiniPlayerController as it was (MiniPlayerController plan, M1); `c` is the
- * controller. See the section comments below for what it is.
+ * Moved out of MiniPlayerController as it was (MiniPlayerController plan, M1), and given only
+ * what it uses of the controller (M2, MiniPlayerParts.kt). See the section comments below for
+ * what it is.
  */
-internal class StackHost(private val c: MiniPlayerController) {
+internal class StackHost(
+    private val views: RowViews,
+    private val rowState: RowState,
+    private val edits: RowEdits,
+    private val rowHost: RowHost,
+    private val motions: Motions,
+    // Made before this part: the motions whose rows it hides, holds and lets go.
+    private val cardExchange: CardExchange,
+    private val groupMotion: GroupMotion,
+    // Made after this part: read when the stack is walked, not when this is built.
+    private val noteMorphRef: () -> NoteMorphMotion,
+    private val spreadRef: () -> SpreadMotion,
+) {
+    private val noteMorphMotion get() = noteMorphRef()
+    private val spreadMotion get() = spreadRef()
 
     // ---- a card landing where the stack is settling it
 
@@ -49,7 +64,7 @@ internal class StackHost(private val c: MiniPlayerController) {
             // the pile, they stay. Counted as leaving, the island's card flew 244px low, to where
             // WeChat's row was, and was pulled back up when the pile ended. Going home they go
             // with it: kept, a focus card let out in its place landed a row too high (2026-09-26).
-            if (row && c !== native && c in hiddenRows && (c !in this@StackHost.c.groupMotion.pileRows || this@StackHost.c.groupMotion.stackGoingHome())) gone += c
+            if (row && c !== native && c in hiddenRows && (c !in groupMotion.pileRows || groupMotion.stackGoingHome())) gone += c
         }
         val top = kids.associateWith { stackTargetY(it) + it.top }
         val nativeTop = top[native] ?: return 0f
@@ -160,7 +175,7 @@ internal class StackHost(private val c: MiniPlayerController) {
      * With every row hidden, there is no notification constraint on the clock's edited position.
      */
     fun stackContentTop(): Float {
-        if (!this@StackHost.c.config.getBoolean(MiniPlayerConfig.ENABLED)) return Float.NaN
+        if (!rowState.config.getBoolean(MiniPlayerConfig.ENABLED)) return Float.NaN
         // Asked on every frame of the clock's own animation: read once a frame at most.
         val now = android.os.SystemClock.uptimeMillis()
         if (now - contentTopAt < 6L) return contentTop
@@ -182,17 +197,17 @@ internal class StackHost(private val c: MiniPlayerController) {
             // and the clock shrank for it until it went (probe, 2026-09-26).
             // The same for the music's own morph into the pill: pulled down out of the cover,
             // the exit aimed at the card and then jumped to full size as it went (2026-09-26).
-            val retractingMusic = this@StackHost.c.morph?.toNative == false &&
-                (this@StackHost.c.noteMorphMotion.noteMorphKey == null || this@StackHost.c.noteMorphMotion.noteMorphKey == MUSIC_ISLAND)
+            val retractingMusic = rowState.morph?.toNative == false &&
+                (!motions.noteMorphing || noteMorphMotion.noteMorphKey == MUSIC_ISLAND)
             // The retraction is asked before the header, not after it: this runs on every
             // pre-draw, and with no header to reuse transitionHeader() resolves the card's id and
             // walks the whole window - about a quarter of SystemUI's cycles opening and closing
             // the shade with no media session (simpleperf, #138).
-            val leaving = this@StackHost.c.cardExchange.exchange?.movers?.values?.filter { it.headedHome }?.map { it.native }.orEmpty() +
-                listOfNotNull(if (retractingMusic) this@StackHost.c.transitionHeader() else null)
+            val leaving = cardExchange.exchange?.movers?.values?.filter { it.headedHome }?.map { it.native }.orEmpty() +
+                listOfNotNull(if (retractingMusic) views.transitionHeader() else null)
             // The row spreading out as the list or folding back: where its islands start from.
             val spreadRest = spreadMoving()?.let {
-                this@StackHost.c.player?.takeIf { v -> v.isAttachedToWindow }
+                views.player?.takeIf { v -> v.isAttachedToWindow }
                     ?.let { v -> (IntArray(2).also(v::getLocationOnScreen)[1] - stackY).toFloat() }
                     ?: stack.height.toFloat()
             }
@@ -250,7 +265,7 @@ internal class StackHost(private val c: MiniPlayerController) {
             if (seen != null) {
                 contentDiagnosticAt = now
                 contentTopFrom = (from?.let(::shortName) ?: "-") + " skip=$skipped" +
-                (if (this@StackHost.c.cardExchange.exchange != null) " X" else "") + (if (this@StackHost.c.morph != null) " M" else "") + " [" + seen.toString().trim() + "]"
+                (if (motions.exchanging) " X" else "") + (if (rowState.morph != null) " M" else "") + " [" + seen.toString().trim() + "]"
             }
             ClockRoomPolicy.contentTop(stackY.toFloat(), top)
         }
@@ -259,7 +274,7 @@ internal class StackHost(private val c: MiniPlayerController) {
 
     /** The spread on its way out or back in (not waiting, not open); null otherwise. */
     private fun spreadMoving(): SpreadMotion.Spread? =
-        c.spreadMotion.spread?.takeIf { it.phase == SPREAD_OPENING || it.phase == SPREAD_CLOSING }
+        spreadMotion.spread?.takeIf { it.phase == SPREAD_OPENING || it.phase == SPREAD_CLOSING }
 
     /**
      * [c], a stack child, is one of the moving spread's cards: its progress, 0 at the islands'
@@ -286,13 +301,13 @@ internal class StackHost(private val c: MiniPlayerController) {
     private fun rowComingOut(c: View): Boolean {
         fun top(key: String?): View? = when (key) {
             null -> null
-            MUSIC_ISLAND -> this@StackHost.c.transitionHeader()
+            MUSIC_ISLAND -> views.transitionHeader()
             else -> findRow(key)?.second
         }
-        if (this@StackHost.c.noteMorphMotion.rowWaitKey != null && top(this@StackHost.c.noteMorphMotion.rowWaitKey) === c) return true
-        val pending = this@StackHost.c.cardExchange.exchange?.pending
+        if (noteMorphMotion.rowWaitKey != null && top(noteMorphMotion.rowWaitKey) === c) return true
+        val pending = cardExchange.exchange?.pending
         if (pending != null && top(pending) === c) return true
-        return c in this@StackHost.c.groupMotion.pileRows && !this@StackHost.c.groupMotion.stackGoingHome()
+        return c in groupMotion.pileRows && !groupMotion.stackGoingHome()
     }
 
     /** See stackContentSource. */
@@ -357,15 +372,15 @@ internal class StackHost(private val c: MiniPlayerController) {
      */
     fun onNativeListScroll(stack: View) {
         if (stack !== notificationStack() || !LockIslands.isReleased(STACK_ISLAND)) return
-        val opening = c.morph?.takeIf { c.noteMorphMotion.noteMorphKey == STACK_ISLAND && it.toNative }
-        val moving = c.cardExchange.exchange?.movers?.get(STACK_ISLAND)?.morph?.takeIf { it.toNative }
+        val opening = rowState.morph?.takeIf { noteMorphMotion.noteMorphKey == STACK_ISLAND && it.toNative }
+        val moving = cardExchange.exchange?.movers?.get(STACK_ISLAND)?.morph?.takeIf { it.toNative }
         val held = pinned?.get() != null && pinnedAt == null
-        if (opening == null && moving == null && c.groupMotion.piles.isEmpty() && !held) return
+        if (opening == null && moving == null && groupMotion.piles.isEmpty() && !held) return
         MiniPlayerRuntime.noteTouch("list scroll takes the rows: open=${opening != null} " +
-            "move=${moving != null} pile=${c.groupMotion.piles.size} pin=$held")
+            "move=${moving != null} pile=${groupMotion.piles.size} pin=$held")
         opening?.cancel()
         moving?.cancel()
-        if (c.groupMotion.piles.isNotEmpty()) c.groupMotion.finishPile(true)
+        if (groupMotion.piles.isNotEmpty()) groupMotion.finishPile(true)
         // Read again: a flight ended here pins its card where it lands (the flight's onSettled).
         if (pinned?.get() != null && pinnedAt == null) unpinCard()
     }
@@ -440,7 +455,7 @@ internal class StackHost(private val c: MiniPlayerController) {
         // out of it - or, turned round, going back up into it - it leaves from and lands at where
         // it was held; the row going up pushes it up in the stack meanwhile, 180px, and the cover
         // was laid out small for that.
-        val m = c.cardExchange.exchange?.movers?.get(MUSIC_ISLAND)?.takeIf { it.morph != null && viewWithin(it.native, card) }
+        val m = cardExchange.exchange?.movers?.get(MUSIC_ISLAND)?.takeIf { it.morph != null && viewWithin(it.native, card) }
             ?: return null
         return (if (m.fromCard) m.cardAt else m.settleAt) - m.native.translationY
     }
@@ -506,7 +521,7 @@ internal class StackHost(private val c: MiniPlayerController) {
             val settled = at == null && kotlin.math.abs(dy) < 0.5f && pinY.atRest() &&
                 kotlin.math.abs(pinWant - v.translationY) < 0.5f && pinSteady >= PIN_STEADY_FRAMES
             if (!v.isAttachedToWindow || waited > PIN_MS || settled && waited > PIN_SETTLE_MS) {
-                c.trace("pin off ${if (settled) "settled" else if (waited > PIN_MS) "timeout" else "detached"} " +
+                rowHost.trace("pin off ${if (settled) "settled" else if (waited > PIN_MS) "timeout" else "detached"} " +
                     "dy=${"%.1f".format(dy)} $lastSettle")
                 unpinCard()
                 return
@@ -527,10 +542,10 @@ internal class StackHost(private val c: MiniPlayerController) {
             LockIslands.release(key)
             return
         }
-        val token = c.controller?.sessionToken ?: return
+        val token = rowState.controller?.sessionToken ?: return
         MiniPlayerRuntime.chooseNative(token)
-        c.updateVisibility()
-        c.transitionHeader()?.let(::hideRow)
+        rowHost.updateVisibility()
+        views.transitionHeader()?.let(::hideRow)
     } finally { android.os.Trace.endSection() } }
 
     internal val kept = HashMap<String, Kept>()
@@ -548,7 +563,7 @@ internal class StackHost(private val c: MiniPlayerController) {
             MiniPlayerRuntime.holdTransient(row)
             rows.append(' ').append(shortName(row)).append('@').append(row.translationY.toInt())
         }
-        c.trace("early in ${c.groupMotion.shortKey(key)}$rows")
+        rowHost.trace("early in ${groupMotion.shortKey(key)}$rows")
         takeIn(key)
     }
 
@@ -558,7 +573,7 @@ internal class StackHost(private val c: MiniPlayerController) {
         if (keys.isEmpty()) return
         val rows = keys.mapNotNull { kept.remove(it)?.row }.distinct()
         for (row in rows) if (kept.values.none { it.row === row }) MiniPlayerRuntime.releaseTransient(row)
-        c.trace("let go ${c.groupMotion.shortKey(key)} rows=${rows.size}")
+        rowHost.trace("let go ${groupMotion.shortKey(key)} rows=${rows.size}")
     }
 
     /**
@@ -576,7 +591,7 @@ internal class StackHost(private val c: MiniPlayerController) {
             if (kept.values.none { it.row === row }) reAdding[row] = now
         }
         letOut(key)
-        c.trace("out again ${c.groupMotion.shortKey(key)} rows=${reAdding.size}")
+        rowHost.trace("out again ${groupMotion.shortKey(key)} rows=${reAdding.size}")
     }
 
     /** Rows let out again, held until the stack has them back (holdKept). */
@@ -610,9 +625,9 @@ internal class StackHost(private val c: MiniPlayerController) {
             return
         }
         turnWanted[key] = out
-        c.handler.removeCallbacks(turnApply)
-        c.handler.postDelayed(turnApply, TURN_SETTLE_MS)
-        c.trace("turn ${c.groupMotion.shortKey(key)} ${if (out) "out" else "home"} held")
+        views.handler.removeCallbacks(turnApply)
+        views.handler.postDelayed(turnApply, TURN_SETTLE_MS)
+        rowHost.trace("turn ${groupMotion.shortKey(key)} ${if (out) "out" else "home"} held")
     }
 
     /** [key]'s turn not told yet, told now: it has landed, or is being taken over. */
@@ -652,14 +667,14 @@ internal class StackHost(private val c: MiniPlayerController) {
                 if (back) MiniPlayerRuntime.forgetTransient(row)
                 else if (now - since > REEADD_MAX_MS) MiniPlayerRuntime.releaseTransient(row)
                 else continue
-                c.trace("re-added ${shortName(row)} back=$back")
+                rowHost.trace("re-added ${shortName(row)} back=$back")
                 it.remove()
             }
         }
         if (kept.isEmpty()) return
         val stale = kept.filter { (_, k) -> !k.row.isAttachedToWindow || now - k.since > KEPT_MAX_MS || !Main.keyguardLocked() }
         for (key in stale.keys) {
-            c.trace("kept ${c.groupMotion.shortKey(key)} dropped: attached=${stale[key]?.row?.isAttachedToWindow}")
+            rowHost.trace("kept ${groupMotion.shortKey(key)} dropped: attached=${stale[key]?.row?.isAttachedToWindow}")
             letGo(key)
         }
         for (k in kept.values.distinctBy { System.identityHashCode(it.row) }) {
@@ -670,15 +685,15 @@ internal class StackHost(private val c: MiniPlayerController) {
 
     /** ...and comes back into the row. */
     internal fun takeIn(key: String) { android.os.Trace.beginSection("MC takeIn"); try {
-        if (key == MUSIC_ISLAND) c.controller?.sessionToken?.let(MiniPlayerRuntime::chooseMini)
+        if (key == MUSIC_ISLAND) rowState.controller?.sessionToken?.let(MiniPlayerRuntime::chooseMini)
         else LockIslands.recapture(key)
     } finally { android.os.Trace.endSection() } }
 
     /** A notification taken back in keeps its place until the stack has given it back. */
     fun markReturning(key: String) {
-        c.returning[key] = android.os.SystemClock.uptimeMillis()
+        edits.returning[key] = android.os.SystemClock.uptimeMillis()
         // Asked again once the wait is up, in case the stack never gives it back.
-        c.handler.postDelayed({ if (key in c.returning) c.refresh() }, RETURN_WAIT_MS + 50L)
+        views.handler.postDelayed({ if (key in edits.returning) rowHost.refresh() }, RETURN_WAIT_MS + 50L)
     }
 
     /**
@@ -712,9 +727,9 @@ internal class StackHost(private val c: MiniPlayerController) {
                 if (!row.isShown || row.width <= 0) continue
                 row.getLocationOnScreen(xy)
                 if (x >= xy[0] && x < xy[0] + row.width && y >= xy[1] && y < xy[1] + row.height) {
-                    if (key == STACK_ISLAND && c.noteMorphMotion.noteMorphKey != STACK_ISLAND) c.stackLeadKey = member
-                    else if (LockIslands.isAppGroup(key) && c.noteMorphMotion.noteMorphKey != key)
-                        c.appLeadKeys[key] = member
+                    if (key == STACK_ISLAND && noteMorphMotion.noteMorphKey != STACK_ISLAND) edits.stackLeadKey = member
+                    else if (LockIslands.isAppGroup(key) && noteMorphMotion.noteMorphKey != key)
+                        edits.appLeadKeys[key] = member
                     return key
                 }
             }
@@ -747,7 +762,7 @@ internal class StackHost(private val c: MiniPlayerController) {
      * opened it to: the same scroll its progress is measured on.
      */
     fun nativeStackAtTop(readRest: Boolean): Boolean {
-        val spreadRest = c.spreadMotion.spread?.takeIf { it.phase == SPREAD_OPEN || it.phase == SPREAD_CLOSING }
+        val spreadRest = spreadMotion.spread?.takeIf { it.phase == SPREAD_OPEN || it.phase == SPREAD_CLOSING }
             ?.cardsY?.toFloat()
         if (readRest) restScrollY = spreadRest
             ?: if (LockIslands.isReleased(STACK_ISLAND)) listRestScroll() else 0f
@@ -764,13 +779,13 @@ internal class StackHost(private val c: MiniPlayerController) {
     private fun listRestScroll(): Float? = runCatching {
         val model = containerModel() ?: return@runCatching null
         val sample = Xp.callMethod(Xp.callMethod(model, "getOnUpdateChildSampleStackInfo"), "getValue")
-        val event = Xp.findClass("com.miui.systemui.notification.view.strategy.KeyguardStackStateChangeEvent", c.loader)
+        val event = Xp.findClass("com.miui.systemui.notification.view.strategy.KeyguardStackStateChangeEvent", views.loader)
             .getField("CLICK_SHOW_LIST").get(null)
         val info = Xp.callMethod(model, "getKeyguardStackStatusInfo", sample, event)
         val focusHeight = (Xp.getObjectField(info, "focusNotifsHeight") as Number).toFloat()
         val origin = (Xp.callMethod(model, "positionWithoutMinScrollRange", focusHeight) as Number).toFloat()
         val strategy = listTopStrategy ?: Xp.findClass(
-            "com.miui.systemui.notification.view.strategy.KeyguardNotificationClickToListStateStrategy", c.loader)
+            "com.miui.systemui.notification.view.strategy.KeyguardNotificationClickToListStateStrategy", views.loader)
             .getDeclaredConstructor().newInstance().also { listTopStrategy = it }
         val top = (Xp.callMethod(strategy, "calculateTargetYPosition", info) as Number).toFloat()
         (origin - top).takeIf { it.isFinite() }?.coerceAtLeast(0f)
@@ -780,7 +795,7 @@ internal class StackHost(private val c: MiniPlayerController) {
     fun notificationStack(): ViewGroup? {
         (stackRef?.get() as? ViewGroup)?.takeIf { it.isAttachedToWindow }?.let { return it }
         val queue = ArrayDeque<View>()
-        queue.add(c.host)
+        queue.add(views.host)
         while (queue.isNotEmpty()) {
             val v = queue.removeFirst()
             if (v.javaClass.name.endsWith("NotificationStackScrollLayout") && v is ViewGroup) {
@@ -838,7 +853,7 @@ internal class StackHost(private val c: MiniPlayerController) {
      */
     internal fun findRow(key: String): Pair<View, View>? {
         if (key == STACK_ISLAND || LockIslands.isAppGroup(key))
-            return findRow(c.groupLead(key) ?: return null)
+            return findRow(rowState.groupLead(key) ?: return null)
         // Given back early and drawn on as a transient view: no longer among the stack's rows.
         kept[key]?.row?.takeIf { it.isAttachedToWindow }?.let { return it to it }
         val stack = notificationStack() ?: return null
@@ -905,14 +920,14 @@ internal class StackHost(private val c: MiniPlayerController) {
 
     fun hideRow(row: View) {
         if (row in hiddenRows) return
-        c.trace("hide ${shortName(row)}")
+        rowHost.trace("hide ${shortName(row)}")
         hiddenRows[row] = row.transitionAlpha
         row.transitionAlpha = 0f
     }
 
     fun showRow(row: View) {
         val was = hiddenRows.remove(row) ?: return
-        c.trace("show ${shortName(row)} ta=$was")
+        rowHost.trace("show ${shortName(row)} ta=$was")
         row.transitionAlpha = was
     }
 
@@ -925,10 +940,10 @@ internal class StackHost(private val c: MiniPlayerController) {
      */
     fun hideRowUntilGone(row: View, key: String) {
         hideRow(row)
-        c.handler.postDelayed({
+        views.handler.postDelayed({
             // Released again meanwhile and waiting to be morphed: that morph gives it back.
             // Held for the media card's morph meanwhile: that morph's end gives it back.
-            if (c.noteMorphMotion.rowWaitKey != key && !(c.noteMorphMotion.noteMorphKey == key && c.morph != null) && !c.groupMotion.rowsHeld()) showRow(row)
+            if (noteMorphMotion.rowWaitKey != key && !(noteMorphMotion.noteMorphKey == key && rowState.morph != null) && !groupMotion.rowsHeld()) showRow(row)
         }, ROW_GONE_MS)
     }
 
@@ -969,9 +984,9 @@ internal class StackHost(private val c: MiniPlayerController) {
         val parent = row.parent as? View
         return "${shortName(row)} v=${row.visibility} shown=${row.isShown} a=${"%.2f".format(row.alpha)} " +
             "ta=${"%.2f".format(row.transitionAlpha)} parentA=${parent?.let { "%.2f".format(drawnAlpha(it)) }} " +
-            "y=${xy[1]} h=${row.height} laid=${row.isLaidOut} bottom=${c.player?.restBoxOnScreen()?.y?.toInt()} " +
-            "folded=${stackFolded()} lead=${c.groupLead(STACK_ISLAND)?.let(c.groupMotion::shortKey)} hiddenBy=" + hiddenAncestors(row) +
-            (findRow(c.groupLead(STACK_ISLAND) ?: "")?.second?.takeIf { it !== row }?.let { top ->
+            "y=${xy[1]} h=${row.height} laid=${row.isLaidOut} bottom=${views.player?.restBoxOnScreen()?.y?.toInt()} " +
+            "folded=${stackFolded()} lead=${rowState.groupLead(STACK_ISLAND)?.let(groupMotion::shortKey)} hiddenBy=" + hiddenAncestors(row) +
+            (findRow(rowState.groupLead(STACK_ISLAND) ?: "")?.second?.takeIf { it !== row }?.let { top ->
                 " group: v=${top.visibility} a=${"%.2f".format(top.alpha)} ta=${"%.2f".format(top.transitionAlpha)} " +
                     "h=${top.height} y=${IntArray(2).also(top::getLocationOnScreen)[1]} " +
                     "expanded=${runCatching { Xp.callMethod(top, "isGroupExpanded") }.getOrNull()}"
@@ -984,7 +999,7 @@ internal class StackHost(private val c: MiniPlayerController) {
         val parent = row.parent as? View ?: return false
         if (!row.isShown || drawnAlpha(parent) < 0.5f) return false
         val xy = IntArray(2).also(row::getLocationOnScreen)
-        val bottom = c.player?.restBoxOnScreen()?.y ?: c.host.height.toFloat()
+        val bottom = views.player?.restBoxOnScreen()?.y ?: views.host.height.toFloat()
         return xy[1] + row.height > 0 && xy[1] < bottom
     }
 
@@ -1030,13 +1045,13 @@ internal class StackHost(private val c: MiniPlayerController) {
         listAskedAt = android.os.SystemClock.uptimeMillis()
         listWhy = why
         listClicked = false
-        c.handler.removeCallbacks(listAsk)
+        views.handler.removeCallbacks(listAsk)
         listAsk.run()
     }
 
     /** A card on its way home from the stack that the stack still lays out; null when none. */
     private fun leavingCards(): String? {
-        val x = c.cardExchange.exchange ?: return null
+        val x = cardExchange.exchange ?: return null
         for (m in x.movers.values) {
             if (!m.headedHome || m.key == STACK_ISLAND || m.key == MUSIC_ISLAND) continue
             // Told to the stack now, if its turn home was waiting: the list waits for it.
@@ -1065,9 +1080,9 @@ internal class StackHost(private val c: MiniPlayerController) {
     private val listAsk = object : Runnable {
         override fun run() {
             // Only while the stack island is out, or on its way.
-            val out = c.noteMorphMotion.noteMorphKey == STACK_ISLAND && c.morph?.toNative != false ||
-                c.cardExchange.exchange?.let { x -> x.expanded == STACK_ISLAND || x.pending == STACK_ISLAND } == true ||
-                c.noteMorphMotion.noteMorphKey == null && c.cardExchange.exchange == null && c.expandedKey() == STACK_ISLAND
+            val out = noteMorphMotion.noteMorphKey == STACK_ISLAND && rowState.morph?.toNative != false ||
+                cardExchange.exchange?.let { x -> x.expanded == STACK_ISLAND || x.pending == STACK_ISLAND } == true ||
+                !motions.noteMorphing && !motions.exchanging && rowState.expandedKey() == STACK_ISLAND
             if (!out) return
             val model = containerModel() ?: return
             val state = stackState(model)
@@ -1079,14 +1094,14 @@ internal class StackHost(private val c: MiniPlayerController) {
             val leaving = leavingCards()
             when {
                 state == "LIST" -> {
-                    c.trace("list is up ($listWhy) after ${waited}ms")
+                    rowHost.trace("list is up ($listWhy) after ${waited}ms")
                     return
                 }
-                leaving != null -> if (waited % 100L < LIST_ASK_STEP_MS) c.trace("list waits for $leaving")
+                leaving != null -> if (waited % 100L < LIST_ASK_STEP_MS) rowHost.trace("list waits for $leaving")
                 listClicked -> {}
                 state == "STACK" && stackWantsList(model) == false -> {
                     // One notification, whole where it is: the stack keeps it so.
-                    c.trace("list not wanted ($listWhy)")
+                    rowHost.trace("list not wanted ($listWhy)")
                     return
                 }
                 state == "STACK" -> runCatching {
@@ -1098,24 +1113,24 @@ internal class StackHost(private val c: MiniPlayerController) {
                     val unit = Class.forName(listOf("kotlin", "Unit").joinToString("."), false,
                         model.javaClass.classLoader).getField("INSTANCE").get(null)
                     Xp.callMethod(Xp.getObjectField(model, "_onClicked"), "tryEmit", unit)
-                    c.trace("list asked ($listWhy) at ${waited}ms")
-                }.onFailure { c.trace("list ask failed: $it") }
+                    rowHost.trace("list asked ($listWhy) at ${waited}ms")
+                }.onFailure { rowHost.trace("list ask failed: $it") }
             }
-            if (waited < LIST_ASK_MS) c.handler.postDelayed(this, LIST_ASK_STEP_MS)
-            else c.trace("list not up ($listWhy): state=$state")
+            if (waited < LIST_ASK_MS) views.handler.postDelayed(this, LIST_ASK_STEP_MS)
+            else rowHost.trace("list not up ($listWhy): state=$state")
         }
     }
 
     /** keyguard_bottom_area above the torch, and keyguard_root_view above that. */
     internal fun findRow(): View? {
         var row: View? = null
-        var v: View? = c.left
-        while (v != null && v !== c.host) {
+        var v: View? = views.left
+        while (v != null && v !== views.host) {
             val name = runCatching { v.resources.getResourceEntryName(v.id) }.getOrNull()
             if (name == "keyguard_bottom_area" && row == null) row = v
-            if (name == "keyguard_root_view") c.followRoot = WeakReference(v)
+            if (name == "keyguard_root_view") edits.followRoot = WeakReference(v)
             v = v.parent as? View
         }
-        return row ?: c.left.parent as? View
+        return row ?: views.left.parent as? View
     }
 }

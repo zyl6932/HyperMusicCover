@@ -15,21 +15,21 @@ import android.media.session.PlaybackState
  */
 internal class SessionSource(
     private val views: RowViews,
-    private val state: RowState,
+    private val rowState: RowState,
     private val edits: RowEdits,
-    private val row: RowHost,
+    private val rowHost: RowHost,
     private val sessions: MediaSessionManager?,
     /** The controller's `describeInk`, for `op mini`: it reads the card and the stack, not the session. */
     private val describeInk: () -> String,
 ) {
 
-    internal val sessionListener = MediaSessionManager.OnActiveSessionsChangedListener { row.scheduleRefresh() }
+    internal val sessionListener = MediaSessionManager.OnActiveSessionsChangedListener { rowHost.scheduleRefresh() }
     internal val mediaListener = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) {
             metadataCalls++
             lastMetadataAt = android.os.SystemClock.uptimeMillis()
             liveMetadata = metadata
-            row.scheduleRefresh()
+            rowHost.scheduleRefresh()
         }
         override fun onPlaybackStateChanged(state: PlaybackState?) {
             // Usable up to this very change: the gap is counted from here. Counted from the
@@ -40,18 +40,18 @@ internal class SessionSource(
                 usableSeenAt = android.os.SystemClock.uptimeMillis()
             }
             liveState = state
-            row.scheduleRefresh()
+            rowHost.scheduleRefresh()
         }
         override fun onSessionDestroyed() {
             liveFor = null
             usableSeenAt = 0L
-            row.scheduleRefresh()
+            rowHost.scheduleRefresh()
         }
     }
 
     /** When the row's session last read as usable (uptime); 0 since it was chosen or destroyed. */
     private var usableSeenAt = 0L
-    private val usableGapEnd = Runnable { row.refresh() }
+    private val usableGapEnd = Runnable { rowHost.refresh() }
 
     /**
      * The registered session's state and metadata, as its callbacks last handed them over.
@@ -70,7 +70,7 @@ internal class SessionSource(
     fun describeSession(): String {
         fun id(c: MediaController?) = c?.let { it.packageName + "@" + Integer.toHexString(it.sessionToken.hashCode()) }
         fun title(m: MediaMetadata?) = m?.getString(MediaMetadata.METADATA_KEY_TITLE)
-        val c = state.controller
+        val c = rowState.controller
         val w = Main.miniPlayerSession()
         return "session=${id(c)} live=${c != null && c.sessionToken == liveFor} calls=$metadataCalls rearms=$rearms " +
             "liveTitle=${title(liveMetadata)} binderTitle=${runCatching { title(c?.metadata) }.getOrNull()} " +
@@ -80,7 +80,7 @@ internal class SessionSource(
             "cbReg=${runCatching { Xp.getObjectField(c, "mCbRegistered") }.getOrNull()} " +
             "cbs=${runCatching { (Xp.getObjectField(c, "mCallbacks") as List<*>).size }.getOrNull()} " +
             "wCbs=${runCatching { (Xp.getObjectField(w, "mCallbacks") as List<*>).size }.getOrNull()} " +
-            "lastCallAgo=${android.os.SystemClock.uptimeMillis() - lastMetadataAt} track=${state.lastTrack} " +
+            "lastCallAgo=${android.os.SystemClock.uptimeMillis() - lastMetadataAt} track=${rowState.lastTrack} " +
             "ink=[${describeInk()}] "
     }
     internal fun stateOf(c: MediaController): PlaybackState? =
@@ -102,8 +102,8 @@ internal class SessionSource(
      */
     fun cardTrackChanged() {
         views.handler.post {
-            val c = state.controller ?: return@post
-            if (state.destroyed) return@post
+            val c = rowState.controller ?: return@post
+            if (rowState.destroyed) return@post
             val own = runCatching { MediaController(views.context, c.sessionToken) }.getOrNull() ?: return@post
             runCatching { Gen.unsessionCallback(c, mediaListener) }
             edits.controller = own
@@ -114,7 +114,7 @@ internal class SessionSource(
             liveMetadata = own.metadata
             liveFor = own.sessionToken
             rearms++
-            row.refresh()
+            rowHost.refresh()
         }
     }
     /** For `op mini`: how often the callback has been put back on a track change. */
@@ -144,11 +144,11 @@ internal class SessionSource(
      */
     fun isUsable(value: MediaController): Boolean {
         if (playbackUsable(stateOf(value)?.state)) {
-            if (value.sessionToken == state.controller?.sessionToken) usableSeenAt = android.os.SystemClock.uptimeMillis()
+            if (value.sessionToken == rowState.controller?.sessionToken) usableSeenAt = android.os.SystemClock.uptimeMillis()
             return true
         }
         if (cardHolds(value)) return true
-        if (usableSeenAt == 0L || value.sessionToken != state.controller?.sessionToken ||
+        if (usableSeenAt == 0L || value.sessionToken != rowState.controller?.sessionToken ||
             value.sessionToken != liveFor) return false
         val left = usableSeenAt + USABLE_GAP_MS - android.os.SystemClock.uptimeMillis()
         if (left <= 0L) return false
