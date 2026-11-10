@@ -309,7 +309,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
             return
         }
         val p = s.spring.value
-        val grown = c.lerpBox(s.pillFrom, s.pillTo, p)
+        val grown = lerpBox(s.pillFrom, s.pillTo, p)
         // Soft as the row's spring is: thinner while it widens fast, a touch taller coming back
         // off its overshoot (applyRow). The widening speed in pixels a second.
         val widening = s.spring.velocity * (s.pillTo.w - s.pillFrom.w)
@@ -358,12 +358,12 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         }
         if (s.smallMode == SMALL_EMERGE) {
             // Out from under the pill's end: from 0.6 of its size, sliding out to its place.
-            val width = c.lerp(targetW * HIDDEN_SCALE, targetW, q).coerceAtLeast(1f).roundToInt()
-            val height = c.lerp(targetH * HIDDEN_SCALE, targetH, q).coerceAtLeast(1f).roundToInt()
+            val width = lerp(targetW * HIDDEN_SCALE, targetW, q).coerceAtLeast(1f).roundToInt()
+            val height = lerp(targetH * HIDDEN_SCALE, targetH, q).coerceAtLeast(1f).roundToInt()
             small.setShape(width, height, 0)
             small.setIconAlpha(MiniCardMorph.smooth(0.15f, 0.7f, q))
             small.alpha = MiniCardMorph.smooth(0f, 0.12f, q) * rearAlpha
-            smallDx = c.lerp(emergeDx(), 0f, q)
+            smallDx = lerp(emergeDx(), 0f, q)
             c.followShortcuts()
             return
         }
@@ -372,18 +372,18 @@ internal class SwapMotion(private val c: MiniPlayerController) {
             // The pill's old island shrinking into the small island's place, under the new one.
             val xy = IntArray(2).also(c.host::getLocationOnScreen)
             val restCx = s.pillTo.cx() - xy[0]
-            val w = c.lerp(s.pillTo.w, targetW, p).coerceAtLeast(d * 0.5f)
-            val cx = c.lerp(restCx, c.smallRest[0], p)
+            val w = lerp(s.pillTo.w, targetW, p).coerceAtLeast(d * 0.5f)
+            val cx = lerp(restCx, c.smallRest[0], p)
             small.setShape(w.roundToInt(),
-                c.lerp(s.pillFrom.h, targetH, p).roundToInt(),
+                lerp(s.pillFrom.h, targetH, p).roundToInt(),
                 (cx - c.smallRest[0]).roundToInt())
             small.setIconAlpha(MiniCardMorph.smooth(0.55f, 1f, p))
-            small.alpha = c.lerp(1f, rearAlpha, p)
+            small.alpha = lerp(1f, rearAlpha, p)
         } else {
             // A new small island coming up in its own place.
             val p = q
-            val width = c.lerp(targetW * 0.4f, targetW, p).coerceAtLeast(1f).roundToInt()
-            val height = c.lerp(targetH * 0.4f, targetH, p).coerceAtLeast(1f).roundToInt()
+            val width = lerp(targetW * 0.4f, targetW, p).coerceAtLeast(1f).roundToInt()
+            val height = lerp(targetH * 0.4f, targetH, p).coerceAtLeast(1f).roundToInt()
             small.setShape(width, height, 0)
             small.setIconAlpha(MiniCardMorph.smooth(0.3f, 1f, p))
             small.alpha = MiniCardMorph.smooth(0f, 0.5f, p) * rearAlpha
@@ -394,15 +394,15 @@ internal class SwapMotion(private val c: MiniPlayerController) {
     private fun applyStackSwap(s: Swap, view: MiniPlayerView) {
         val p = s.spring.value
         val q = p.coerceIn(0f, 1f)
-        val front = c.lerpBox(s.pillFrom, s.pillTo, p)
+        val front = lerpBox(s.pillFrom, s.pillTo, p)
         view.setMorphFrame(front, front.h / 2f, 1f)
         view.setContentAlpha(1f)
         view.setContentBlur(kotlin.math.sin(Math.PI.toFloat() * q) * swapBlurPx())
-        view.alpha = c.lerp(MiniPlayerGeometry.STACK_BACK_ALPHA, 1f, q)
+        view.alpha = lerp(MiniPlayerGeometry.STACK_BACK_ALPHA, 1f, q)
         val rear = c.smallBoxOnScreen()
         val from = s.ghostFrom
         if (from != null) ghostPill?.let { ghost ->
-            val shrunk = c.lerpBox(from, rear, p)
+            val shrunk = lerpBox(from, rear, p)
             val drop = kotlin.math.sin(Math.PI.toFloat() * q) * s.pillTo.h * 0.75f
             val box = CoverMorphMotion.Box(shrunk.x, shrunk.y + drop, shrunk.w, shrunk.h)
             ghost.setMorphFrame(box, box.h / 2f, 1f)
@@ -520,7 +520,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         val from = s.ghostFrom ?: return null
         val to = c.smallBoxOnScreen()
         val g = s.small.value
-        val shrunk = c.lerpBox(from, to, g)
+        val shrunk = lerpBox(from, to, g)
         val narrowing = s.small.velocity * (to.w - from.w)
         val squash = (narrowing / from.w.coerceAtLeast(1f) * ROW_SQUASH)
             .coerceIn(-ROW_SQUASH_MAX, ROW_SQUASH_MAX)
@@ -550,7 +550,7 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         val view = ghostPill ?: return
         val from = s.ghostFrom ?: return
         val g = s.ghostBox.value
-        val box = c.lerpBox(from, cutoutBox(s.pillTo), g)
+        val box = lerpBox(from, cutoutBox(s.pillTo), g)
         view.setMorphFrame(box, box.h / 2f, 1f - MiniCardMorph.smooth(0.35f, 0.9f, g))
         val a = s.ghostContent.value.coerceIn(0f, 1f)
         view.setContentAlpha(1f - a)
@@ -600,8 +600,8 @@ internal class SwapMotion(private val c: MiniPlayerController) {
         val w = c.smallRestWidth().toFloat()
         val h = s.ghostDisc.value.coerceIn(0f, 1f)
         val start = if (s.discFromSide > 0f) s.discFromSide else w
-        val width = c.lerp(start, w * HIDDEN_SCALE, h).coerceAtLeast(1f).roundToInt()
-        val height = c.lerp(d, d * HIDDEN_SCALE, h).coerceAtLeast(1f).roundToInt()
+        val width = lerp(start, w * HIDDEN_SCALE, h).coerceAtLeast(1f).roundToInt()
+        val height = lerp(d, d * HIDDEN_SCALE, h).coerceAtLeast(1f).roundToInt()
         disc.setShape(width, height)
         disc.alpha = (1f - h) *
             if (c.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f

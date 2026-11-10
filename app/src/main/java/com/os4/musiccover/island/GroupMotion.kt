@@ -447,9 +447,9 @@ internal class GroupMotion(private val c: MiniPlayerController) {
 
     /** NotificationStackingCalculator.calculateScaleForFirstStackedCard. */
     private fun firstStackedScale(p: Float): Float = when {
-        p < 1f -> c.lerp(1f, 0.934f, p)
-        p < 1.5f -> c.lerp(0.934f, 0.85f, ((p - 1f) / 0.5f).coerceIn(0f, 1f))
-        else -> c.lerp(0.85f, 0.8f, ((p - 1.5f) / 1.5f).coerceIn(0f, 1f))
+        p < 1f -> lerp(1f, 0.934f, p)
+        p < 1.5f -> lerp(0.934f, 0.85f, ((p - 1f) / 0.5f).coerceIn(0f, 1f))
+        else -> lerp(0.85f, 0.8f, ((p - 1.5f) / 1.5f).coerceIn(0f, 1f))
     }.coerceAtLeast(0.8f)
 
     /** The stack island's other rows the pile has moved: their matrix and alpha are ours. */
@@ -608,7 +608,7 @@ internal class GroupMotion(private val c: MiniPlayerController) {
                 val k0 = if (island != null && w > 0f) island.w / w else 1f
                 val start = if (island != null) CoverMorphMotion.Box(island.cx() - w * k0 / 2f,
                     island.cy() - h * k0 / 2f, w * k0, h * k0) else native
-                val box = c.lerpBox(start, native, u)
+                val box = lerpBox(start, native, u)
                 val k = if (w > 0f) box.w / w else 1f
                 m.setScale(k, k, mx, my)
                 m.postTranslate(box.x - native.x, box.y - native.y)
@@ -700,9 +700,9 @@ internal class GroupMotion(private val c: MiniPlayerController) {
 
     /** NotificationStackingCalculator.calculateScaleForOtherStackedCards. */
     private fun otherStackedScale(p: Float): Float = when {
-        p < 1f -> c.lerp(1f, 0.934f, p)
-        p < 2f -> c.lerp(0.934f, 0.85f, p - 1f)
-        else -> c.lerp(0.85f, 0.8f, (p - 2f).coerceAtMost(1f))
+        p < 1f -> lerp(1f, 0.934f, p)
+        p < 2f -> lerp(0.934f, 0.85f, p - 1f)
+        else -> lerp(0.85f, 0.8f, (p - 2f).coerceAtMost(1f))
     }.coerceAtLeast(0.8f)
 
     /**

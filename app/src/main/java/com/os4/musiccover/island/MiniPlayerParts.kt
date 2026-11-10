@@ -3,6 +3,9 @@ package com.os4.musiccover.island
 import android.content.Context
 import android.media.session.MediaController
 import android.os.Handler
+import android.view.View
+import android.view.ViewGroup
+import com.os4.musiccover.CoverMorphMotion
 
 /*
  * What the mini player's parts (SessionSource, the motions, StackHost and the rest) are given of
@@ -19,6 +22,15 @@ import android.os.Handler
 internal interface RowViews {
     val context: Context
     val handler: Handler
+    val host: ViewGroup
+    val left: View
+    val right: View
+    val player: MiniPlayerView?
+    /** The pill's place in the row, sprung (controller, "the row's layout, animated"). */
+    val rowLeft: Jelly
+    val rowWidth: Jelly
+    fun density(): Float
+    fun stackedStyle(): Boolean
 }
 
 /** The row's state, read only. What a part writes is in [RowEdits]. */
@@ -26,15 +38,38 @@ internal interface RowState {
     val controller: MediaController?
     val destroyed: Boolean
     val lastTrack: String
+    val rowKnown: Boolean
+    val rowAnimating: Boolean
+    fun pillSeen(): Boolean
 }
 
 /** The few fields of the row's state a part writes, kept apart so the writers can be read off. */
 internal interface RowEdits {
     var controller: MediaController?
+    var rowKnown: Boolean
 }
 
-/** What a part asks of the controller: refresh the row, now or on the next frame. */
+/** What a part asks the controller to do to the row: refresh it, lay it out, apply its frame. */
 internal interface RowHost {
     fun refresh()
     fun scheduleRefresh()
+    fun applyRow()
 }
+
+/**
+ * Which motions are running, for a part deciding whether it may start or step (the busyForXxx
+ * checks named in M0). Queries only: each reads the motion's own field, as the checks did.
+ */
+internal interface Motions {
+    val swapping: Boolean
+    val grouping: Boolean
+    /** Another motion is drawing the pill's frame (the controller's frameTaken). */
+    fun frameTaken(): Boolean
+}
+
+/** Plain arithmetic the controller and the motions share; moved here off the controller (M2). */
+internal fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
+
+internal fun lerpBox(a: CoverMorphMotion.Box, b: CoverMorphMotion.Box, t: Float) =
+    CoverMorphMotion.Box(lerp(a.x, b.x, t), lerp(a.y, b.y, t),
+        maxOf(1f, lerp(a.w, b.w, t)), maxOf(1f, lerp(a.h, b.h, t)))

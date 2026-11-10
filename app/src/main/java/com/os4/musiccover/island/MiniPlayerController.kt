@@ -54,17 +54,17 @@ import org.json.JSONObject
  * else changed.
  */
 internal class MiniPlayerController(
-    val host: ViewGroup,
-    val left: View,
-    val right: View,
+    override val host: ViewGroup,
+    override val left: View,
+    override val right: View,
     private val prefs: SharedPreferences,
     val loader: ClassLoader,
-) : RowViews, RowState, RowEdits, RowHost {
+) : RowViews, RowState, RowEdits, RowHost, Motions {
     override val context = host.context
     override val handler = Gen.handler()
     internal val sessions = context.getSystemService(MediaSessionManager::class.java)
     private val audio = context.getSystemService(AudioManager::class.java)
-    var player: MiniPlayerView? = null
+    override var player: MiniPlayerView? = null
     override var controller: MediaController? = null
     var header: WeakReference<View>? = null
     private val suppressedHeaders = WeakViewOverrideRegistry<View>()
@@ -389,7 +389,7 @@ internal class MiniPlayerController(
     /** The islands wear the ordinary notification's colours and soft glass, always (2026-10-09). */
     fun notificationMaterial(): Boolean = true
 
-    fun stackedStyle(): Boolean =
+    override fun stackedStyle(): Boolean =
         config.optInt(MiniPlayerConfig.STYLE, MiniPlayerConfig.STYLE_ROW) == MiniPlayerConfig.STYLE_STACK
 
     fun smallRestHeight(): Int = if (stackedStyle())
@@ -1024,12 +1024,6 @@ internal class MiniPlayerController(
         small.alpha = if (stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
     }
 
-    fun lerpBox(a: CoverMorphMotion.Box, b: CoverMorphMotion.Box, t: Float) =
-        CoverMorphMotion.Box(lerp(a.x, b.x, t), lerp(a.y, b.y, t),
-            maxOf(1f, lerp(a.w, b.w, t)), maxOf(1f, lerp(a.h, b.h, t)))
-
-    fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
-
     // ---- the row's layout, animated
 
     /**
@@ -1039,10 +1033,10 @@ internal class MiniPlayerController(
      * container clip does for each of those transitions. position() sets the target; the pill's
      * own layout is already at the target size, and the frame is drawn at the spring's.
      */
-    val rowLeft = Jelly(SWAP_RESPONSE, ROW_DAMPING)
-    val rowWidth = Jelly(SWAP_RESPONSE, ROW_DAMPING)
-    var rowKnown = false
-    var rowAnimating = false
+    override val rowLeft = Jelly(SWAP_RESPONSE, ROW_DAMPING)
+    override val rowWidth = Jelly(SWAP_RESPONSE, ROW_DAMPING)
+    override var rowKnown = false
+    override var rowAnimating = false
     private var rowLast = 0L
 
     private val rowFrame = object : Choreographer.FrameCallback {
@@ -1089,7 +1083,7 @@ internal class MiniPlayerController(
 
     // ---- the row coming up out of nothing, and going back into it
 
-    internal val appearMotion = AppearMotion(this)
+    internal val appearMotion = AppearMotion(this, this, this, this, this) { probe }
     /** The clock going into the cover or out of it: the row is put away or brought back by that, not by its islands. */
     private fun coverMoving(): Boolean = Main.coverSceneActive() && ClockCollapse.phase().let {
         // The cover's clock only: 高德's map moves the same clock and puts nothing away.
@@ -1097,7 +1091,7 @@ internal class MiniPlayerController(
     }
 
     /** The pill is on screen enough to be seen changing: lit or held into the AOD, the keyguard staying. */
-    fun pillSeen(): Boolean = !MiniPlayerScene.keyguardGoingAway && followPillFade > 0.5f &&
+    override fun pillSeen(): Boolean = !MiniPlayerScene.keyguardGoingAway && followPillFade > 0.5f &&
         (Main.screenOnCached() || MiniPlayerScene.aodActive)
 
 
@@ -1111,7 +1105,10 @@ internal class MiniPlayerController(
     fun describeFingerprint(): String = probe.describeFingerprint()
 
     /** Another motion is drawing the pill's frame, and ends its own morph when it is done. */
-    fun frameTaken(): Boolean = swapMotion.swap != null || morph != null || groupMotion.group != null || noteMorphMotion.flight != null ||
+    override val swapping: Boolean get() = swapMotion.swap != null
+    override val grouping: Boolean get() = groupMotion.group != null
+
+    override fun frameTaken(): Boolean = swapMotion.swap != null || morph != null || groupMotion.group != null || noteMorphMotion.flight != null ||
         cardExchange.exchange != null || noteMorphMotion.noteMorphKey != null || noteMorphMotion.pillLandingBox != null || spreadMotion.spread != null
 
 
@@ -1143,7 +1140,7 @@ internal class MiniPlayerController(
 
 
 
-    fun applyRow() {
+    override fun applyRow() {
         val view = player ?: return
         val rest = view.restBoxOnScreen() ?: return
         if (noteMorphMotion.pillLandingBox != null) return
@@ -2090,7 +2087,7 @@ internal class MiniPlayerController(
             Main.miniPlayerCanShow()
     }
 
-    fun density(): Float = context.resources.displayMetrics.density
+    override fun density(): Float = context.resources.displayMetrics.density
 
     /**
      * Busy for the music's own switch pulled from either end (an exchange is asked next, on its

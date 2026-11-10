@@ -251,7 +251,7 @@ internal class CardExchange(private val c: MiniPlayerController) {
         m.endLast = now
         val to = m.endTo ?: return m.endFrom
         val from = m.endFrom ?: return to
-        return c.lerpBox(from, to, m.endT.value)
+        return lerpBox(from, to, m.endT.value)
     }
 
     /**
@@ -332,7 +332,7 @@ internal class CardExchange(private val c: MiniPlayerController) {
         val oldBig = c.selectedIsland
         val oldSmall = c.smallKey
         // The pill as drawn now: an island still growing into it is taken from where it has got to.
-        val pillDrawn = c.swapMotion.swap?.takeIf { !it.holdPill }?.let { c.lerpBox(it.pillFrom, it.pillTo, it.spring.value) }
+        val pillDrawn = c.swapMotion.swap?.takeIf { !it.holdPill }?.let { lerpBox(it.pillFrom, it.pillTo, it.spring.value) }
         // The small island asked for, still shrinking into its place as a stand-in of itself (a
         // collapse onto the pill sends the pill's island there so): it goes up from the stand-in,
         // which goes - left, it drew the island a second time under its own way up.
@@ -538,7 +538,7 @@ internal class CardExchange(private val c: MiniPlayerController) {
         }
         if (m.landed) morph.containerBox()?.let { if (m.place == LAND_PILL) c.noteMorphMotion.landOnPill(it) else c.noteMorphMotion.landOn(it) }
         val a = if (m.landed || hiding) MiniCardMorph.smooth(0f, FLIGHT_HANDOFF, p)
-            else if (m.place == LAND_SMALL && c.stackedStyle()) c.lerp(MiniPlayerGeometry.STACK_BACK_ALPHA, 1f, p)
+            else if (m.place == LAND_SMALL && c.stackedStyle()) lerp(MiniPlayerGeometry.STACK_BACK_ALPHA, 1f, p)
             else 1f
         if (kotlin.math.abs(m.view.alpha - a) > 0.002f) m.view.alpha = a
         traced("MC xTrace") {

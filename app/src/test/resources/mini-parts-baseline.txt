@@ -1,23 +1,5 @@
 # MiniPlayerPartsTest: what each mini player part still reaches through the whole controller.
 # One "<file> <reference>" per line; it only gets shorter (MiniPlayerController plan, M2).
-AppearMotion.kt c.applyRow
-AppearMotion.kt c.density
-AppearMotion.kt c.frameTaken
-AppearMotion.kt c.groupMotion.group
-AppearMotion.kt c.host
-AppearMotion.kt c.left
-AppearMotion.kt c.lerp
-AppearMotion.kt c.pillSeen
-AppearMotion.kt c.player
-AppearMotion.kt c.probe.quietWhy
-AppearMotion.kt c.right
-AppearMotion.kt c.rowAnimating
-AppearMotion.kt c.rowKnown
-AppearMotion.kt c.rowLeft
-AppearMotion.kt c.rowWidth
-AppearMotion.kt c.scheduleRefresh
-AppearMotion.kt c.stackedStyle
-AppearMotion.kt c.swapMotion.swap
 CardExchange.kt c.applyArtBridge
 CardExchange.kt c.artBridged
 CardExchange.kt c.clearSmallNudge
@@ -33,8 +15,6 @@ CardExchange.kt c.groupMotion.pileGroup
 CardExchange.kt c.groupMotion.rowReady
 CardExchange.kt c.islandKeys
 CardExchange.kt c.landingBox
-CardExchange.kt c.lerp
-CardExchange.kt c.lerpBox
 CardExchange.kt c.morph
 CardExchange.kt c.nativeFor
 CardExchange.kt c.noteDragMotion.noteDrag
@@ -118,8 +98,6 @@ GroupMotion.kt c.groupLead
 GroupMotion.kt c.host
 GroupMotion.kt c.islandKeys
 GroupMotion.kt c.landingBox
-GroupMotion.kt c.lerp
-GroupMotion.kt c.lerpBox
 GroupMotion.kt c.morph
 GroupMotion.kt c.morphListener
 GroupMotion.kt c.noteMorphMotion.flight
@@ -443,8 +421,6 @@ SwapMotion.kt c.dp
 SwapMotion.kt c.endRow
 SwapMotion.kt c.followShortcuts
 SwapMotion.kt c.host
-SwapMotion.kt c.lerp
-SwapMotion.kt c.lerpBox
 SwapMotion.kt c.loader
 SwapMotion.kt c.lockScreenLayerIndex
 SwapMotion.kt c.morph
