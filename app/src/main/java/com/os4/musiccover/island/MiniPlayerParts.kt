@@ -70,6 +70,12 @@ internal interface RowViews {
     fun prepareSmallView(key: String, pooled: Boolean = false): MiniPlayerView?
     fun recycleSmallView(v: MiniPlayerView)
     fun applySmallGrow()
+    fun takeSpare(): MiniPlayerView?
+    /** The small island on its rest place, carried by the row's motion as the pill is. */
+    fun placeSmallIsland(follow: Matrix?, fade: Float)
+    fun fitToPill(view: MiniPlayerView, small: Boolean)
+    /** The small island's pulse when the island out as its card goes back into hiding. */
+    fun startSmallPulse(key: String?)
     /** Where in the host the pill goes, over the lock screen's own layer. */
     fun lockScreenLayerIndex(): Int
     /** A view's centre as drawn, every ancestor's transform included, in host pixels. */
@@ -112,6 +118,10 @@ internal interface RowState {
     fun smallState(): String
     /** The dynamic switch can be pulled from this end right now. */
     fun canDrag(fromNative: Boolean, small: Boolean = false): Boolean
+    val morphScene: Boolean
+    val artBridged: Boolean
+    val smallWide: Boolean
+    fun takesPlace(cur: String, origin: String, big: Boolean): Boolean
     val rowKnown: Boolean
     val rowAnimating: Boolean
     fun pillSeen(): Boolean
@@ -128,6 +138,9 @@ internal interface RowEdits {
     var preferredSmall: String?
     var snapSmallOnce: Boolean
     var selectedIsland: String?
+    var morph: MiniCardMorph?
+    var morphScene: Boolean
+    var smallWide: Boolean
     var stackLeadKey: String?
     var followRoot: WeakReference<View>?
     /** The member an app group's island shows, by group key. */
@@ -154,6 +167,7 @@ internal interface RowHost {
     fun trace(what: String)
     /** Listens to the row's own card morphs (the controller's). */
     val morphListener: MiniCardMorph.Listener
+    fun applyArtBridge()
     /** The pill's media buttons, sent to the session the row follows. */
     fun togglePlayback()
     fun skip(next: Boolean)

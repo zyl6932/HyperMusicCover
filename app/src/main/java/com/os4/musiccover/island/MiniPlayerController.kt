@@ -70,8 +70,9 @@ internal class MiniPlayerController(
     private val suppressedHeaders = WeakViewOverrideRegistry<View>()
     override var nativeSuppressionRequested = false
     override var morph: MiniCardMorph? = null
-    internal var morphScene = false
-    internal var artBridged = false
+    override var morphScene = false
+    override var artBridged = false
+        private set
     /** Whether the pill is bound to the music as refresh last bound it, not to a notification. */
     private var pillShowsMusic = false
     /** Refresh had nothing to bind the pill's island to: it still holds another's picture. */
@@ -733,7 +734,7 @@ internal class MiniPlayerController(
         } finally { android.os.Trace.endSection() } }
     }
 
-    internal fun startSmallPulse(key: String?) {
+    override fun startSmallPulse(key: String?) {
         if (key == null) return
         pulseKey = key
         pulseAt = android.os.SystemClock.uptimeMillis()
@@ -766,7 +767,7 @@ internal class MiniPlayerController(
     }
 
     /** The small island on its rest place, carried by the row's motion as the pill is. */
-    internal fun placeSmallIsland(follow: Matrix?, fade: Float) {
+    override fun placeSmallIsland(follow: Matrix?, fade: Float) {
         val v = smallIsland ?: return
         if (v.visibility != View.VISIBLE) return
         // Its frame is centred on its rest place; a switch only widens the frame, never moves it.
@@ -982,7 +983,7 @@ internal class MiniPlayerController(
         small.translationY = cy - small.top - height / 2f
     }
 
-    internal var smallWide = false
+    override var smallWide = false
 
     override fun restoreSmallIslandShape() {
         val small = smallIsland ?: return
@@ -1201,7 +1202,7 @@ internal class MiniPlayerController(
      * jumped to the end, the text let out (filmed 2026-09-26). Laid out mid-morph, it keeps its
      * frame (MiniPlayerView.onLayout); the morph moves what is in it.
      */
-    internal fun fitToPill(view: MiniPlayerView, small: Boolean) {
+    override fun fitToPill(view: MiniPlayerView, small: Boolean) {
         val rest = pillRest(small) ?: return
         val lp = view.layoutParams ?: return
         if (lp.width != rest.width || lp.height != rest.height) {
@@ -1223,7 +1224,7 @@ internal class MiniPlayerController(
     /** A stack can spread several cards at once; prepare their views across idle frames. */
     private fun spareLimit(): Int = if (stackedStyle()) STACK_SPARE_VIEWS else SPARE_VIEWS
 
-    internal fun takeSpare(): MiniPlayerView? {
+    override fun takeSpare(): MiniPlayerView? {
         while (spareViews.isNotEmpty()) {
             val v = spareViews.removeAt(spareViews.size - 1)
             if (v.parent === host) return v
@@ -1612,7 +1613,7 @@ internal class MiniPlayerController(
      * Against the ordinary notifications, which the super island has no island for, the music
      * still wins both places.
      */
-    internal fun takesPlace(cur: String, origin: String, big: Boolean): Boolean {
+    override fun takesPlace(cur: String, origin: String, big: Boolean): Boolean {
         if (origin == MUSIC_ISLAND && !isFocusIsland(cur)) return true
         if (cur == MUSIC_ISLAND && !isFocusIsland(origin)) return false
         val c = rankOf(cur) ?: return true
@@ -1659,7 +1660,8 @@ internal class MiniPlayerController(
         }
     }
 
-    internal val cardExchange: CardExchange = CardExchange(this)
+    internal val cardExchange: CardExchange = CardExchange(this, this, this, this, flightState, this, swapMotion, groupMotion,
+        { stackHost }, { spreadMotion }, { noteMorphMotion }, { noteDragMotion })
     fun exchangeRunning(): Boolean = cardExchange.exchangeRunning()
     fun tapDuringExchange(small: Boolean) = cardExchange.tapDuringExchange(small)
 
@@ -1694,7 +1696,8 @@ internal class MiniPlayerController(
     fun spreadFingerMove(y: Float): Boolean = spreadMotion.spreadFingerMove(y)
     fun spreadFingerEnd(velocityY: Float, cancelled: Boolean): Boolean = spreadMotion.spreadFingerEnd(velocityY, cancelled)
 
-    internal val noteMorphMotion: NoteMorphMotion = NoteMorphMotion(this)
+    internal val noteMorphMotion: NoteMorphMotion = NoteMorphMotion(this, this, this, this, flightState, this, sessionSource,
+        swapMotion, groupMotion, cardExchange, stackHost, spreadMotion, { noteDragMotion }, { shortcutDiscs }, { binding })
     fun collapseRow(key: String, startY: Float): Boolean = noteMorphMotion.collapseRow(key, startY)
     internal val noteDragMotion: NoteDragMotion = NoteDragMotion(this, this, this, flightState, this, noteMorphMotion,
         spreadMotion, cardExchange, stackHost, swapMotion)
@@ -1785,8 +1788,6 @@ internal class MiniPlayerController(
 
     val landTrace = ArrayDeque<String>()
 
-    /** Frames the running notification morph has spent at its island's end. */
-    internal var restFrames = 0
 
     override fun trace(what: String) {
         landTrace.addLast("${android.os.SystemClock.uptimeMillis() % 100000} $what")
@@ -2033,7 +2034,7 @@ internal class MiniPlayerController(
      * music's, was hidden - and the island that landed in the pill had its icon hidden with it
      * until the flight ended (filmed 2026-09-25, Amap in the pill with no icon).
      */
-    internal fun applyArtBridge() {
+    override fun applyArtBridge() {
         val bridged = artBridged
         // The music's artwork: the small island's view's while the music is the small island.
         val small = groupMotion.group?.takeIf { it.musicSmall }?.smallView
