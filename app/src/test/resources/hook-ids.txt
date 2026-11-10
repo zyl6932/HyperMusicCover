@@ -117,7 +117,10 @@ sysui.mediacard.top_data
 sysui.mini.apply
 sysui.mini.glass*
 sysui.mini.header_visibility
+sysui.mini.material_state
 sysui.mini.remove_transient
+sysui.mini.row_apply
+sysui.mini.row_clear
 sysui.mini.scene.dozing
 sysui.mini.scene.editor
 sysui.mini.scene.expand

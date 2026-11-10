@@ -185,7 +185,7 @@ object MiniPlayerRuntime {
             }.onFailure { Xp.log("MCMini: full-AOD listener not removed: $it") }
         }
         aodDimFrames = 0
-        aodDimLook = null
+        IslandMaterial.retire()
         aodDimDepth = -1f
         aodDimFlat = false
         // The AOD dressing belongs to the views that just went; left here it would hand the
@@ -322,7 +322,7 @@ object MiniPlayerRuntime {
             }
         }.onFailure { Xp.w("MCMini: stacking bottom hook unavailable, cards may meet a lifted row: $it") }
         MiniPlayerScene.install(classLoader)
-        installCardMaterialHooks(classLoader)
+        runCatching { installMaterial(classLoader) }.onFailure { Xp.w("MCMini: island material unavailable: $it") }
         runCatching { installAodDim(classLoader) }
             .onFailure { Xp.w("MCMini: full-AOD dim unavailable: $it") }
         LockIslands.install(classLoader)
@@ -495,448 +495,94 @@ object MiniPlayerRuntime {
     @Volatile internal var materialGeneration = 0
         private set
 
-    /**
-     * The pill's material key: the effect, then the generation after a '#'. The pill builds a
-     * new layer only when the effect before the '#' changes (MiniPlayerMaterialState).
-     */
-    internal val materialStyleKey: String get() = "$cardEffect#$materialGeneration"
-    /** The last recipe's values, for telling a new one from the same one again. */
-    private var materialSignature: Any? = null
-    private var materialRepeats = 0
-
-    /** Effects run on the main thread only; this counts how deep inside one another they are. */
-    private var effectDepth = 0
-
-    /** One material call the card got, to be made again on the pill with the pill put in. */
-    private class Recorded(val method: Method, val args: Array<Any?>, val viewAt: Int)
-
-    /** The card's material as it was last dressed: its background, then every call in order. */
-    @Volatile private var cardRecipe: List<Recorded>? = null
-    @Volatile private var cardBackground: android.graphics.drawable.Drawable.ConstantState? = null
-    private var notificationBlend: IntArray? = null
-    private var notificationGlass: FloatArray? = null
-    private var notificationBlendMethod: Method? = null
-    private var notificationGlassMethod: Method? = null
-    private var notificationBackground: android.graphics.drawable.Drawable.ConstantState? = null
-    private var notificationSignature: Any? = null
-    private var notificationSource: WeakReference<View>? = null
+    // ---- what dressed the islands again, counted (op mini dresscount=)
 
     /**
-     * The rest of an ordinary row's dressing, by method, as last given: its blur mode, outline
-     * switches, material type and its glass's maximum size. Only the blend and the glass were
-     * taken (#73), the rest left to the media card's recipe, which sets none of them - and the
-     * glass's size comes on its own, with the row's size, not in the dressing at all. Replayed
-     * so the pill is dressed as the row is (#122). They are not what made its glass darker and
-     * greener than the row's - that was the container (matchRowContainer) - but without them
-     * the two were still not the same material.
+     * Why each generation was bumped, by cause, and every dressing per view: for #135, discs
+     * flickering on the soft glass and not on the frost. Counted since the process started -
+     * the uptime is printed with them, so two reads give a rate - and never logged.
      */
-    private val notificationExtras = java.util.concurrent.ConcurrentHashMap<String, Recorded>()
+    private val bumpCounts = IntArray(BUMP_NAMES.size)
+    @Volatile private var lastBump = -1
+    private var dressTotal = 0
+    private val dressCounts = java.util.WeakHashMap<View, IntArray>()
+    private val dressRing = ArrayDeque<String>()
 
-    private val NOTIFICATION_EXTRAS = setOf("setBlurOutlineEnable", "setGlassOutlineEnable",
-        "setMiViewBlurModeCompat", "setMiViewMaterialTypeCompat", "setMiGlassSdfMaxSizeCompat")
-    private var notificationFocusCheck: Method? = null
-    private var recording: ArrayList<Recorded>? = null
-    private var recordTarget: View? = null
-    private var recordDepth = 0
+    private fun bumpGeneration(cause: Int) {
+        materialGeneration++
+        synchronized(bumpCounts) { bumpCounts[cause]++ }
+        lastBump = cause
+    }
 
-    /**
-     * The card's material, copied call for call. NotificationViewEffectHelper has eight media
-     * card effects - plain, blur, blur on the keyguard, glass, glass on the keyguard, glass on a
-     * light wallpaper, glass in the full-screen AOD - and the keyguard ones run the plain blur
-     * inside themselves. Copying three of them by hand, the first version saw that inner blur
-     * as the card's material and dressed the pill in the shade's dark one. So nothing is
-     * copied by hand any more: while an effect dresses the lock screen's card, every material
-     * call made on its media_bg is recorded, and the pill gets the same calls, in order.
-     */
-    private fun installCardMaterialHooks(classLoader: ClassLoader) {
-        notificationFocusCheck = runCatching {
-            Xp.findClass("com.android.systemui.statusbar.notification.utils.FocusUtils", classLoader)
-                .getDeclaredMethod("isFocusNotification", android.app.Notification::class.java)
-                .apply { isAccessible = true }
-        }.getOrNull()
-        val effects = runCatching {
-            val helper = Xp.findClass(
-                "com.android.systemui.statusbar.notification.style.vieweffect.NotificationViewEffectHelper",
-                classLoader)
-            val field = helper.declaredFields.first { it.name == "mediaViewEffectsMap" }
-            field.isAccessible = true
-            (field.get(null) as Map<*, *>).values.filterNotNull().map { it.javaClass }.distinct()
-        }.getOrElse {
-            Xp.w("MCMini: effect map unavailable, naming the effects instead: $it")
-            listOf("MediaViewNormalEffect", "MediaViewBlurEffect", "MediaViewBlurOnKeyguardEffect",
-                "MediaViewGlassEffect", "MediaViewGlassOnKeyguardEffect",
-                "MediaViewGlassOnKeyguardLightWallPaperEffect", "MediaViewGlassFullAodEffect")
-                .mapNotNull { name -> runCatching { Xp.findClass(
-                    "com.android.systemui.statusbar.notification.style.vieweffect.$name", classLoader)
-                }.getOrNull() }
-        }
-        effects.forEach { cls ->
-            runCatching {
-                Xp.hookAll("sysui.mini.apply", cls, "apply") { chain ->
-                    val target = chain.args.firstOrNull() as? View
-                    val card = Main.miniPlayerMediaHeader()
-                    // The pill and the islands live on the lock screen, so they wear the lock
-                    // screen's effect. The OEM dresses the card in the plain one too - often the
-                    // plain effect first and the keyguard one 50ms later, sometimes the plain one
-                    // alone - and recorded last, the plain frost's dark recipe went onto the pill
-                    // while its words took the keyguard card's near black: dark on dark after a
-                    // wallpaper change (#87, the reporter's log ended on MediaViewBlurEffect).
-                    // The plain one is still taken until a keyguard one has been seen at all.
-                    val keyguardKind = isKeyguardEffect(cls.simpleName)
-                    val mine = effectDepth == 0 && target != null && (card == null || target === card) &&
-                        (keyguardKind || !isKeyguardEffect(cardEffect))
-                    if (mine) {
-                        recordTarget = Main.miniPlayerMediaBg(target)
-                        recording = ArrayList()
-                    }
-                    effectDepth++
-                    val result = try {
-                        chain.proceed()
-                    } finally {
-                        effectDepth--
-                    }
-                    val recorded = recording
-                    if (mine && recorded.isNullOrEmpty()) {
-                        // An effect that made no material call on a card background - with no
-                        // media card on the lock screen, one on another media view: kept, it
-                        // replaced the card's recipe with nothing, and the pill, dressed again
-                        // from it, went clear while the discs kept their glass (2026-09-25).
-                        recording = null
-                        recordTarget = null
-                        if (emptyEffect != cls.simpleName) {
-                            emptyEffect = cls.simpleName
-                            Xp.log("MCMini: ${cls.simpleName} recorded no material calls; recipe kept")
-                        }
-                    } else if (mine) {
-                        val bg = recordTarget
-                        recording = null
-                        recordTarget = null
-                        val signature = materialSignature(cls.name, recorded!!, bg?.background)
-                        if (signature != materialSignature) {
-                            materialSignature = signature
-                            cardRecipe = recorded
-                            cardBackground = bg?.background?.constantState
-                            runCatching { keepRecipe(target!!.context, recorded, bg?.background) }
-                                .onFailure { Xp.log("MCMini: recipe not kept: $it") }
-                            if (cardEffect != cls.simpleName) Xp.log("MCMini: card material -> ${cls.simpleName}")
-                            matNote("card recipe <- ${cls.simpleName} (was $cardEffect): " +
-                                recorded.joinToString(" ; ") { matCall(it.method.name, it.args) })
-                            cardEffect = cls.simpleName
-                            materialGeneration++
-                            refresh()
-                        } else materialRepeats++
-                    }
-                    result
-                }
-            }.onFailure { Xp.w("MCMini: ${cls.simpleName} hook unavailable: $it") }
-        }
-        // What the effects call on the card's background: record the outermost of them.
-        listOf(
-            "com.android.systemui.statusbar.notification.utils.NotificationUtil" to
-                setOf("applyElementViewBlend"),
-            "com.miui.systemui.util.MiGlassCompat" to setOf("setMiGlassBlurRadius",
-                "setMiGlassCompat", "setMiGlassSdfMaxSizeCompat", "setMiViewMaterialTypeCompat"),
-            "com.miui.systemui.util.MiBlurCompat" to setOf("addMiBackgroundBlendColorCompat",
-                "clearMiBackgroundBlendColorCompat", "setBlurOutlineEnable", "setGlassOutlineEnable",
-                "setMiBackgroundBlendColors", "setMiBackgroundBlendColors\$default",
-                "setMiBackgroundBlendColorsNew\$default", "setMiBackgroundBlurModeCompat",
-                "setMiBackgroundBlurRadiusCompat", "setMiBackgroundBlurScaleRatioCompat",
-                "setMiSelfBlurTypeCompat", "setMiViewBlurModeCompat", "setPassWindowBlurEnabledCompat"),
-        ).forEach { (className, names) ->
-            runCatching {
-                val cls = Xp.findClass(className, classLoader)
-                cls.declaredMethods.filter {
-                    it.name in names && java.lang.reflect.Modifier.isStatic(it.modifiers)
-                        && it.parameterTypes.any { p -> View::class.java.isAssignableFrom(p) }
-                }.forEach { m ->
-                    m.isAccessible = true
-                    Xp.hook("sysui.mini.glass." + Xp.slug(className.substringAfterLast('.')) + "." + Xp.slug(m.name), m) { chain ->
-                        val list = recording
-                        val bg = recordTarget
-                        if (list == null || bg == null || recordDepth > 0) {
-                            val result = chain.proceed()
-                            if (list == null && recordDepth == 0) runCatching {
-                                recordNotificationMaterial(m, chain.args.toTypedArray())
-                            }
-                            return@hook result
-                        }
-                        val args = chain.args.toTypedArray()
-                        val at = args.indexOfFirst { it === bg }
-                        if (at < 0) return@hook chain.proceed()
-                        recordDepth++
-                        try {
-                            chain.proceed()
-                        } finally {
-                            recordDepth--
-                            // Copied: the OEM hands the same array to the next dressing, changed.
-                            list.add(Recorded(m, Array(args.size) { i -> copyArray(args[i]) }, at))
-                        }
-                    }
-                }
-            }.onFailure { Xp.w("MCMini: material recorder on $className unavailable: $it") }
+    /** One dressing of [view]: counted against the view it lies in (a disc, the pill), with what last bumped the generation. */
+    private fun countDressing(view: View) {
+        val owner = view.parent as? View ?: view
+        val entry = "${android.os.SystemClock.uptimeMillis() % 1000000} " +
+            "${owner.javaClass.simpleName}@${Integer.toHexString(System.identityHashCode(owner))} " +
+            "gen=$materialGeneration by=${BUMP_NAMES.getOrNull(lastBump) ?: "none"}"
+        synchronized(dressRing) {
+            dressTotal++
+            dressCounts.getOrPut(owner) { IntArray(1) }[0]++
+            dressRing.addLast(entry)
+            while (dressRing.size > 20) dressRing.removeFirst()
         }
     }
 
-    private fun copyArray(value: Any?): Any? = when (value) {
-        is IntArray -> value.copyOf()
-        is FloatArray -> value.copyOf()
-        else -> value
+    private fun describeDressCount(): String {
+        val bumps = synchronized(bumpCounts) {
+            BUMP_NAMES.indices.joinToString(",") { "${BUMP_NAMES[it]}=${bumpCounts[it]}" }
+        }
+        return synchronized(dressRing) {
+            "dresscount=[t=${android.os.SystemClock.uptimeMillis()} total=$dressTotal bumps={$bumps} views={" +
+                dressCounts.entries.joinToString(",") { (v, n) ->
+                    "${v.javaClass.simpleName}@${Integer.toHexString(System.identityHashCode(v))}" +
+                        "${if (v.isAttachedToWindow) "" else "(detached)"}=${n[0]}"
+                } + "} last={" + dressRing.joinToString(" ; ") + "}]"
+        }
     }
 
-    /** Only ordinary rows supply the glass; expanded focus cards have their own darker material. */
-    private fun recordNotificationMaterial(method: Method, args: Array<Any?>) {
-        if (!Main.keyguardLocked() || MiniPlayerScene.aodActive) return
-        val extra = method.name in NOTIFICATION_EXTRAS
-        if (method.name != "applyElementViewBlend" && method.name != "setMiGlassCompat" && !extra) return
-        val element = args.firstOrNull { it is View } as? View ?: return
-        // The background's own, not anything else in the row (its children are dressed too).
-        if (extra && !element.javaClass.name.contains("NotificationBackgroundView")) return
-        if (element is MaterialElement) return
-        var ancestor: View? = element
-        var row: View? = null
-        while (ancestor != null) {
-            if (ancestor.javaClass.name.contains("ExpandableNotificationRow")) {
-                row = ancestor
-                break
-            }
-            ancestor = ancestor.parent as? View
-        }
-        val source = row ?: return
-        val ordinary = runCatching {
-            val entry = Xp.callMethod(source, "getEntry")
-            val notification = (Xp.getObjectField(entry, "mSbn") as?
-                android.service.notification.StatusBarNotification)?.notification ?: return@runCatching false
-            // A media row or a focus/super-island row must never replace the ordinary palette.
-            // If classification is unavailable, keep the last ordinary look or the keyguard
-            // fallback rather than sampling an unknown card.
-            !notification.extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION) &&
-                notificationFocusCheck?.invoke(null, notification) == false
-        }.getOrDefault(false)
-        if (!ordinary) return
-        val previousSource = notificationSource?.get()
-        if (previousSource != null && previousSource !== source && previousSource.isAttachedToWindow) return
-        notificationSource = WeakReference(source)
-        if (extra) {
-            // Kept for the next dressing, not a re-dress of every island now: the glass's size
-            // comes again with every change of the row's height.
-            val at = args.indexOfFirst { it === element }
-            if (at < 0) return
-            val previous = notificationExtras[method.name]
-            val first = notificationExtras.put(method.name,
-                Recorded(method, Array(args.size) { i -> copyArray(args[i]) }, at)) == null
-            // The size comes with every change of the row's height and says nothing about
-            // which material the next dressing replays; the others do.
-            var changed = false
-            if (method.name != "setMiGlassSdfMaxSizeCompat") {
-                val now = matCall(method.name, args)
-                val was = previous?.let { matCall(it.method.name, it.args) }
-                changed = previous != null && now != was
-                if (now != was) matNoteLimited("row extra") { "$now (was ${was ?: "none"}) from ${matTag(source)}" }
-            }
-            if (notificationBlend == null || notificationGlass == null) return
-            if (first) {
-                // Type 1 and the size come after the blend and glass that re-dress the islands:
-                // the first of each re-dresses them once more, or they would wait for the next
-                // change.
-                materialGeneration++
-                refreshSoon()
-            } else if (changed) {
-                // A row dresses itself type 0, outlines and blur mode, blend and glass, then
-                // type 1, and an island dressed in between replayed the 0 - the frosted material
-                // on a glass phone - until something unrelated dressed it again: seconds, or for
-                // good (logged 2026-11-04, 8s twice). Checked once the row's run is through: a
-                // rebind goes 0 and back to 1 every second or two, and only a run that ends on
-                // something other than what the islands wear needs them dressed again.
-                extrasHandler.removeCallbacks(extrasCheck)
-                extrasHandler.post(extrasCheck)
-            }
-            return
-        }
-        when (method.name) {
-            "applyElementViewBlend" -> {
-                // An ordinary row blends two layers (NotificationRowBlurEffect: the int overload,
-                // four values), the media card three. Only six were taken, so the row's look was
-                // never recorded and the islands wore the fallback - the media card's modes over
-                // the focus list's darker colours, a 60% black layer the torch and camera do not
-                // have (#73, 2026-10-14). The int overload passes on to the array one, which is
-                // the one recorded: taken from the outer call, the method was the eight-argument
-                // overload, which the replay's five arguments do not fit.
-                val colors = args.firstOrNull { it is IntArray } as? IntArray ?: return
-                if (colors.isEmpty() || colors.size % 2 != 0) return
-                notificationBlendMethod = method
-                notificationBlend = colors.copyOf()
-            }
-            "setMiGlassCompat" -> {
-                notificationGlassMethod = method
-                notificationGlass =
-                    (args.firstOrNull { it is FloatArray } as? FloatArray)?.copyOf()
-            }
-        }
-        notificationBackground = element.background?.constantState ?: notificationBackground
-        val blend = notificationBlend ?: return
-        val glass = notificationGlass ?: return
-        val signature = listOf(blend.toList(), glass.toList())
-        if (signature != notificationSignature) {
-            notificationSignature = signature
-            matNoteLimited("row look <-") { "blend=${matArg(blend)} glass=${matArg(glass)} from ${matTag(source)}" }
-            materialGeneration++
-            // On the next turn of the loop, not now: this is the middle of the row's own run of
-            // calls, with its type 1 still to come (see the extras above). Folded, too - the
-            // row's colours change on every frame of a wake, and each was a dressing of its own.
+    /**
+     * The pill's material key: the islands' material key (IslandMaterial), then the generation
+     * after a '#'. The pill builds a new layer only when the part before the '#' changes
+     * (MiniPlayerMaterialState): another effect, not new values of the same one.
+     */
+    internal val materialStyleKey: String get() = "${islandKey ?: "none"}#$materialGeneration"
+
+    /** The islands' material key as last read; a new one is a dressing of every island. */
+    @Volatile private var islandKey: String? = null
+
+    /**
+     * The generation, after reading the islands' material key: a new key bumps it and asks for
+     * a refresh, so the pill and the small island are dressed with the discs. Main thread; read
+     * on every disc frame, and IslandMaterial holds the state for about a frame.
+     */
+    internal fun islandGeneration(): Int {
+        // The AOD's dim has the views (onAodDim puts its frames on them, settleAodDim gives
+        // them back): a new key is taken once it is through, not in the middle of its run.
+        if (aodDimArgs != null && islandKey != null) return materialGeneration
+        val k = IslandMaterial.islandKey(Main.sAppCtx)
+        if (k != null && k != islandKey) {
+            val was = islandKey
+            islandKey = k
+            matNote("island key $was -> $k")
+            bumpGeneration(BUMP_KEY)
             refreshSoon()
         }
+        return materialGeneration
     }
 
-    /** The row's steps the islands were last dressed with; null before the first dressing. */
-    @Volatile private var dressedExtras: String? = null
-
-    private val extrasHandler by lazy { Gen.handler() }
-
-    /** The row's material steps as the next dressing would replay them, the size aside. */
-    private fun extrasNow(): String = notificationExtras.values
-        .filter { it.method.name != "setMiGlassSdfMaxSizeCompat" }
-        .map { matCall(it.method.name, it.args) }
-        .sorted().joinToString(" ; ")
-
-    private val extrasCheck = Runnable {
-        val now = extrasNow()
-        val dressed = dressedExtras ?: return@Runnable
-        if (now == dressed) return@Runnable
-        matNote("row steps changed under the islands: $dressed -> $now, dressing again")
-        materialGeneration++
-        refresh()
-    }
-
-    /** A recipe's values: the effect, the background, and every call with its arguments. */
-    private fun materialSignature(effect: String, calls: List<Recorded>,
-                                  bg: android.graphics.drawable.Drawable?): Any {
-        val background: Any? = when (bg) {
-            null -> null
-            is GradientDrawable -> listOf(bg.javaClass.name, bg.color?.defaultColor, bg.color?.isStateful,
-                bg.cornerRadius, MiniPlayerMaterialState.snapshot(bg.cornerRadii), bg.shape,
-                bg.gradientType, bg.orientation, MiniPlayerMaterialState.snapshot(bg.colors))
-            is android.graphics.drawable.ColorDrawable -> listOf(bg.javaClass.name, bg.color)
-            else -> bg.constantState ?: bg
+    /** A recipe arriving for what the islands wear now dresses them again; any other is only kept. */
+    private fun installMaterial(classLoader: ClassLoader) {
+        IslandMaterial.install(classLoader) { key ->
+            if (IslandMaterial.wouldWear(key)) {
+                bumpGeneration(BUMP_RECIPE)
+                refreshSoon()
+            }
         }
-        return listOf(effect, background, calls.map { call ->
-            listOf(call.method, call.viewAt, call.args.mapIndexed { i, arg ->
-                if (i == call.viewAt || arg is Context) null else MiniPlayerMaterialState.snapshot(arg)
-            })
-        })
     }
 
-    // ---- the card's recipe, kept
-
-    /**
-     * The recipe is recorded only when the lock screen dresses a media card, and it lived in
-     * memory: after SystemUI restarted with no music, there was no card to record from and the
-     * row of notification islands was a flat grey fill until music played (2026-09-25). It is
-     * kept in SystemUI's own preferences now, call by call - class, method, parameter types and
-     * the plain values - and read back the first time a pill is dressed without one.
-     */
-    private const val RECIPE_KEY = "card_recipe_v1"
-    private var recipeLoaded = false
-
-    private fun keepRecipe(context: Context, list: List<Recorded>, bg: android.graphics.drawable.Drawable?) {
-        val calls = org.json.JSONArray()
-        for (r in list) {
-            val args = org.json.JSONArray()
-            r.args.forEachIndexed { i, a ->
-                args.put(when {
-                    i == r.viewAt -> JSONObject().put("t", "view")
-                    a == null -> JSONObject().put("t", "null")
-                    a is Int -> JSONObject().put("t", "i").put("x", a)
-                    a is Long -> JSONObject().put("t", "l").put("x", a)
-                    a is Float -> JSONObject().put("t", "f").put("x", a.toDouble())
-                    a is Double -> JSONObject().put("t", "d").put("x", a)
-                    a is Boolean -> JSONObject().put("t", "b").put("x", a)
-                    a is String -> JSONObject().put("t", "s").put("x", a)
-                    a is IntArray -> JSONObject().put("t", "ia").put("x", org.json.JSONArray(a.toList()))
-                    a is FloatArray -> JSONObject().put("t", "fa")
-                        .put("x", org.json.JSONArray(a.map { it.toDouble() }))
-                    a is Context -> JSONObject().put("t", "ctx")
-                    // Anything else cannot be written down: the recipe is not kept at all.
-                    else -> error("argument ${a.javaClass.name} of ${r.method.name}")
-                })
-            }
-            calls.put(JSONObject()
-                .put("c", r.method.declaringClass.name)
-                .put("m", r.method.name)
-                .put("p", org.json.JSONArray(r.method.parameterTypes.map { it.name }))
-                .put("v", r.viewAt)
-                .put("a", args))
-        }
-        val kept = JSONObject().put("calls", calls)
-        when (bg) {
-            is GradientDrawable -> kept.put("bg", JSONObject()
-                .put("t", "gradient")
-                .put("color", bg.color?.defaultColor ?: 0)
-                .put("radius", bg.cornerRadius.toDouble()))
-            is android.graphics.drawable.ColorDrawable -> kept.put("bg", JSONObject()
-                .put("t", "color").put("color", bg.color))
-        }
-        val text = kept.toString()
-        val p = prefs(context)
-        if (p.getString(RECIPE_KEY, null) != text) p.edit().putString(RECIPE_KEY, text).apply()
-    }
-
-    /** The recipe kept from an earlier dressing, when none has been recorded since SystemUI started. */
-    private fun loadRecipe(context: Context, classLoader: ClassLoader) {
-        if (recipeLoaded || cardRecipe != null) return
-        recipeLoaded = true
-        runCatching {
-            val text = prefs(context).getString(RECIPE_KEY, null) ?: return
-            val kept = JSONObject(text)
-            val calls = kept.getJSONArray("calls")
-            val list = ArrayList<Recorded>()
-            fun type(name: String): Class<*> = when (name) {
-                "int" -> Int::class.javaPrimitiveType!!
-                "long" -> Long::class.javaPrimitiveType!!
-                "float" -> Float::class.javaPrimitiveType!!
-                "double" -> Double::class.javaPrimitiveType!!
-                "boolean" -> Boolean::class.javaPrimitiveType!!
-                else -> Class.forName(name, false, classLoader)
-            }
-            for (i in 0 until calls.length()) {
-                val c = calls.getJSONObject(i)
-                val params = c.getJSONArray("p")
-                val types = Array(params.length()) { type(params.getString(it)) }
-                val method = Class.forName(c.getString("c"), false, classLoader)
-                    .getDeclaredMethod(c.getString("m"), *types).apply { isAccessible = true }
-                val a = c.getJSONArray("a")
-                val args = Array<Any?>(a.length()) { j ->
-                    val o = a.getJSONObject(j)
-                    when (o.getString("t")) {
-                        "view", "null" -> null
-                        "i" -> o.getInt("x")
-                        "l" -> o.getLong("x")
-                        "f" -> o.getDouble("x").toFloat()
-                        "d" -> o.getDouble("x")
-                        "b" -> o.getBoolean("x")
-                        "s" -> o.getString("x")
-                        "ia" -> o.getJSONArray("x").let { x -> IntArray(x.length()) { x.getInt(it) } }
-                        "fa" -> o.getJSONArray("x").let { x -> FloatArray(x.length()) { x.getDouble(it).toFloat() } }
-                        "ctx" -> context
-                        else -> error("argument type ${o.getString("t")}")
-                    }
-                }
-                list.add(Recorded(method, args, c.getInt("v")))
-            }
-            kept.optJSONObject("bg")?.let { bg ->
-                cardBackground = when (bg.getString("t")) {
-                    "gradient" -> GradientDrawable().apply {
-                        setColor(bg.getInt("color"))
-                        cornerRadius = bg.getDouble("radius").toFloat()
-                    }.constantState
-                    "color" -> android.graphics.drawable.ColorDrawable(bg.getInt("color")).constantState
-                    else -> null
-                }
-            }
-            cardRecipe = list
-            cardEffect = "kept"
-            Xp.log("MCMini: card recipe read back from preferences (${list.size} calls)")
-        }.onFailure { Xp.log("MCMini: kept recipe unusable: $it") }
-    }
+    /** For IslandMaterial: a line in the material log. */
+    internal fun matNoteFor(what: String) = matNote(what)
 
     // ---- the full-screen AOD's dim, as the card takes it
 
@@ -970,11 +616,7 @@ object MiniPlayerRuntime {
         else -> aodDimDepth.coerceIn(0f, 1f)
     }
 
-    /**
-     * The last frame as the views take it: the card's own blend and glass eased toward the AOD's
-     * by the frame's depth ([dimDepth]). Null to put the frame's own values on as they come.
-     */
-    private var aodDimLook: Pair<IntArray, FloatArray?>? = null
+
     private var aodDimDepth = -1f
 
     /**
@@ -1043,7 +685,7 @@ object MiniPlayerRuntime {
             val firstController = aodController?.get() == null
             aodController = WeakReference(chain.thisObject)
             if (firstController) {
-                materialGeneration++
+                bumpGeneration(BUMP_AOD_ATTACH)
                 refresh()
             }
             if (!aodListenerAdded) {
@@ -1069,7 +711,7 @@ object MiniPlayerRuntime {
         aodListenerAdded = true
         runCatching { add.invoke(controller, ours) }
             .onSuccess {
-                materialGeneration++
+                bumpGeneration(BUMP_AOD_ADOPT)
                 refresh()
                 Xp.log("MCMini: full-AOD listener adopted")
             }
@@ -1084,10 +726,9 @@ object MiniPlayerRuntime {
         aodDimFrames++
         val depth = runCatching { dimDepth(args) }.getOrNull()
         aodDimDepth = depth ?: -1f
-        aodDimLook = depth?.let { d -> runCatching { dimLook(d) }.getOrNull() }
         run { for (view in dressedViews.toList()) dimView(view, args) }
         dimNote("frame ${Integer.toHexString(args[4] as Int)} ta=${"%.2f".format(args[13] as Float)} " +
-            "d=${depth?.let { "%.2f".format(it) } ?: "?"}${if (aodDimLook == null) " raw" else ""}")
+            "d=${depth?.let { "%.2f".format(it) } ?: "?"}")
         // The run ends in completeFullAodAnim; should it be cut short, the last frame settles it.
         aodDimHandler.removeCallbacks(aodDimSettle)
         aodDimHandler.postDelayed(aodDimSettle, AOD_DIM_SETTLE_MS)
@@ -1099,18 +740,17 @@ object MiniPlayerRuntime {
         val ctx = view.context
         val blurOpened = blurOpenedMethod?.let { runCatching { it.invoke(null, ctx) as Boolean }.getOrNull() } ?: true
         if (dimNoted.add(view)) {
-            val own = view !in notificationDressedViews && aodDimLook != null
             matNoteLimited("dim") {
-                "${matTag(view)} first frame: ${if (!blurOpened) "flat fill" else if (own) "card look" else "OEM frame raw"}" +
+                "${matTag(view)} first frame: ${if (!blurOpened) "flat fill" else "OEM frame"}" +
                     " glass=${args[12]} notif=${view in notificationDressedViews}"
             }
         }
         runCatching {
             if (blurOpened) {
-                val look = if (view in notificationDressedViews) null else aodDimLook
-                val colours = look?.first ?: IntArray(6) { args[4 + it] as Int }
+                // The OEM's own frame, as its rows take it: the islands wear a row's material.
+                val colours = IntArray(6) { args[4 + it] as Int }
                 blendMethod?.invoke(null, ctx, view, false, colours, false)
-                val params = if (look != null) look.second ?: args[10] as? FloatArray else args[10] as? FloatArray
+                val params = args[10] as? FloatArray
                 if (args[12] == true && params != null) glassMethod?.invoke(null, view, params)
             } else {
                 val id = ctx.resources.getIdentifier("notification_media_fullaod_item_bg", "drawable",
@@ -1151,37 +791,8 @@ object MiniPlayerRuntime {
         return (num / den).toFloat().coerceIn(0f, 1f)
     }
 
-    /**
-     * The card's recorded blend and glass eased toward the AOD's by [depth]. The AOD's colours
-     * are the controller's focus list's AOD side (mFocusNotifiColorList: origin, target pairs;
-     * the target is the AOD's on the way in, the origin on the way out), the ones the card's
-     * listener puts on; the blend modes stay the card's.
-     */
-    private fun dimLook(depth: Float): Pair<IntArray, FloatArray?>? {
-        val recipe = cardRecipe ?: return null
-        val blend = recipe.firstOrNull { it.method.name == "applyElementViewBlend" }
-            ?.args?.firstOrNull { it is IntArray } as? IntArray ?: return null
-        if (blend.size != 6) return null
-        val c = aodController?.get() ?: return null
-        val list = Xp.getObjectField(c, "mFocusNotifiColorList") as? IntArray ?: return null
-        if (list.size != 6) return null
-        val into = c.javaClass.getField("mEnableFullAod").getBoolean(null)
-        val evaluator = android.animation.ArgbEvaluator()
-        val colours = blend.copyOf()
-        for (j in 0 until 3) {
-            val aod = list[2 * j + if (into) 1 else 0]
-            colours[2 * j] = evaluator.evaluate(depth, blend[2 * j], aod) as Int
-        }
-        val cardGlass = recipe.lastOrNull { it.method.name == "setMiGlassCompat" }
-            ?.args?.firstOrNull { it is FloatArray } as? FloatArray
-        val aodGlass = Xp.getObjectField(c, "mGlassParamsFullAod") as? FloatArray
-        val glass = if (cardGlass != null && aodGlass != null && cardGlass.size == aodGlass.size)
-            FloatArray(cardGlass.size) { cardGlass[it] + (aodGlass[it] - cardGlass[it]) * depth }
-        else null
-        return colours to glass
-    }
 
-    /** Out of the AOD for good: every view back to the card's recipe. In the AOD, left as it is. */
+    /** Out of the AOD for good: every view back to its recipe. In the AOD, left as it is. */
     private fun settleAodDim() {
         aodDimHandler.removeCallbacks(aodDimSettle)
         if (aodDimArgs == null || MiniPlayerScene.aodActive) {
@@ -1192,8 +803,7 @@ object MiniPlayerRuntime {
         // Eased all the way back to the card's own material: already dressed as it, and a
         // dressing again only risks a change on a pill that should not change.
         // The views out of their window missed the frames: those are dressed when they return.
-        val home = aodDimLook != null && aodDimDepth in 0f..0.01f && !aodDimFlat
-        aodDimLook = null
+        val home = aodDimDepth in 0f..0.01f && !aodDimFlat
         aodDimFlat = false
         val cl = loader ?: return
         var later = 0
@@ -1222,7 +832,7 @@ object MiniPlayerRuntime {
                 })
             }
         }
-        dimNote("settle: ${if (home) "at the card's own look" else "redressed"}, $later out of window")
+        dimNote("settle: ${if (home) "at the lock screen's own look" else "redressed"}, $later out of window")
     }
 
     /**
@@ -1279,13 +889,6 @@ object MiniPlayerRuntime {
         }
     }
 
-    /** Which effect dressed the card last, for the log and `op mini`. */
-    @Volatile private var cardEffect = "none"
-
-    private fun isKeyguardEffect(name: String) = "OnKeyguard" in name || "FullAod" in name
-
-    /** The last effect whose empty recording was thrown away, for `op mini`. */
-    @Volatile private var emptyEffect = "none"
 
     /** The pending retries of scheduleInstall, so a retirement can take them back. */
     private var installTask: Runnable? = null
@@ -2005,32 +1608,13 @@ object MiniPlayerRuntime {
     /** The keyguard's notification stack, for NumStateProbe. */
     @JvmStatic fun stackForProbe(): ViewGroup? = live().firstNotNullOfOrNull { it.stackForProbe() }
 
-    /** For `op mini`: what the islands are dressed in - the card's recipe and the notification's look. */
-    private fun describeMaterial(): String {
-        fun arg(v: Any?): String = when (v) {
-            is IntArray -> v.joinToString(",", "[", "]") { Integer.toHexString(it) }
-            is FloatArray -> v.joinToString(",", "[", "]") { "%.3f".format(it) }
-            is View -> "V"
-            null -> "null"
-            else -> v.toString().take(24)
-        }
-        val recipe = cardRecipe?.joinToString(" ; ") { c -> c.method.name + c.args.joinToString(",", "(", ")") { arg(it) } }
-        val bg = { d: android.graphics.drawable.Drawable.ConstantState? ->
-            d?.newDrawable()?.let { (it as? GradientDrawable)?.color?.defaultColor?.let(Integer::toHexString) ?: it.javaClass.simpleName }
-        }
-        return "nlook=${arg(notificationBlend)}/${arg(notificationGlass)} nsrc=${notificationSource?.get() != null} " +
-            "fallback=${notificationLook()?.let { arg(it.first) + "/" + arg(it.second) }} " +
-            "cardBg=${bg(cardBackground)} notifBg=${bg(notificationBackground)} recipe={$recipe}" +
-            " nextra={" + notificationExtras.values.joinToString(" ; ") { c ->
-                c.method.name + c.args.joinToString(",", "(", ")") { arg(it) } } + "}"
-    }
 
     /** For `op mini`: the pill, the card, and the torch button's chain as they are right now. */
     @JvmStatic fun describe(): String {
         val sb = StringBuilder("gone: " + synchronized(goneLog) { goneLog.joinToString(" ; ") } +
-            " || material=$cardEffect gen=$materialGeneration same=$materialRepeats calls=${cardRecipe?.size} empty=$emptyEffect " +
-            "${describeMaterial()} " +
-            "aod=${MiniPlayerScene.aodActive} ${describeAodDim()} ${describeMatLog()} || ${LockIslands.describe()} || touches: " +
+            " || material=$islandKey gen=$materialGeneration " +
+            "${IslandMaterial.describe()} " +
+            "aod=${MiniPlayerScene.aodActive} ${describeAodDim()} ${describeMatLog()} ${describeDressCount()} || ${LockIslands.describe()} || touches: " +
             synchronized(touchLog) { touchLog.joinToString(" ; ") })
         synchronized(controllers) { controllers.values.toList() }.forEach { held ->
             sb.append(" || ").append(held.controller.describe())
@@ -2253,21 +1837,6 @@ object MiniPlayerRuntime {
     }
 
     /**
-     * A real notification row's material, once one has been drawn; until then none, and the
-     * islands wear the media card's own recipe. The fallback used to be the media recipe's modes
-     * over the focus list's keyguard colours (mFocusNotifiColorList) - the expanded focus card's
-     * darker material, a 60% black layer last. A lock screen with only focus notifications and
-     * the music never draws an ordinary row, so every island dressed there went near black once
-     * that list was filled; dressed before it was (all zeros, just after a restart) they were
-     * light, which is why the black came and went with switches (#91, logged 2026-10-20).
-     */
-    private fun notificationLook(): Pair<IntArray, FloatArray>? {
-        val recordedBlend = notificationBlend ?: return null
-        val recordedGlass = notificationGlass ?: return null
-        return recordedBlend.copyOf() to recordedGlass.copyOf()
-    }
-
-    /**
      * A notification pill's blur container set as the rows' own is (#122): the stack's container
      * (SharedNotificationContainer, the first view above the rows blurring the window) blurs at
      * 120 with forceSDFT; applyContainerViewBlur left the pill's at its default 300 without it.
@@ -2280,7 +1849,7 @@ object MiniPlayerRuntime {
      * Read from the live container rather than written in, as the OEM's own value may change.
      */
     private fun matchRowContainer(container: View) {
-        val row = notificationSource?.get() ?: return
+        val row = IslandMaterial.lastRow?.get() ?: return
         var v: View? = row.parent as? View
         var source: View? = null
         while (v != null) {
@@ -2304,8 +1873,9 @@ object MiniPlayerRuntime {
     }
 
     /**
-     * The pill's material: the card's recorded calls replayed on the pill's layer, with the
-     * pill itself made the blur container they expect above them.
+     * The pill's material: the recipe of the effect a lock screen row wears now
+     * (IslandMaterial.replay) on the pill's layer, with the pill itself made the blur container
+     * those calls expect above them.
      *
      * HyperOS notification material has two layers. The card's background is only an element:
      * it tints and shapes a blur that an ancestor container provides, and that container is
@@ -2317,6 +1887,7 @@ object MiniPlayerRuntime {
                           notificationStyle: Boolean = false) {
         val ctx = view.context
         val missed = ArrayList<String>(0)
+        countDressing(view)
         if (notificationStyle) notificationDressedViews.add(view)
         else notificationDressedViews.remove(view)
         runCatching {
@@ -2342,63 +1913,16 @@ object MiniPlayerRuntime {
                 }
                 if (notificationStyle) matchRowContainer(container)
             } }
-            if (cardRecipe == null) loadRecipe(ctx, classLoader)
-            val recipe = cardRecipe
-            if (recipe == null && (!notificationStyle || notificationLook() == null))
-                error("no card or notification material has been recorded yet")
-            view.setImageDrawable(null)
-            view.background = cardBackground?.newDrawable(res)?.mutate()
-            if (recipe != null) run {
-                recipe.forEach { call ->
-                    val args = call.args.copyOf()
-                    args[call.viewAt] = view
-                    call.method.invoke(null, *args)
-                }
-            }
-            if (notificationStyle) notificationLook()?.let { (colors, glass) ->
-                runCatching { run {
-                    notificationBackground?.newDrawable(res)?.mutate()?.let { view.background = it }
-                    val blend = notificationBlendMethod ?: blendMethod ?: recipe?.firstOrNull {
-                        it.method.name == "applyElementViewBlend"
-                    }?.method
-                    val setGlass = notificationGlassMethod ?: glassMethod ?: recipe?.lastOrNull {
-                        it.method.name == "setMiGlassCompat"
-                    }?.method
-                    // In the row's own order: material type 0, the outlines
-                    // and blur mode, the blend and glass, type 1, and the glass's size last.
-                    fun replay(name: String, edit: ((Array<Any?>) -> Unit)? = null) {
-                        val call = notificationExtras[name] ?: return
-                        val args = call.args.copyOf()
-                        args[call.viewAt] = view
-                        edit?.invoke(args)
-                        runCatching { call.method.invoke(null, *args) }
-                            .onFailure { missed.add(name); Xp.log("MCMini: notification $name not replayed: $it") }
-                    }
-                    replay("setMiViewMaterialTypeCompat") { a ->
-                        val i = a.indexOfFirst { it is Int }
-                        if (i >= 0) a[i] = 0
-                    }
-                    replay("setBlurOutlineEnable")
-                    replay("setGlassOutlineEnable")
-                    replay("setMiViewBlurModeCompat")
-                    blend?.invoke(null, ctx, view, false, colors, false)
-                    setGlass?.invoke(null, view, glass)
-                    replay("setMiViewMaterialTypeCompat")
-                    replay("setMiGlassSdfMaxSizeCompat")
-                    dressedExtras = extrasNow()
-                    if (blend == null) missed.add("blend")
-                    if (setGlass == null) missed.add("glass")
-                } }.onFailure { missed.add("look"); Xp.log("MCMini: notification glass unavailable: $it") }
-            }
+            val worn = IslandMaterial.replay(view, classLoader)
             dressedViews.add(view)
-            noteDressing(view, notificationStyle, recipe, missed)
+            noteDressing(view, worn, missed)
             // Dressed in the AOD - a small island coming up there: dimmed as the rest are.
             aodDimArgs?.let { run { dimView(view, it) } }
         }.onFailure { error ->
             val cause = (error as? java.lang.reflect.InvocationTargetException)?.targetException ?: error
             if (!materialFailed) {
                 materialFailed = true
-                Xp.w("MCMini: card material unavailable, plain fill instead: $cause")
+                Xp.w("MCMini: island material unavailable, plain fill instead: $cause")
             }
             view.background = null
             view.setImageDrawable(GradientDrawable().apply { setColor(0x9E1F2324.toInt()) })
@@ -2409,11 +1933,10 @@ object MiniPlayerRuntime {
     // ---------------------------------------------------------------- the material log
 
     /**
-     * What dressed the pill and the islands, and what changed under them, for "the pill turned
-     * frosted on a glass phone": the card's recipe and the row's look as they are replaced, a
-     * row's material type and blur steps as they change (the last one recorded is what the next
-     * dressing replays, and a change does not re-dress), each dressing whose outcome differs from
-     * that view's last, and what the AOD's dim did to each view and how it was let go. Logged
+     * What dressed the pill and the islands, and what changed under them: the islands' key as
+     * it changes, each effect's recipe as it is recorded or asked for, each dressing whose
+     * outcome differs from that view's last, and what the AOD's dim did to each view and how it
+     * was let go. Logged
      * and kept for `op mini` (matlog=); all but the rare ones at most a line a second of each
      * kind (matNoteLimited).
      */
@@ -2474,18 +1997,21 @@ object MiniPlayerRuntime {
     private fun matCall(name: String, args: Array<Any?>): String =
         name + args.joinToString(",", "(", ")") { matArg(it) }
 
-    private fun noteDressing(view: ImageView, notificationStyle: Boolean, recipe: List<Recorded>?,
-                             missed: List<String>) {
-        val type = notificationExtras["setMiViewMaterialTypeCompat"]?.args?.firstOrNull { it is Int }
-        val blurMode = notificationExtras["setMiViewBlurModeCompat"]?.args?.firstOrNull { it is Int }
-        val outcome = "notif=$notificationStyle effect=$cardEffect recipe=${recipe?.size ?: "none"}" +
-            (if (notificationStyle) " look=${notificationLook() != null} type=$type blurMode=$blurMode" else "") +
+    private fun noteDressing(view: ImageView, worn: String, missed: List<String>) {
+        val outcome = "wore=$worn" +
             (if (missed.isEmpty()) "" else " missed=$missed") +
             (if (aodDimArgs != null) " dimNext" else "")
         val changed = synchronized(lastDressing) { lastDressing.put(view, outcome) != outcome }
         if (changed) matNoteLimited("dress") { "${matTag(view)} $outcome" }
     }
 }
+
+/** What bumped MiniPlayerRuntime.materialGeneration; indices into BUMP_NAMES. */
+private const val BUMP_KEY = 0
+private const val BUMP_RECIPE = 1
+private const val BUMP_AOD_ATTACH = 2
+private const val BUMP_AOD_ADOPT = 3
+private val BUMP_NAMES = arrayOf("key", "recipe", "aodAttach", "aodAdopt")
 
 /** The full-screen AOD's colour run quiet this long: over, whether or not it said so. */
 private const val AOD_DIM_SETTLE_MS = 600L

@@ -156,7 +156,7 @@ internal class MiniPlayerController(
     /** For `op mini`: the text colours the system gave its own card and rows, by view id. */
     private fun describeInk(): String {
         fun hex(v: View?) = (v as? android.widget.TextView)?.let { Integer.toHexString(it.currentTextColor) }
-        val sb = StringBuilder("cardTitle=${hex(Main.miniPairTitle())} cardArtist=${hex(Main.miniPairArtist())}")
+        val sb = StringBuilder("${describeInkCounts()} cardTitle=${hex(Main.miniPairTitle())} cardArtist=${hex(Main.miniPairArtist())}")
         val seen = HashSet<String>()
         fun walk(v: View) {
             if (v is android.widget.TextView && v.isShown) {
@@ -499,11 +499,14 @@ internal class MiniPlayerController(
     private fun smallRestHeight(): Int = if (stackedStyle())
         MiniPlayerGeometry.stackBackSizePx(discDiameter()) else discDiameter()
 
-    private fun materialKey(): String =
-        "${if (notificationMaterial()) "notification" else "media"}:${MiniPlayerRuntime.materialStyleKey}"
+    private fun materialKey(): String {
+        MiniPlayerRuntime.islandGeneration()
+        return "${if (notificationMaterial()) "notification" else "media"}:${MiniPlayerRuntime.materialStyleKey}"
+    }
 
+    /** Read first, the islands' material key: a new one is a new generation for every disc. */
     private fun discMaterialGeneration(): Int =
-        MiniPlayerRuntime.materialGeneration * 2 + if (notificationMaterial()) 1 else 0
+        MiniPlayerRuntime.islandGeneration() * 2 + if (notificationMaterial()) 1 else 0
 
     private fun smallRestWidth(): Int = if (stackedStyle())
         MiniPlayerGeometry.stackBackSizePx(pillRest(false)?.width ?: player?.width ?: discDiameter())
@@ -8290,15 +8293,16 @@ internal class MiniPlayerController(
     } finally { android.os.Trace.endSection() } }
 
     /**
-     * The colour the system gives the words on its own card, for the material it is in now: the
-     * media card's title, or a lock screen notification's when there is no card. The pill and
-     * the discs wear the card's material, so its words are the ones that can be read on them -
-     * white on the glass and on the dark frost, near black on the frost in light mode. Opaque:
-     * the pill's own alphas say how strong each line is.
+     * The words' colour, as SystemUI colours its own media card's (IslandMaterial.ink, after
+     * MiuiMediaViewControllerImpl.updateForegroundColors): white on the glass and in the full
+     * AOD, the light or dark frost's own otherwise. [title] the card title's, else the action
+     * buttons'. Opaque: the pill's own alphas say how strong each line is. The same state the
+     * islands' material is chosen by, so the two cannot disagree (the card title, a row title
+     * and a fallback of our own used to, #87 and #91).
      */
-    private fun ink(): Int {
-        val card = Main.miniPairTitle() as? TextView
-        val color = card?.takeIf { it.isAttachedToWindow }?.currentTextColor ?: rowInk() ?: materialInk()
+    private fun ink(title: Boolean = true): Int {
+        val ctx = Main.sAppCtx ?: context
+        val color = IslandMaterial.ink(ctx)[if (title) 0 else 1]
         // The AOD darkens the plate under the light frost, and the frost's near black, kept on
         // it, could not be read on the lock screen (2026-10-24). Toward white as deep as the
         // plate has gone, so the words turn with it rather than at once.
@@ -8308,45 +8312,27 @@ internal class MiniPlayerController(
         else androidx.core.graphics.ColorUtils.blendARGB(base, android.graphics.Color.WHITE, dim)
     }
 
-    private var materialInkAt = 0L
-    private var materialInkCached = android.graphics.Color.WHITE
-
-    /**
-     * No card and no notification to read it off: the material's own answer. The frost in light
-     * mode writes near black (the card's title, #E5000000); the frost in dark mode and the glass
-     * write white. Defaulting to white, the torch and camera stayed white on the light frost's
-     * discs with nothing else on the lock screen (the user, 2026-10-14). Read every frame by
-     * updateDiscs, so held for a moment rather than asked each time.
-     */
-    private fun materialInk(): Int {
-        val now = android.os.SystemClock.uptimeMillis()
-        if (now - materialInkAt < MATERIAL_INK_MS) return materialInkCached
-        materialInkAt = now
-        val ctx = Main.sAppCtx ?: return materialInkCached
-        val frost = runCatching {
-            android.provider.Settings.Secure.getInt(ctx.contentResolver, "material_style", 1) == 0
-        }.getOrDefault(false)
-        val night = (ctx.resources.configuration.uiMode and
-            android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-        materialInkCached = if (frost && !night) 0xE5000000.toInt() else android.graphics.Color.WHITE
-        return materialInkCached
-    }
-
-    private fun rowInk(): Int? {
-        fun find(v: View): TextView? {
-            if (v is TextView && v.isShown &&
-                runCatching { v.resources.getResourceEntryName(v.id) }.getOrNull() == "title") return v
-            if (v is ViewGroup) for (i in 0 until v.childCount) find(v.getChildAt(i))?.let { return it }
-            return null
-        }
-        return notificationStack()?.let(::find)?.currentTextColor
-    }
-
     /** What applyInk last tinted the buttons with; null while they are the OEM's own. */
     private var buttonInk: Int? = null
 
+    // For `op mini` (ink=): how often the ink, the buttons' tint and their layer changed.
+    // Counts since the controller was made.
+    private var lastInk = 0
+    private var inkChanges = 0
+    private var buttonInkChanges = 0
+    private var buttonLayerWrites = 0
+
+    private fun describeInkCounts(): String =
+        "inkChanges=$inkChanges buttonInk=${buttonInk?.let(Integer::toHexString)} " +
+            "buttonChanges=$buttonInkChanges layerWrites=$buttonLayerWrites " +
+            "buttons=${left.javaClass.simpleName}/${right.javaClass.simpleName}"
+
     private fun applyInk() {
         val color = ink()
+        if (color != lastInk) {
+            lastInk = color
+            inkChanges++
+        }
         player?.setInk(color)
         smallIsland?.setInk(color)
         ghostPill?.setInk(color)
@@ -8354,16 +8340,21 @@ internal class MiniPlayerController(
         flight?.setInk(color)
         for (v in spareViews) v.setInk(color)
         // The torch and the camera are white glyphs; on discs of the light frost they vanished.
-        // Tinted only while the discs are under them, and given back as they were after.
-        val want = color.takeIf { discsWanted && discs.any { it?.visibility == View.VISIBLE } && it != android.graphics.Color.WHITE }
+        // Tinted as the card's own buttons are, only while the discs are under them, and given
+        // back as they were after.
+        val want = ink(title = false).takeIf {
+            discsWanted && discs.any { d -> d?.visibility == View.VISIBLE } && it != android.graphics.Color.WHITE
+        }
         if (want == buttonInk) return
         buttonInk = want
+        buttonInkChanges++
         for (side in 0..1) tintButton(button(side), want)
     }
 
     private fun tintButton(v: View, color: Int?) {
         val filter = color?.let { android.graphics.PorterDuffColorFilter(it, android.graphics.PorterDuff.Mode.SRC_IN) }
         if (v is ImageView) { v.colorFilter = filter; return }
+        buttonLayerWrites++
         if (filter == null) v.setLayerType(View.LAYER_TYPE_NONE, null)
         else v.setLayerType(View.LAYER_TYPE_HARDWARE, android.graphics.Paint().apply { colorFilter = filter })
     }
@@ -10015,8 +10006,6 @@ private const val SPREAD_STILL_FRAMES = 3
 /** A spread still between its ends this long after it set out is sent to the nearer one for good. */
 private const val SPREAD_GIVE_UP_MS = 3000L
 
-/** How long materialInk holds its answer: it is read every frame the discs are up. */
-private const val MATERIAL_INK_MS = 500L
 
 /** A finger pulling the open list this far toward the fold takes the cards home with it. */
 private const val SPREAD_PULL_DP = 8f
