@@ -69,7 +69,7 @@ internal class MiniPlayerController(
     var header: WeakReference<View>? = null
     private val suppressedHeaders = WeakViewOverrideRegistry<View>()
     override var nativeSuppressionRequested = false
-    var morph: MiniCardMorph? = null
+    override var morph: MiniCardMorph? = null
     internal var morphScene = false
     internal var artBridged = false
     /** Whether the pill is bound to the music as refresh last bound it, not to a notification. */
@@ -81,8 +81,8 @@ internal class MiniPlayerController(
     private var refreshPosted = false
     private var positionPosted = false
     override var destroyed = false
-    var configuredHeightDp = MiniPlayerConfig.DEFAULT_HEIGHT_DP
-    var config = JSONObject(MiniPlayerConfig.defaultJson())
+    override var configuredHeightDp = MiniPlayerConfig.DEFAULT_HEIGHT_DP
+    override var config = JSONObject(MiniPlayerConfig.defaultJson())
     private var forceHeaderRefresh = true
     var lastPresentationLog = ""
     private var lastActive = false
@@ -92,7 +92,7 @@ internal class MiniPlayerController(
     }
     /** The config is read from preferences only when they change, not on every refresh. */
     private var configStale = true
-    internal val sessionSource = SessionSource(this, this, this, this, sessions, ::describeInk)
+    internal val sessionSource: SessionSource = SessionSource(this, this, this, this, sessions, ::describeInk)
     fun cardTrackChanged() = sessionSource.cardTrackChanged()
 
     /** For `op mini`: the text colours the system gave its own card and rows, by view id. */
@@ -137,9 +137,9 @@ internal class MiniPlayerController(
     } finally { android.os.Trace.endSection() } }
 
     private val followRelative = Matrix()
-    val followHost = Matrix()
-    var followRoot: WeakReference<View>? = null
-    var rowHeldOff = false
+    override val followHost = Matrix()
+    override var followRoot: WeakReference<View>? = null
+    override var rowHeldOff = false
     private var shortcutRow: WeakReference<View>? = null
 
     /**
@@ -157,7 +157,7 @@ internal class MiniPlayerController(
      * faded all the way back in after the wake - switching earlier, it dropped with their fade
      * and came back: a flash.
      */
-    fun followShortcuts() {
+    override fun followShortcuts() {
         val view = player ?: return
         // The spread's morphs place the pill; out as the list, it is not drawn.
         if (spreadMotion.spread != null) {
@@ -330,10 +330,8 @@ internal class MiniPlayerController(
     var followRowFade = 1f
     private var followPillFade = 1f
 
-    val hostInverse = Matrix()
-    val discToScreen = Matrix()
-    val discInverse = Matrix()
-    val scratch = Matrix()
+    override val hostInverse = Matrix()
+    override val scratch = Matrix()
     private val pillSqueeze = Matrix()
     private val drawnL = FloatArray(2)
     private val drawnR = FloatArray(2)
@@ -348,7 +346,7 @@ internal class MiniPlayerController(
             button.width > 0 && button.height > 0
 
     /** A view's centre as drawn, every ancestor's transform included, in host pixels. */
-    fun drawnCentre(v: View, out: FloatArray, inverse: Matrix = hostInverse): Boolean {
+    override fun drawnCentre(v: View, out: FloatArray, inverse: Matrix): Boolean {
         if (!v.isAttachedToWindow || v.width <= 0) return false
         scratch.reset()
         v.transformMatrixToGlobal(scratch)
@@ -360,7 +358,7 @@ internal class MiniPlayerController(
     }
 
     /** The same centre with no transform anywhere: layout positions only. */
-    fun restCentre(v: View, out: FloatArray = FloatArray(2)): FloatArray {
+    override fun restCentre(v: View, out: FloatArray): FloatArray {
         restOrigin(v, out)
         out[0] += v.width / 2f
         out[1] += v.height / 2f
@@ -396,7 +394,7 @@ internal class MiniPlayerController(
         MiniPlayerGeometry.stackBackSizePx(shortcutDiscs.discDiameter()) else shortcutDiscs.discDiameter()
 
     /** Read first, the islands' material key: a new one is a new generation for every disc. */
-    fun discMaterialGeneration(): Int =
+    override fun discMaterialGeneration(): Int =
         MiniPlayerRuntime.islandGeneration() * 2 + if (notificationMaterial()) 1 else 0
 
     fun smallRestWidth(): Int = if (stackedStyle())
@@ -409,7 +407,7 @@ internal class MiniPlayerController(
     override var smallIsland: ShortcutDisc? = null
     override var smallKey: String? = null
     private var smallIconKey: Any? = null
-    val smallRest = FloatArray(2)
+    override val smallRest = FloatArray(2)
     private val smallFollow = Matrix()
     private val smallFollowValues = FloatArray(9)
     private val lastSmallFollow = FloatArray(9)
@@ -734,7 +732,7 @@ internal class MiniPlayerController(
      * flight went through the overshoot invisible, and the landing had no give at all, where
      * the pill's has (2026-09-25). On screen; null when not landing.
      */
-    var landingBox: CoverMorphMotion.Box? = null
+    override var landingBox: CoverMorphMotion.Box? = null
 
     /**
      * The small island's pulse, the super island's smallIslandScaleAnimation: when the island out
@@ -882,8 +880,8 @@ internal class MiniPlayerController(
     private var smallNudging = false
     private var smallNudgeLast = 0L
 
-    fun smallNudgeX() = smallNudgeXs.value * 100f
-    fun smallNudgeY() = smallNudgeYs.value * 100f
+    override fun smallNudgeX() = smallNudgeXs.value * 100f
+    override fun smallNudgeY() = smallNudgeYs.value * 100f
 
     private val smallNudgeFrame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC smallNudge"); try {
@@ -961,7 +959,7 @@ internal class MiniPlayerController(
         smallIconKey = null
     }
 
-    internal val swapMotion = SwapMotion(this)
+    internal val swapMotion: SwapMotion = SwapMotion(this)
 
     /** The small island on screen, at rest. */
     fun smallBoxOnScreen(): CoverMorphMotion.Box {
@@ -990,7 +988,7 @@ internal class MiniPlayerController(
      * island was placed by one size and drawn at the other - a jump sideways as it grew for a
      * flight or went back to its circle. From TakeKazeX's PR #15.
      */
-    fun resizeSmallIsland(small: ShortcutDisc, width: Int, height: Int) {
+    override fun resizeSmallIsland(small: ShortcutDisc, width: Int, height: Int) {
         if (small.layoutParams.width != width || small.layoutParams.height != height) {
             small.layoutParams = small.layoutParams.apply { this.width = width; this.height = height }
         }
@@ -1078,7 +1076,7 @@ internal class MiniPlayerController(
 
     // ---- the row coming up out of nothing, and going back into it
 
-    internal val appearMotion = AppearMotion(this, this, this, this, this) { probe }
+    internal val appearMotion: AppearMotion = AppearMotion(this, this, this, this, this) { probe }
     /** The clock going into the cover or out of it: the row is put away or brought back by that, not by its islands. */
     private fun coverMoving(): Boolean = Main.coverSceneActive() && ClockCollapse.phase().let {
         // The cover's clock only: 高德's map moves the same clock and puts nothing away.
@@ -1094,7 +1092,7 @@ internal class MiniPlayerController(
     private fun rowQuiet(): Boolean = !frameTaken() &&
         !rowHeldOff && followRowFade >= 0.99f && !MiniPlayerScene.aodActive
 
-    internal val probe = MiniPlayerProbe(this)
+    internal val probe: MiniPlayerProbe = MiniPlayerProbe(this)
     fun rowTree(match: String): String = probe.rowTree(match)
     fun describe(): String = probe.describe()
     fun describeFingerprint(): String = probe.describeFingerprint()
@@ -1167,7 +1165,7 @@ internal class MiniPlayerController(
         if (groupMotion.group == null && !appearMotion.appearing) player?.endMorph()
     }
 
-    internal val groupMotion = GroupMotion(this)
+    internal val groupMotion: GroupMotion = GroupMotion(this)
     fun anticipateRows(small: Boolean) = groupMotion.anticipateRows(small)
     fun stopAnticipating() = groupMotion.stopAnticipating()
     /**
@@ -1321,8 +1319,8 @@ internal class MiniPlayerController(
     // ---- the small island coming and going
 
     /** The small island's presence, 0 gone to 1 there, sprung the same way. */
-    val smallGrow = Jelly(SWAP_RESPONSE, SWAP_DAMPING)
-    var smallGrowing = false
+    override val smallGrow = Jelly(SWAP_RESPONSE, SWAP_DAMPING)
+    override var smallGrowing = false
     private var smallGrowLast = 0L
 
     val smallGrowFrame = object : Choreographer.FrameCallback {
@@ -1680,7 +1678,7 @@ internal class MiniPlayerController(
         }
     }
 
-    internal val cardExchange = CardExchange(this)
+    internal val cardExchange: CardExchange = CardExchange(this)
     fun exchangeRunning(): Boolean = cardExchange.exchangeRunning()
     fun tapDuringExchange(small: Boolean) = cardExchange.tapDuringExchange(small)
 
@@ -1688,7 +1686,7 @@ internal class MiniPlayerController(
     fun nativeFor(key: String): View? = if (key == MUSIC_ISLAND)
         transitionHeader()?.takeIf { Main.miniPlayerMediaCardPresent() } else stackHost.rowFor(key)
 
-    internal val stackHost = StackHost(this)
+    internal val stackHost: StackHost = StackHost(this)
     fun cardHeldDy(card: View): Float? = stackHost.cardHeldDy(card)
     val contentTopFrom: String get() = stackHost.contentTopFrom
     val lastScrollRead: String get() = stackHost.lastScrollRead
@@ -1701,7 +1699,7 @@ internal class MiniPlayerController(
     fun stackDrawnTop(): Float = stackHost.stackDrawnTop()
     fun stackForProbe(): ViewGroup? = stackHost.stackForProbe()
 
-    internal val spreadMotion = SpreadMotion(this)
+    internal val spreadMotion: SpreadMotion = SpreadMotion(this)
     fun spreadCollapseAt(x: Float, y: Float): Boolean = spreadMotion.spreadCollapseAt(x, y)
     fun beginSpreadCollapse(startY: Float): Boolean = spreadMotion.beginSpreadCollapse(startY)
     fun moveSpreadCollapse(y: Float) = spreadMotion.moveSpreadCollapse(y)
@@ -1713,16 +1711,16 @@ internal class MiniPlayerController(
     fun spreadFingerMove(y: Float): Boolean = spreadMotion.spreadFingerMove(y)
     fun spreadFingerEnd(velocityY: Float, cancelled: Boolean): Boolean = spreadMotion.spreadFingerEnd(velocityY, cancelled)
 
-    internal val noteMorphMotion = NoteMorphMotion(this)
+    internal val noteMorphMotion: NoteMorphMotion = NoteMorphMotion(this)
     fun collapseRow(key: String, startY: Float): Boolean = noteMorphMotion.collapseRow(key, startY)
-    internal val noteDragMotion = NoteDragMotion(this)
+    internal val noteDragMotion: NoteDragMotion = NoteDragMotion(this)
     fun beginNoteDrag(key: String, fromSmall: Boolean, startY: Float): Boolean =
         noteDragMotion.beginNoteDrag(key, fromSmall, startY)
     fun noteDragMove(y: Float, nudgeX: Float = 0f) = noteDragMotion.noteDragMove(y, nudgeX)
     fun noteDragEnd(velocityY: Float, cancelled: Boolean) = noteDragMotion.noteDragEnd(velocityY, cancelled)
 
     /** A released notification's row under a point on screen, by key. */
-    internal val shortcutDiscs = ShortcutDiscs(this)
+    internal val shortcutDiscs: ShortcutDiscs = ShortcutDiscs(this, this, this, this, this, groupMotion, cardExchange) { binding }
     fun press(side: Int, down: Boolean) = shortcutDiscs.press(side, down)
     fun discAt(x: Float, y: Float): Int? = shortcutDiscs.discAt(x, y)
     fun letGoOnDrag(dx: Float, dy: Float): Boolean = shortcutDiscs.letGoOnDrag(dx, dy)
@@ -2250,7 +2248,7 @@ internal class MiniPlayerController(
     private fun lockScreenLayerSlot(): Int = layerSlot(host)
 
     /** Where in [parent] the child holding the buttons is: the discs go right before it. */
-    fun layerSlot(parent: ViewGroup): Int {
+    override fun layerSlot(parent: ViewGroup): Int {
         var v: View = left
         while (true) {
             val up = v.parent as? View ?: return parent.childCount
@@ -2262,38 +2260,6 @@ internal class MiniPlayerController(
         }
     }
 
-    /**
-     * The discs' parent: keyguard_root_view, not the window root, when the buttons are in it.
-     *
-     * Under the buttons is not enough - the lock screen's depth cut-out (the wallpaper's subject,
-     * deducted_image_view in keyguard_panel_view) is drawn in keyguard_root_view too, after
-     * everything before that view in the root and before the buttons' keyguard_bottom_area. A disc
-     * in the root, right before keyguard_root_view, was drawn under the subject: wherever the
-     * subject reached the torch or the camera, that part of the disc was gone and the icon sat on
-     * the picture (#18, measured: the disc's pixels over the subject equal the subject's). Right
-     * before the buttons' own branch in keyguard_root_view it is over the subject and under the
-     * icon, and otherwise stacked exactly as the buttons are, the shade's blur included.
-     */
-    fun discParent(): ViewGroup {
-        val root = followRoot?.get() as? ViewGroup ?: return host
-        var v: View? = left
-        while (v != null && v !== host) {
-            if (v === root) return root
-            v = v.parent as? View
-        }
-        return host
-    }
-
-    /** Right before the buttons' branch in [parent], with nothing but the other disc between. */
-    fun discInPlace(disc: View, parent: ViewGroup): Boolean {
-        if (disc.parent !== parent) return false
-        val slot = layerSlot(parent)
-        val at = parent.indexOfChild(disc)
-        if (at < 0 || at >= slot) return false
-        for (i in at + 1 until slot) if (parent.getChildAt(i) !is ShortcutDisc) return false
-        return true
-    }
-
     /** The torch's right edge or the camera's left edge, where the pill's touch area stops. */
     private fun buttonEdge(button: View, inner: Boolean): Float? {
         if (!button.isShown || button.width <= 0) return null
@@ -2301,7 +2267,7 @@ internal class MiniPlayerController(
         return if (inner) (xy[0] + button.width).toFloat() else xy[0].toFloat()
     }
 
-    fun onButton(button: View, x: Float, y: Float): Boolean {
+    override fun onButton(button: View, x: Float, y: Float): Boolean {
         if (!button.isShown || button.width <= 0) return false
         val xy = IntArray(2).also(button::getLocationOnScreen)
         return x >= xy[0] && x < xy[0] + button.width && y >= xy[1] && y < xy[1] + button.height
@@ -2535,7 +2501,7 @@ internal class MiniPlayerController(
         prewarmSpares()
     } finally { android.os.Trace.endSection() } }
 
-    internal val binding = MiniPlayerBinding(this, this, this, this, swapMotion, noteMorphMotion, shortcutDiscs,
+    internal val binding: MiniPlayerBinding = MiniPlayerBinding(this, this, this, this, swapMotion, noteMorphMotion, shortcutDiscs,
         sessionSource, cardExchange)
 
 

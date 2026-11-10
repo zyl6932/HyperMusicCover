@@ -2,11 +2,14 @@ package com.os4.musiccover.island
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.media.session.MediaController
 import android.os.Handler
 import android.view.View
 import android.view.ViewGroup
 import com.os4.musiccover.CoverMorphMotion
+import java.lang.ref.WeakReference
+import org.json.JSONObject
 
 /*
  * What the mini player's parts (SessionSource, the motions, StackHost and the rest) are given of
@@ -31,6 +34,15 @@ internal interface RowViews {
     val smallIsland: ShortcutDisc?
     /** Views kept from earlier switches for the next one to take. */
     val spareViews: List<MiniPlayerView>
+    /** The small island's resting centre in host pixels, and its grow spring. */
+    val smallRest: FloatArray
+    val smallGrow: Jelly
+    /** The lock screen root the buttons are followed in, and host-to-screen matrices. */
+    val followRoot: WeakReference<View>?
+    val followHost: Matrix
+    val hostInverse: Matrix
+    /** Scratch for one measurement at a time, on the main thread. */
+    val scratch: Matrix
     /** The pill's place in the row, sprung (controller, "the row's layout, animated"). */
     val rowLeft: Jelly
     val rowWidth: Jelly
@@ -38,6 +50,16 @@ internal interface RowViews {
     fun stackedStyle(): Boolean
     fun dp(value: Float): Int
     fun notificationMaterial(): Boolean
+    fun discMaterialGeneration(): Int
+    fun smallNudgeX(): Float
+    fun smallNudgeY(): Float
+    fun resizeSmallIsland(small: ShortcutDisc, width: Int, height: Int)
+    /** A view's centre as drawn, every ancestor's transform included, in host pixels. */
+    fun drawnCentre(v: View, out: FloatArray, inverse: Matrix = hostInverse): Boolean
+    /** The same centre with no transform anywhere: layout positions only. */
+    fun restCentre(v: View, out: FloatArray = FloatArray(2)): FloatArray
+    fun layerSlot(parent: ViewGroup): Int
+    fun onButton(button: View, x: Float, y: Float): Boolean
 }
 
 /** The row's state, read only. What a part writes is in [RowEdits]. */
@@ -49,6 +71,12 @@ internal interface RowState {
     val nativeSuppressionRequested: Boolean
     val selectedIsland: String?
     val smallKey: String?
+    val config: JSONObject
+    val configuredHeightDp: Float
+    val morph: MiniCardMorph?
+    val landingBox: CoverMorphMotion.Box?
+    val rowHeldOff: Boolean
+    val smallGrowing: Boolean
     val rowKnown: Boolean
     val rowAnimating: Boolean
     fun pillSeen(): Boolean
@@ -60,6 +88,7 @@ internal interface RowEdits {
     var rowKnown: Boolean
     var lastTrack: String
     var cachedCover: Bitmap?
+    var rowHeldOff: Boolean
 }
 
 /** What a part asks the controller to do to the row: refresh it, lay it out, apply its frame. */
@@ -67,6 +96,8 @@ internal interface RowHost {
     fun refresh()
     fun scheduleRefresh()
     fun applyRow()
+    /** Moves the pill and the discs with the buttons, as the preDraw does. */
+    fun followShortcuts()
     /** The pill's media buttons, sent to the session the row follows. */
     fun togglePlayback()
     fun skip(next: Boolean)
