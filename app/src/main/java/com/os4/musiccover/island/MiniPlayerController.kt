@@ -2230,10 +2230,15 @@ internal class MiniPlayerController(
         }
     }
 
+    /**
+     * Busy for a group - the row and the lock screen's cards moving as one: the motions that keep
+     * it from starting (M0, the subset as it was).
+     */
+    private fun busyForGroup(): Boolean = noteMorphKey != null || flight != null || exchange != null
+
     private fun prepareGroupUnsafe(native: View, toNative: Boolean): MiniCardMorph? {
         val view = player ?: return null
-        if (controller?.takeIf(::isUsable) == null || noteMorphKey != null || flight != null ||
-            exchange != null) return null
+        if (controller?.takeIf(::isUsable) == null || busyForGroup()) return null
         if (toNative && selectedIsland != MUSIC_ISLAND && smallKey != MUSIC_ISLAND) return null
         endSwap()
         endRow()
@@ -3188,13 +3193,19 @@ internal class MiniPlayerController(
     }
 
     /**
+     * Busy for a flight into or out of the cover or the lyrics: the motions that keep it from
+     * starting (M0, the subset as it was).
+     */
+    private fun busyForSceneFlight(): Boolean = noteMorphKey != null || flight != null || exchange != null
+
+    /**
      * Into the cover or out of it with other islands in the row: the music goes as a flight, as
      * it does pulled up into its card or down out of it - the row's next island grows into the
      * pill as it leaves, and the others make room as it comes back. The pill itself going into
      * the cover, the others stood still and the pill swapped islands in one jump at the end.
      */
     private fun startSceneFlight(native: View, toNative: Boolean): Boolean {
-        if (noteMorphKey != null || flight != null || exchange != null) return false
+        if (busyForSceneFlight()) return false
         val view = player?.takeIf { it.visibility == View.VISIBLE } ?: return false
         endSwap()
         endRow()
@@ -4146,10 +4157,16 @@ internal class MiniPlayerController(
 
     fun exchangeRunning(): Boolean = exchange != null
 
+    /**
+     * Busy for an exchange - one island out as its card, the expanded one home: the motions that
+     * keep it from starting (M0, the subset as it was).
+     */
+    private fun busyForExchange(): Boolean = exchange != null || morph != null || noteMorphKey != null || flight != null || group != null
+
     /** [up] - the pill's island or the small one - goes out in place of the one out now. */
     private fun startExchange(up: String, toCover: Boolean = false): Boolean { android.os.Trace.beginSection("MC startExchange"); try {
         val down = expandedKey()
-        val busy = exchange != null || morph != null || noteMorphKey != null || flight != null || group != null
+        val busy = busyForExchange()
         if (down == null || down == up || busy) {
             MiniPlayerRuntime.noteTouch("exchange refused: out=${down?.takeLast(6)} busy=$busy")
             return false
@@ -4738,6 +4755,12 @@ internal class MiniPlayerController(
     }
 
     /**
+     * Busy for a running morph taken over as a notification's flight: the motions that keep it from
+     * starting (M0, the subset as it was).
+     */
+    private fun busyForAdoptNote(): Boolean = exchange != null || rowWaitKey != null
+
+    /**
      * The notification opening or folding back as the flight, made a [Mover] of a new switch as
      * it is: its morph handed over (MiniCardMorph.handTo) at its progress and speed, the flight
      * its stand-in, its row end where the flight was headed. Out on its way up, it is the switch's
@@ -4747,7 +4770,7 @@ internal class MiniPlayerController(
     private fun adoptNote(key: String): Switch? {
         val running = morph ?: return null
         val view = flight ?: return null
-        if (exchange != null || rowWaitKey != null) return null
+        if (busyForAdoptNote()) return null
         val native = running.card
         flushTurn(key)
         // Let go by no finger yet: from here the switch moves it, on its spring.
@@ -4966,11 +4989,18 @@ internal class MiniPlayerController(
         override fun onSettled(morph: MiniCardMorph, toNative: Boolean, completed: Boolean) {}
     }
 
+    /**
+     * Busy for a lone stacked card's list, from a pull: the motions that keep it from starting (M0,
+     * the subset as it was).
+     */
+    private fun busyForStackSpread(): Boolean = spread != null ||
+        morph != null || exchange != null || noteMorphKey != null || group != null ||
+        flight != null
+
     /** Even a lone stacked card uses the list whose downward pull returns it to its island. */
     fun beginStackSpread(startY: Float): Boolean {
-        if (!stackedStyle() || islandKeys.isEmpty() || spread != null ||
-            morph != null || exchange != null || noteMorphKey != null || group != null ||
-            flight != null || player?.visibility != View.VISIBLE) return false
+        if (!stackedStyle() || islandKeys.isEmpty() || busyForStackSpread() ||
+            player?.visibility != View.VISIBLE) return false
         // The music alone, and no notification in the stack either: there is no list to spread
         // out to. The stack read its fold again a moment after the lift, the spread folded with
         // it, and the card went back into the pill by itself every time (Xiaomi 13, 2026-10-14).
@@ -5031,13 +5061,19 @@ internal class MiniPlayerController(
     }
 
     /**
+     * Busy for the whole row out as the stack's list (a spread already out is asked first, on its
+     * own): the motions that keep it from starting (M0, the subset as it was).
+     */
+    private fun busyForSpread(): Boolean = morph != null || exchange != null || noteMorphKey != null || group != null ||
+        flight != null
+
+    /**
      * The stack island tapped or pulled open: the whole row out. With another motion under way -
      * a card out, a switch, a flight - only the stack opens, as it did before (openStack).
      */
     private fun openSpread(why: String, finger: SpreadFinger? = null) { android.os.Trace.beginSection("MC openSpread"); try {
         if (spread != null) return
-        val busy = morph != null || exchange != null || noteMorphKey != null || group != null ||
-            flight != null
+        val busy = busyForSpread()
         if (busy || player?.visibility != View.VISIBLE) {
             MiniPlayerRuntime.noteTouch("spread refused ($why): busy=$busy; the stack alone")
             LockIslands.openStack(why)
@@ -5763,6 +5799,12 @@ internal class MiniPlayerController(
     private var stackRef: WeakReference<View>? = null
 
     /**
+     * Busy for a notification island out to its row: the motions that keep it from starting (M0,
+     * the subset as it was).
+     */
+    private fun busyForExpandNote(): Boolean = noteMorphKey != null || morph != null || exchange != null
+
+    /**
      * A tap on a notification island opens it into its own row, as the music island opens into
      * the media card: the stack is given the notification back, and once its row is laid out
      * the island becomes that row - its picture, title and text landing on the row's own.
@@ -5791,7 +5833,7 @@ internal class MiniPlayerController(
             MiniPlayerRuntime.noteTouch("open: ${key.takeLast(6)} turned out on its way home")
             return
         }
-        if (noteMorphKey != null || morph != null || exchange != null) return
+        if (busyForExpandNote()) return
         // Every layout shares one expanded card: the previous island returns as this one opens.
         if (expandedKey()?.let { it != key } == true) {
             startExchange(key)
@@ -5876,6 +5918,12 @@ internal class MiniPlayerController(
     }
 
     /**
+     * Busy for a row pulled back into its island (a spread is asked first, on its own): the motions
+     * that keep it from starting (M0, the subset as it was).
+     */
+    private fun busyForCollapseRow(): Boolean = noteMorphKey != null || morph != null || exchange != null
+
+    /**
      * A swipe down on a notification's row that came out of the row of islands: it goes back in,
      * the row becoming the pill, as the media card folds back into it. It comes in as the
      * flight and lands on the pill's place; only then does the pill take it, so nothing in the
@@ -5884,7 +5932,7 @@ internal class MiniPlayerController(
     fun collapseRow(key: String, startY: Float): Boolean { android.os.Trace.beginSection("MC collapseRow"); try {
         // Out as the list, a pull down is the stack's own, which takes the whole row home.
         if (spread != null) return false
-        if (noteMorphKey != null || morph != null || exchange != null) {
+        if (busyForCollapseRow()) {
             MiniPlayerRuntime.noteTouch("collapse refused: noteMorph=${noteMorphKey != null} " +
                 "morph=${morph != null} exchange=${exchange != null}")
             return false
@@ -6353,6 +6401,12 @@ internal class MiniPlayerController(
         setFlightOut(toRow)
     }
 
+    /**
+     * Busy for a finger pulling a notification island out: the motions that keep it from starting
+     * (M0, the subset as it was).
+     */
+    private fun busyForNoteDrag(): Boolean = noteMorphKey != null || morph != null || exchange != null
+
     fun beginNoteDrag(key: String, fromSmall: Boolean, startY: Float): Boolean {
         // Folded natively, a pull past the threshold opens the stack's list as a tap does; the
         // pull is taken (true) so nothing else runs under it, and the island springs back as it
@@ -6370,7 +6424,7 @@ internal class MiniPlayerController(
             if (spread == null) player?.springNudgeBack(0f, 0f)
             return true
         }
-        if (noteMorphKey != null || morph != null || exchange != null) return false
+        if (busyForNoteDrag()) return false
         val view = player ?: return false
         if (view.visibility != View.VISIBLE) return false
         if (fromSmall && key != smallKey) return false
@@ -7776,9 +7830,15 @@ internal class MiniPlayerController(
 
     fun density(): Float = context.resources.displayMetrics.density
 
+    /**
+     * Busy for the music's own switch pulled from either end (an exchange is asked next, on its
+     * own): the motions that keep it from starting (M0, the subset as it was).
+     */
+    private fun busyForDrag(): Boolean = morph != null || spread != null
+
     /** The dynamic switch can be pulled from this end right now. */
     fun canDrag(fromNative: Boolean, small: Boolean = false): Boolean {
-        if (!config.getBoolean(MiniPlayerConfig.ENABLED) || morph != null || spread != null) return false
+        if (!config.getBoolean(MiniPlayerConfig.ENABLED) || busyForDrag()) return false
         // With other islands in the row the music goes out and back as a flight, as they do.
         if (musicFlies() || exchange != null) return false
         // Only the music island has a card to open into - in the pill, or as the small island.
@@ -8014,6 +8074,13 @@ internal class MiniPlayerController(
         handler.post { refreshPosted = false; refresh() }
     }
 
+    /**
+     * Busy for the row switching to an island that has just taken the pill's place: the motions
+     * that keep it from starting (M0, the subset as it was).
+     */
+    private fun busyForTakerSwap(): Boolean = swap != null || morph != null || exchange != null || flight != null ||
+        group != null || rowWaitKey != null || islandDragging
+
     private fun refreshUnsafe() { android.os.Trace.beginSection("MC refresh"); try {
         lottiesFollowDoze()
         if (configStale) {
@@ -8154,8 +8221,7 @@ internal class MiniPlayerController(
             it != selected && it in islandKeys && isFocusIsland(it) && takesPlace(selected, it, big = true)
         }
         if (taker != null) {
-            val busy = swap != null || morph != null || exchange != null || flight != null ||
-                group != null || rowWaitKey != null || islandDragging
+            val busy = busyForTakerSwap()
             if (busy) islandKnown.remove(taker)
             else {
                 val oldBig = selected
