@@ -827,7 +827,7 @@ internal class MiniPlayerController(
      * the threshold - and the place is the row's again. Until then it is the flight's to come
      * back to.
      */
-    private var flightOut = false
+    internal var flightOut = false
 
     /**
      * The flight is on its last stretch home: the real small island is already in its place
@@ -3081,7 +3081,7 @@ internal class MiniPlayerController(
      * [key] goes out as its card: the music is chosen as the media card, a notification is
      * given back to the stack. The card is kept out of sight until a morph takes it.
      */
-    private fun letOut(key: String) { android.os.Trace.beginSection("MC letOut"); try {
+    fun letOut(key: String) { android.os.Trace.beginSection("MC letOut"); try {
         if (key != MUSIC_ISLAND) {
             LockIslands.release(key)
             return
@@ -3157,7 +3157,7 @@ internal class MiniPlayerController(
         for ((key, out) in due) tellTurn(key, out)
     }
 
-    private fun turnTo(key: String, out: Boolean) {
+    fun turnTo(key: String, out: Boolean) {
         // Out again at once: the stack puts its row back with an animation of its own, and told
         // 200ms late, that played mid-way through the card's way up - the stopwatch flashed on
         // a second tap (2026-09-26). At once, the card is still the pill then. Home again is
@@ -3329,7 +3329,7 @@ internal class MiniPlayerController(
     private fun busyForExchange(): Boolean = exchange != null || morph != null || noteMorphKey != null || flight != null || group != null
 
     /** [up] - the pill's island or the small one - goes out in place of the one out now. */
-    private fun startExchange(up: String, toCover: Boolean = false): Boolean { android.os.Trace.beginSection("MC startExchange"); try {
+    fun startExchange(up: String, toCover: Boolean = false): Boolean { android.os.Trace.beginSection("MC startExchange"); try {
         val down = expandedKey()
         val busy = busyForExchange()
         if (down == null || down == up || busy) {
@@ -3846,7 +3846,7 @@ internal class MiniPlayerController(
      * the music's place as the music goes up - one card at a time; it stood there beside the
      * cover's card before (2026-09-25).
      */
-    private fun openCover() {
+    fun openCover() {
         MiniPlayerRuntime.forgetRestoreScene()
         // A notification still on its way - opening, or springing back out after a pull too
         // short to collapse it - is not "out" yet to expandedKey, and the cover came up over it
@@ -3859,7 +3859,7 @@ internal class MiniPlayerController(
             moving != null && morph != null -> {
                 val m = morph!!
                 trace("cover takes ${moving.takeLast(6)} in: p=${"%.2f".format(m.progress)} toRow=${m.toNative} " +
-                    "out=$flightOut drag=${noteDrag != null} " + smallState())
+                    "out=$flightOut drag=${noteDragMotion.noteDrag != null} " + smallState())
                 val inPill = selectedIsland == MUSIC_ISLAND
                 val x = if (inPill || smallKey == MUSIC_ISLAND) adoptNote(moving) else null
                 if (x == null) {
@@ -3870,7 +3870,7 @@ internal class MiniPlayerController(
                 MiniPlayerRuntime.noteTouch("cover: ${moving.takeLast(6)} taken in, music up")
             }
             moving != null && rowWaitKey == moving -> {
-                noteDrag = null
+                noteDragMotion.noteDrag = null
                 abandonNoteMorph(moving)
                 MiniPlayerRuntime.noteTouch("cover: ${moving.takeLast(6)} not opened")
             }
@@ -3940,7 +3940,7 @@ internal class MiniPlayerController(
         flushTurn(key)
         // Let go by no finger yet: from here the switch moves it, on its spring.
         if (running.held) running.release(running.toNative, 0f)
-        noteDrag = null
+        noteDragMotion.noteDrag = null
         // Pulled and not let go, it was not out yet: its home is given up now, as a tap's is.
         if (running.toNative) setFlightOut(true) else takeInEarly(key)
         val home = if (flightHome == HOME_PILL) LAND_PILL else LAND_SMALL
@@ -4011,9 +4011,9 @@ internal class MiniPlayerController(
     /** A small island tapped: it takes the pill first, and opens once it has. */
     var pendingExpand: String? = null
 
-    private var rowWaitKey: String? = null
-    private var rowWaitSince = 0L
-    private var appListAsked = false
+    var rowWaitKey: String? = null
+    var rowWaitSince = 0L
+    var appListAsked = false
     private var stackRef: WeakReference<View>? = null
 
     /**
@@ -4046,8 +4046,8 @@ internal class MiniPlayerController(
         // turns a switch (the super island's canClick waits for nothing). It used to do nothing
         // until the flight had landed.
         if (noteMorphKey == key && flight != null && morph?.toNative == false) {
-            noteDrag = null
-            releaseNote(true, 0f)
+            noteDragMotion.noteDrag = null
+            noteDragMotion.releaseNote(true, 0f)
             MiniPlayerRuntime.noteTouch("open: ${key.takeLast(6)} turned out on its way home")
             return
         }
@@ -4092,7 +4092,7 @@ internal class MiniPlayerController(
     } finally { android.os.Trace.endSection() } }
 
     /** Frame by frame until the released notification's row is in the stack and laid out. */
-    private val rowWait = object : Choreographer.FrameCallback {
+    val rowWait = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC rowWait"); try {
             val key = rowWaitKey ?: return
             // The stack island's other rows stay out of sight, piled, till the morph moves them.
@@ -4127,7 +4127,7 @@ internal class MiniPlayerController(
                 Xp.log("MCIsland: $key not opened: $why")
                 MiniPlayerRuntime.noteTouch("open $why")
                 rowWaitKey = null
-                noteDrag = null
+                noteDragMotion.noteDrag = null
                 abandonNoteMorph(key)
                 return
             }
@@ -4191,7 +4191,7 @@ internal class MiniPlayerController(
             if (player?.visibility != View.VISIBLE || player?.restBoxOnScreen() == null) {
                 MiniPlayerRuntime.noteTouch("collapse: no pill, recaptured")
                 noteMorphKey = null
-                noteDrag = null
+                noteDragMotion.noteDrag = null
                 dropFlight()
                 takeIn(key)
                 refresh()
@@ -4206,7 +4206,7 @@ internal class MiniPlayerController(
             refresh()
             swapMotion.startSwap(oldBig, oldSmall, intoSmall = true)
         }
-        noteDrag = NoteDrag(key, startY, opening = false,
+        noteDragMotion.noteDrag = NoteDragMotion.NoteDrag(key, startY, opening = false,
             MiniPlayerRuntime.dragThresholdPx(density()), MiniPlayerRuntime.dragNudgePx(density()))
         // The row laid out with this notification as its small island: the pill gives it room
         // on its spring while the row comes down, as the super island's big island does.
@@ -4221,10 +4221,10 @@ internal class MiniPlayerController(
 
     /** The flight: a pill of its own, bound to [key]'s notification, laid out at the pill's size. */
     var flight: MiniPlayerView? = null
-    private var flightFromSmall = false
+    var flightFromSmall = false
 
     /** Where the flight's island lives when it is in the row: the pill, or the small island. */
-    private var flightHome = HOME_SMALL
+    var flightHome = HOME_SMALL
 
     /** Notifications let out of the pill itself: pulled down, their row goes back there. */
     val releasedFromPill = HashSet<String>()
@@ -4248,7 +4248,7 @@ internal class MiniPlayerController(
      * island's CHANGE_EASE (SmallIslandToBigIsland); coming back, that island shrinks into the
      * small place again (BigIslandToSmallIsland) while the flight lands on the pill.
      */
-    private fun setFlightOut(out: Boolean) {
+    fun setFlightOut(out: Boolean) {
         val key = noteMorphKey
         if (flight == null || key == null || out == flightOut) return
         flightOut = out
@@ -4278,7 +4278,7 @@ internal class MiniPlayerController(
         }
     }
 
-    private fun prepareFlight(key: String): MiniPlayerView? { android.os.Trace.beginSection("MC prepareFlight"); try {
+    fun prepareFlight(key: String): MiniPlayerView? { android.os.Trace.beginSection("MC prepareFlight"); try {
         val music = if (key == MUSIC_ISLAND) controller?.takeIf(::isUsable) ?: return null else null
         val note = if (music == null) LockIslands.noteFor(key) ?: return null else null
         val pill = player ?: return null
@@ -4373,15 +4373,15 @@ internal class MiniPlayerController(
             circle = useFlight && home == HOME_SMALL && !stackedStyle(),
             nativeDy = if (toRow) { { settleDy(row, emptyList()) } } else null)
         morph = next
-        noteSpan = noteDragSpan(row, useFlight && home == HOME_SMALL)
-        val drag = noteDrag?.takeIf { it.key == key }
+        noteDragMotion.noteSpan = noteDragMotion.noteDragSpan(row, useFlight && home == HOME_SMALL)
+        val drag = noteDragMotion.noteDrag?.takeIf { it.key == key }
         if (useFlight && toRow && home == HOME_SMALL) {
             // The flight is the small island from here: one hands over to the other in place.
             smallIsland?.visibility = View.GONE
             smallGrowing = false
             Gen.unframe(smallGrowFrame)
         }
-        if (drag != null) drag.span = noteSpan
+        if (drag != null) drag.span = noteDragMotion.noteSpan
         // The island's own nudge is the morph's from here, as the pill's is handed to the card's.
         if (drag != null && drag.opening) {
             if (flightFromSmall) clearSmallNudge() else player?.clearNudge()
@@ -4391,7 +4391,7 @@ internal class MiniPlayerController(
         if (!started) {
             morph = null
             noteMorphKey = null
-            noteDrag = null
+            noteDragMotion.noteDrag = null
             dropFlight()
             if (!toRow) takeIn(key)
             refresh()
@@ -4400,12 +4400,12 @@ internal class MiniPlayerController(
         if (drag != null) {
             if (drag.ended) {
                 // The finger already let go, committed: it opens from where the pull left it.
-                noteDrag = null
-                val (p, nudge) = notePose(drag)
+                noteDragMotion.noteDrag = null
+                val (p, nudge) = noteDragMotion.notePose(drag)
                 next.drag(p, nudge, drag.nudgeX)
-                next.release(drag.toRow, noteVelocity(drag))
+                next.release(drag.toRow, noteDragMotion.noteVelocity(drag))
                 if (!drag.toRow) takeInEarly(key)
-            } else applyNoteDrag()
+            } else noteDragMotion.applyNoteDrag()
         }
         // The small place, the pill's width and the small island's presence follow the flight:
         // freed (the next island comes up, or the pill takes the room back) or held (what is
@@ -4472,7 +4472,7 @@ internal class MiniPlayerController(
             if (key == STACK_ISLAND || LockIslands.isAppGroup(key)) endPile(toNative)
             if (key == MUSIC_ISLAND) morphScene = false
             if (this@MiniPlayerController.morph === morph) this@MiniPlayerController.morph = null
-            noteDrag = null
+            noteDragMotion.noteDrag = null
             val flew = flight != null
             val home = flightHome
             val oldSmall = smallKey
@@ -4563,198 +4563,13 @@ internal class MiniPlayerController(
         placeSmallIsland(null, small.transitionAlpha)
     }
 
-    // ---- a finger pulling a notification island out
-
-    /**
-     * A notification island - the pill's or the small one - pulled up by the finger into its
-     * row, as the music pill is pulled up into the media card. The row only exists once the
-     * stack has been given the notification back, a frame or two later, so the finger is
-     * followed from the start and the morph picks up wherever it has got to when the row is
-     * there. Let go before then, the pull's own distance and speed decide.
-     */
-    class NoteDrag(
-        val key: String,
-        val startY: Float,
-        /** Up out of the island into its row; false for a row pulled down into its island. */
-        val opening: Boolean,
-        val threshold: Float,
-        val nudgeLimit: Float,
-    ) {
-        var y = startY
-        var nudgeX = 0f
-        var ended = false
-        /** The stack's list asked for: the pull went past its threshold. */
-        var listAsked = false
-        /** Where the lift sends it: its row (true) or its island. */
-        var toRow = false
-        /** Toward the far end, in pixels per second, as the lift measured it. */
-        var speed = 0f
-        /** The pull's length, from the island to the row: unknown (0) until the row is there. */
-        var span = 0f
-
-        fun pulled() = if (opening) startY - y else y - startY
-    }
-
-    var noteDrag: NoteDrag? = null
-
-    /** The running notification morph's pull length: what a finger catching it moves over. */
-    private var noteSpan = 0f
-
-    private fun spanOf(drag: NoteDrag) = drag.span.takeIf { it > 0f } ?: NOTE_SPAN_MIN_DP * density()
-
-    /** The pull as the music's is posed (MiniPlayerRuntime.pose): progress, then nudge. */
-    private fun notePose(drag: NoteDrag): Pair<Float, Float> = MiniPlayerRuntime.pose(drag.pulled(),
-        !drag.opening, drag.threshold, spanOf(drag), drag.nudgeLimit)
-
-    /** The lift's speed as the morph's progress speed. */
-    private fun noteVelocity(drag: NoteDrag): Float =
-        (if (drag.opening) drag.speed else -drag.speed) / spanOf(drag)
-
-    /** A notification's morph, let go by a finger that caught it: to its row or its island. */
-    private fun releaseNote(toRow: Boolean, velocity: Float) {
-        morph?.release(toRow, velocity)
-        noteMorphKey?.let { turnTo(it, toRow) }
-        if (toRow && noteMorphKey == STACK_ISLAND) showStackAsList("turned out")
-        // A flight headed out frees its home; headed home, it holds it again.
-        setFlightOut(toRow)
-    }
-
-    /**
-     * Busy for a finger pulling a notification island out: the motions that keep it from starting
-     * (M0, the subset as it was).
-     */
-    private fun busyForNoteDrag(): Boolean = noteMorphKey != null || morph != null || exchange != null
-
-    fun beginNoteDrag(key: String, fromSmall: Boolean, startY: Float): Boolean {
-        // Folded natively, a pull past the threshold opens the stack's list as a tap does; the
-        // pull is taken (true) so nothing else runs under it, and the island springs back as it
-        // goes.
-        if (spreadMotion.spread != null) return false
-        if (key == STACK_ISLAND && LockIslands.foldsNatively()) {
-            // The pill stays where the finger has lifted it, and the morph starts from there
-            // (startSpreadMorphs takes the nudge over). Sprung home here, it dropped back down
-            // for the frame before the morph came up past it (#122).
-            val lift = (-(player?.nudgeY ?: 0f)).coerceAtLeast(0f)
-            player?.holdNudge()
-            springSmallNudgeBack(0f, 0f)
-            spreadMotion.openSpread("pull", SpreadFinger(startY, lift))
-            // Refused (another motion under way): nothing takes the nudge over.
-            if (spreadMotion.spread == null) player?.springNudgeBack(0f, 0f)
-            return true
-        }
-        if (busyForNoteDrag()) return false
-        val view = player ?: return false
-        if (view.visibility != View.VISIBLE) return false
-        if (fromSmall && key != smallKey) return false
-        if (!fromSmall && selectedIsland != key) return false
-        // Another island out as its card: the pull opens this one in its stead, the two
-        // exchanged on their own spring (not under the finger, which only asked for it).
-        if (expandedKey()?.let { it != key } == true) {
-            player?.springNudgeBack(0f, 0f)
-            springSmallNudgeBack(0f, 0f)
-            // The music left the cover for the island out now (a page opened from it): pulled
-            // back up it goes into the cover, as a tap does. Exchanged as a plain card it came
-            // up over the wallpaper with the cover still held off (#63).
-            if (key == MUSIC_ISLAND && MiniPlayerRuntime.takeRestoreScene()) {
-                openCover()
-                return true
-            }
-            return startExchange(key)
-        }
-        if (prepareFlight(key) == null) return false
-        swapMotion.endSwap()
-        resetIslandDrag()
-        // The island keeps following the finger until its row is there to morph into; its
-        // nudge is handed to the morph then (startNoteMorph), as the pill's is to the card's.
-        noteMorphKey = key
-        flightFromSmall = fromSmall
-        flightHome = if (fromSmall) HOME_SMALL else HOME_PILL
-        flightOut = false
-        noteDrag = NoteDrag(key, startY, opening = true,
-            MiniPlayerRuntime.dragThresholdPx(density()), MiniPlayerRuntime.dragNudgePx(density()))
-        letOut(key)
-        rowWaitKey = key
-        rowWaitSince = android.os.SystemClock.uptimeMillis()
-        appListAsked = false
-        Gen.frame(rowWait)
-        return true
-    }
-
-    fun noteDragMove(y: Float, nudgeX: Float = 0f) { android.os.Trace.beginSection("MC t.noteDragMove"); try {
-        if (spreadMotion.spreadFingerMove(y)) return
-        val drag = noteDrag ?: return
-        drag.y = y
-        drag.nudgeX = nudgeX
-        applyNoteDrag()
-    } finally { android.os.Trace.endSection() } }
-
-    /**
-     * The finger is off: the music's lift decides (MiniPlayerRuntime.lift). Let go before the
-     * row was there, the decision takes the shortest span a pull can have and the real one
-     * sets the speed once the row is laid out (startNoteMorph) - with a 1px span, the flight
-     * was once flung hundreds of times too fast (filmed 2026-09-25).
-     */
-    fun noteDragEnd(velocityY: Float, cancelled: Boolean) {
-        if (spreadMotion.spreadFingerEnd(velocityY, cancelled)) return
-        val drag = noteDrag ?: return
-        drag.ended = true
-        val speed = if (drag.opening) -velocityY else velocityY
-        val (toRow, _) = MiniPlayerRuntime.lift(drag.pulled(), speed, !drag.opening, drag.threshold,
-            spanOf(drag), cancelled)
-        drag.toRow = toRow
-        drag.speed = if (drag.pulled() > drag.threshold) speed else 0f
-        // Flung open short of the threshold: the list now, not once the card is there.
-        if (toRow && drag.opening && drag.key == STACK_ISLAND && !drag.listAsked) {
-            drag.listAsked = true
-            showStackAsList("flung")
-        }
-        val running = morph
-        if (running != null) {
-            noteDrag = null
-            releaseNote(toRow, noteVelocity(drag))
-            return
-        }
-        if (!toRow && drag.opening) {
-            // Let go short, before the row was even there: nothing opened.
-            noteDrag = null
-            abandonNoteMorph(drag.key)
-        }
-        // Headed for the row: its arrival opens it on its own.
-    }
-
-    private fun applyNoteDrag() {
-        val drag = noteDrag ?: return
-        // The list only once the pull means it: a pull let go short would have pressed the
-        // clock down and let it back up for nothing.
-        if (drag.key == STACK_ISLAND && drag.opening && !drag.listAsked && drag.pulled() > drag.threshold) {
-            drag.listAsked = true
-            showStackAsList("pulled")
-        }
-        if (drag.ended) return
-        val running = morph
-        if (running != null) {
-            val (p, nudge) = notePose(drag)
-            running.drag(p, nudge, drag.nudgeX)
-            return
-        }
-        if (!drag.opening) return
-        // No row to morph into yet: the island itself goes on following the finger, as far as
-        // the morph would have carried it - rubber-banded to the threshold, then one to one.
-        val pulled = drag.pulled()
-        val up = if (pulled <= drag.threshold) MiniCardMorph.rubber(pulled.coerceAtLeast(0f), drag.nudgeLimit)
-            else MiniCardMorph.rubber(drag.threshold, drag.nudgeLimit) + (pulled - drag.threshold)
-        if (flightFromSmall) setSmallNudge(drag.nudgeX, -up) else player?.setNudge(drag.nudgeX, -up)
-    }
-
-    /** The row's arrival: how far the pull has to go, from the island's place to the row's. */
-    private fun noteDragSpan(row: View, fromSmall: Boolean): Float {
-        val start = (if (fromSmall) smallBoxOnScreen() else player?.restBoxOnScreen())?.y ?: return 1f
-        val xy = IntArray(2).also(row::getLocationOnScreen)
-        return kotlin.math.abs(start - xy[1]).coerceAtLeast(NOTE_SPAN_MIN_DP * density())
-    }
-
+    internal val noteDragMotion = NoteDragMotion(this)
+    fun beginNoteDrag(key: String, fromSmall: Boolean, startY: Float): Boolean =
+        noteDragMotion.beginNoteDrag(key, fromSmall, startY)
+    fun noteDragMove(y: Float, nudgeX: Float = 0f) = noteDragMotion.noteDragMove(y, nudgeX)
+    fun noteDragEnd(velocityY: Float, cancelled: Boolean) = noteDragMotion.noteDragEnd(velocityY, cancelled)
     /** A notification that set out and did not open: back in the row as it was. */
-    private fun abandonNoteMorph(key: String) {
+    fun abandonNoteMorph(key: String) {
         flushTurn(key)
         if (key == STACK_ISLAND || LockIslands.isAppGroup(key)) endPile(toRow = false)
         // Whatever the finger had pulled goes home.
@@ -5094,7 +4909,7 @@ internal class MiniPlayerController(
      * settleDy), so they go to the list as it opens. Asked again for a while if the stack is not
      * a pile yet to be tapped - the rows only just given back - and never once it is a list.
      */
-    private fun showStackAsList(why: String) {
+    fun showStackAsList(why: String) {
         listAskedAt = android.os.SystemClock.uptimeMillis()
         listWhy = why
         listClicked = false
@@ -5461,7 +5276,7 @@ internal class MiniPlayerController(
 
     /** A morph moving on its springs under this point - the switch's, or a scene's. */
     /** A notification's morph is not the music's to catch: its drag engine would drive it wrong. */
-    fun catchableAt(x: Float, y: Float): Boolean = noteDrag == null && morph?.catchableAt(x, y) == true
+    fun catchableAt(x: Float, y: Float): Boolean = noteDragMotion.noteDrag == null && morph?.catchableAt(x, y) == true
 
     /** Whether the running morph belongs to a cover or lyrics entry or exit. */
     fun morphIsScene(): Boolean = morph != null && morphScene
@@ -5581,7 +5396,7 @@ internal class MiniPlayerController(
 
     /** How far apart the pill and the card are: what a full pull covers. */
     fun dragSpan(): Float? {
-        if (noteMorphKey != null) return noteSpan.takeIf { it > 0f }
+        if (noteMorphKey != null) return noteDragMotion.noteSpan.takeIf { it > 0f }
         val pill = player?.restBoxOnScreen() ?: return null
         val card = transitionHeader() ?: return null
         val xy = IntArray(2).also(card::getLocationOnScreen)
@@ -5612,7 +5427,7 @@ internal class MiniPlayerController(
     /** The lift: the choice follows where the container is going, then the springs. */
     fun releaseDrag(toNative: Boolean, velocity: Float) {
         if (noteMorphKey != null) {
-            releaseNote(toNative, velocity)
+            noteDragMotion.releaseNote(toNative, velocity)
             return
         }
         val token = controller?.sessionToken
