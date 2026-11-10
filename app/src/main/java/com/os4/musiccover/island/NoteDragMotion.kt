@@ -70,7 +70,7 @@ internal class NoteDragMotion(private val c: MiniPlayerController) {
      * Busy for a finger pulling a notification island out: the motions that keep it from starting
      * (M0, the subset as it was).
      */
-    private fun busyForNoteDrag(): Boolean = c.noteMorphMotion.noteMorphKey != null || c.morph != null || c.exchange != null
+    private fun busyForNoteDrag(): Boolean = c.noteMorphMotion.noteMorphKey != null || c.morph != null || c.cardExchange.exchange != null
 
     fun beginNoteDrag(key: String, fromSmall: Boolean, startY: Float): Boolean {
         // Folded natively, a pull past the threshold opens the stack's list as a tap does; the
@@ -103,10 +103,10 @@ internal class NoteDragMotion(private val c: MiniPlayerController) {
             // back up it goes into the cover, as a tap does. Exchanged as a plain card it came
             // up over the wallpaper with the cover still held off (#63).
             if (key == MUSIC_ISLAND && MiniPlayerRuntime.takeRestoreScene()) {
-                c.openCover()
+                c.cardExchange.openCover()
                 return true
             }
-            return c.startExchange(key)
+            return c.cardExchange.startExchange(key)
         }
         if (c.noteMorphMotion.prepareFlight(key) == null) return false
         c.swapMotion.endSwap()

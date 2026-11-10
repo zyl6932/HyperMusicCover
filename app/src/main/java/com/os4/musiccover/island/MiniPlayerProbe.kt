@@ -15,7 +15,7 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
         if (c.morph != null) add("morph")
         if (c.groupMotion.group != null) add("group")
         if (c.noteMorphMotion.flight != null) add("flight")
-        if (c.exchange != null) add("exchange")
+        if (c.cardExchange.exchange != null) add("exchange")
         c.noteMorphMotion.noteMorphKey?.let { add("noteMorph=${it.takeLast(6)}") }
         if (c.noteMorphMotion.pillLandingBox != null) add("landing")
         if (c.rowHeldOff) add("heldOff")
@@ -51,9 +51,9 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
             "stackTy=${c.stackHost.notificationStack()?.translationY} "
         val islands = c.describeSession() + c.spreadMotion.describeSpread() + " rowAnim=${c.rowAnimating} swap=${c.swapMotion.swap != null} noteMorph=${c.noteMorphMotion.noteMorphKey != null} " +
             "flight=${c.noteMorphMotion.flight != null} drag=${c.noteDragMotion.noteDrag != null} ${c.player?.touchState()} " +
-            "out=${c.expandedKey()?.takeLast(12)} xchg=${c.exchange?.let { x -> "out=${x.expanded?.takeLast(6)} pend=${x.pending?.takeLast(6)} " +
+            "out=${c.expandedKey()?.takeLast(12)} xchg=${c.cardExchange.exchange?.let { x -> "out=${x.expanded?.takeLast(6)} pend=${x.pending?.takeLast(6)} " +
                 "seats=${x.seats?.big?.takeLast(6)}/${x.seats?.small?.takeLast(6)} " +
-                x.movers.values.joinToString(" ") { c.moverState(it) } }} " +
+                x.movers.values.joinToString(" ") { c.cardExchange.moverState(it) } }} " +
             "row=${c.islandKeys.size} sel=${c.selectedIsland?.takeLast(24)} " +
             "small=${c.smallKey?.takeLast(24)} smallShown=${c.smallIsland?.visibility == View.VISIBLE} " +
             "follow=${c.followBranch} " + sink

@@ -37,7 +37,7 @@ internal class NoteMorphMotion(private val c: MiniPlayerController) {
      * Busy for a notification island out to its row: the motions that keep it from starting (M0,
      * the subset as it was).
      */
-    private fun busyForExpandNote(): Boolean = noteMorphKey != null || c.morph != null || c.exchange != null
+    private fun busyForExpandNote(): Boolean = noteMorphKey != null || c.morph != null || c.cardExchange.exchange != null
 
     /**
      * A tap on a notification island opens it into its own row, as the music island opens into
@@ -71,7 +71,7 @@ internal class NoteMorphMotion(private val c: MiniPlayerController) {
         if (busyForExpandNote()) return
         // Every layout shares one expanded card: the previous island returns as this one opens.
         if (c.expandedKey()?.let { it != key } == true) {
-            c.startExchange(key)
+            c.cardExchange.startExchange(key)
             return
         }
         val view = c.player
@@ -156,7 +156,7 @@ internal class NoteMorphMotion(private val c: MiniPlayerController) {
      * Busy for a row pulled back into its island (a spread is asked first, on its own): the motions
      * that keep it from starting (M0, the subset as it was).
      */
-    private fun busyForCollapseRow(): Boolean = noteMorphKey != null || c.morph != null || c.exchange != null
+    private fun busyForCollapseRow(): Boolean = noteMorphKey != null || c.morph != null || c.cardExchange.exchange != null
 
     /**
      * A swipe down on a notification's row that came out of the row of islands: it goes back in,
@@ -169,7 +169,7 @@ internal class NoteMorphMotion(private val c: MiniPlayerController) {
         if (c.spreadMotion.spread != null) return false
         if (busyForCollapseRow()) {
             MiniPlayerRuntime.noteTouch("collapse refused: noteMorph=${noteMorphKey != null} " +
-                "morph=${c.morph != null} exchange=${c.exchange != null}")
+                "morph=${c.morph != null} exchange=${c.cardExchange.exchange != null}")
             return false
         }
         val row = c.nativeFor(key) ?: run {

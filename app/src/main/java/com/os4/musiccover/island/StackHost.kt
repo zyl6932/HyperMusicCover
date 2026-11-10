@@ -188,7 +188,7 @@ internal class StackHost(private val c: MiniPlayerController) {
             // pre-draw, and with no header to reuse transitionHeader() resolves the card's id and
             // walks the whole window - about a quarter of SystemUI's cycles opening and closing
             // the shade with no media session (simpleperf, #138).
-            val leaving = this@StackHost.c.exchange?.movers?.values?.filter { it.headedHome }?.map { it.native }.orEmpty() +
+            val leaving = this@StackHost.c.cardExchange.exchange?.movers?.values?.filter { it.headedHome }?.map { it.native }.orEmpty() +
                 listOfNotNull(if (retractingMusic) this@StackHost.c.transitionHeader() else null)
             // The row spreading out as the list or folding back: where its islands start from.
             val spreadRest = spreadMoving()?.let {
@@ -250,7 +250,7 @@ internal class StackHost(private val c: MiniPlayerController) {
             if (seen != null) {
                 contentDiagnosticAt = now
                 contentTopFrom = (from?.let(::shortName) ?: "-") + " skip=$skipped" +
-                (if (this@StackHost.c.exchange != null) " X" else "") + (if (this@StackHost.c.morph != null) " M" else "") + " [" + seen.toString().trim() + "]"
+                (if (this@StackHost.c.cardExchange.exchange != null) " X" else "") + (if (this@StackHost.c.morph != null) " M" else "") + " [" + seen.toString().trim() + "]"
             }
             ClockRoomPolicy.contentTop(stackY.toFloat(), top)
         }
@@ -290,7 +290,7 @@ internal class StackHost(private val c: MiniPlayerController) {
             else -> findRow(key)?.second
         }
         if (this@StackHost.c.noteMorphMotion.rowWaitKey != null && top(this@StackHost.c.noteMorphMotion.rowWaitKey) === c) return true
-        val pending = this@StackHost.c.exchange?.pending
+        val pending = this@StackHost.c.cardExchange.exchange?.pending
         if (pending != null && top(pending) === c) return true
         return c in this@StackHost.c.groupMotion.pileRows && !this@StackHost.c.groupMotion.stackGoingHome()
     }
@@ -358,7 +358,7 @@ internal class StackHost(private val c: MiniPlayerController) {
     fun onNativeListScroll(stack: View) {
         if (stack !== notificationStack() || !LockIslands.isReleased(STACK_ISLAND)) return
         val opening = c.morph?.takeIf { c.noteMorphMotion.noteMorphKey == STACK_ISLAND && it.toNative }
-        val moving = c.exchange?.movers?.get(STACK_ISLAND)?.morph?.takeIf { it.toNative }
+        val moving = c.cardExchange.exchange?.movers?.get(STACK_ISLAND)?.morph?.takeIf { it.toNative }
         val held = pinned?.get() != null && pinnedAt == null
         if (opening == null && moving == null && c.groupMotion.piles.isEmpty() && !held) return
         MiniPlayerRuntime.noteTouch("list scroll takes the rows: open=${opening != null} " +
@@ -440,7 +440,7 @@ internal class StackHost(private val c: MiniPlayerController) {
         // out of it - or, turned round, going back up into it - it leaves from and lands at where
         // it was held; the row going up pushes it up in the stack meanwhile, 180px, and the cover
         // was laid out small for that.
-        val m = c.exchange?.movers?.get(MUSIC_ISLAND)?.takeIf { it.morph != null && viewWithin(it.native, card) }
+        val m = c.cardExchange.exchange?.movers?.get(MUSIC_ISLAND)?.takeIf { it.morph != null && viewWithin(it.native, card) }
             ?: return null
         return (if (m.fromCard) m.cardAt else m.settleAt) - m.native.translationY
     }
@@ -1036,7 +1036,7 @@ internal class StackHost(private val c: MiniPlayerController) {
 
     /** A card on its way home from the stack that the stack still lays out; null when none. */
     private fun leavingCards(): String? {
-        val x = c.exchange ?: return null
+        val x = c.cardExchange.exchange ?: return null
         for (m in x.movers.values) {
             if (!m.headedHome || m.key == STACK_ISLAND || m.key == MUSIC_ISLAND) continue
             // Told to the stack now, if its turn home was waiting: the list waits for it.
@@ -1066,8 +1066,8 @@ internal class StackHost(private val c: MiniPlayerController) {
         override fun run() {
             // Only while the stack island is out, or on its way.
             val out = c.noteMorphMotion.noteMorphKey == STACK_ISLAND && c.morph?.toNative != false ||
-                c.exchange?.let { x -> x.expanded == STACK_ISLAND || x.pending == STACK_ISLAND } == true ||
-                c.noteMorphMotion.noteMorphKey == null && c.exchange == null && c.expandedKey() == STACK_ISLAND
+                c.cardExchange.exchange?.let { x -> x.expanded == STACK_ISLAND || x.pending == STACK_ISLAND } == true ||
+                c.noteMorphMotion.noteMorphKey == null && c.cardExchange.exchange == null && c.expandedKey() == STACK_ISLAND
             if (!out) return
             val model = containerModel() ?: return
             val state = stackState(model)

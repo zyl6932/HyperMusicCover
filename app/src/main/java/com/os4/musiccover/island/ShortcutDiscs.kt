@@ -306,7 +306,7 @@ internal class ShortcutDiscs(private val c: MiniPlayerController) {
         }
         mover(c.morph)
         mover(c.groupMotion.group?.follower)
-        c.exchange?.movers?.values?.forEach { if (it.morph !== c.morph) mover(it.morph) }
+        c.cardExchange.exchange?.movers?.values?.forEach { if (it.morph !== c.morph) mover(it.morph) }
         squeeze.setScene(pill, running == null, disc(0), disc(1), small, squeezePushers)
     }
 
