@@ -13,7 +13,7 @@ internal class MiniPlayerProbe(private val c: MiniPlayerController) {
     fun quietWhy(): String = buildList {
         if (c.swapMotion.swap != null) add("swap")
         if (c.morph != null) add("morph")
-        if (c.group != null) add("group")
+        if (c.groupMotion.group != null) add("group")
         if (c.noteMorphMotion.flight != null) add("flight")
         if (c.exchange != null) add("exchange")
         c.noteMorphMotion.noteMorphKey?.let { add("noteMorph=${it.takeLast(6)}") }

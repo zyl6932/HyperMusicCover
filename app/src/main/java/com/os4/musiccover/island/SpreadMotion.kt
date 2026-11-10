@@ -189,7 +189,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
      * the subset as it was).
      */
     private fun busyForStackSpread(): Boolean = spread != null ||
-        c.morph != null || c.exchange != null || c.noteMorphMotion.noteMorphKey != null || c.group != null ||
+        c.morph != null || c.exchange != null || c.noteMorphMotion.noteMorphKey != null || c.groupMotion.group != null ||
         c.noteMorphMotion.flight != null
 
     /** Even a lone stacked card uses the list whose downward pull returns it to its island. */
@@ -259,7 +259,7 @@ internal class SpreadMotion(private val c: MiniPlayerController) {
      * Busy for the whole row out as the stack's list (a spread already out is asked first, on its
      * own): the motions that keep it from starting (M0, the subset as it was).
      */
-    private fun busyForSpread(): Boolean = c.morph != null || c.exchange != null || c.noteMorphMotion.noteMorphKey != null || c.group != null ||
+    private fun busyForSpread(): Boolean = c.morph != null || c.exchange != null || c.noteMorphMotion.noteMorphKey != null || c.groupMotion.group != null ||
         c.noteMorphMotion.flight != null
 
     /**

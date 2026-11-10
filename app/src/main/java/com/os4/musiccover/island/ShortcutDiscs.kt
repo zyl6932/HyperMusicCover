@@ -267,7 +267,7 @@ internal class ShortcutDiscs(private val c: MiniPlayerController) {
         val hostXY = IntArray(2).also(c.host::getLocationOnScreen)
         // A flight's morph is the flight's, and the small island's view in a group is not the
         // pill's: the row pressing on the discs is still the pill's.
-        val running = c.pillMorph()
+        val running = c.groupMotion.pillMorph()
         val view = c.player
         val pill: CoverMorphMotion.Box? = when {
             running != null -> running.containerBox()?.let {
@@ -305,7 +305,7 @@ internal class ShortcutDiscs(private val c: MiniPlayerController) {
             squeezePushers += MiniSqueeze.Pusher(box, endX, away(pill), away(small))
         }
         mover(c.morph)
-        mover(c.group?.follower)
+        mover(c.groupMotion.group?.follower)
         c.exchange?.movers?.values?.forEach { if (it.morph !== c.morph) mover(it.morph) }
         squeeze.setScene(pill, running == null, disc(0), disc(1), small, squeezePushers)
     }

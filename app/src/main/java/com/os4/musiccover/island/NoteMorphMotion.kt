@@ -113,7 +113,7 @@ internal class NoteMorphMotion(private val c: MiniPlayerController) {
         override fun doFrame(frameTimeNanos: Long) { android.os.Trace.beginSection("MC rowWait"); try {
             val key = rowWaitKey ?: return
             // The stack island's other rows stay out of sight, piled, till the morph moves them.
-            if (key == STACK_ISLAND || LockIslands.isAppGroup(key)) c.pileGroup(key, 0f, null)
+            if (key == STACK_ISLAND || LockIslands.isAppGroup(key)) c.groupMotion.pileGroup(key, 0f, null)
             val row = c.nativeFor(key)
             // The stack fades a returned row in on its own: seen before the morph took it, it
             // stood there whole, went, and came back as the morph's end (filmed 2026-09-25).
@@ -446,7 +446,7 @@ internal class NoteMorphMotion(private val c: MiniPlayerController) {
 
         override fun onFrame(morph: MiniCardMorph, progress: Float) {
             if ((key == STACK_ISLAND || LockIslands.isAppGroup(key)) &&
-                c.morph === morph) c.pileGroup(key, progress, morph.miniEndBox())
+                c.morph === morph) c.groupMotion.pileGroup(key, progress, morph.miniEndBox())
             val f = flight ?: return
             if (c.morph !== morph) return
             val stackedSmall = c.stackedStyle() && flightHome == HOME_SMALL
@@ -486,7 +486,7 @@ internal class NoteMorphMotion(private val c: MiniPlayerController) {
             c.flushTurn(key)
             c.trace("settled toRow=$toNative completed=$completed " +
                 (if (completed) "" else "why=${morph.lastCancel} ") + c.smallState())
-            if (key == STACK_ISLAND || LockIslands.isAppGroup(key)) c.endPile(toNative)
+            if (key == STACK_ISLAND || LockIslands.isAppGroup(key)) c.groupMotion.endPile(toNative)
             if (key == MUSIC_ISLAND) c.morphScene = false
             if (c.morph === morph) c.morph = null
             c.noteDragMotion.noteDrag = null
@@ -583,7 +583,7 @@ internal class NoteMorphMotion(private val c: MiniPlayerController) {
     /** A notification that set out and did not open: back in the row as it was. */
     fun abandonNoteMorph(key: String) {
         c.flushTurn(key)
-        if (key == STACK_ISLAND || LockIslands.isAppGroup(key)) c.endPile(toRow = false)
+        if (key == STACK_ISLAND || LockIslands.isAppGroup(key)) c.groupMotion.endPile(toRow = false)
         // Whatever the finger had pulled goes home.
         c.player?.springNudgeBack(0f, 0f)
         c.springSmallNudgeBack(0f, 0f)
