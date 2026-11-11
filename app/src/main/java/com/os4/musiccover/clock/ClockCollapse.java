@@ -211,6 +211,7 @@ public final class ClockCollapse {
     private static final float FALLBACK_FLOOR_DP = 246.7f;
 
     private static View sGuarded;
+    private static final ClockDateLayout<View> DATE_LAYOUT = new ClockDateLayout<>();
     private static final int[] LOC = new int[2];
 
     /**
@@ -1660,6 +1661,7 @@ public final class ClockCollapse {
         uninstall();
         try {
             Gen.preDraw(v, PRE_DRAW);
+            Gen.draw(v, DRAW);
             sGuarded = v;
         } catch (Throwable t) {
             Xp.log(TAG + "clock: pre-draw not installed: " + t);
@@ -1669,9 +1671,11 @@ public final class ClockCollapse {
     private static void uninstall() {
         View v = sGuarded;
         sGuarded = null;
+        DATE_LAYOUT.reset();
         if (v == null) return;
         try {
             Gen.unpreDraw(v, PRE_DRAW);
+            Gen.undraw(v, DRAW);
         } catch (Throwable ignored) {
         }
     }
@@ -1684,6 +1688,24 @@ public final class ClockCollapse {
     private static void prepareGlass() {
         ClockGlass.armGlassMorph();
     }
+
+    // Other modules can hide the date in their own pre-draw, after ours. Reading the OEM's
+    // temporary VISIBLE here made both the clock and lyric band jump by dateH + gap on wakes.
+    // OnDraw runs after every pre-draw: commit only that final visibility, then both users
+    // consume the same layout. A real visibility change is placed before this draw as well,
+    // so a newly shown date cannot spend one frame at an old translation.
+    private static final ViewTreeObserver.OnDrawListener DRAW = () -> {
+        if (!Gen.live() || sPhase == Phase.OFF) return;
+        View date = ClockViews.visibleDate();
+        if (DATE_LAYOUT.commit(date, date == null ? 0f : date.getHeight())) {
+            try {
+                frame();
+            } catch (Throwable t) {
+                Xp.w(TAG + "clock: final date layout failed: " + t);
+            }
+            invalidate();
+        }
+    };
 
     private static final ViewTreeObserver.OnPreDrawListener PRE_DRAW =
             new ViewTreeObserver.OnPreDrawListener() {
@@ -1932,12 +1954,12 @@ public final class ClockCollapse {
         m.unit = ClockViews.glyphUnit(box);
         m.inkTop = parentTop(g) + g.getTop() + box.top;
         m.anchored = ClockViews.anchoredStyle();
-        View date = ClockViews.visibleDate();
+        View date = DATE_LAYOUT.forFrame(ClockViews.visibleDate());
         Main.noteDateView(date);
         m.date = date;
         if (date != null) {
             m.dateTop = parentTop(date) + date.getTop();
-            m.dateH = date.getHeight();
+            m.dateH = DATE_LAYOUT.heightForFrame(date.getHeight());
         } else {
             m.dateTop = Float.NaN;
             m.dateH = 0f;
@@ -2358,6 +2380,13 @@ public final class ClockCollapse {
                 if (!Float.isNaN(sAodHoldY)) hold(sAodHoldY);
                 // Held still in the unzoomed pixels, so the doze's zoom takes it in with the rest
                 // of the screen - see parentTop().
+                if (m.anchored) {
+                    float top = ClockDateLayout.heldTimeTop(sFromTop, sFromDate,
+                            m.dateH, Main.CLOCK_GAP_DP * Main.density());
+                    sFromDate = m.date == null ? Float.NaN
+                            : Float.isNaN(sFromDate) ? sFromTop : sFromDate;
+                    sFromTop = top;
+                }
                 writePose(m, sFromTop, sFromUnit, sFromDate, false);
                 // The wake starts from what is on screen, which is this pose.
                 sAodTop = sFromTop;

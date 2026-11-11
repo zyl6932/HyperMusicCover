@@ -733,14 +733,17 @@ public final class ClockViews {
     public static boolean usableDate(View v) {
         if (v == null || v.getVisibility() != View.VISIBLE || v.getHeight() <= 0
                 || !v.isAttachedToWindow()) return false;
-        // Not inside a face that is faded out: oriental C keeps its big face's date_and_time
-        // VISIBLE under an alpha-0 clock, and that was the date every other lookup hung from.
-        for (android.view.ViewParent p = v.getParent(); p instanceof View; p = p.getParent()) {
-            View pv = (View) p;
-            if (pv == Main.sContainer) break;
-            if (pv.getAlpha() <= 0.01f) return false;
+        // Match the time target's visibility boundary: the two clock layers fade as a whole
+        // while unlocked, but their layout is still the one a full-screen AOD will show.
+        // Walking above the foreground layer (Main.sContainer is the background one) made
+        // only the date disappear, moved the held time up by dateH + gap, and saved that
+        // incomplete pose for the next sleep (#142).
+        // Hidden variants INSIDE a layer still do not count, nor does a date hidden on its
+        // own by another module. Both are checked by drawnUnder before it reaches the root.
+        for (View root : Main.clockRoots()) {
+            if (drawnUnder(v, root)) return true;
         }
-        return v.getAlpha() > 0.01f;
+        return false;
     }
 
     /**

@@ -22,6 +22,7 @@ class GenRulesTest {
         Regex("new Thread\\("),
         Regex("postFrameCallback\\("),
         Regex("addOnPreDrawListener\\("),
+        Regex("addOnDrawListener\\("),
         Regex("addOnLayoutChangeListener\\("),
         Regex("addOnAttachStateChangeListener\\("),
         Regex("addOnGlobalLayoutListener\\("),

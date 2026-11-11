@@ -304,6 +304,7 @@ public final class Gen {
         INSTALL_KEPT.addAll(networkCallbacks);
         INSTALL_KEPT.addAll(sensorListeners);
         INSTALL_KEPT.addAll(preDraws);
+        INSTALL_KEPT.addAll(draws);
         INSTALL_KEPT.addAll(attachStates);
         INSTALL_KEPT.addAll(layoutChanges);
         INSTALL_KEPT.addAll(displayListeners);
@@ -498,6 +499,15 @@ public final class Gen {
         }
         retain(dryRun, preDraws);
 
+        for (DrawReg d : draws) {
+            if (kept(dryRun, d)) continue;
+            try {
+                d.view.getViewTreeObserver().removeOnDrawListener(d.listener);
+            } catch (Throwable ignored) {
+            }
+        }
+        retain(dryRun, draws);
+
         for (AttachReg a : attachStates) {
             if (kept(dryRun, a)) continue;
             try {
@@ -633,6 +643,7 @@ public final class Gen {
     private static final List<SensorReg> sensorListeners = new CopyOnWriteArrayList<>();
     private static final List<TreeReg> treeListeners = new CopyOnWriteArrayList<>();
     private static final List<PreDrawReg> preDraws = new CopyOnWriteArrayList<>();
+    private static final List<DrawReg> draws = new CopyOnWriteArrayList<>();
     private static final List<AttachReg> attachStates = new CopyOnWriteArrayList<>();
     private static final List<LayoutReg> layoutChanges = new CopyOnWriteArrayList<>();
     private static final List<DisplayReg> displayListeners = new CopyOnWriteArrayList<>();
@@ -789,6 +800,8 @@ public final class Gen {
             this.listener = listener;
         }
     }
+
+    private record DrawReg(View view, ViewTreeObserver.OnDrawListener listener) {}
 
     private static final class PreDrawReg {
         /** The view, or null for a call site that only holds the observer (then [vto]). */
@@ -1299,6 +1312,18 @@ public final class Gen {
 
     // ---------------------------------------------------------------- view listeners
 
+    /** Observes visibility after every pre-draw listener has finished. */
+    public static void draw(View v, ViewTreeObserver.OnDrawListener l) {
+        if (refused("a draw listener")) return;
+        v.getViewTreeObserver().addOnDrawListener(l);
+        draws.add(new DrawReg(v, l));
+    }
+
+    public static void undraw(View v, ViewTreeObserver.OnDrawListener l) {
+        v.getViewTreeObserver().removeOnDrawListener(l);
+        draws.removeIf(r -> r.view == v && r.listener == l);
+    }
+
     public static void preDraw(View v, ViewTreeObserver.OnPreDrawListener l) {
         if (refused("a pre-draw")) return;
         v.getViewTreeObserver().addOnPreDrawListener(l);
@@ -1467,6 +1492,7 @@ public final class Gen {
                 + " sensorListeners=" + sensorListeners.size()
                 + " treeListeners=" + treeListeners.size()
                 + " preDraws=" + preDraws.size()
+                + " draws=" + draws.size()
                 + " attachStates=" + attachStates.size()
                 + " layoutChanges=" + layoutChanges.size()
                 + " displayListeners=" + displayListeners.size()
