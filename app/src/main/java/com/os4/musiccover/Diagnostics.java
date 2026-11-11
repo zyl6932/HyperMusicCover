@@ -842,14 +842,13 @@ final class Diagnostics {
           // are. The first thing to look at when the slider appears to do nothing.
           .append(" anchored=").append(ClockViews.anchoredStyle())
           .append(" glassStyle=").append(ClockGlass.clockHasGlass())
-          .append("\ndate: rest=").append(Main.r1(ClockCollapse.coverDateY(ClockViews.visibleDate())))
-          .append("px from the top; cover mode leaves the date there and hangs the clock under"
-                  + " it")
+          .append("\nblock: top=").append(Main.r1(ClockCollapse.coverBlockTop()))
+          .append("px; anchored to window safe area, date optional")
           .append("\ngap=").append(Main.CLOCK_GAP_DP).append("dp\n");
 
         View date = ClockViews.visibleDate();
         if (date == null) {
-            sb.append("date: NOT FOUND - nothing to anchor the clock to\n");
+            sb.append("date: hidden or absent; no header space reserved\n");
         } else {
             int[] loc = new int[2];
             date.getLocationOnScreen(loc);

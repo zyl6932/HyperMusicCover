@@ -148,7 +148,7 @@ final class PreviewShots {
                     : date.getClass().getSimpleName() + " " + date.getWidth() + "x"
                       + date.getHeight() + " vis=" + date.getVisibility())
                 .append(" shot=").append(out.containsKey("date") ? "yes" : "NULL");
-            diag.append("\n  clock: geom=").append(cg == null ? "NULL (no date or no glyph box)"
+            diag.append("\n  clock: geom=").append(cg == null ? "NULL (clock not measured yet)"
                     : "w" + cg[0] + " h" + cg[1] + " y" + cg[2] + " x" + cg[3] + " pivot" + cg[4]);
             View[] roots = Main.clockRoots();
             diag.append(" roots=").append(roots.length);
@@ -281,7 +281,7 @@ final class PreviewShots {
         int[] loc = new int[2];
         date.getLocationOnScreen(loc);
         out.putByteArray("date", png);
-        out.putIntArray("daterect", new int[]{loc[0], Math.round(ClockCollapse.coverDateY(date)),
+        out.putIntArray("daterect", new int[]{loc[0], Math.round(ClockCollapse.coverBlockTop()),
                 date.getWidth(), date.getHeight()});
     }
 

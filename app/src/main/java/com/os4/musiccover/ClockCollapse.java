@@ -477,10 +477,6 @@ public final class ClockCollapse {
         } else {
             captureFrom();
             if (was == Phase.OFF && !wake && !Float.isNaN(sFromTop)) noteNaturalUnit(LIVE.unit);
-            if (was == Phase.OFF && !wake && !Float.isNaN(sFromDate) && LIVE.date != null) {
-                sDateAnchor = sFromDate;
-                sDateAnchorView = LIVE.date;
-            }
         }
         // Where the face stands across: a doze that held the cover's pose was showing it centred
         // already, and a re-entry mid-flight starts from wherever the last one left it. Starting
@@ -792,7 +788,7 @@ public final class ClockCollapse {
                 // What the pose is derived from, so the line that moved names itself: the date
                 // line and the date's own height place an anchored clock, the full unit sizes
                 // it, and the room below is the only thing that can push it back up.
-                + " | line=" + Main.r1(coverDateY(m.date)) + " dateH=" + Main.r1(m.dateH)
+                + " | line=" + Main.r1(coverBlockTop()) + " dateH=" + Main.r1(m.dateH)
                 + " full=" + Main.r1(full) + " room=" + Main.r1(room)
                 + " anchored=" + m.anchored + " dateView=" + (m.date == null ? "none"
                         : Integer.toHexString(System.identityHashCode(m.date)))
@@ -1076,52 +1072,25 @@ public final class ClockCollapse {
         return floor;
     }
 
-    /**
-     * Where the date stood on screen the last time cover mode was entered from the OEM's own
-     * lock screen, and the date view that was.
-     */
-    private static float sDateAnchor = Float.NaN;
-    private static View sDateAnchorView;
-
-    /**
-     * Where cover mode puts the date: a line near the top of the screen, in dp, kept clear of the
-     * cut-out and the status bar. The keyguard's layouts put the date anywhere from 233 to 455 on
-     * this phone, and cover mode wants it up top in all of them.
-     */
-    private static final float DATE_LINE_DP = 76f;
-    /** Air between the top inset and the date, when the inset is what decides the line. */
-    private static final float DATE_SAFE_GAP_DP = 8f;
-    /**
-     * Closer than this to the line and the date stays where it already was. That is the layout
-     * whose date sits a few pixels off the line (233 against 228 here), where moving it reads as
-     * a nudge rather than a placement.
-     */
-    private static final float DATE_SNAP_DP = 12f;
-
-    /** The date line cover mode uses, for the app's preview as well. */
-    static float coverDateY(View date) {
-        float d = Main.density();
-        float line = DATE_LINE_DP * d;
-        float safe = safeTopPx();
-        if (safe > 0f) line = Math.max(line, safe + DATE_SAFE_GAP_DP * d);
-        if (date != null && date == sDateAnchorView && !Float.isNaN(sDateAnchor)
-                && Math.abs(sDateAnchor - line) <= DATE_SNAP_DP * d) {
-            return sDateAnchor;
-        }
-        return line;
+    /** Top of the visible clock block, relative to the unzoomed lock-screen window. */
+    static float coverBlockTop() {
+        return ClockPlacement.blockTop(Main.density(), safeTopPx(), Settings.CLOCK_OFFSET.get());
     }
 
-    /** How deep the top of the screen is covered - cut-out, else status bar - or 0. */
+    /** Stable top obstruction, even when the status bar is hidden during a doze. */
     private static float safeTopPx() {
         View v = Main.sContainer;
         if (v == null) return 0f;
         try {
-            android.view.WindowInsets insets = v.getRootWindowInsets();
+            android.view.WindowInsets insets = v.getRootView().getRootWindowInsets();
+            if (insets == null) {
+                android.view.WindowManager wm = v.getContext().getSystemService(android.view.WindowManager.class);
+                if (wm != null) insets = wm.getCurrentWindowMetrics().getWindowInsets();
+            }
             if (insets == null) return 0f;
-            android.view.DisplayCutout cut = insets.getDisplayCutout();
-            if (cut != null && cut.getSafeInsetTop() > 0) return cut.getSafeInsetTop();
-            int bar = insets.getInsets(android.view.WindowInsets.Type.statusBars()).top;
-            return Math.max(bar, 0);
+            return Math.max(0, insets.getInsetsIgnoringVisibility(
+                    android.view.WindowInsets.Type.statusBars()
+                            | android.view.WindowInsets.Type.displayCutout()).top);
         } catch (Throwable t) {
             return 0f;
         }
@@ -1982,7 +1951,9 @@ public final class ClockCollapse {
             s.top = parentTop(v) + v.getTop();
             s.gap = s.top - (m.inkTop + box.height());
         }
-        return !(m.anchored && date == null);
+        // A date is optional content. In particular GONE dates supplied by another module
+        // cannot invalidate the clock, its lyric band, or the scene's card transition.
+        return m.unit > 0f && Float.isFinite(m.unit);
     }
 
     /**
@@ -2258,17 +2229,101 @@ public final class ClockCollapse {
         sFromDate = m.date == null ? Float.NaN : m.dateTop + m.date.getTranslationY();
     }
 
+    /** One destination calculation for the keyguard and its settings preview. */
+    private static final class CoverPose {
+        float top, unit, date;
+    }
+
+    private static final CoverPose COVER_POSE = new CoverPose();
+    private static final Live PREVIEW_LIVE = new Live();
+
+    private static CoverPose coverPose(Live m, float full, float room) {
+        float d = Main.density();
+        float size = Settings.CLOCK_SIZE.get();
+        float base = sizeBase(m, full);
+        float coverUnit = Float.isNaN(size) ? Settings.CLOCK_HEIGHT.get() * d : size * base;
+        if (coverUnit > full) coverUnit = full;
+        if (coverUnit < Main.MIN_CLOCK_K * base) coverUnit = Main.MIN_CLOCK_K * base;
+        // The date and the clock move as one block.
+        float blockTop = coverBlockTop();
+        float coverDate, coverTop;
+        if (m.anchored) {
+            coverDate = m.date == null ? Float.NaN : blockTop;
+            coverTop = ClockPlacement.timeTop(blockTop, m.dateH, Main.CLOCK_GAP_DP * d);
+        } else {
+            // The whole face - the time and its companions, in the OEM's own arrangement - starts
+            // on the line the anchored styles put their date on. NOT where the OEM has the ink:
+            // these styles answer the held y with a plain translation of the whole clock - 716px
+            // up on magazine C - and taking that as the pose put the clock off the top of the
+            // screen. The companions are placed from the clock in writePose; here only how far
+            // the topmost of them reaches above the time's ink.
+            coverTop = blockTop + leadAbove(m, coverUnit / m.unit);
+            coverDate = Float.NaN;
+        }
+
+        // Notifications. The OEM squeezes its full clock out of their way - down to its minimum
+        // height, then up - and ours gets the same rule, off the same number: the notifY the OEM
+        // keeps reporting while we hold it is the screen y the stack starts at.
+        if (!Float.isNaN(room)) {
+            float ratio = m.box.height() / m.unit;
+            float bottom = coverTop + coverUnit * ratio;
+            if (bottom > room) {
+                float minUnit = coverUnit * minSqueeze();
+                float fit = (room - coverTop) / ratio;
+                float u = Math.max(minUnit, Math.min(coverUnit, fit));
+                float overflow = coverTop + u * ratio - room;
+                coverUnit = u;
+                if (overflow > 0f) {
+                    float safe = ClockPlacement.safeLine(d, safeTopPx());
+                    float shift = Math.min(overflow, Math.max(0f, blockTop - safe));
+                    coverTop -= shift;
+                    if (!Float.isNaN(coverDate)) coverDate -= shift;
+                }
+            }
+        }
+
+        CoverPose pose = COVER_POSE;
+        pose.top = coverTop;
+        pose.unit = coverUnit;
+        pose.date = coverDate;
+        return pose;
+    }
+
+    static float previewClockTop() {
+        Live m = PREVIEW_LIVE;
+        if (!measure(m)) return Float.NaN;
+        return coverPose(m, fullUnitFor(sPhase, m), roomBelow()).top;
+    }
+
+    /** Scene effects do not depend on any particular clock view being measurable. */
+    private static void applySceneProgress(Phase phase) {
+        if (phase == Phase.AOD || phase == Phase.OFF) return;
+        float lag = phase == Phase.ENTER && !Main.perfOff("lag") ? CARD_LAG : 0f;
+        float card = phase == Phase.ON ? 1f
+                : ClockPlacement.progress(sCardFrom, sCardTo, sT, lag);
+        float glass = phase == Phase.ON ? 1f
+                : ClockPlacement.progress(sGlassFrom, sGlassTo, sT, 0f);
+        MediaCard.setCardProgressFrom(card);
+        sGlassP = glass;
+        ClockGlass.applyGlassMorph(glass);
+    }
+
     private static void frame() {
         Phase phase = sPhase;
         if (phase == Phase.OFF) return;
         // The cover holds the y, so the room is not asked while it is up: the yes/no the faces
         // are told is checked from here instead (NotifPresence).
         NotifPresence.recheck();
+        applySceneProgress(phase);
         Live m = LIVE;
         boolean measured;
         android.os.Trace.beginSection("MC c.measure");
         try { measured = measure(m); } finally { android.os.Trace.endSection(); }
-        if (!measured) return;
+        if (!measured) {
+            // A new/unmeasured clock has no safe lyric boundary. Scene effects above still run.
+            if (!sAodHeld) sInkBottom = Float.NaN;
+            return;
+        }
 
         if (phase == Phase.AOD) {
             if (sWaking && Main.clockHeld()) {
@@ -2380,62 +2435,16 @@ public final class ClockCollapse {
             sFromDate = m.date == null ? Float.NaN : m.dateTop + m.date.getTranslationY();
         }
 
-        // The cover pose, live.
-        float d = Main.density();
-        float full;
-        android.os.Trace.beginSection("MC c.full");
-        try { full = fullUnitFor(phase, m); } finally { android.os.Trace.endSection(); }
-        float size = Settings.CLOCK_SIZE.get();
-        float base = sizeBase(m, full);
-        float coverUnit = Float.isNaN(size) ? Settings.CLOCK_HEIGHT.get() * d : size * base;
-        if (coverUnit > full) coverUnit = full;
-        if (coverUnit < Main.MIN_CLOCK_K * base) coverUnit = Main.MIN_CLOCK_K * base;
-        // The date and the clock move as one block.
-        float offset = Settings.CLOCK_OFFSET.get() * d;
-        float coverDate, coverTop;
-        if (m.anchored) {
-            coverDate = coverDateY(m.date) + offset;
-            coverTop = coverDate + m.dateH + Main.CLOCK_GAP_DP * d;
-        } else {
-            // The whole face - the time and its companions, in the OEM's own arrangement - starts
-            // on the line the anchored styles put their date on. NOT where the OEM has the ink:
-            // these styles answer the held y with a plain translation of the whole clock - 716px
-            // up on magazine C - and taking that as the pose put the clock off the top of the
-            // screen. The companions are placed from the clock in writePose; here only how far
-            // the topmost of them reaches above the time's ink.
-            coverTop = coverDateY(null) + offset + leadAbove(m, coverUnit / m.unit);
-            coverDate = Float.NaN;
-        }
+        float full = fullUnitFor(phase, m);
+        float room = roomBelow();
+        CoverPose pose = coverPose(m, full, room);
+        float coverTop = pose.top, coverUnit = pose.unit, coverDate = pose.date;
 
-        // Notifications. The OEM squeezes its full clock out of their way - down to its minimum
-        // height, then up - and ours gets the same rule, off the same number: the notifY the OEM
-        // keeps reporting while we hold it is the screen y the stack starts at.
-        float room;
-        android.os.Trace.beginSection("MC c.room");
-        try { room = roomBelow(); } finally { android.os.Trace.endSection(); }
-        if (!Float.isNaN(room)) {
-            float ratio = m.box.height() / m.unit;
-            float bottom = coverTop + coverUnit * ratio;
-            if (bottom > room) {
-                float minUnit = coverUnit * minSqueeze();
-                float fit = (room - coverTop) / ratio;
-                float u = Math.max(minUnit, Math.min(coverUnit, fit));
-                float overflow = coverTop + u * ratio - room;
-                coverUnit = u;
-                if (overflow > 0f) {
-                    coverTop -= overflow;
-                    if (!Float.isNaN(coverDate)) coverDate -= overflow;
-                }
-            }
-        }
-
-        float top, unit, date, card, glass;
+        float top, unit, date;
         if (phase == Phase.ON) {
             top = coverTop;
             unit = coverUnit;
             date = coverDate;
-            card = 1f;
-            glass = 1f;
         } else {
             float t = sT;
             boolean in = phase == Phase.ENTER;
@@ -2472,19 +2481,6 @@ public final class ClockCollapse {
             top = sFromTop + (toTop - sFromTop) * t;
             unit = sFromUnit + (toUnit - sFromUnit) * t;
             date = Float.isNaN(sFromDate) ? toDate : sFromDate + (toDate - sFromDate) * t;
-            float tc = Math.max(0f, Math.min(1f, t));
-            // Into the cover, the card's material sets off after the artwork has: the entry's
-            // first frames are the GPU's worst - the artwork's texture going up, the new effects
-            // set up, three frames queued behind them (traced 2026-09-25, 7-34ms waits) - and the
-            // card's crossfade was one more full-card redraw on each of them. It catches up on a
-            // smooth curve and lands with the clock.
-            float tCard = tc;
-            if (in && !Main.perfOff("lag")) {
-                float u = Math.max(0f, Math.min(1f, (tc - CARD_LAG) / (1f - CARD_LAG)));
-                tCard = u * u * (3f - 2f * u);
-            }
-            card = sCardFrom + (sCardTo - sCardFrom) * tCard;
-            glass = sGlassFrom + (sGlassTo - sGlassFrom) * tc;
         }
         // How far a style that is not anchored is taken to the middle - see writePose.
         sCenterK = phase == Phase.ON ? 1f
@@ -2515,9 +2511,6 @@ public final class ClockCollapse {
             View gt = firstTarget();
             noteFall(m.unit, sLastToUnit, unit, gt == null ? 1f : aboveScaleY(gt));
         }
-        android.os.Trace.beginSection("MC c.card"); try { MediaCard.setCardProgressFrom(card); } finally { android.os.Trace.endSection(); }
-        sGlassP = glass;
-        android.os.Trace.beginSection("MC c.glass"); try { ClockGlass.applyGlassMorph(glass); } finally { android.os.Trace.endSection(); }
         // The colour band describes the lock screen; the AOD's layout is not that.
         if (!(phase == Phase.EXIT && sExitToAod)) { android.os.Trace.beginSection("MC c.band"); try { Main.updateColorBand(); } finally { android.os.Trace.endSection(); } }
     }
