@@ -830,6 +830,8 @@ internal class SpreadMotion(
     private fun finishOpen(s: Spread, y: Int) {
         s.collapseFinger = null
         letLeadGoWhenSettled()
+        // Whether the hand-off tail about to be kept is one the pill draws itself.
+        val leadPill = s.items.firstOrNull { it.lead }?.view === views.player
         for (item in s.items) {
             val m = item.morph
             if (m != null && item.lead && !s.stacked && m.active) {
@@ -851,7 +853,13 @@ internal class SpreadMotion(
             item.standIn = false
             item.native?.let(stackHost::showRow)
         }
-        if (leadTail == null) {
+        // The pill stays only while a hand-off tail drawn by it runs: the lead's tail is the
+        // row's glass coming in under the pill's (#122). A tail of a stand-in - the stack island
+        // out as the small place - is not the pill's, and the pill, its own morph cancelled back
+        // to its rest place, stood at the bottom of the lock screen under the media card for the
+        // tail's frames (#137, filmed 2026-11-11). Whatever the tail is doing, the pill itself is
+        // the list's to put away now.
+        if (leadTail == null || !leadPill) {
             views.player?.visibility = View.INVISIBLE
             views.player?.alpha = 1f
         }
