@@ -81,6 +81,31 @@ public final class LockLyrics {
     }
 
     /**
+     * The lyric settings' effects, registered into the settings table at install (stage 5.1):
+     * Settings.java names no feature any more. One refresh After for the four switches, so a
+     * batch that changes several of them refreshes once.
+     */
+    private static final Settings.After REFRESH = c -> refresh();
+
+    public static void bindSettings() {
+        Settings.LYRICS.apply((c, v) -> {
+            setEnabled(v, Main.trackKey(), Main.miniPlayerSession());
+            return true;
+        });
+        Settings.LYRIC_ONLINE.apply((c, v) -> setOnline(v));
+        Settings.LYRIC_ALIGN.apply((c, v) -> setAlign(v));
+        Settings.LYRIC_STYLE.apply((c, v) -> setStyle(v));
+        Settings.LYRIC_APPEARANCE.apply((c, v) -> {
+            setAppearance(v);
+            return true;
+        });
+        Settings.LYRIC_KEEP_ON.then(REFRESH);
+        Settings.LYRIC_HDR.then(REFRESH);
+        Settings.LYRIC_TRANS.then(REFRESH);
+        Settings.LYRIC_ROMA.then(REFRESH);
+    }
+
+    /**
      * Switches Settings.LYRIC_ONLINE and looks the song on screen up again: off, a lyric that came off the
      * network goes - with nothing local to replace it the song has none; on, a song with no
      * lyric, or no translation, gets the chance of one. The cache goes either way, since it
@@ -115,8 +140,7 @@ public final class LockLyrics {
      */
     public static volatile int sMaxLines = LyricFocus.DEFAULT_LIMIT;
 
-    public static void setAppearance(String json) {
-        LyricAppearance next = LyricAppearance.parse(json);
+    public static void setAppearance(LyricAppearance next) {
         if (Settings.LYRIC_APPEARANCE.get().toJson().equals(next.toJson())) return;
         Settings.LYRIC_APPEARANCE.set(next);
         LyricView view = sView;
@@ -148,8 +172,7 @@ public final class LockLyrics {
         return true;
     }
 
-    public static boolean setStyle(String key, float value) {
-        LyricStyle next = Settings.LYRIC_STYLE.get().with(key, value);
+    public static boolean setStyle(LyricStyle next) {
         if (next == Settings.LYRIC_STYLE.get()) return false;
         Settings.LYRIC_STYLE.set(next);
         LyricView view = sView;

@@ -102,6 +102,9 @@ public final class ModuleState {
 
             @Override
             boolean read(String k, String v) throws Exception {
+                // The settings come from the app's group now (stage 5.2): this file is the
+                // downgrade copy then, and an older one must not overwrite what it says.
+                if (SettingsPrefs.usesPrefs()) return false;
                 for (Settings.FileKey f : s.files) {
                     if (!f.name.equals(k)) continue;
                     f.read.apply(v);

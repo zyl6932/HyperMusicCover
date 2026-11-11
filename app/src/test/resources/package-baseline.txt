@@ -32,9 +32,7 @@ feature-cycle transit/AmapTransitScene.java -> immersive.ImmersiveScene
 feature-cycle transit/AmapTransitScene.java -> island.LockIslands
 feature-cycle transit/AmapTransitScene.java -> island.MiniPlayerRuntime
 
-# The settings table names the features it applies to (stage 5.1 has them register instead).
-settings-imports-feature Settings.java -> lyrics.LockLyrics
+# The settings table keeps the lyrics' two value objects: they are what the entries hold, not
+# features, and they import nothing of the module (stage 5.1 took the other three out).
 settings-imports-feature Settings.java -> lyrics.LyricStyle
 settings-imports-feature Settings.java -> lyrics.LyricAppearance
-settings-imports-feature Settings.java -> pickup.PickupCodeIsland
-settings-imports-feature Settings.java -> transit.AmapTransitScene

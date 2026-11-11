@@ -749,6 +749,9 @@ public class Main extends XposedModule {
      * reinstalling this list, which is why FeatureHost marks Gen's install scope after it.
      */
     static List<Feature> systemUiFeatures() {
+        bindSettings();
+        // After the effects are bound: a migrated group only sets values here (stage 5.2).
+        SettingsPrefs.install();
         return java.util.Arrays.asList(
                 Feature.of("feature:tweaks", false, c -> HyperTweaks.systemUi(c.host)),
                 // The home screen magnified behind the shade, after the lock screen.
@@ -835,6 +838,30 @@ public class Main extends XposedModule {
                 // in, left it that way after cover mode ended.
 
                 Feature.of("feature:clock_interactor", true, c -> hookClockInteractor(c.host)));
+    }
+
+    /**
+     * The settings' effects, registered by the features that own them (stage 5.1): the table no
+     * longer names a feature. Run when the feature list is built, so both a cold start and a
+     * hot-reloaded generation bind their own class loader's table. Each in its own try - a class
+     * missing from this build costs the settings it owns, not the others.
+     */
+    private static void bindSettings() {
+        try {
+            LockLyrics.bindSettings();
+        } catch (Throwable t) {
+            Xp.w(TAG + "lyric settings not bound: " + t);
+        }
+        try {
+            AmapTransitScene.INSTANCE.bindSettings();
+        } catch (Throwable t) {
+            Xp.w(TAG + "高德 setting not bound: " + t);
+        }
+        try {
+            PickupCodeIsland.INSTANCE.bindSettings();
+        } catch (Throwable t) {
+            Xp.w(TAG + "pickup setting not bound: " + t);
+        }
     }
 
     /**
@@ -1580,6 +1607,13 @@ public class Main extends XposedModule {
             Xp.w(TAG + "hello to the wallpaper process failed: " + t);
         }
         ModuleState.loadState();
+        // Changes the app wrote while this process was starting: the install read may have run
+        // before its main loop did. Values were already set there; this applies any that differ.
+        try {
+            SettingsPrefs.flush(ctx);
+        } catch (Throwable t) {
+            Xp.w(TAG + "settings flush failed: " + t);
+        }
         // What it restored goes onto the lock screen here when there is one - an attach, a dry
         // run's re-entry - exactly where loadState used to do it. Booted at process start there
         // is none yet; the attach does it then, and an adoption after its boot step.
@@ -2695,6 +2729,11 @@ public class Main extends XposedModule {
 
     public static MediaController miniPlayerSession() {
         return sWatched;
+    }
+
+    /** The track the cover is following; the lyrics' switch is given it at a start. */
+    public static String trackKey() {
+        return sTrackKey;
     }
 
     /** The OEM header owns the media card's background and foreground rim. */

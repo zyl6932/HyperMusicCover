@@ -171,6 +171,14 @@ internal object PickupCodeIsland {
         PickupIsland.install()
     }
 
+    /** The settings table's effect for 取餐码, registered at install (stage 5.1). */
+    fun bindSettings() {
+        Settings.PICKUP.apply(Settings.Bool.Apply { _, on ->
+            setOn(on)
+            true
+        })
+    }
+
     fun setOn(on: Boolean) {
         Settings.PICKUP.set(on)
         bg.post {

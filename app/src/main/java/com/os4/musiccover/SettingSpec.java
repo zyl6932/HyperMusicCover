@@ -143,6 +143,23 @@ public final class SettingSpec {
     /** Colours and opacity of the lead and the backing vocal, as LyricAppearance's JSON. */
     public static final SettingSpec LYRIC_APPEARANCE = text("lyricappearance", "");
 
+    // ---------------------------------------------------------------- the remote preferences
+
+    /**
+     * The group the app writes settings into (architecture plan, stage 5.2). A group of its own,
+     * not "module": LSPosed's manager keeps the module's hot-reload switch in that one and must
+     * not see it cleared or overwritten.
+     */
+    public static final String PREFS_GROUP = "settings";
+    /**
+     * Set by the app once it has copied the settings it read back from the module into
+     * {@link #PREFS_GROUP}. Without it the module keeps reading the state file, exactly as it
+     * always has - one source or the other, never a key from each.
+     */
+    public static final String PREFS_MIGRATED = "_migrated";
+    /** The app's write counter, monotonic; the module reports the last one it has applied. */
+    public static final String PREFS_REV = "_rev";
+
     // ---------------------------------------------------------------- the islands
 
     /** 「高德公交地铁」. */

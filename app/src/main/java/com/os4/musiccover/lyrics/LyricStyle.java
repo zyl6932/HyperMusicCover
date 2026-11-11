@@ -46,7 +46,7 @@ public final class LyricStyle {
     }
 
     /** Non-finite input changes nothing; finite input is kept inside the UI's supported range. */
-    LyricStyle with(String key, float value) {
+    public LyricStyle with(String key, float value) {
         if (!Float.isFinite(value)) return this;
         float f = fill, p = pos, side = sideDp, size = sizeSp, bgSize = bgSizeSp;
         int fontWeight = weight;

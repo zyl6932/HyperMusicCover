@@ -257,6 +257,11 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
         // The features that did not go in at start - failed, hooked nothing, or skipped for a
         // missing clock container - for the home page's "N features not installed".
         out.putStringArray("features_missing", FeatureHost.missing());
+        // Stage 5.2: whether the settings come from the app's group, and the last of the app's
+        // writes this generation applied. An older module answers neither, which is what tells
+        // the app to keep sending ops instead.
+        out.putBoolean("settings_prefs", SettingsPrefs.usesPrefs());
+        out.putLong("settings_rev", SettingsPrefs.rev());
         // 设置页那行「手动刷新取餐码云端规则」的副标题，和这一份名单有几个小程序。
         out.putString("rulesdate", PickupCloud.INSTANCE.stamp(PickupCloud.INSTANCE.getUpdatedAt()));
         out.putInt("rulescount", PickupCloud.INSTANCE.count());

@@ -128,6 +128,14 @@ public final class AmapTransitScene implements ImmersiveScene {
 
     // ---------------------------------------------------------------- the switch
 
+    /** The settings table's effect for 「高德公交地铁」, registered at install (stage 5.1). */
+    public void bindSettings() {
+        Settings.TRANSIT.apply((c, on) -> {
+            setOn(c, on);
+            return true;
+        });
+    }
+
     /** The switch moved ({@code op transitcfg --ez on}): 高德 told, and a page up taken down. */
     public void setOn(Context ctx, boolean on) {
         Settings.TRANSIT.set(on);

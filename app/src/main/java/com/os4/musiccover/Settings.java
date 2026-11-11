@@ -4,17 +4,18 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 
-import com.os4.musiccover.lyrics.LockLyrics;
 import com.os4.musiccover.lyrics.LyricStyle;
 import com.os4.musiccover.lyrics.LyricAppearance;
-import com.os4.musiccover.pickup.PickupCodeIsland;
-import com.os4.musiccover.transit.AmapTransitScene;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Every setting the app's pages change, in one table: its value, the op and extra that set it,
@@ -73,8 +74,37 @@ public final class Settings {
         void apply(String v) throws Exception;
     }
 
-    interface After {
+    /**
+     * What runs once after a change. A feature registers its own (stage 5.1), so one instance
+     * shared by several entries is what {@link #applyBatch} dedupes by.
+     */
+    public interface After {
         void run(Context c);
+    }
+
+    /**
+     * One entry and the whole value it should have - one setting's share of a batch (see
+     * {@link #applyBatch}). [same] is read when the change is made: the batch leaves that entry
+     * alone rather than applying the value and trusting the effect to notice.
+     */
+    static final class Change {
+        final Entry<?> entry;
+        final boolean same;
+        private final java.util.function.Consumer<Context> run;
+        private final Runnable set;
+
+        Change(Entry<?> entry, boolean same, java.util.function.Consumer<Context> run,
+               Runnable set) {
+            this.entry = entry;
+            this.same = same;
+            this.run = run;
+            this.set = set;
+        }
+
+        /** Writes the value and nothing else - a cold start's read, before any view exists. */
+        void setOnly() {
+            set.run();
+        }
     }
 
     /** One line of the state file. */
@@ -133,8 +163,8 @@ public final class Settings {
             return self();
         }
 
-        /** Run after a change the op applied, after it is saved. */
-        E then(After after) {
+        /** Run after a change the op applied, after it is saved. Features register their own. */
+        public E then(After after) {
             this.after = after;
             return self();
         }
@@ -172,14 +202,14 @@ public final class Settings {
     // ---------------------------------------------------------------- the kinds
 
     public static final class Bool extends Entry<Bool> {
-        interface Apply {
+        public interface Apply {
             /** False when the value did not change and nothing follows. */
             boolean apply(Context c, boolean v);
         }
 
         private volatile boolean value;
         private boolean absentValue;
-        private Apply apply;
+        private Apply effect;
 
         Bool(SettingSpec spec) {
             super(spec);
@@ -200,8 +230,8 @@ public final class Settings {
             return this;
         }
 
-        Bool apply(Apply apply) {
-            this.apply = apply;
+        public Bool apply(Apply apply) {
+            this.effect = apply;
             return this;
         }
 
@@ -227,9 +257,27 @@ public final class Settings {
                 default:
                     next = i.getBooleanExtra(extra, on());
             }
-            if (apply != null) return apply.apply(c, next);
-            set(next);
+            return apply(c, next);
+        }
+
+        /** The op path's whole-value apply: the bound effect, or the value alone. */
+        boolean apply(Context c, boolean v) {
+            if (effect != null) return effect.apply(c, v);
+            set(v);
             return true;
+        }
+
+        /**
+         * The batch's way in (stage 5.2): a value the entry already has is not applied at all, so
+         * a migration arriving with what memory holds changes nothing on screen.
+         */
+        boolean applyValue(Context c, boolean v) {
+            if (v == on()) return false;
+            return apply(c, v);
+        }
+
+        Change change(boolean v) {
+            return new Change(this, v == on(), c -> applyValue(c, v), () -> set(v));
         }
 
         @Override
@@ -244,13 +292,19 @@ public final class Settings {
     }
 
     public static final class Real extends Entry<Real> {
-        interface Apply {
+        public interface Apply {
             boolean apply(Context c, float v);
+        }
+
+        /** Whether a whole value is the one the entry already has; see CLOCK_HEIGHT. */
+        interface Same {
+            boolean is(float v);
         }
 
         private volatile float value;
         private float absentValue;
-        private Apply apply;
+        private Apply effect;
+        private Same same = v -> Float.compare(value, v) == 0;
 
         Real(SettingSpec spec) {
             super(spec);
@@ -271,8 +325,14 @@ public final class Settings {
             return this;
         }
 
-        Real apply(Apply apply) {
-            this.apply = apply;
+        public Real apply(Apply apply) {
+            this.effect = apply;
+            return this;
+        }
+
+        /** Overrides "is this the value already here" for an entry whose setter keeps it elsewhere. */
+        Real sameWith(Same same) {
+            this.same = same;
             return this;
         }
 
@@ -292,9 +352,24 @@ public final class Settings {
             } else {
                 next = i.getFloatExtra(extra, absentValue);
             }
-            if (apply != null) return apply.apply(c, next);
-            set(next);
+            return apply(c, next);
+        }
+
+        /** The op path's whole-value apply: the bound effect, or the value alone. */
+        boolean apply(Context c, float v) {
+            if (effect != null) return effect.apply(c, v);
+            set(v);
             return true;
+        }
+
+        /** The batch's way in: a value the entry already has is not applied at all. */
+        boolean applyValue(Context c, float v) {
+            if (same.is(v)) return false;
+            return apply(c, v);
+        }
+
+        Change change(float v) {
+            return new Change(this, same.is(v), c -> applyValue(c, v), () -> set(v));
         }
 
         @Override
@@ -309,13 +384,15 @@ public final class Settings {
     }
 
     public static final class Int extends Entry<Int> {
-        interface Apply {
+        public interface Apply {
             boolean apply(Context c, int v);
         }
 
         private volatile int value;
         private int absentValue;
-        private Apply apply;
+        private Apply effect;
+        /** Validates a whole value from any source: the op, the file, or the app's write. */
+        private java.util.function.IntUnaryOperator check = v -> v;
 
         Int(SettingSpec spec) {
             super(spec);
@@ -336,14 +413,24 @@ public final class Settings {
             return this;
         }
 
-        Int apply(Apply apply) {
-            this.apply = apply;
+        public Int apply(Apply apply) {
+            this.effect = apply;
             return this;
+        }
+
+        /** Keeps a whole value inside the spec's range wherever it came from. */
+        Int clamp(java.util.function.IntUnaryOperator check) {
+            this.check = check;
+            return this;
+        }
+
+        int checked(int v) {
+            return check.applyAsInt(v);
         }
 
         /** Written as a decimal, read back as it is - the apply step is not run. */
         Int file(String name) {
-            return file(name, () -> String.valueOf(get()), v -> set(Integer.parseInt(v)));
+            return file(name, () -> String.valueOf(get()), v -> set(checked(Integer.parseInt(v))));
         }
 
         @Override
@@ -367,9 +454,26 @@ public final class Settings {
                 default:
                     next = i.getIntExtra(extra, absentValue);
             }
-            if (apply != null) return apply.apply(c, next);
-            set(next);
+            return apply(c, checked(next));
+        }
+
+        /** The op path's whole-value apply: the bound effect, or the value alone. */
+        boolean apply(Context c, int v) {
+            if (effect != null) return effect.apply(c, v);
+            set(v);
             return true;
+        }
+
+        /** The batch's way in: a value the entry already has is not applied at all. */
+        boolean applyValue(Context c, int v) {
+            int next = checked(v);
+            if (next == get()) return false;
+            return apply(c, next);
+        }
+
+        Change change(int v) {
+            int next = checked(v);
+            return new Change(this, next == get(), c -> applyValue(c, next), () -> set(next));
         }
 
         @Override
@@ -385,13 +489,20 @@ public final class Settings {
 
     /** A value object (a style), set by an op whose extras only it knows how to read. */
     public static final class Ref<T> extends Entry<Ref<T>> {
-        interface Apply {
-            /** Reads the op's extras and applies them. False when nothing changed. */
-            boolean apply(Context c, Intent i);
+        public interface Apply<T> {
+            /** Applies a whole value. False when nothing changed. */
+            boolean apply(Context c, T v);
+        }
+
+        /** Reads an op's extras into the whole value it means; null when the op has none. */
+        interface Params<T> {
+            T parse(Intent i);
         }
 
         private volatile T value;
-        private Apply apply;
+        private Apply<T> effect;
+        private Params<T> params;
+        private java.util.function.BiPredicate<T, T> same = (a, b) -> a == b;
 
         Ref(SettingSpec spec, T initial) {
             super(spec);
@@ -406,14 +517,44 @@ public final class Settings {
             value = v;
         }
 
-        Ref<T> apply(Apply apply) {
-            this.apply = apply;
+        public Ref<T> apply(Apply<T> apply) {
+            this.effect = apply;
+            return this;
+        }
+
+        /** How the op's extras become a whole value - the `key`/`v` pair, or the appearance JSON. */
+        Ref<T> params(Params<T> params) {
+            this.params = params;
+            return this;
+        }
+
+        /** Whether two values are the same; identity unless the value object says otherwise. */
+        Ref<T> sameAs(java.util.function.BiPredicate<T, T> same) {
+            this.same = same;
             return this;
         }
 
         @Override
         boolean fromIntent(Context c, Intent i) {
-            return apply != null && apply.apply(c, i);
+            T next = params == null ? null : params.parse(i);
+            return next != null && apply(c, next);
+        }
+
+        /** The op path's whole-value apply: the bound effect, or the value alone. */
+        boolean apply(Context c, T v) {
+            if (effect != null) return effect.apply(c, v);
+            set(v);
+            return true;
+        }
+
+        /** The batch's way in: a value the entry already has is not applied at all. */
+        boolean applyValue(Context c, T v) {
+            if (same.test(get(), v)) return false;
+            return apply(c, v);
+        }
+
+        Change change(T v) {
+            return new Change(this, same.test(get(), v), c -> applyValue(c, v), () -> set(v));
         }
 
         @Override
@@ -476,10 +617,14 @@ public final class Settings {
     public static final Ref<CoverCardStyle> COVER_STYLE =
             new Ref<CoverCardStyle>(SettingSpec.COVER_STYLE, CoverCardStyle.defaults())
             .op("coverstyle", "key", Absent.IGNORE).save(Save.SOON)
-            .apply((c, i) -> {
+            .params(i -> i.hasExtra("key")
+                    ? Settings.COVER_STYLE.get().with(i.getStringExtra("key"),
+                            i.getFloatExtra("v", Float.NaN))
+                    : null)
+            .sameAs((a, b) -> a.mode == b.mode && Float.compare(a.fill, b.fill) == 0
+                    && Float.compare(a.pos, b.pos) == 0 && Float.compare(a.corner, b.corner) == 0)
+            .apply((c, next) -> {
                 CoverCardStyle was = Settings.COVER_STYLE.get();
-                CoverCardStyle next = was.with(i.getStringExtra("key"),
-                        i.getFloatExtra("v", Float.NaN));
                 Settings.COVER_STYLE.set(next);
                 CoverCardLayer.style(next);
                 CoverCardLayer.refresh();
@@ -518,6 +663,11 @@ public final class Settings {
      */
     public static final Real CLOCK_HEIGHT = new Real(SettingSpec.CLOCK_HEIGHT)
             .op("clockscale", "v", Absent.DEFAULT)
+            // A value too small for dp is a pre-dp one, kept in Main until the clock is measured
+            // rather than written here (setClockHeightDp). Comparing the mirror alone would call
+            // that value "already set".
+            .sameWith(v -> Float.compare(Float.isNaN(Main.sClockLegacyK)
+                    ? Settings.CLOCK_HEIGHT.get() : Main.sClockLegacyK, v) == 0)
             .apply((c, v) -> {
                 Main.setClockHeightDp(v);
                 return true;
@@ -798,10 +948,6 @@ public final class Settings {
      */
     public static final Bool LYRICS = new Bool(SettingSpec.LYRICS)
             .op("lyrics", "on", Absent.TOGGLE)
-            .apply((c, v) -> {
-                LockLyrics.setEnabled(v, Main.sTrackKey, Main.sWatched);
-                return true;
-            })
             .file("lyricmaster");
 
     /**
@@ -809,7 +955,6 @@ public final class Settings {
      */
     public static final Bool LYRIC_KEEP_ON = new Bool(SettingSpec.LYRIC_KEEP_ON)
             .op("lyrickeep", "on", Absent.TOGGLE)
-            .then(c -> LockLyrics.refresh())
             .file("lyrickeep");
 
     /**
@@ -825,7 +970,6 @@ public final class Settings {
      */
     public static final Bool LYRIC_HDR = new Bool(SettingSpec.LYRIC_HDR)
             .op("lyrichdr", "on", Absent.TOGGLE)
-            .then(c -> LockLyrics.refresh())
             .file("lyrichdr");
 
     /**
@@ -840,7 +984,6 @@ public final class Settings {
      */
     public static final Bool LYRIC_TRANS = new Bool(SettingSpec.LYRIC_TRANS)
             .op("lyrictrans", "on", Absent.TOGGLE)
-            .then(c -> LockLyrics.refresh())
             .file("lyrictrans");
 
     /**
@@ -850,7 +993,6 @@ public final class Settings {
      */
     public static final Bool LYRIC_ROMA = new Bool(SettingSpec.LYRIC_ROMA)
             .op("lyricroma", "on", Absent.TOGGLE)
-            .then(c -> LockLyrics.refresh())
             .file("lyricroma");
 
     /**
@@ -860,7 +1002,6 @@ public final class Settings {
      */
     public static final Bool LYRIC_ONLINE = new Bool(SettingSpec.LYRIC_ONLINE)
             .op("lyriconline", "on", Absent.TOGGLE)
-            .apply((c, v) -> LockLyrics.setOnline(v))
             .file("lyriconline");
 
     /**
@@ -871,15 +1012,16 @@ public final class Settings {
      * use was built with (see its builtAlign). Left is what the lyrics did before the setting existed,
      * and what a state file written before it loads as.
      *
-     * Saved the way the style is: a quick run of picks is one write. Clamped in setAlign, from the
-     * file as from an op.
+     * Saved the way the style is: a quick run of picks is one write. Clamped here, from the file
+     * as from an op (the feature's setAlign clamps again, harmlessly).
      */
     public static final Int LYRIC_ALIGN = new Int(SettingSpec.LYRIC_ALIGN)
             .op("lyricalign", "v", Absent.KEEP).save(Save.SOON)
-            .apply((c, v) -> LockLyrics.setAlign(v))
-            .then(c -> LockLyrics.refresh())
+            // The clamp LockLyrics.setAlign does, kept in the table now that the effect is the
+            // feature's: the file and the app's write come through here too.
+            .clamp(v -> v < 0 ? 0 : Math.min(v, 2))
             .file("lyricalign", () -> String.valueOf(Settings.LYRIC_ALIGN.get()),
-                    v -> LockLyrics.setAlign(Integer.parseInt(v)));
+                    v -> Settings.LYRIC_ALIGN.set(Settings.LYRIC_ALIGN.checked(Integer.parseInt(v))));
 
     /**
      * Immutable snapshot: the UI, renderer and state loader all use the same validated values. The two
@@ -889,12 +1031,21 @@ public final class Settings {
     public static final Ref<LyricStyle> LYRIC_STYLE =
             new Ref<LyricStyle>(SettingSpec.LYRIC_SIZE, LyricStyle.DEFAULT)
             .op("lyricstyle", "key", Absent.IGNORE).save(Save.SOON)
-            .apply((c, i) -> LockLyrics.setStyle(i.getStringExtra("key"),
-                    i.getFloatExtra("v", Float.NaN)))
+            .params(i -> i.hasExtra("key")
+                    ? Settings.LYRIC_STYLE.get().with(i.getStringExtra("key"),
+                            i.getFloatExtra("v", Float.NaN))
+                    : null)
+            .sameAs((a, b) -> Float.compare(a.fill, b.fill) == 0
+                    && Float.compare(a.pos, b.pos) == 0
+                    && Float.compare(a.sideDp, b.sideDp) == 0
+                    && Float.compare(a.sizeSp, b.sizeSp) == 0
+                    && Float.compare(a.bgSizeSp, b.bgSizeSp) == 0 && a.weight == b.weight)
             .file("lyricsize", () -> String.valueOf(Settings.LYRIC_STYLE.get().sizeSp),
-                    v -> LockLyrics.setStyle("size", Float.parseFloat(v)))
+                    v -> Settings.LYRIC_STYLE.set(
+                            Settings.LYRIC_STYLE.get().with("size", Float.parseFloat(v))))
             .file("lyricbgsize", () -> String.valueOf(Settings.LYRIC_STYLE.get().bgSizeSp),
-                    v -> LockLyrics.setStyle("bgsize", Float.parseFloat(v)))
+                    v -> Settings.LYRIC_STYLE.set(
+                            Settings.LYRIC_STYLE.get().with("bgsize", Float.parseFloat(v))))
             .answer(out -> {
                 LyricStyle s = Settings.LYRIC_STYLE.get();
                 out.putFloat(SettingSpec.LYRIC_BG_SIZE.key, s.bgSizeSp);
@@ -912,12 +1063,11 @@ public final class Settings {
     public static final Ref<LyricAppearance> LYRIC_APPEARANCE =
             new Ref<LyricAppearance>(SettingSpec.LYRIC_APPEARANCE, LyricAppearance.DEFAULT)
             .op("lyricappearance", "json", Absent.IGNORE).save(Save.SOON)
-            .apply((c, i) -> {
-                if (!i.hasExtra("json")) return false;
-                LockLyrics.setAppearance(i.getStringExtra("json"));
-                return true;
-            })
-            .file("lyricappearance", () -> Settings.LYRIC_APPEARANCE.get().toJson(), LockLyrics::setAppearance)
+            .params(i -> i.hasExtra("json")
+                    ? LyricAppearance.parse(i.getStringExtra("json")) : null)
+            .sameAs((a, b) -> a.toJson().equals(b.toJson()))
+            .file("lyricappearance", () -> Settings.LYRIC_APPEARANCE.get().toJson(),
+                    v -> Settings.LYRIC_APPEARANCE.set(LyricAppearance.parse(v)))
             .answer(out -> out.putString(SettingSpec.LYRIC_APPEARANCE.key,
                     Settings.LYRIC_APPEARANCE.get().toJson()));
 
@@ -930,10 +1080,6 @@ public final class Settings {
      */
     public static final Bool TRANSIT = new Bool(SettingSpec.TRANSIT)
             .op("transitcfg", "on", Absent.IGNORE).absent(true)
-            .apply((c, v) -> {
-                AmapTransitScene.INSTANCE.setOn(c, v);
-                return true;
-            })
             .file("transit");
 
     /**
@@ -941,10 +1087,6 @@ public final class Settings {
      */
     public static final Bool PICKUP = new Bool(SettingSpec.PICKUP)
             .op("pickup", "on", Absent.IGNORE).absent(true)
-            .apply((c, v) -> {
-                PickupCodeIsland.INSTANCE.setOn(v);
-                return true;
-            })
             .file("pickup");
 
     /**
@@ -977,13 +1119,92 @@ public final class Settings {
         for (Entry<?> e : entries) {
             if (!e.fromIntent(c, i)) continue;
             Xp.log(Main.TAG + "setting " + e.spec.key + " = " + e.describe());
-            if (e.save == Save.NOW) ModuleState.saveState();
-            else if (e.save == Save.SOON) ModuleState.saveStateSoon();
+            // With the app's group as the source an op changes this session only (decision B):
+            // the group is the truth, and the file is a downgrade copy the batches keep current.
+            if (!SettingsPrefs.usesPrefs()) {
+                if (e.save == Save.NOW) ModuleState.saveState();
+                else if (e.save == Save.SOON) ModuleState.saveStateSoon();
+            }
             if (e.after != null) e.after.run(c);
         }
         After finish = FINISH.get(op);
         if (finish != null) finish.run(c);
         return true;
+    }
+
+    /**
+     * Applies whole values as one batch - what one write from the app's settings becomes (stage
+     * 5.2). Entries go in the table's order, each at most once; one already holding its value is
+     * left alone, so a migration arriving with what memory already has does nothing at all. The
+     * state file is written once for the batch, an After shared by several entries runs once, and
+     * an op's finish runs once whichever of its entries changed - the media card's four are one
+     * op and still one finish.
+     *
+     * <p>An adb op does not come through here: {@link #dispatch} keeps applying each op on its
+     * own, a repeated value included.
+     */
+    static boolean applyBatch(Context c, List<Change> changes) {
+        Map<Entry<?>, Change> byEntry = new HashMap<>();
+        for (Change change : changes) byEntry.put(change.entry, change);
+        List<Change> ordered = new ArrayList<>(byEntry.values());
+        ordered.sort(Comparator.comparingInt(ch -> ALL.indexOf(ch.entry)));
+
+        List<Change> applied = new ArrayList<>();
+        for (Change change : ordered) {
+            if (change.same) continue;
+            change.run.accept(c);
+            Xp.log(Main.TAG + "setting " + change.entry.spec.key + " = "
+                    + change.entry.describe());
+            applied.add(change);
+        }
+        if (applied.isEmpty()) return false;
+
+        boolean now = false, soon = false;
+        for (Change change : applied) {
+            if (change.entry.save == Save.NOW) now = true;
+            else if (change.entry.save == Save.SOON) soon = true;
+        }
+        if (now) ModuleState.saveState();
+        else if (soon) ModuleState.saveStateSoon();
+
+        // By instance: a feature registering one After for several of its entries gets one run.
+        Set<After> afters = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Change change : applied) {
+            After after = change.entry.after;
+            if (after != null && afters.add(after)) after.run(c);
+        }
+
+        Set<String> ops = new LinkedHashSet<>();
+        for (Change change : applied) {
+            if (change.entry.op != null) ops.add(change.entry.op);
+        }
+        for (String op : ops) {
+            After finish = FINISH.get(op);
+            if (finish != null) finish.run(c);
+        }
+        return true;
+    }
+
+    /**
+     * Whether the app keeps this setting in its own preferences (stage 5.2). The six without a
+     * file key are the ones nothing keeps today (AUTO forces itself on at every start, and the
+     * rest are per-session debug values); they stay out of prefs the same way.
+     */
+    static boolean persisted(Entry<?> e) {
+        return !e.files.isEmpty();
+    }
+
+    /** A whole value for one of the value-object entries, from the parts a prefs read gives. */
+    static Change coverStyle(int mode) {
+        return COVER_STYLE.change(COVER_STYLE.get().with("mode", mode));
+    }
+
+    static Change lyricStyle(float sizeSp, float bgSizeSp) {
+        return LYRIC_STYLE.change(LYRIC_STYLE.get().with("size", sizeSp).with("bgsize", bgSizeSp));
+    }
+
+    static Change lyricAppearance(String json) {
+        return LYRIC_APPEARANCE.change(LyricAppearance.parse(json));
     }
 
     /** Every setting's answer to the query. */
