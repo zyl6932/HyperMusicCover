@@ -121,6 +121,18 @@ public final class Settings {
     }
 
     /** Every entry, in the order the ops apply them. */
+    /**
+     * Whether the state file had a clock size when it was last read. The query answers it beside
+     * the size itself, because the size it answers is the one the clock is at either way - and
+     * the app's migration (stage 5.4) must not write that back as if it had been chosen: doing so
+     * would fix the clock to this style's height instead of following it.
+     */
+    private static boolean sClockSizeFromFile;
+
+    static boolean clockSizeFromFile() {
+        return sClockSizeFromFile;
+    }
+
     private static final List<Entry<?>> ALL = new ArrayList<>();
     /** Every op's entries, in that order. */
     private static final Map<String, List<Entry<?>>> OPS = new HashMap<>();
@@ -687,8 +699,16 @@ public final class Settings {
             })
             .then(c -> ClockCollapse.refresh())
             .file("clocksize", () -> Float.isNaN(Settings.CLOCK_SIZE.get()) ? null : String.valueOf(Settings.CLOCK_SIZE.get()),
-                    v -> Main.setClockSize(Float.parseFloat(v)))
-            .answer(out -> out.putFloat(SettingSpec.CLOCK_SIZE.key, Main.effectiveClockSize()));
+                    v -> {
+                        sClockSizeFromFile = true;
+                        Main.setClockSize(Float.parseFloat(v));
+                    })
+            .answer(out -> {
+                out.putFloat(SettingSpec.CLOCK_SIZE.key, Main.effectiveClockSize());
+                // Beside the size, not under a setting's key: what is asked is whether the user
+                // ever chose a size, not what the clock came to. See sClockSizeFromFile.
+                out.putBoolean("clocksizeset", sClockSizeFromFile);
+            });
 
     /**
      * How far the date and the clock are moved together, in dp, from where cover mode puts them.

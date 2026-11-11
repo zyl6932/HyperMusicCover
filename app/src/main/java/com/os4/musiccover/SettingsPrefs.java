@@ -155,6 +155,11 @@ final class SettingsPrefs {
         } catch (Throwable t) {
             return;   // the next change tries again
         }
+        // What the callback delivered and what the group says at this point. A running write
+        // from the app must arrive here as changed values; a generation that never switches is
+        // either not called or reads a snapshot that lagged behind its callback.
+        Xp.log(TAG + "flush: " + keys.size() + " key(s) " + keys
+                + " migrated=" + migrated + " fromPrefs=" + sFromPrefs);
         if (!sFromPrefs) {
             if (!migrated) return;   // still the file's settings; nothing to apply
             readIntoTable(p);
@@ -215,13 +220,23 @@ final class SettingsPrefs {
     /** The whole value one entry should have, read from the group; null if it is not one of ours. */
     private static Settings.Change changeFor(Settings.Entry<?> e, SharedPreferences p) {
         SettingSpec s = e.spec;
+        if (e == Settings.LYRIC_STYLE) {
+            // One entry, two keys: a batch that moved one of them must not reset the other. What
+            // the module holds now is the best answer for a key the group does not carry.
+            if (!p.contains(SettingSpec.LYRIC_SIZE.key) && !p.contains(SettingSpec.LYRIC_BG_SIZE.key)) {
+                return null;
+            }
+            com.os4.musiccover.lyrics.LyricStyle cur = Settings.LYRIC_STYLE.get();
+            return Settings.lyricStyle(
+                    p.getFloat(SettingSpec.LYRIC_SIZE.key, cur.sizeSp),
+                    p.getFloat(SettingSpec.LYRIC_BG_SIZE.key, cur.bgSizeSp));
+        }
+        // A key the group does not carry leaves the value the module already has. The migration
+        // (stage 5.4) writes only what the state file held, and the clock size is the one setting
+        // that is absent until someone chooses it - reading the default there would choose it.
+        if (!p.contains(s.key)) return null;
         if (e == Settings.COVER_STYLE) {
             return Settings.coverStyle(p.getInt(s.key, s.defInt));
-        }
-        if (e == Settings.LYRIC_STYLE) {
-            return Settings.lyricStyle(
-                    p.getFloat(SettingSpec.LYRIC_SIZE.key, SettingSpec.LYRIC_SIZE.defFloat),
-                    p.getFloat(SettingSpec.LYRIC_BG_SIZE.key, SettingSpec.LYRIC_BG_SIZE.defFloat));
         }
         if (e == Settings.LYRIC_APPEARANCE) {
             return Settings.lyricAppearance(p.getString(s.key, s.defString));
