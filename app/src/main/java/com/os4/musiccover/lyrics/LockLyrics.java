@@ -393,6 +393,14 @@ public final class LockLyrics {
         // In the keyguard's own layer the lock screen going takes the view with it, as it always
         // did; only the window needs telling.
         if (!hdr()) return true;
+        // A held doze is this lock screen, dimmed - not a lock screen that has gone (#134).
+        //
+        // The first lock taken straight out of the player is the case that reads wrong: the
+        // keyguard is laid out AS the doze rather than before it, so the keyguard service's own
+        // "is it showing" answer can still say no while the doze is up, and the page stayed cut
+        // for the whole sleep. That the doze is holding the cover's clock is the stronger
+        // answer, and it is the one inHeldAod() already gives the rest of the drawing.
+        if (inHeldAod()) return true;
         return !lockScreenGone();
     }
 

@@ -1868,8 +1868,9 @@ final class LyricView extends View {
         // card's containers and not this layer. See ClockCollapse.contentBottomFor.
         float clock = ClockCollapse.contentBottomFor(this);
         boolean ok = false;
+        boolean attached = isAttachedToWindow();
         float top = bandTop, bottom = bandBottom;
-        if (!Float.isNaN(clock) && isAttachedToWindow()) {
+        if (!Float.isNaN(clock) && attached) {
             getLocationOnScreen(loc);
             float me = loc[1];
             float floor = bandFloor();
@@ -1878,9 +1879,32 @@ final class LyricView extends View {
                 bottom = bandBounds[1] - me;
                 ok = bottom - top >= MIN_BAND_ROWS * textPx - 0.01f;
             }
+        } else if (attached && bandOk && Float.isNaN(clock) && LockLyrics.inHeldAod()) {
+            // A pose that has not been written yet is not a clock that has gone (#134).
+            //
+            // The held doze derives its clock pose a frame or two AFTER the hand-over
+            // (ClockCollapse.frame: `held doze had no pose, put the cover's on it`), so for
+            // those frames inkBottomOnScreen() is still NaN. Answering bandOk=false there is
+            // what costs the whole sleep: showTarget() reads it, answers 0, and the page is cut
+            // while the clock itself comes back one frame later - nothing then asks the lyrics
+            // again, because a page already at 0 has no alpha of its own to animate back.
+            // Keeping the band we had is free: writePose() rewrites the clock's ink on every
+            // doze frame, so the next measurement is off the pose that was just put on.
+            ok = true;
         }
         boolean changed = ok != bandOk
                 || Math.abs(top - bandTop) >= 0.5f || Math.abs(bottom - bandBottom) >= 0.5f;
+        if (ok != bandOk) {
+            // The decision, not only its result: `clock` and `ink` say which edge was missing
+            // and `onKeyguard` says whether wantsWindow() had let the page out at all. #134
+            // could not be closed from a log without these four numbers.
+            Xp.log(TAG + "band " + (ok ? "up" : "off")
+                    + " clock=" + clock
+                    + " ink=" + ClockCollapse.inkBottomOnScreen()
+                    + " band=" + Math.round(top) + ".." + Math.round(bottom)
+                    + " phase=" + ClockCollapse.phase() + " held=" + ClockCollapse.aodHeld()
+                    + " onKeyguard=" + Main.keyguardLocked() + " shown=" + LockLyrics.wantsShown());
+        }
         bandOk = ok;
         if (ok) {
             bandTop = top;
