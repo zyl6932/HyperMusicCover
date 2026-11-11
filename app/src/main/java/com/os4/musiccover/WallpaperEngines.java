@@ -239,11 +239,14 @@ final class WallpaperEngines {
      */
     static void reloadEngine(Object eng, boolean keepAlive) {
         if (eng == null) return;
-        try {
-            Xp.callMethod(eng, "u");
-        } catch (Throwable t) {
-            Xp.w(WallpaperProbe.TAG + "reload: u() failed: " + t);
-        }
+        // No call to u() by name any more. On MiWallpaper 7.1.3 (OS4.0.6.0) u() is
+        // EngineService.setNeedRedraw - the OEM logs "setNeedRedraw true" before calling it on an
+        // orientation change - and its whole body is `b = true`: the same pending-surface flag set
+        // just below, from a name EngineNames has checked is a boolean. Called blind it only
+        // repeated that here, and on a build where the obfuscated names move (as the class comment
+        // of EngineNames records for 8.0.8-flip) it would call whatever else is named u. It cannot
+        // be found by shape instead: the interface has several other no-argument void methods.
+        //
         // Resolved, never assumed. On the multi-display build this flag is called `w`, and the
         // name `b` that it has on 7.0.7 belongs there to an int holding `which` - so writing `b`
         // blind is not a miss, it is a write onto the engine's own lock-or-desktop identity.
