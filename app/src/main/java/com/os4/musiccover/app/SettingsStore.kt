@@ -426,7 +426,10 @@ object SettingsStore {
                 else -> return false
             }
         }
-        if (migrate) e.putBoolean(SettingSpec.PREFS_MIGRATED, true)
+        // The marker goes with any write from a migrated install, not only the migration
+        // itself: LSPosed deletes the whole group on an uninstall, and a later reconcile has
+        // to put the marker back or the host would go on reading the state file.
+        if (migrate || migrated) e.putBoolean(SettingSpec.PREFS_MIGRATED, true)
         // Every whole-set write names the installation, so a group whose row was lost gets it
         // back on the next bind as well as on the next migration.
         if (install != null) e.putString(SettingSpec.PREFS_INSTALL, install)
