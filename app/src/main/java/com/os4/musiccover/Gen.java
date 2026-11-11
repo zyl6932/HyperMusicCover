@@ -59,7 +59,7 @@ public final class Gen {
     /** Set when retirement is committed: hooks pass through, queued work is dropped. */
     static volatile boolean retired;
     /** Adoption failed: this generation answers nothing until the process restarts. */
-    static volatile boolean inert;
+    public static volatile boolean inert;
     /**
      * Set while a retirement's teardown runs on the main thread. The teardown gives OEM state
      * back through the same helpers the features use at runtime, and those are all refused once
@@ -131,7 +131,7 @@ public final class Gen {
      * HotReload, and until then they pass through because [retired] is set. The sweep is best
      * effort on purpose: every step is independent and a failure is left for the next one.
      */
-    static String retireOnMain(long timeoutMs, java.util.function.Supplier<String> check,
+    public static String retireOnMain(long timeoutMs, java.util.function.Supplier<String> check,
                                Runnable beforeSweep) {
         final AtomicInteger state = new AtomicInteger(R_WAITING);
         final String[] refusal = {null};
@@ -204,7 +204,7 @@ public final class Gen {
      * restoring OEM state the new hooks are about to write, and sweeping as they go in. False
      * when it is still running.
      */
-    static boolean awaitPredecessor(long timeoutMs) {
+    public static boolean awaitPredecessor(long timeoutMs) {
         String mark = System.getProperty(TEARDOWN_MARK);
         if (mark == null) return true;
         long start = android.os.SystemClock.uptimeMillis();
@@ -239,7 +239,7 @@ public final class Gen {
      * keep running half a generation. So the same teardown and sweep a retirement runs, on the
      * main thread; [teardown] may be null for a process with no host state to give back.
      */
-    static void goInert(long timeoutMs, Runnable teardown) {
+    public static void goInert(long timeoutMs, Runnable teardown) {
         quiescing = true;
         inert = true;
         boolean ran = onMain(timeoutMs, () -> {
@@ -293,7 +293,7 @@ public final class Gen {
      * Called once SystemUI's features are all in (FeatureHost.installAll, skipped and failed ones
      * included): from here on, these registrations outlive a dry run.
      */
-    static void markInstallScope() {
+    public static void markInstallScope() {
         INSTALL_KEPT.clear();
         INSTALL_KEPT.addAll(receivers);
         INSTALL_KEPT.addAll(observers);
@@ -600,7 +600,7 @@ public final class Gen {
 
     // ---------------------------------------------------------------- what we own
 
-    static final List<XposedInterface.HookHandle> hooks = new CopyOnWriteArrayList<>();
+    public static final List<XposedInterface.HookHandle> hooks = new CopyOnWriteArrayList<>();
     private static final List<PostedOn> postedOn = new CopyOnWriteArrayList<>();
     /**
      * The main-looper Handlers the features made for themselves; see {@link #handler()}.
@@ -1446,7 +1446,7 @@ public final class Gen {
     }
 
     /** What this generation holds, for the probe and for the hot-reload log line. */
-    static String report() {
+    public static String report() {
         pruneAttachStates();
         return "class=" + Integer.toHexString(System.identityHashCode(Gen.class))
                 + " live=" + live()

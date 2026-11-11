@@ -1,11 +1,11 @@
 package com.os4.musiccover.lyrics;
 import com.os4.musiccover.Settings;
 import com.os4.musiccover.ModuleState;
-import com.os4.musiccover.MediaCard;
-import com.os4.musiccover.ClockCollapse;
-import com.os4.musiccover.CoverCardLayer;
-import com.os4.musiccover.CoverMorphRoute;
-import com.os4.musiccover.CoverPush;
+import com.os4.musiccover.card.MediaCard;
+import com.os4.musiccover.clock.ClockCollapse;
+import com.os4.musiccover.cover.CoverCardLayer;
+import com.os4.musiccover.cover.CoverMorphRoute;
+import com.os4.musiccover.cover.CoverPush;
 import com.os4.musiccover.Main;
 import com.os4.musiccover.Gen;
 import com.os4.musiccover.Xp;

@@ -32,7 +32,7 @@ class HotReloadProcessTest {
     }
 
     private fun registryProcesses(): List<String> {
-        val source = read("FeatureRegistry.java")
+        val source = read("feature/FeatureRegistry.java")
         val blocks = Regex("processes\\(([^)]*)\\)").findAll(source).map { it.groupValues[1] }
             .toList()
         assertTrue("no processes(...) found in FeatureRegistry.java", blocks.size > 1)
@@ -63,6 +63,6 @@ class HotReloadProcessTest {
     @Test
     fun theInstallerThrowsForAnythingElse() {
         assertTrue("install() must refuse an unknown process",
-            read("HotReload.java").contains("no installer for "))
+            read("hotreload/HotReload.java").contains("no installer for "))
     }
 }

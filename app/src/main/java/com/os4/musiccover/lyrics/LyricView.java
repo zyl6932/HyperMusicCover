@@ -1,7 +1,7 @@
 package com.os4.musiccover.lyrics;
 import com.os4.musiccover.Settings;
-import com.os4.musiccover.MediaCard;
-import com.os4.musiccover.ClockCollapse;
+import com.os4.musiccover.card.MediaCard;
+import com.os4.musiccover.clock.ClockCollapse;
 import com.os4.musiccover.Main;
 import com.os4.musiccover.Gen;
 import com.os4.musiccover.Xp;

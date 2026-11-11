@@ -1,5 +1,6 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.clock.ClockPlacement;
 import org.junit.Test;
 
 import static org.junit.Assert.*;

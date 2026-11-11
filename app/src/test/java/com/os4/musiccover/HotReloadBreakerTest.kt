@@ -1,5 +1,6 @@
 package com.os4.musiccover
 
+import com.os4.musiccover.hotreload.HotReload
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

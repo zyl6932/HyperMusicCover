@@ -1,5 +1,16 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.cover.CoverCompose;
+import com.os4.musiccover.cover.CoverStore;
+import com.os4.musiccover.cover.PaletteCache;
+import com.os4.musiccover.hotreload.HotReload;
+import com.os4.musiccover.wallpaper.EngineNames;
+import com.os4.musiccover.wallpaper.VideoTakeover;
+import com.os4.musiccover.wallpaper.WallpaperArt;
+import com.os4.musiccover.wallpaper.WallpaperDiag;
+import com.os4.musiccover.wallpaper.WallpaperEngines;
+import com.os4.musiccover.wallpaper.WallpaperFade;
+import com.os4.musiccover.wallpaper.WallpaperVideo;
 import android.app.Application;
 import android.content.Context;
 import android.content.Intent;
@@ -29,16 +40,16 @@ import java.lang.reflect.Modifier;
  */
 public class WallpaperProbe {
 
-    static final String TAG = "[MCWall] ";
+    public static final String TAG = "[MCWall] ";
     private static final String ACTION = "com.os4.musiccover.WPROBE";
     private static final String PKG = "com.miui.miwallpaper";
 
-    static ClassLoader sCl;
+    public static ClassLoader sCl;
     private static boolean sRegistered;
-    static Context sCtx;
+    public static Context sCtx;
     /** The fitted copy of sArt, kept so the GL thread never rescales during a track change. */
-    static volatile Bitmap sFitted;
-    static volatile Bitmap sFittedOf;
+    public static volatile Bitmap sFitted;
+    public static volatile Bitmap sFittedOf;
     /**
      * Give the keyguard a texture the size of the SCREEN instead of the size of the wallpaper
      * file. On by default; the `texfit` probe turns it off.
@@ -65,13 +76,13 @@ public class WallpaperProbe {
      * the KEYGUARD renderer - the desktop wallpaper shares this code and is not ours to resize.
      */
     private static volatile boolean sTexFit = true;
-    static volatile Object sKeyguardTexture;
+    public static volatile Object sKeyguardTexture;
     /**
      * The size each keyguard texture was last uploaded at, so getTextureDimensions can answer for
      * the texture being asked about instead of for whichever screen uploaded most recently.
      * Weak, because these are the OEM's objects and a screen that goes away takes its own with it.
      */
-    static final java.util.Map<Object, android.graphics.Rect> sTexSizes =
+    public static final java.util.Map<Object, android.graphics.Rect> sTexSizes =
             java.util.Collections.synchronizedMap(
                     new java.util.WeakHashMap<Object, android.graphics.Rect>());
     /**
@@ -86,18 +97,18 @@ public class WallpaperProbe {
      * Guarded by itself: each screen's renderer fits on its own GL thread, and a retirement
      * clears it from the main thread.
      */
-    static final java.util.HashMap<Long, Bitmap> sScreenArts = new java.util.HashMap<>();
+    public static final java.util.HashMap<Long, Bitmap> sScreenArts = new java.util.HashMap<>();
     private static Bitmap sScreenArtOf;
-    static volatile int sReportedW, sReportedH;
+    public static volatile int sReportedW, sReportedH;
 
     /**
      * While non-null, this replaces whatever the keyguard renderer would have uploaded as its
      * wallpaper texture. Because it becomes the real wallpaper surface, the clock glass and the
      * card blur sample it too - which is the whole point of coming into this process.
      */
-    static volatile Bitmap sArt;
+    public static volatile Bitmap sArt;
     /** Which of the two cover compositions the current source represents. */
-    static volatile boolean sCardMode;
+    public static volatile boolean sCardMode;
     /** When the running fade-out of the cover began, and how long it runs; 0 when none is. */
     private static volatile long sLeaveAt, sLeaveMs;
 
@@ -107,7 +118,7 @@ public class WallpaperProbe {
      * (upload, getBitmap short-circuit, both fade ends) already reads, so a track change under
      * the lyrics fades frosted to frosted with nothing else knowing. Cleared when the cover goes.
      */
-    static volatile boolean sLyricBlur;
+    public static volatile boolean sLyricBlur;
     /**
      * The newest thing SystemUI has asked for, which is not the same as what is on screen: a
      * switch waits for a fade in the air before it takes effect. Recorded the moment the message
@@ -115,7 +126,7 @@ public class WallpaperProbe {
      * stale answer back - which is how a track changed at the moment the lyrics arrived could
      * leave the cover sharp for the rest of the song, both sides believing it was blurred.
      */
-    static volatile boolean sLyricBlurWant;
+    public static volatile boolean sLyricBlurWant;
     /**
      * When the newest blur decision this process has been given was made, on the clock both
      * processes share. See LockLyrics.putBlurOn.
@@ -134,7 +145,7 @@ public class WallpaperProbe {
      * what this process already holds. 0 means the message carried no stamp at all - an older
      * SystemUI, which sends the answer on its own.
      */
-    static volatile long sBlurSeq;
+    public static volatile long sBlurSeq;
     /**
      * Every message that could carry a blur decision, and every one that carried a cover.
      *
@@ -144,7 +155,7 @@ public class WallpaperProbe {
      * being asked for. Counted separately because the two halves are cleared for the same reason
      * but not by the same thing: a lyric switch arriving mid-fade owns the blur and not the art.
      */
-    static volatile int sMsgSeq, sArtSeq;
+    public static volatile int sMsgSeq, sArtSeq;
 
     /**
      * One track change, segment by segment, read back with `op timing`.
@@ -155,18 +166,18 @@ public class WallpaperProbe {
      * is a bare field write on a path that already exists; nothing is measured that was not
      * already happening.
      */
-    static volatile long sTmT0, sTmBurst, sTmArt, sTmSent, sTmRecv, sTmRead, sTmComposed,
+    public static volatile long sTmT0, sTmBurst, sTmArt, sTmSent, sTmRecv, sTmRead, sTmComposed,
             sTmFrosted, sTmMain, sTmUploaded, sTmCheckMs;
-    static volatile long sTmSkip;
-    static volatile int sTmTries, sTmSkips, sTmSkipDir;
-    static volatile String sTmKind = "";
+    public static volatile long sTmSkip;
+    public static volatile int sTmTries, sTmSkips, sTmSkipDir;
+    public static volatile String sTmKind = "";
 
     /**
      * The keyguard engine, captured so a new track can re-run the texture upload without the
      * process being killed. Its GL work all happens on one HandlerThread; nothing here touches
      * GL directly, it only asks the engine to run its own surface-created path again.
      */
-    static volatile Object sKeyguardEngine;
+    public static volatile Object sKeyguardEngine;
 
     /**
      * Every keyguard engine built, newest last.
@@ -176,7 +187,7 @@ public class WallpaperProbe {
      * at, with nothing in the log to say so. Kept as a list first and picked between second,
      * because which one is right is exactly the question the port has to answer.
      */
-    static final java.util.List<Object> sKeyguardEngines =
+    public static final java.util.List<Object> sKeyguardEngines =
             java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
     /** Renderer class names already reported by the diagnostic above; one line each. */
@@ -193,7 +204,7 @@ public class WallpaperProbe {
      * Not ours to leave swapped: a failure that strands this one shows the album cover on the
      * user's home screen, so anything that sets it has to have a path that puts it back.
      */
-    static volatile Object sDesktopEngine;
+    public static volatile Object sDesktopEngine;
 
     /**
      * The lock screen shows the desktop's still, with no keyguard engine of its own (#84: a
@@ -202,27 +213,27 @@ public class WallpaperProbe {
      * go through the keyguard branch, cover, fade, frost and all, and the cover is in the
      * wallpaper window where the clock's glass and the cards sample it.
      */
-    static volatile boolean sSharedLock;
+    public static volatile boolean sSharedLock;
 
     /**
      * The desktop engine's own word on the lock screen: its show/hideKeyguardWallpaper calls,
      * which arrive as the keyguard locks and unlocks. Null until the first of them - a process
      * started on the lock screen - and then SystemUI's reading, carried on its messages, fills in.
      */
-    static volatile Boolean sDesktopKgShown;
+    public static volatile Boolean sDesktopKgShown;
 
     /**
      * The desktop renderer's last getBitmap was answered with one of ours. Read by the upload
      * that follows it: if the lock screen went in between, that upload is the home screen's,
      * and it is carrying a cover.
      */
-    static volatile boolean sDesktopGaveOurs;
+    public static volatile boolean sDesktopGaveOurs;
 
     /** The desktop's renderer, from its last upload. */
-    static volatile Object sDesktopRenderer;
+    public static volatile Object sDesktopRenderer;
 
     /** The desktop's last upload went through the keyguard branch. */
-    static volatile boolean sDesktopOnLock;
+    public static volatile boolean sDesktopOnLock;
 
     /**
      * The shade is up, so the DESKTOP wallpaper should be showing the cover.
@@ -232,14 +243,14 @@ public class WallpaperProbe {
      * be what the cards blur. The lock screen solved the same problem the same way, by having
      * the picture where the glass looks. This is that, for the desktop.
      */
-    static volatile boolean sShadeOn;
+    public static volatile boolean sShadeOn;
 
     /** When the last shade-state message arrived, so a lost one cannot strand the wallpaper. */
-    static volatile long sShadeAt;
+    public static volatile long sShadeAt;
 
     /** The composed cover, fitted to the desktop texture, and the size it was fitted for. */
-    static volatile Bitmap sShadeFitted;
-    static volatile String sShadeFitOf;
+    public static volatile Bitmap sShadeFitted;
+    public static volatile String sShadeFitOf;
 
     private static final String CLS_KEYGUARD_ENGINE =
             "com.miui.miwallpaper.wallpaperservice.impl.keyguard.KeyguardImageEngineImpl";
@@ -267,7 +278,7 @@ public class WallpaperProbe {
      * Written from the GL thread as well as the main one, so these are only ever coarse.
      */
     private static volatile long sAskedAt;
-    static volatile int sAsks;
+    public static volatile int sAsks;
 
     /**
      * Tells SystemUI that this process has no cover to draw, so it should send one again.
@@ -313,7 +324,7 @@ public class WallpaperProbe {
      * all. Missing it costs exactly one hard cut - the reload that performs it is the reload
      * that learns the original - so this heals itself on first use after a process restart.
      */
-    static volatile Bitmap sOrig;
+    public static volatile Bitmap sOrig;
     private static volatile int sOrigPrint;
 
     // ------------------------------------------------------------------ the OEM's darkening
@@ -340,23 +351,23 @@ public class WallpaperProbe {
      * standing: the user's measure is "the lock screen is darker than the desktop", and on the
      * device that reported it the two slots came back support_dark=true / false.
      */
-    static volatile boolean sOemDarken;
-    static volatile boolean sOemDarkenKnown;
+    public static volatile boolean sOemDarken;
+    public static volatile boolean sOemDarkenKnown;
     /**
      * The desktop renderer's own darkening, as the OEM last handed it over. It goes through the
      * same updateMaskLayerStatus(), so the hook reads it there without touching R8-renamed
      * WallpaperServiceController internals.
      */
-    static volatile boolean sHomeDarken;
-    static volatile boolean sHomeDarkenKnown;
+    public static volatile boolean sHomeDarken;
+    public static volatile boolean sHomeDarkenKnown;
     /** What the OEM's keyguard texture holds right now is a cover, not the real wallpaper. */
-    static volatile boolean sTexShowsCover;
+    public static volatile boolean sTexShowsCover;
     /** Set when the program on screen has no mDarken to write; the OEM's value stands from then on. */
-    static volatile boolean sDarkenBroken;
+    public static volatile boolean sDarkenBroken;
     /** The frame the fade is on. Non-null only while one is running. */
-    static volatile Bitmap sFade;
+    public static volatile Bitmap sFade;
     /** Reused across fades: a 12MB allocation per transition is itself a dropped frame. */
-    static Bitmap sFadeBuf;
+    public static Bitmap sFadeBuf;
     /**
      * The second buffer, allocated only the first time the first one is still being read.
      *
@@ -369,13 +380,13 @@ public class WallpaperProbe {
      * published nor being uploaded, and the second buffer is what keeps a slow upload from
      * stalling the fade instead.
      */
-    static Bitmap sFadeBuf2;
+    public static Bitmap sFadeBuf2;
     /**
      * The buffer the GL thread is copying right now, or null. Guarded by FADE_LOCK, and
      * volatile because the hot reload's check section reads it from a binder thread.
      */
-    static volatile Bitmap sUploading;
-    static final Object FADE_LOCK = new Object();
+    public static volatile Bitmap sUploading;
+    public static final Object FADE_LOCK = new Object();
     /**
      * True from the moment a blended frame is handed to the engine until the GL thread has
      * finished reading it.
@@ -386,7 +397,7 @@ public class WallpaperProbe {
      * like on video: the top third of the wallpaper a step or two behind the rest, for several
      * frames in a row. So the fade waits for its frame to be consumed before composing another.
      */
-    static volatile boolean sFadeInFlight;
+    public static volatile boolean sFadeInFlight;
     /**
      * How long the crossfade takes.
      *
@@ -414,7 +425,7 @@ public class WallpaperProbe {
      * The op is kept for the case where SystemUI is not the one being tested:
      *   --es op fadems --ei v 370
      */
-    static volatile long sFadeMs = 370L;
+    public static volatile long sFadeMs = 370L;
     /**
      * The crossfade for a TRACK CHANGE, which is a different animation with a different job.
      *
@@ -425,7 +436,7 @@ public class WallpaperProbe {
      *
      *   --es op trackfadems --ei v 60
      */
-    static volatile long sTrackFadeMs = 180L;
+    public static volatile long sTrackFadeMs = 180L;
     /**
      * Whether the OEM's frosted copy is regenerated on the fade's frames.
      *
@@ -434,32 +445,32 @@ public class WallpaperProbe {
      * part of it. What it costs is the notification and media cards blurring a wallpaper up to
      * 240ms stale, which nobody can see, and the upload that ends the fade puts it right.
      */
-    static volatile boolean sSkipFrost = true;
+    public static volatile boolean sSkipFrost = true;
     /** Live for the duration of one fade, read by the frosting hook on the GL thread. */
-    static volatile boolean sFrostSkipping;
+    public static volatile boolean sFrostSkipping;
 
-    static volatile WallpaperFade.GpuFade sGpuFade;
+    public static volatile WallpaperFade.GpuFade sGpuFade;
     /** The probe's switch: `--es op gpufade --ez on false` puts the CPU fade back. */
-    static volatile boolean sGpuFadeOn = true;
+    public static volatile boolean sGpuFadeOn = true;
     /** Set when the draw path met something it cannot handle; the CPU fade is used from then on. */
-    static volatile boolean sGpuFadeBroken;
-    static volatile boolean sDrawHooked;
+    public static volatile boolean sGpuFadeBroken;
+    public static volatile boolean sDrawHooked;
     /**
      * What the keyguard texture must be uploaded from while a GPU fade runs: the far end of it.
      * Needed on the way OUT of cover mode above all, where the art is still set until the fade
      * lands and the real wallpaper would otherwise be decoded off disk - the 210ms the getBitmap
      * short-circuit exists to avoid.
      */
-    static volatile Bitmap sUploadOverride;
-    static volatile Object sKeyguardRenderer;
-    static Class<?> sPlainProgram;
+    public static volatile Bitmap sUploadOverride;
+    public static volatile Object sKeyguardRenderer;
+    public static Class<?> sPlainProgram;
     /**
      * GL-thread state: our texture, the fade it belongs to and the context it was made in.
      * sGlTex is volatile because the hot reload's check section reads it from a binder thread.
      */
-    static volatile int sGlTex;
+    public static volatile int sGlTex;
     /** Which FRAME_REQUESTS entry this build answers to, once one has; -1 until then. */
-    static volatile int sFrameReq = -1;
+    public static volatile int sFrameReq = -1;
 
     /**
      * 保留壁纸's dim, 0..0.25: the wallpaper's fragment shader multiplies the texture by
@@ -472,22 +483,22 @@ public class WallpaperProbe {
      * one value per frame instead was a coarse fade - a wallpaper redraw per broadcast, and
      * whichever of the two the phone happened to miss read as a snap (2026-10-17).
      */
-    static volatile float sKeepDim;
-    static float sKeepFrom;
-    static float sKeepTo;
+    public static volatile float sKeepDim;
+    public static float sKeepFrom;
+    public static float sKeepTo;
     /** Written under KEEP_LOCK; volatile because the hot reload's check section reads it. */
-    static volatile long sKeepAt;
-    static int sKeepDurMs = 100;
-    static boolean sKeepPumping;
-    static final Handler KEEP_MAIN = Gen.watchHandler(new Handler(Looper.getMainLooper()));
-    static final Object KEEP_LOCK = new Object();
+    public static volatile long sKeepAt;
+    public static int sKeepDurMs = 100;
+    public static boolean sKeepPumping;
+    public static final Handler KEEP_MAIN = Gen.watchHandler(new Handler(Looper.getMainLooper()));
+    public static final Object KEEP_LOCK = new Object();
     /** Diagnostics: messages received, drawn changes, and the last few drawn values. */
-    static int sKeepMsgs;
-    static int sKeepDraws;
-    static final int KEEP_LOG = 8;
-    static final long[] sKeepLogAt = new long[KEEP_LOG];
-    static final float[] sKeepLogV = new float[KEEP_LOG];
-    static int sKeepLogN;
+    public static int sKeepMsgs;
+    public static int sKeepDraws;
+    public static final int KEEP_LOG = 8;
+    public static final long[] sKeepLogAt = new long[KEEP_LOG];
+    public static final float[] sKeepLogV = new float[KEEP_LOG];
+    public static int sKeepLogN;
     /** True while the keyguard renderer's own onDrawFrame runs. GL thread only. */
     private static boolean sKeyguardDrawing;
 
@@ -621,7 +632,7 @@ public class WallpaperProbe {
      * reload can run the very same sequence in a process that has been up for hours; the
      * adoption validates that loader against the process's own classes first.
      */
-    static void install(ClassLoader cl) {
+    public static void install(ClassLoader cl) {
         sCl = cl;
         Xp.log(TAG + "loaded into " + PKG);
         // The lock clock's palette read off the cover while the cover is up. Its own hook, failing
@@ -1196,12 +1207,12 @@ public class WallpaperProbe {
         return BitmapFactory.decodeByteArray(jpg, 0, jpg.length, o);
     }
 
-    static String sRenderState = "";
+    public static String sRenderState = "";
     /** How the last GPU fade ended, for `op selftest`. */
-    static volatile String sLastFade = "none yet";
+    public static volatile String sLastFade = "none yet";
     private static boolean sRenderStateFailed;
     /** The screen, as MIUI's own renderer has it (mSurfaceSize). 0 until an upload has run. */
-    static volatile int sSurfaceW, sSurfaceH;
+    public static volatile int sSurfaceW, sSurfaceH;
 
     /**
      * The three numbers that decide where the wallpaper lands on screen, read off MIUI's own
@@ -1224,7 +1235,7 @@ public class WallpaperProbe {
      * different answer per renderer - so it is read from the renderer that is about to upload,
      * immediately before the crop that uses it, rather than left over from the last one.
      */
-    static void adoptSurfaceOf(Object renderer) {
+    public static void adoptSurfaceOf(Object renderer) {
         try {
             Object surface = Xp.getObjectField(renderer, "mSurfaceSize");
             if (surface instanceof android.graphics.Rect) {
@@ -1260,12 +1271,12 @@ public class WallpaperProbe {
      * sArt scaled to the texture the keyguard actually uploads, or null while that size is still
      * unknown. Cached, so a track change scales once rather than on every GL callback.
      */
-    static Bitmap fittedArt() {
+    public static Bitmap fittedArt() {
         return WallpaperArt.frostedIfWanted(WallpaperArt.sharpFittedArt());
     }
 
     /** The keyguard renderer's GL thread, as its last frame ran on; 0 until one has drawn. */
-    static volatile int sKeyguardGlTid;
+    public static volatile int sKeyguardGlTid;
 
     /**
      * Keeps a copy of the real lock wallpaper, which is the only thing the cover can fade back
@@ -1273,7 +1284,7 @@ public class WallpaperProbe {
      * this has to be a copy - and the fingerprint is what stops it being copied again on every
      * reload that happens while cover mode is off.
      */
-    static void rememberOriginal(Bitmap b) {
+    public static void rememberOriginal(Bitmap b) {
         if (b == null || b.isRecycled()) return;
         try {
             int print = WallpaperDiag.print8(b);
@@ -1699,10 +1710,10 @@ public class WallpaperProbe {
     // ------------------------------------------------------------------ hot reload
 
     /** Compositions in flight: a source push or a precompose. The check section refuses. */
-    static final java.util.concurrent.atomic.AtomicInteger sComposing =
+    public static final java.util.concurrent.atomic.AtomicInteger sComposing =
             new java.util.concurrent.atomic.AtomicInteger();
     /** JPEG writes in flight: the next generation restores the cover from what is on disk. */
-    static final java.util.concurrent.atomic.AtomicInteger sArtSaving =
+    public static final java.util.concurrent.atomic.AtomicInteger sArtSaving =
             new java.util.concurrent.atomic.AtomicInteger();
 
     /**
@@ -1712,7 +1723,7 @@ public class WallpaperProbe {
      * composer's counters are atomics. The rule is SystemUI's, only wider: a wallpaper restart is a flash the user barely sees, so
      * anything mid-GL, mid-compose or mid-video is refused rather than handed over.
      */
-    static String busyReason() {
+    public static String busyReason() {
         if (sFade != null || sGpuFade != null || sUploadOverride != null
                 || sUploading != null || sFadeInFlight || sLeaveAt != 0L) {
             return "a cover crossfade is running";
@@ -1759,7 +1770,7 @@ public class WallpaperProbe {
      * recomputed on demand. Everything here is a framework object or a primitive, which is what
      * the framework lets cross a generation.
      */
-    static Object[] save() {
+    public static Object[] save() {
         return new Object[]{
                 WALL_STATE_SCHEMA,
                 sArt, sCardMode, sOrig, sOrigPrint, sTexShowsCover,
@@ -1796,7 +1807,7 @@ public class WallpaperProbe {
      * install(): the new hooks are live the moment they are installed, and an upload arriving
      * before sArt is back would see no cover and hand MiWallpaper the real wallpaper to decode.
      */
-    static void adoptState(Object[] f) {
+    public static void adoptState(Object[] f) {
         if (f == null || f.length < S_LEN) return;
         if (!(f[0] instanceof Integer) || (Integer) f[0] != WALL_STATE_SCHEMA) {
             Xp.w(TAG + "saved wall state is not this build's; the cover comes back from disk");
@@ -1882,7 +1893,7 @@ public class WallpaperProbe {
      * cold-start registration path. No reload is asked for - the texture already shows the
      * cover, and re-running onSurfaceCreated would only upload the same picture again.
      */
-    static void adoptMain(Context ctx) {
+    public static void adoptMain(Context ctx) {
         if (ctx != null) sCtx = ctx.getApplicationContext();
         Object eng = sKeyguardEngine != null ? sKeyguardEngine : sDesktopEngine;
         if (eng != null) {
@@ -1914,7 +1925,7 @@ public class WallpaperProbe {
      * handed over, so it is not touched; everything here is a cache this generation was the
      * last holder of.
      */
-    static void retireForReload() {
+    public static void retireForReload() {
         sKeepPumping = false;
         KEEP_MAIN.removeCallbacks(WallpaperEngines.KEEP_PUMP);
         WallpaperVideo.retire();
@@ -1999,7 +2010,7 @@ public class WallpaperProbe {
      * Puts a new picture in as the art: the fade from what is on screen now, or a plain reload.
      * Main thread.
      */
-    static void applyArt(Bitmap b, boolean reload, boolean fade) {
+    public static void applyArt(Bitmap b, boolean reload, boolean fade) {
         sTmMain = SystemClock.uptimeMillis();
         // Read before sArt moves: on the way into cover mode this is the lock wallpaper, and on
         // a track change it is the album that is on screen right now.
@@ -2077,7 +2088,7 @@ public class WallpaperProbe {
         }
     }
     /** The newest source asked for; a composition overtaken by a newer one is dropped. */
-    static volatile int sSrcSeq;
+    public static volatile int sSrcSeq;
 
     /**
      * The last composition, kept past the cover that showed it. Composer thread only.
@@ -2091,19 +2102,19 @@ public class WallpaperProbe {
      * One screen-sized bitmap and a ~0.3MB small frosting. Let go COMPOSED_KEEP_MS after the cover
      * stops showing it, PRECOMPOSED_KEEP_MS after a precompose nothing used.
      */
-    static volatile WallpaperArt.Composed sComposed;
+    public static volatile WallpaperArt.Composed sComposed;
 
     /** The precompose key of the cover the tap last put up (applyKept). Main thread. */
-    static String sKeptShown;
+    public static String sKeptShown;
     /** CRC32 of the pushed JPEG, the cover video's cache key. 0 means "work it out". */
-    static volatile long sCurrentArtChecksum;
+    public static volatile long sCurrentArtChecksum;
 
     /**
      * Says something to SystemUI. Foreground, like every other broadcast between the two
      * processes: from the background queue a broadcast took a measured ~500ms to arrive, and
      * SystemUI is holding its half of the transition for this one.
      */
-    static void tellSystemUi(String op, String why) {
+    public static void tellSystemUi(String op, String why) {
         Context c = sCtx;
         if (c == null) return;
         try {
@@ -2123,7 +2134,7 @@ public class WallpaperProbe {
      * The still cover's frosting for the lyrics is starting (or is there already), with the
      * decision it answers - SystemUI holds the lyrics back for it. See LockLyrics.onBlurShown.
      */
-    static void tellBlurShown(String why) {
+    public static void tellBlurShown(String why) {
         Context c = sCtx;
         if (c == null) return;
         try {
@@ -2154,7 +2165,7 @@ public class WallpaperProbe {
      * this upload. Taking it from anywhere else is what cropped the cover for one screen and
      * handed it to another.
      */
-    static Bitmap screenSized(Bitmap src) {
+    public static Bitmap screenSized(Bitmap src) {
         int w = sSurfaceW, h = sSurfaceH;
         if (!sTexFit || src == null || w <= 0 || h <= 0) return null;
         if (src.getWidth() == w && src.getHeight() == h) return null;
@@ -2193,7 +2204,7 @@ public class WallpaperProbe {
         return fitted;
     }
 
-    static String describe(Object o) {
+    public static String describe(Object o) {
         if (o == null) return "null";
         if (o instanceof Bitmap) {
             Bitmap b = (Bitmap) o;

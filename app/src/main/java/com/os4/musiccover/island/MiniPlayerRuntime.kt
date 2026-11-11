@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 btm_m
 package com.os4.musiccover.island
-import com.os4.musiccover.AlbumArt
-import com.os4.musiccover.CardTouch
-import com.os4.musiccover.MediaCard
-import com.os4.musiccover.ClockCollapse
-import com.os4.musiccover.ClockRoom
-import com.os4.musiccover.ClockRoomPolicy
-import com.os4.musiccover.CoverMorphMotion
+import com.os4.musiccover.cover.AlbumArt
+import com.os4.musiccover.card.CardTouch
+import com.os4.musiccover.card.MediaCard
+import com.os4.musiccover.clock.ClockCollapse
+import com.os4.musiccover.clock.ClockRoom
+import com.os4.musiccover.clock.ClockRoomPolicy
+import com.os4.musiccover.cover.CoverMorphMotion
 import com.os4.musiccover.Main
 import com.os4.musiccover.lyrics.TrackName
 import com.os4.musiccover.Gen

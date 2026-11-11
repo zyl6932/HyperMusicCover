@@ -1,5 +1,6 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.hotreload.HotReload;
 import java.lang.reflect.Executable;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,19 +21,19 @@ import io.github.libxposed.api.XposedInterface;
  * reloads per process), and the methods are synchronized so the hook installer can be called
  * from whichever thread the framework picks.
  */
-final class HandleStore {
+public final class HandleStore {
 
     private final List<XposedInterface.HookHandle> pending = new ArrayList<>();
     private final List<XposedInterface.HookHandle> installed = new ArrayList<>();
     private final List<String> replacedIds = new ArrayList<>();
     private final List<String> addedIds = new ArrayList<>();
 
-    HandleStore(List<XposedInterface.HookHandle> old) {
+    public HandleStore(List<XposedInterface.HookHandle> old) {
         if (old != null) pending.addAll(old);
     }
 
     /** The old handle with this id and executable, taken out of pending; null when none. */
-    synchronized XposedInterface.HookHandle take(String id, Executable target) {
+    public synchronized XposedInterface.HookHandle take(String id, Executable target) {
         for (int i = 0; i < pending.size(); i++) {
             XposedInterface.HookHandle h = pending.get(i);
             if (id.equals(h.getId()) && target.equals(h.getExecutable())) {
@@ -44,33 +45,33 @@ final class HandleStore {
     }
 
     /** A replace that failed: the old handle goes back, to be unhooked if nothing else claims it. */
-    synchronized void keep(XposedInterface.HookHandle handle) {
+    public synchronized void keep(XposedInterface.HookHandle handle) {
         if (handle != null) pending.add(handle);
     }
 
     /** A hook this generation installed by replacing an old one. */
-    synchronized void replaced(String id, XposedInterface.HookHandle handle) {
+    public synchronized void replaced(String id, XposedInterface.HookHandle handle) {
         replacedIds.add(id);
         installed.add(handle);
     }
 
     /** A hook this generation installed from scratch. */
-    synchronized void added(String id, XposedInterface.HookHandle handle) {
+    public synchronized void added(String id, XposedInterface.HookHandle handle) {
         addedIds.add(id);
         installed.add(handle);
     }
 
     /** The hooks this generation installed, for the failure path's orderly undo. */
-    synchronized List<XposedInterface.HookHandle> installed() {
+    public synchronized List<XposedInterface.HookHandle> installed() {
         return new ArrayList<>(installed);
     }
 
-    synchronized void clearInstalled() {
+    public synchronized void clearInstalled() {
         installed.clear();
     }
 
     /** Unhook everything never claimed. Returns how many. */
-    synchronized int unhookRemaining() {
+    public synchronized int unhookRemaining() {
         int removed = 0;
         for (XposedInterface.HookHandle h : pending) {
             try {
@@ -84,23 +85,23 @@ final class HandleStore {
         return removed;
     }
 
-    synchronized int replacedCount() {
+    public synchronized int replacedCount() {
         return replacedIds.size();
     }
 
-    synchronized int addedCount() {
+    public synchronized int addedCount() {
         return addedIds.size();
     }
 
     /** The ids of the old handles nothing claimed, for the adoption log. */
-    synchronized List<String> remainingLabels() {
+    public synchronized List<String> remainingLabels() {
         List<String> out = new ArrayList<>(pending.size());
         for (XposedInterface.HookHandle h : pending) out.add(HotReload.labelOf(h));
         return out;
     }
 
     /** The ids this generation installed, replaced and added together. */
-    synchronized List<String> newIds() {
+    public synchronized List<String> newIds() {
         List<String> out = new ArrayList<>(replacedIds.size() + addedIds.size());
         out.addAll(replacedIds);
         out.addAll(addedIds);

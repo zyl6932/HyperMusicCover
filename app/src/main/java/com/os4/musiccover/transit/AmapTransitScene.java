@@ -1,7 +1,7 @@
 package com.os4.musiccover.transit;
 import com.os4.musiccover.Settings;
-import com.os4.musiccover.ClockViews;
-import com.os4.musiccover.ClockCollapse;
+import com.os4.musiccover.clock.ClockViews;
+import com.os4.musiccover.clock.ClockCollapse;
 import com.os4.musiccover.immersive.CountdownScene;
 import com.os4.musiccover.Http;
 import com.os4.musiccover.immersive.ImmersiveHost;

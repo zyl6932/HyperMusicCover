@@ -1,5 +1,6 @@
 package com.os4.musiccover
 
+import com.os4.musiccover.fingerprint.FingerprintFrameRestore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

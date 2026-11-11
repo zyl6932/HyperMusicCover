@@ -1,6 +1,6 @@
 package com.os4.musiccover.island
 
-import com.os4.musiccover.CoverMorphMotion
+import com.os4.musiccover.cover.CoverMorphMotion
 import com.os4.musiccover.Main
 import com.os4.musiccover.Gen
 import android.graphics.Bitmap

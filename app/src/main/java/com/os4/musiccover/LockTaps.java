@@ -1,5 +1,7 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.card.CardTouch;
+import com.os4.musiccover.card.MediaCard;
 import com.os4.musiccover.island.MiniPlayerRuntime;
 import java.util.List;
 import com.os4.musiccover.immersive.ImmersiveHost;

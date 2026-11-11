@@ -1,5 +1,6 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.cover.CoverCardStyle;
 import static org.junit.Assert.assertFalse;
 
 import java.util.Arrays;

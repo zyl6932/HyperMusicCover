@@ -1,5 +1,8 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.card.MediaCard;
+import com.os4.musiccover.clock.ClockCollapse;
+import com.os4.musiccover.cover.CoverPush;
 import com.os4.musiccover.lyrics.LockLyrics;
 import com.os4.musiccover.island.MiniPlayerRuntime;
 import com.os4.musiccover.shade.ShadeLayer;
@@ -251,7 +254,7 @@ public final class ModuleState {
      * pre-draw listener while the card is animating in, and writing the file on every frame of
      * that would be a file write per frame for a number that settles in a few hundred ms.
      */
-    static void saveStateSoon() {
+    public static void saveStateSoon() {
         Main.main().removeCallbacks(sSaveState);
         Main.main().postDelayed(sSaveState, 500L);
     }
@@ -325,7 +328,7 @@ public final class ModuleState {
      * the clock container is already known, as before; otherwise the first attach does, and an
      * adoption right after its boot step, so the order of every path is what it was.
      */
-    static void applyRestored() {
+    public static void applyRestored() {
         if (!sRestorePending) return;
         sRestorePending = false;
         // The mode fpavoid has just come back to. A policy flow the OEM's combine already had

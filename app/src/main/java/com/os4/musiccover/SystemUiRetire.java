@@ -1,5 +1,18 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.card.MediaCard;
+import com.os4.musiccover.clock.ClockCollapse;
+import com.os4.musiccover.clock.ClockGlass;
+import com.os4.musiccover.clock.ClockMove;
+import com.os4.musiccover.clock.ClockRoom;
+import com.os4.musiccover.clock.ClockViews;
+import com.os4.musiccover.cover.CoverCardLayer;
+import com.os4.musiccover.cover.CoverMorphLayer;
+import com.os4.musiccover.cover.CoverPush;
+import com.os4.musiccover.cover.MotionCover;
+import com.os4.musiccover.fingerprint.Fingerprint;
+import com.os4.musiccover.fingerprint.FingerprintQuick;
+import com.os4.musiccover.hotreload.HotReload;
 import android.app.Application;
 import android.content.Context;
 import android.os.Looper;
@@ -33,7 +46,7 @@ import java.util.List;
  * <p>Step 7's {@code save()/adopt()} pairs belong beside each group here, so that "what this
  * looks like when it goes" and "what the next generation needs to know" stay one decision.
  */
-final class SystemUiRetire {
+public final class SystemUiRetire {
 
     private SystemUiRetire() {
     }
@@ -101,7 +114,7 @@ final class SystemUiRetire {
      * no put-it-back afterwards: the next generation rebuilds from the state file and the
      * container the old one handed over.
      */
-    static void retireForReload() {
+    public static void retireForReload() {
         List<String> warnings = new ArrayList<>();
         long started = SystemClock.uptimeMillis();
         retireAll(warnings);

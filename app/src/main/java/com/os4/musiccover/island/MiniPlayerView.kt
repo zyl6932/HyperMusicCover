@@ -2,7 +2,7 @@
 // Copyright 2026 btm_m
 package com.os4.musiccover.island
 import com.os4.musiccover.Gen
-import com.os4.musiccover.CoverMorphMotion
+import com.os4.musiccover.cover.CoverMorphMotion
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas

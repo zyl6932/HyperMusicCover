@@ -1,4 +1,10 @@
 package com.os4.musiccover;
+import com.os4.musiccover.card.MediaCard;
+import com.os4.musiccover.clock.ClockCollapse;
+import com.os4.musiccover.clock.ClockGlass;
+import com.os4.musiccover.clock.ClockViews;
+import com.os4.musiccover.cover.CoverPush;
+import com.os4.musiccover.cover.Prefetch;
 import com.os4.musiccover.Gen;
 
 import android.animation.ValueAnimator;
@@ -33,7 +39,7 @@ import java.lang.reflect.Method;
  * its comments, references across the line prefixed with Main. or Diagnostics., nothing else
  * changed.
  */
-final class Diagnostics {
+public final class Diagnostics {
     private Diagnostics() {}
 
     /** Dumps the declared API of one view in the clock tree, to find the size knobs. */
@@ -226,7 +232,7 @@ final class Diagnostics {
      * sInkUnit and the cached box are what the next real placement is made from and a diagnostic
      * that moves them is measuring itself.
      */
-    static RectF measureLiveBox() {
+    public static RectF measureLiveBox() {
         RectF keepBox = ClockViews.sGlyphCache;
         long keepAt = ClockViews.sGlyphAt;
         float keepUnit = ClockViews.sInkUnit;
@@ -257,7 +263,7 @@ final class Diagnostics {
      * something else, `dtop` moves instead. One or the other, and no way to tell them apart from
      * a settled reading.
      */
-    static volatile long sGeomTraceUntil;
+    public static volatile long sGeomTraceUntil;
 
     static int sGeomTraceN;
 

@@ -1,5 +1,6 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.clock.ClockCollapse;
 import java.util.EnumSet;
 
 /**
@@ -19,14 +20,14 @@ import java.util.EnumSet;
  * the question is whether the clock's flight is the COVER's, which {@link #exitingFor} answers -
  * "the clock is moving" does not say whose it is any more.
  */
-final class LockHold {
+public final class LockHold {
 
     private LockHold() {
     }
 
     private static final String TAG = Main.TAG;
 
-    enum Owner {
+    public enum Owner {
         /** The album cover. Its entry fades the card on the clock's spring. */
         COVER(true),
         /** A full-screen immersive page: ImmersiveHost. */
@@ -54,7 +55,7 @@ final class LockHold {
     }
 
     /** The clock is still flying home from [o] giving the lock screen back. */
-    static boolean exitingFor(Owner o) {
+    public static boolean exitingFor(Owner o) {
         return sExitOwner == o && ClockCollapse.phase() != ClockCollapse.Phase.OFF;
     }
 

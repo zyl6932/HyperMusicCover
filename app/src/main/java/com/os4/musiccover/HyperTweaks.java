@@ -28,7 +28,7 @@ import java.lang.reflect.Method;
  * builds, and a lookup that throws must cost its own feature and nothing else - see the module's
  * history of one missing class taking the whole of SystemUI unhooked with it.
  */
-final class HyperTweaks {
+public final class HyperTweaks {
 
     private HyperTweaks() {
     }
@@ -534,7 +534,7 @@ final class HyperTweaks {
      * The editor and the always-on display, which judge a wallpaper's depth all over again with
      * their own copies of the same classes.
      */
-    static void aod(ClassLoader cl) {
+    public static void aod(ClassLoader cl) {
         openDepthThreshold(cl, "aod", "aod.depth.threshold");
         hierarchyBypass(cl);
         aodWallpaperDepth(cl);
@@ -568,7 +568,7 @@ final class HyperTweaks {
     }
 
     /** The control centre, where the soft glass a global theme switched off actually shows. */
-    static void plugin(ClassLoader cl) {
+    public static void plugin(ClassLoader cl) {
         softGlassPlugin(cl, "plugin", "plugin");
     }
 
@@ -1069,7 +1069,7 @@ final class HyperTweaks {
      * already, so the constructor watch will not fire again. Re-running the soft install with
      * that loader replaces the old hooks by id.
      */
-    static void adoptPlugin(ClassLoader cl) {
+    public static void adoptPlugin(ClassLoader cl) {
         softGlassPlugin(cl, "adopt", "sysui");
     }
 

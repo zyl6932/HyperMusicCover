@@ -1,5 +1,6 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.clock.ClockCollapse;
 import com.os4.musiccover.island.MiniPlayerRuntime;
 import android.view.Choreographer;
 import android.view.View;

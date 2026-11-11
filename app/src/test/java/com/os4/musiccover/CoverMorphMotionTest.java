@@ -1,5 +1,7 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.cover.CoverMorphMotion;
+import com.os4.musiccover.card.CardSpring;
 import org.junit.Test;
 
 import static org.junit.Assert.*;

@@ -70,7 +70,7 @@ public final class ProbeGuard {
      * The token as it stands, for a hot-reloaded generation to inherit. Null when this process
      * has not minted (or been given) one yet.
      */
-    static synchronized String token() {
+    public static synchronized String token() {
         return sMinted ? sToken : null;
     }
 
@@ -97,7 +97,7 @@ public final class ProbeGuard {
      * Takes on the retiring generation's token instead of minting a new one: the wallpaper
      * process holds the old token and would refuse every hello until it heard a new one.
      */
-    static synchronized void adoptToken(String token) {
+    public static synchronized void adoptToken(String token) {
         if (token == null || token.isEmpty() || sMinted) return;
         sToken = token;
         sMinted = true;
@@ -150,7 +150,7 @@ public final class ProbeGuard {
      * registration and whose receivers have all been swept. Never unregistered - the process
      * has to restart to leave that state, and the pair goes with it.
      */
-    static void registerOutsideLedger(Context ctx, IntentFilter filter, String tag,
+    public static void registerOutsideLedger(Context ctx, IntentFilter filter, String tag,
                          java.util.function.Supplier<? extends Receiver> make, String... trusted) {
         register(ctx, filter, tag, make, false, trusted);
     }

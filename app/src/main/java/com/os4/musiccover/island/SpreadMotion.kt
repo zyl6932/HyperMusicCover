@@ -1,6 +1,5 @@
 package com.os4.musiccover.island
 
-import com.os4.musiccover.ClockRoom
 import com.os4.musiccover.Main
 import com.os4.musiccover.Gen
 import com.os4.musiccover.Xp
@@ -757,7 +756,7 @@ internal class SpreadMotion(
     private fun followClock(s: Spread) {
         if (!s.clockP.isNaN() && kotlin.math.abs(s.progress - s.clockP) < CLOCK_FOLLOW_STEP) return
         s.clockP = s.progress
-        com.os4.musiccover.ClockRoom.reassertClockRoom()
+        com.os4.musiccover.clock.ClockRoom.reassertClockRoom()
     }
 
     /**

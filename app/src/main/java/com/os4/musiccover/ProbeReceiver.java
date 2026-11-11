@@ -1,5 +1,25 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.card.CardPageButton;
+import com.os4.musiccover.card.CardTouch;
+import com.os4.musiccover.card.CardVideo;
+import com.os4.musiccover.card.MediaCard;
+import com.os4.musiccover.clock.AodColour;
+import com.os4.musiccover.clock.ClockCollapse;
+import com.os4.musiccover.clock.ClockGlass;
+import com.os4.musiccover.clock.ClockMove;
+import com.os4.musiccover.clock.ClockViews;
+import com.os4.musiccover.cover.CoverCardLayer;
+import com.os4.musiccover.cover.CoverPalette;
+import com.os4.musiccover.cover.CoverPush;
+import com.os4.musiccover.cover.MotionCover;
+import com.os4.musiccover.cover.PaletteThrottle;
+import com.os4.musiccover.feature.FeatureHost;
+import com.os4.musiccover.fingerprint.Fingerprint;
+import com.os4.musiccover.fingerprint.FingerprintQuick;
+import com.os4.musiccover.fingerprint.InstallFingerprint;
+import com.os4.musiccover.hotreload.HotReload;
+import com.os4.musiccover.wallpaper.KeepDim;
 import com.os4.musiccover.lyrics.LocalLyrics;
 import com.os4.musiccover.lyrics.LockLyrics;
 import com.os4.musiccover.lyrics.LyricSource;

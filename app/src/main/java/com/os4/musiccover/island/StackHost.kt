@@ -1,7 +1,7 @@
 package com.os4.musiccover.island
 
-import com.os4.musiccover.CardTouch
-import com.os4.musiccover.ClockRoomPolicy
+import com.os4.musiccover.card.CardTouch
+import com.os4.musiccover.clock.ClockRoomPolicy
 import com.os4.musiccover.Main
 import com.os4.musiccover.Gen
 import com.os4.musiccover.Xp

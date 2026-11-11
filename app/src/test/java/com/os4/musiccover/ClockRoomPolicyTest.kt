@@ -1,5 +1,6 @@
 package com.os4.musiccover
 
+import com.os4.musiccover.clock.ClockRoomPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

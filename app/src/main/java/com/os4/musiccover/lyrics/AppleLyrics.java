@@ -1,5 +1,5 @@
 package com.os4.musiccover.lyrics;
-import com.os4.musiccover.HotReload;
+import com.os4.musiccover.hotreload.HotReload;
 import com.os4.musiccover.Xp;
 import android.media.MediaMetadata;
 import android.os.Bundle;

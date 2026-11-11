@@ -51,7 +51,7 @@ internal class SpreadCollapseFinger(val startY: Float, val startProgress: Float,
      * finger's speed. Jumped straight to the end, a pull let go half way had the card in
      * the island (or back in the list) on the very next frame (#122, filmed 2026-11-04).
      */
-    val motion = com.os4.musiccover.CoverMorphMotion()
+    val motion = com.os4.musiccover.cover.CoverMorphMotion()
     var steppedAt = 0L
     fun progress(): Float = if (ended) motion.value
         else MiniPlayerStackGesture.collapseProgress(startProgress, y - startY, range)

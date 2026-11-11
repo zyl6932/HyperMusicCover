@@ -1,5 +1,7 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.fingerprint.InstallFingerprint;
+import com.os4.musiccover.hotreload.HotReload;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.SystemClock;

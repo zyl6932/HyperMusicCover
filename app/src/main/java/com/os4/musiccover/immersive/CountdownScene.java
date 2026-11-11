@@ -1,5 +1,5 @@
 package com.os4.musiccover.immersive;
-import com.os4.musiccover.CoverCompose;
+import com.os4.musiccover.cover.CoverCompose;
 import com.os4.musiccover.island.LockIslands;
 import com.os4.musiccover.Main;
 import com.os4.musiccover.PageSpring;
@@ -660,7 +660,7 @@ public final class CountdownScene implements ImmersiveScene {
             float bottom = cy0 + rMax;
             try {
                 // Into the frame's unzoomed pixels: a swipe zooms the clock's side, not this one.
-                float clock = com.os4.musiccover.ClockCollapse.contentBottomFor(frame);
+                float clock = com.os4.musiccover.clock.ClockCollapse.contentBottomFor(frame);
                 if (!Float.isNaN(clock) && clock - origin + gap < cy0) top = clock - origin + gap;
             } catch (Throwable ignored) {
             }

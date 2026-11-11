@@ -1,6 +1,6 @@
 package com.os4.musiccover.island
 
-import com.os4.musiccover.AlbumArt
+import com.os4.musiccover.cover.AlbumArt
 import com.os4.musiccover.Main
 import com.os4.musiccover.lyrics.TrackIdentity
 import com.os4.musiccover.Xp

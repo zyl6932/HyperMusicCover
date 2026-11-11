@@ -1,5 +1,6 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.hotreload.HotReload;
 import android.content.SharedPreferences;
 import android.util.Log;
 
@@ -473,12 +474,12 @@ public final class Xp {
      * Drops both ClassValue entries, so the classes stop pointing at this generation. Called
      * at retirement, after retired is set; what is asked after that is not cached ([cached]).
      */
-    static void dropClassValues() {
+    public static void dropClassValues() {
         dropClassValues(DECLARED_FIELDS, FIELD_CLASSES);
         dropClassValues(DECLARED_METHODS, METHOD_CLASSES);
     }
 
-    private static void dropClassValues(ClassValue<?> value, java.util.Set<Class<?>> classes) {
+    public static void dropClassValues(ClassValue<?> value, java.util.Set<Class<?>> classes) {
         synchronized (classes) {
             for (Class<?> c : classes) {
                 try {

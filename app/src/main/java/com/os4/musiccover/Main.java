@@ -1,4 +1,32 @@
 package com.os4.musiccover;
+import com.os4.musiccover.card.CardArt;
+import com.os4.musiccover.card.CardPageButton;
+import com.os4.musiccover.card.MediaCard;
+import com.os4.musiccover.clock.AodColour;
+import com.os4.musiccover.clock.ClockCollapse;
+import com.os4.musiccover.clock.ClockGlass;
+import com.os4.musiccover.clock.ClockMove;
+import com.os4.musiccover.clock.ClockRoom;
+import com.os4.musiccover.clock.ClockViews;
+import com.os4.musiccover.cover.AlbumArt;
+import com.os4.musiccover.cover.CoverCardLayer;
+import com.os4.musiccover.cover.CoverCardStyle;
+import com.os4.musiccover.cover.CoverMorphLayer;
+import com.os4.musiccover.cover.CoverMorphMotion;
+import com.os4.musiccover.cover.CoverMorphRoute;
+import com.os4.musiccover.cover.CoverPalette;
+import com.os4.musiccover.cover.CoverPush;
+import com.os4.musiccover.cover.MotionCover;
+import com.os4.musiccover.cover.PaletteThrottle;
+import com.os4.musiccover.cover.Prefetch;
+import com.os4.musiccover.feature.Feature;
+import com.os4.musiccover.feature.FeatureHost;
+import com.os4.musiccover.feature.FeatureRegistry;
+import com.os4.musiccover.fingerprint.Fingerprint;
+import com.os4.musiccover.fingerprint.FingerprintQuick;
+import com.os4.musiccover.fingerprint.InstallFingerprint;
+import com.os4.musiccover.hotreload.HotReload;
+import com.os4.musiccover.wallpaper.KeepDim;
 import com.os4.musiccover.Gen;
 
 import com.os4.musiccover.lyrics.LocalLyrics;
@@ -85,7 +113,7 @@ public class Main extends XposedModule {
     public Main() {
     }
 
-    static final String TAG = "[MCProbe] ";
+    public static final String TAG = "[MCProbe] ";
     private static final String ACTION = "com.os4.musiccover.PROBE";
 
     private static final String CLS_CONTAINER =
@@ -94,8 +122,8 @@ public class Main extends XposedModule {
             "com.android.keyguard.interactor.KeyguardClockNotifInteractor";
     static final String CLS_TIME_VIEW = "com.miui.clock.allInOne.TimeView";
     /** The OEM's own per-style index of clock parts. See dumpClockViewTypes(). */
-    static final String CLS_CLOCK_VIEW_TYPE = "com.miui.clock.module.ClockViewType";
-    static final String CLS_MEDIA_CARD = "com.android.systemui.statusbar.notification"
+    public static final String CLS_CLOCK_VIEW_TYPE = "com.miui.clock.module.ClockViewType";
+    public static final String CLS_MEDIA_CARD = "com.android.systemui.statusbar.notification"
             + ".mediacontrol.MiuiMediaNotificationControllerImpl";
     private static final String CLS_KG_WALLPAPER_MANAGER =
             "com.android.keyguard.wallpaper.MiuiKeyguardWallPaperManager";
@@ -111,11 +139,11 @@ public class Main extends XposedModule {
      * The class doing the combining is a Kotlin lambda that R8 names with a per-build ordinal,
      * so what follows is a shape to search for, never a name to look up. See findAvoidCombine.
      */
-    static final String CLS_KG_PANEL =
+    public static final String CLS_KG_PANEL =
             "com.android.keyguard.panel.KeyguardPanelViewController";
 
     /** SystemUI's own keyguard wallpaper manager, for the wallpaper type. See wallpaperKind(). */
-    static volatile Object sKgWallpaperMgr;
+    public static volatile Object sKgWallpaperMgr;
     /**
      * Whether the lock wallpaper is a live one, which decides where the cover is drawn: the
      * wallpaper process's GL texture for a still, a view in our own keyguard layer for a live
@@ -124,17 +152,17 @@ public class Main extends XposedModule {
      */
     public static volatile boolean sVideoWallpaper;
     /** The live wallpaper's cut-out subject, hidden alongside deducted_image_view. */
-    static volatile View sVideoFg;
+    public static volatile View sVideoFg;
     /** The live wallpaper itself, in the background layer, under our cover. */
-    static volatile View sVideoBg;
+    public static volatile View sVideoBg;
     /** The bitmap currently on sCover, ours to recycle when it is replaced. */
-    static volatile Bitmap sCoverBitmap;
+    public static volatile Bitmap sCoverBitmap;
     /** The frosted copy on sCover during lyric display. */
-    static volatile Bitmap sCoverBlurBitmap;
-    static volatile boolean sVideoCoverBlurred;
+    public static volatile Bitmap sCoverBlurBitmap;
+    public static volatile boolean sVideoCoverBlurred;
 
     public static volatile View sContainer;
-    static volatile Class<?> sContainerCls;
+    public static volatile Class<?> sContainerCls;
     /**
      * The enum KeyguardClockContainer.notifStateChange takes as its third argument, read off
      * that method's own signature rather than looked up by name.
@@ -147,7 +175,7 @@ public class Main extends XposedModule {
      */
     private static volatile Class<?> sTypeCls;
     /** notifStateChange(float, boolean, NotificationTopChangeType), or null if it is gone. */
-    static volatile Method sNotifStateChange;
+    public static volatile Method sNotifStateChange;
     private static boolean sReceiverRegistered;
     /** The result code an op is answered with; the app sends 0. See ModuleBridge.OP_ACK. */
     static final int OP_ACK = 1;
@@ -157,9 +185,9 @@ public class Main extends XposedModule {
      * re-assertions from KeyguardClockNotifInteractor$collectNotificationYSource -
      * is coerced to this Y. This is how the cover mode takes ownership of the clock.
      */
-    static volatile Float sHoldY;
+    public static volatile Float sHoldY;
     /** Last Y the system asked for, so we can hand control back on release. */
-    static volatile float sLastSystemY = Float.NaN;
+    public static volatile float sLastSystemY = Float.NaN;
     /** Set while our own frame is inside setNotifY, so we don't read it back as the system's. */
     private static volatile boolean sSelfDriving;
     /** Per-frame setNotifY logging floods logcat at 8ms intervals; off unless asked for. */
@@ -183,7 +211,7 @@ public class Main extends XposedModule {
      * already worked that out from a palette. Overriding the lightness as well is what used to
      * make the glyphs flip dark over a light cover.
      */
-    static volatile int sCoverTint;
+    public static volatile int sCoverTint;
     /** From a debug op, so a colour can be tried without hunting for the artwork that gives it. */
     static volatile int sCoverTintOverride;
     /**
@@ -197,13 +225,13 @@ public class Main extends XposedModule {
      * with is taken down to its own lightness and then held, so the clock keeps the neutral the
      * OEM starts from and the palette arriving late cannot repaint it. See the setMiGlass guard.
      */
-    static volatile float sAodGrey = Float.NaN;
+    public static volatile float sAodGrey = Float.NaN;
     /**
      * The glass clock's dark/light switch (`TimeView.setBrightness`) as the OEM last decided it
      * from the palette of the cover, and as it last set it outside cover mode. See the
      * setBrightness hook: null until the OEM has said.
      */
-    static volatile Boolean sBrightCover, sBrightOutside;
+    public static volatile Boolean sBrightCover, sBrightOutside;
     /**
      * The strip of the cover that gets sampled for that reading, in dp from the top of the
      * screen. Generous on purpose: the date rests near the top and the collapsed clock
@@ -211,7 +239,7 @@ public class Main extends XposedModule {
      * the status bar and 172dp is past the glyphs on every style measured so far, the point
      * being that a band that overshoots by a few rows still describes what the eye sees there.
      */
-    static final float BAND_TOP_DP = 56f, BAND_BOT_DP = 172f;
+    public static final float BAND_TOP_DP = 56f, BAND_BOT_DP = 172f;
 
     /**
      * The same strip, measured off the placement instead of written down, in screen pixels.
@@ -228,10 +256,10 @@ public class Main extends XposedModule {
      * used whenever it has been written. The constants stay as the answer for the frames before
      * the first placement, which is also the only case they were ever right for.
      */
-    static volatile float sBandTopPx = Float.NaN, sBandBotPx = Float.NaN;
+    public static volatile float sBandTopPx = Float.NaN, sBandBotPx = Float.NaN;
 
     /** Air above the date and below the clock that the band includes. */
-    static final float BAND_PAD_DP = 8f;
+    public static final float BAND_PAD_DP = 8f;
 
     /**
      * Where the date and the clock are, right now, on the screen.
@@ -244,7 +272,7 @@ public class Main extends XposedModule {
      * behind the glyphs, and the clock was drawn white on white. Same rule as everything else
      * in this file: read after the transforms, never before.
      */
-    static void updateColorBand() {
+    public static void updateColorBand() {
         if (!ClockCollapse.active()) return;
         int[] p = LOC_BAND;
         float top = Float.NaN, bot = Float.NaN;
@@ -270,10 +298,10 @@ public class Main extends XposedModule {
     }
 
     /** ClockViewType constants by name, resolved once. See oemPart(). */
-    static volatile java.util.Map<String, Object> sViewTypes;
+    public static volatile java.util.Map<String, Object> sViewTypes;
 
     /** The full-bleed album cover we add behind the clock. */
-    static volatile ImageView sCover;
+    public static volatile ImageView sCover;
     /** Survives keyguard rebuilds: re-attach whenever a fresh clock container shows up. */
     static volatile boolean sCoverWanted;
     /**
@@ -282,7 +310,7 @@ public class Main extends XposedModule {
      * swapping the wallpaper texture alone leaves the OLD wallpaper's subject floating over the
      * album cover - the leftover the cover swap does not otherwise explain.
      */
-    static volatile boolean sDepthHidden;
+    public static volatile boolean sDepthHidden;
     /**
      * The OEM's cut-out ImageView (deducted_image_view), and the visibility the OEM itself last
      * gave it. On a depth VIDEO wallpaper it holds the last frame's subject for the AOD, and the
@@ -331,7 +359,7 @@ public class Main extends XposedModule {
     }
 
     /** The album cover is the wallpaper: depth cut-out hidden and the clock collapsed. */
-    static volatile boolean sCoverMode;
+    public static volatile boolean sCoverMode;
     /**
      * How tall the collapsed clock's digits are, in dp.
      *
@@ -357,7 +385,7 @@ public class Main extends XposedModule {
      */
     private static final float CLOCK_HEIGHT_MAX_DP = SettingSpec.CLOCK_HEIGHT.max;
     /** The smallest scale ever written to a view, so no style can collapse itself to nothing. */
-    static final float MIN_CLOCK_K = 0.05f;
+    public static final float MIN_CLOCK_K = 0.05f;
     /**
      * How solid the glass clock goes, in the OEM's own terms: updateGlassValue(0) is transparent
      * refracting glass and (1) is a solid fill.
@@ -399,9 +427,9 @@ public class Main extends XposedModule {
     static final float CLOCK_OFFSET_MIN_DP = SettingSpec.CLOCK_OFFSET.min;
     static final float CLOCK_OFFSET_MAX_DP = SettingSpec.CLOCK_OFFSET.max;
     /** The session we are mirroring, plus the callback that keeps the cover on the right track. */
-    static MediaController sWatched;
+    public static MediaController sWatched;
 
-    static MediaController watched() {
+    public static MediaController watched() {
         return sWatched;
     }
     private static MediaController.Callback sMediaCb;
@@ -415,7 +443,7 @@ public class Main extends XposedModule {
     static volatile boolean sCoverCardPlaying;
 
     /** What the pushed wallpaper currently shows, so a metadata storm pushes it only once. */
-    static volatile String sTrackKey = "";
+    public static volatile String sTrackKey = "";
     private static MediaSessionManager sMsm;
     private static MediaSessionManager.OnActiveSessionsChangedListener sSessionsCb;
 
@@ -428,7 +456,7 @@ public class Main extends XposedModule {
     private static Handler sMain;
 
     /** The screen the wallpaper is composed for. Read off the keyguard, not assumed. */
-    static volatile int sScreenW = 1200, sScreenH = 2608;
+    public static volatile int sScreenW = 1200, sScreenH = 2608;
 
     /**
      * Scratch pairs for getLocationOnScreen, one per call site: both sit on per-frame paths, where
@@ -436,7 +464,7 @@ public class Main extends XposedModule {
      * a caller that ever nests inside another cannot clobber it.
      */
     private static final int[] LOC_BAND = new int[2];
-    static final int[] LOC_CARD = new int[2];
+    public static final int[] LOC_CARD = new int[2];
 
     /**
      * Whether the wallpaper process is sizing the keyguard texture to the SCREEN rather than to
@@ -446,8 +474,8 @@ public class Main extends XposedModule {
      * is what costs the user their depth cut-out, and it is no longer needed to make the
      * crossfade affordable, because a screen-sized texture is what made it affordable.
      */
-    static volatile boolean sTexFit = true;
-    static final NotificationSink sNotificationSink = new NotificationSink();
+    public static volatile boolean sTexFit = true;
+    public static final NotificationSink sNotificationSink = new NotificationSink();
     private static final Runnable REFRESH_NOTIFICATION_SINK = () -> {
         try {
             int mode = Settings.FP_AVOID.get();
@@ -459,15 +487,15 @@ public class Main extends XposedModule {
         }
     };
 
-    static void refreshNotificationSink() {
+    public static void refreshNotificationSink() {
         main().removeCallbacks(REFRESH_NOTIFICATION_SINK);
         main().post(REFRESH_NOTIFICATION_SINK);
     }
 
     /** The title carrying our play/pause listener, and what it was clickable-wise before. */
-    static View sCardTitleTapped;
+    public static View sCardTitleTapped;
     /** Set only around a capture. See shootCard(). */
-    static volatile boolean sCardForced;
+    public static volatile boolean sCardForced;
     /**
      * The artwork's scale as the OEM has it, and the last one we wrote over it.
      *
@@ -480,8 +508,8 @@ public class Main extends XposedModule {
      *
      * Keeping both numbers is what removes the guess. See scaleArt().
      */
-    static float sArtBaseX = 1f, sArtBaseY = 1f;
-    static float sArtWroteX = Float.NaN, sArtWroteY = Float.NaN;
+    public static float sArtBaseX = 1f, sArtBaseY = 1f;
+    public static float sArtWroteX = Float.NaN, sArtWroteY = Float.NaN;
 
     /**
      * What the cover's own fade does about the wallpaper window's head start, which is the one
@@ -514,7 +542,7 @@ public class Main extends XposedModule {
      * with no measurement at all the stretch falls back to the crossfade length, which is mode
      * OFF for that one transition.
      */
-    static final int FADE_MODE_OFF = 0, FADE_MODE_HOLD = 1, FADE_MODE_STRETCH = 2;
+    public static final int FADE_MODE_OFF = 0, FADE_MODE_HOLD = 1, FADE_MODE_STRETCH = 2;
     /**
      * Set when the user tapped their way OUT of cover mode while the card was still up.
      *
@@ -523,14 +551,14 @@ public class Main extends XposedModule {
      * the next thing the user plays starts from the cover again rather than inheriting a
      * decision that was made about a different song.
      */
-    static volatile boolean sTapSuppressed;
+    public static volatile boolean sTapSuppressed;
     /** Set for the length of one gesture that started on the card's artwork and is ours. */
-    static boolean sArtSwallow;
+    public static boolean sArtSwallow;
     private static long sArtDownAt;
     /** Longer than a tap is a press, a drag or a scroll, and none of those mean expand. */
-    static final long ART_TAP_MS = 500L;
+    public static final long ART_TAP_MS = 500L;
     /** Px of forgiveness around the thumbnail. The card slides; fingers are not pixels. */
-    static final int ART_TAP_SLOP = 24;
+    public static final int ART_TAP_SLOP = 24;
 
     /**
      * Whether the gesture in flight began on the control centre.
@@ -539,7 +567,7 @@ public class Main extends XposedModule {
      * during the gesture it is being dismissed by, so anything asked after that reads "no
      * centre" and hands the touch to the cover.
      */
-    static volatile boolean sGestureOnCentre;
+    public static volatile boolean sGestureOnCentre;
 
     /**
      * The curve the cover-mode transition runs on, and it is the OEM's own: the preset the system
@@ -568,7 +596,7 @@ public class Main extends XposedModule {
      * reproduces an independent measurement already in this file: the exit spring "settles in
      * 610-636ms" was read off the device, and 0.38 lands at 665ms.
      */
-    static final float[] EASE_COVER         = {0.88f, 0.38f};
+    public static final float[] EASE_COVER         = {0.88f, 0.38f};
 
     /**
      * The slider's range for the response above, in seconds. Zeta is not on it: the whole of the
@@ -748,7 +776,7 @@ public class Main extends XposedModule {
      * <p>Nothing here runs a second time: a dry run puts the attach path back up without
      * reinstalling this list, which is why FeatureHost marks Gen's install scope after it.
      */
-    static List<Feature> systemUiFeatures() {
+    public static List<Feature> systemUiFeatures() {
         bindSettings();
         // After the effects are bound: a migrated group only sets values here (stage 5.2).
         SettingsPrefs.install();
@@ -872,7 +900,7 @@ public class Main extends XposedModule {
      * {@code debug.mc.hr_fault} is {@code nocontainer}, which is how the skip is checked on a
      * phone that has it.
      */
-    static boolean findContainer(Feature.Ctx c) {
+    public static boolean findContainer(Feature.Ctx c) {
         if ((BuildConfig.DEBUG || BuildConfig.HR_FAULTS)
                 && "nocontainer".equals(HotReload.sysProp("debug.mc.hr_fault"))) {
             Xp.log(TAG + "KeyguardClockContainer treated as missing (fault injection)");
@@ -919,7 +947,7 @@ public class Main extends XposedModule {
      * The keyguard clock container has just been attached. Also the hot-reload entry: a new
      * generation runs this against the container it inherited from the old one.
      */
-    static void onContainerAttached(View container) {
+    public static void onContainerAttached(View container) {
         CoverMorphLayer.cancel();
         sContainer = container;
         if (!sScreenCompared && sScreenW > 0) {
@@ -1562,7 +1590,7 @@ public class Main extends XposedModule {
      * generation, which starts with every static field empty. Nothing here needs a keyguard:
      * what the state file restored is put onto one by ModuleState.applyRestored.
      */
-    static synchronized void boot(Context ctx) {
+    public static synchronized void boot(Context ctx) {
         if (sReceiverRegistered) {
             return;
         }
@@ -1795,7 +1823,7 @@ public class Main extends XposedModule {
      * wrong in that direction costs a screenshot's worth of wrongness rather than a clock nobody
      * can read.
      */
-    static volatile boolean sScreenOn = true;
+    public static volatile boolean sScreenOn = true;
 
     /** The cached reading, for LockLyrics' per-frame questions. */
     public static boolean screenOnCached() {
@@ -1863,7 +1891,7 @@ public class Main extends XposedModule {
      * Puts the OEM's clock at one notifY, in this frame, with no animation of its own. Must
      * already be on the view's thread.
      */
-    static void applyY(float y) {
+    public static void applyY(float y) {
         View v = sContainer;
         Method m = sNotifStateChange;
         if (v == null || m == null) return;
@@ -1935,7 +1963,7 @@ public class Main extends XposedModule {
     }
 
     /** The density of whatever screen this process is glued to. */
-    static float density() {
+    public static float density() {
         View v = sContainer;
         if (v != null) return v.getResources().getDisplayMetrics().density;
         return sAppCtx != null ? sAppCtx.getResources().getDisplayMetrics().density : 3f;
@@ -2055,7 +2083,7 @@ public class Main extends XposedModule {
      * place that has to know the difference. (A style that has neither takes the clock takeover
      * out of play entirely rather than throwing: the date, and the wallpaper, still work.)
      */
-    static View clockTarget(View root) {
+    public static View clockTarget(View root) {
         // Always tried first and never answered from the cache: one resource lookup and a
         // findViewById, and short-circuiting it is how a style change would go unnoticed.
         View g = ClockViews.findClockView(root, "time_group");
@@ -2162,27 +2190,27 @@ public class Main extends XposedModule {
         }
     }
 
-    static boolean usable(View v) {
+    public static boolean usable(View v) {
         return v != null && v.getVisibility() == View.VISIBLE && v.getWidth() > 0;
     }
 
     /** Read-only probe switch: measure through the hold and the TTL cache, change nothing. */
-    static volatile boolean sProbeLive;
+    public static volatile boolean sProbeLive;
 
     /** Air between the date and the collapsed clock. */
-    static final float CLOCK_GAP_DP = 10f;
+    public static final float CLOCK_GAP_DP = 10f;
 
     // ------------------------------------------------------- transition trace
 
-    static String r1(float v) {
+    public static String r1(float v) {
         return Float.isNaN(v) ? "NaN" : String.valueOf(Math.round(v * 10f) / 10f);
     }
 
-    static String r2(float v) {
+    public static String r2(float v) {
         return Float.isNaN(v) ? "NaN" : String.valueOf(Math.round(v * 100f) / 100f);
     }
 
-    static String r3(float v) {
+    public static String r3(float v) {
         return Float.isNaN(v) ? "NaN" : String.valueOf(Math.round(v * 1000f) / 1000f);
     }
 
@@ -2204,7 +2232,7 @@ public class Main extends XposedModule {
      * before the group is laid out, and a width of 0 would put the pivot on the left edge - the
      * clock then collapses into the corner instead of staying centred under the date.
      */
-    static float clockPivotX(View g, RectF pooled) {
+    public static float clockPivotX(View g, RectF pooled) {
         float screenW = g.getResources().getDisplayMetrics().widthPixels;
         if (pooled == null) return screenW / 2f - g.getLeft();
         float inkCentre = g.getLeft() + pooled.centerX();
@@ -2223,7 +2251,7 @@ public class Main extends XposedModule {
      * the first one with art showed a cover for a track that was not the one on screen. Rank
      * the way the card does: whatever is actually playing, then whoever reported progress last.
      */
-    static MediaController pickController(Context ctx) {
+    public static MediaController pickController(Context ctx) {
         try {
             MediaSessionManager msm =
                     (MediaSessionManager) ctx.getSystemService(Context.MEDIA_SESSION_SERVICE);
@@ -2252,12 +2280,12 @@ public class Main extends XposedModule {
         }
     }
 
-    static float easeRaw() {
+    public static float easeRaw() {
         return ClockRoom.sRoomRaw;
     }
 
     /** Prefer the pixels visible in the card; some OEM drawables expose no BitmapDrawable. */
-    static Bitmap coverMorphSource() {
+    public static Bitmap coverMorphSource() {
         // The square's own art first: prepared off the main thread already, and the very pixels
         // the morph lands on. The session fallback below is a binder call carrying the bitmap,
         // made on the main thread at the moment the animation has to start.
@@ -2279,7 +2307,7 @@ public class Main extends XposedModule {
         return thumb != null ? thumb : (sAppCtx == null ? null : AlbumArt.albumArt(sAppCtx, false));
     }
 
-    static float outlineRadius(View v) {
+    public static float outlineRadius(View v) {
         try {
             android.graphics.Outline o = new android.graphics.Outline();
             v.getOutlineProvider().getOutline(v, o);
@@ -2295,13 +2323,13 @@ public class Main extends XposedModule {
      * own bounds, but the digits are STROKED - in glass mode they are nothing but stroke - so
      * half a stroke width falls outside it and the crop shaved the last digit.
      */
-    static final float CLOCK_PAD = 10f;
+    public static final float CLOCK_PAD = 10f;
 
     /** A hand-back of the live wallpaper's surfaces that is waiting for a lock screen. */
-    static volatile boolean sVideoWpOwed;
+    public static volatile boolean sVideoWpOwed;
 
     /** PROBE `uncover`: our video cover view hidden, so a screenshot shows what is under it. */
-    static volatile boolean sUncoverProbe;
+    public static volatile boolean sUncoverProbe;
 
     /** A view's current picture as an average colour, for the vcprobe op. */
     static String avgColour(View v) {
@@ -2485,7 +2513,7 @@ public class Main extends XposedModule {
     }
 
     /** The one worker the composing runs on, so two track changes cannot compose at once. */
-    static synchronized Handler worker() {
+    public static synchronized Handler worker() {
         if (sWork == null) {
             // Default priority put the composing on a little core and made it swing between
             // 48ms and 196ms for the same picture. This work is on the critical path of a track
@@ -2515,10 +2543,10 @@ public class Main extends XposedModule {
      * the wallpaper process, which holds the other half of the timeline, can print all of it at
      * once. Both processes read the same uptimeMillis clock, so the two halves simply subtract.
      */
-    static volatile long sCtTrack;
-    static volatile long sCtArt;
-    static volatile long sCtCheckMs;
-    static volatile int sCtTries;
+    public static volatile long sCtTrack;
+    public static volatile long sCtArt;
+    public static volatile long sCtCheckMs;
+    public static volatile int sCtTries;
 
     /**
      * The first track change of a BURST, and how many were swallowed by it.
@@ -2530,15 +2558,15 @@ public class Main extends XposedModule {
      * repeatedly actually sees. Measured from here instead: the first press of the burst to the
      * cover that finally arrives.
      */
-    static volatile long sCtBurst;
-    static volatile int sCtSkips;
+    public static volatile long sCtBurst;
+    public static volatile int sCtSkips;
 
     /**
      * Which push is the current one. The retries span a couple of seconds, so the card can be
      * dismissed - or the track changed again - while they are still running; without this, a
      * retry that finally found artwork would put the cover back after cover mode had ended.
      */
-    static volatile int sPushGen;
+    public static volatile int sPushGen;
 
     /**
      * Whether the wallpaper process composes covers itself, as said by that process.
@@ -2549,10 +2577,10 @@ public class Main extends XposedModule {
      * sent to it would leave the lock screen without a cover. So the source goes over only once
      * the process on the other end has said it knows what to do with one.
      */
-    static volatile boolean sWpComposes;
+    public static volatile boolean sWpComposes;
 
     /** The one kind of wallpaper this module can work with: a still picture. */
-    static final String KIND_IMAGE = "image";
+    public static final String KIND_IMAGE = "image";
 
     /**
      * The kinds MiWallpaper draws with an engine other than its image one - the list its own
@@ -2568,7 +2596,7 @@ public class Main extends XposedModule {
                     "linkage_video", "loop_video", "maml"));
 
     /** Whether a slot of [kind] is drawn by something other than the image engine. */
-    static boolean liveKind(String kind) {
+    public static boolean liveKind(String kind) {
         return kind != null && LIVE_KINDS.contains(kind);
     }
 
@@ -2679,12 +2707,12 @@ public class Main extends XposedModule {
     private static boolean sCoverHeld;
 
     /** 保留壁纸: cover mode leaves the wallpaper alone. See CoverCardStyle.KEEP. */
-    static boolean keepsWallpaper() {
+    public static boolean keepsWallpaper() {
         return Settings.COVER_STYLE.get().mode == CoverCardStyle.KEEP;
     }
 
     /** The clock is small for the cover, or flying back from it. KeepDim's gate. */
-    static boolean coverHoldsClock() {
+    public static boolean coverHoldsClock() {
         return sCoverHeld || LockHold.exitingFor(LockHold.Owner.COVER);
     }
 
@@ -2716,7 +2744,7 @@ public class Main extends XposedModule {
     }
 
     /** ClockCollapse let go of the clock. Outside cover mode, the card goes back with it. */
-    static void onClockReleased() {
+    public static void onClockReleased() {
         LockHold.clockReleased();
         if (sCoverMode) return;
         MediaCard.sCardP = 0f;
@@ -2970,7 +2998,7 @@ public class Main extends XposedModule {
     }
 
     /** The wake reached the clock before the SCREEN_ON broadcast did. */
-    static void noteAwake() {
+    public static void noteAwake() {
         if (sScreenOn) return;
         sScreenOn = true;
         sAodGrey = Float.NaN;
@@ -2979,7 +3007,7 @@ public class Main extends XposedModule {
         AodColour.recolorClock();
     }
 
-    static boolean coverCardVisible() {
+    public static boolean coverCardVisible() {
         View c = sContainer;
         // The PIN pad is not a reason to hide it: taken away there, the square cut out as the pad
         // came up and popped back as it went. It stays and blurs under the pad instead, the way
@@ -3012,13 +3040,13 @@ public class Main extends XposedModule {
      * square sat across the digits. It used to be a setting, off by default; with the big clock
      * taken care of there was nothing left for the setting to protect.
      */
-    static boolean coverCardInAod() {
+    public static boolean coverCardInAod() {
         return sCoverMode && !sScreenOn && ClockCollapse.phase() == ClockCollapse.Phase.AOD
                 && ClockCollapse.aodHeld();
     }
 
     /** The full-screen AOD may show a faint static colour wash even with the square hidden. */
-    static boolean coverCardBackdropInAod() {
+    public static boolean coverCardBackdropInAod() {
         View c = sContainer;
         return sCoverMode && Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD && !sScreenOn
                 && ClockCollapse.phase() == ClockCollapse.Phase.AOD
@@ -3026,11 +3054,11 @@ public class Main extends XposedModule {
                 && !LockLyrics.lockScreenGone() && c != null && c.isShown();
     }
 
-    static int screenWidth() {
+    public static int screenWidth() {
         return sScreenW;
     }
 
-    static float coverCardMediaTop() {
+    public static float coverCardMediaTop() {
         if (coverCardInAod()) return sScreenH * 0.70f;
         return liveMediaTop();
     }
@@ -3056,7 +3084,7 @@ public class Main extends XposedModule {
     }
 
     /** Geometry is sampled from the OEM's live thumbnail, not its transformed screen origin. */
-    static CoverMorphMotion.Box coverMorphThumbnail() {
+    public static CoverMorphMotion.Box coverMorphThumbnail() {
         View art = MediaCard.sCardArt;
         if (art == null || !art.isAttachedToWindow() || art.getWidth() <= 0
                 || art.getHeight() <= 0 || !(art.getParent() instanceof View)) return null;
@@ -3081,12 +3109,12 @@ public class Main extends XposedModule {
         return Math.min(14f * density(), Math.min(art.getWidth(), art.getHeight()) * 0.20f);
     }
 
-    static ViewGroup coverMorphRoot() {
+    public static ViewGroup coverMorphRoot() {
         View root = sContainer == null ? null : sContainer.getRootView();
         return root instanceof ViewGroup ? (ViewGroup) root : null;
     }
 
-    static boolean coverMorphEligible() {
+    public static boolean coverMorphEligible() {
         return coverMorphStillEligible() && !bouncerUp() && !controlCenterUp();
     }
 
@@ -3113,7 +3141,7 @@ public class Main extends XposedModule {
     }
 
     /** Cheap per-frame guard; the expensive overlay lookups are only needed at gesture start. */
-    static boolean coverMorphStillEligible() {
+    public static boolean coverMorphStillEligible() {
         View c = sContainer;
         // The leaving hooks as well as the keyguard reading, for the reason coverCardVisible gives:
         // unlocked mid-flight, the copy outstayed the square by ~0.2s, until ACTION_USER_PRESENT.
@@ -3121,12 +3149,12 @@ public class Main extends XposedModule {
                 && keyguardShowing() && !LockLyrics.lockScreenGone();
     }
 
-    static boolean coverMorphCardMode() {
+    public static boolean coverMorphCardMode() {
         return Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD;
     }
 
     /** A manual entry must keep its moving artwork until the asynchronous backdrop can take it. */
-    static boolean coverMorphHandoffReady(boolean cardMode) {
+    public static boolean coverMorphHandoffReady(boolean cardMode) {
         long artAt = sCtArt;
         if (artAt == 0L) return false;
         long afterArt = cardMode ? 120L : fadeMsFor(Settings.SPRING.get()) + 140L;
@@ -3134,7 +3162,7 @@ public class Main extends XposedModule {
     }
 
     /** The full-screen destination is the sharp band in CoverCompose.composeWallpaper(). */
-    static CoverMorphMotion.Box coverMorphTarget(Bitmap art) {
+    public static CoverMorphMotion.Box coverMorphTarget(Bitmap art) {
         if (art == null || art.isRecycled()) return null;
         if (Settings.COVER_STYLE.get().mode == CoverCardStyle.FULL) {
             if (sScreenW <= 0 || sScreenH <= 0 || art.getWidth() <= 0) return null;
@@ -3165,7 +3193,7 @@ public class Main extends XposedModule {
     }
 
     /** Keep the shared media card at its real state while the moving copy owns its pixels. */
-    static void refreshMediaCardForMorph() {
+    public static void refreshMediaCardForMorph() {
         // Called on the morph's frames: the card already held, not a search of the whole tree.
         View card = MediaCard.sCardGuarded;
         if (card == null || !card.isAttachedToWindow()) card = findSysuiView("mi_media_controls");
@@ -3176,7 +3204,7 @@ public class Main extends XposedModule {
      * The date view the clock is placed against. A different one means the clock views were
      * re-inflated - a style change - and everything resolved about the old ones is stale.
      */
-    static void noteDateView(View date) {
+    public static void noteDateView(View date) {
         if (date == ClockViews.sDateView) return;
         ClockViews.sDateView = date;
         ClockViews.sSigViews = new View[0];
@@ -3186,12 +3214,12 @@ public class Main extends XposedModule {
     }
 
     /** A pre-dp height setting is converted the first time there is a box to convert it with. */
-    static void convertLegacyHeight(RectF box) {
+    public static void convertLegacyHeight(RectF box) {
         if (!Float.isNaN(sClockLegacyK)) heightDpFor(box);
     }
 
     /** Kotlin's Function3 bridge: invoke(FlowCollector, Object[], Continuation). */
-    static java.lang.reflect.Method invoke3(Class<?> c) {
+    public static java.lang.reflect.Method invoke3(Class<?> c) {
         for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
             if ("invoke".equals(m.getName()) && m.getParameterTypes().length == 3) {
                 m.setAccessible(true);
@@ -3201,9 +3229,9 @@ public class Main extends XposedModule {
         return null;
     }
 
-    static final Object NO_FIELD = new Object();
+    public static final Object NO_FIELD = new Object();
 
-    static void setDepthHidden(final boolean hide) {
+    public static void setDepthHidden(final boolean hide) {
         setDepthHidden(hide, 0);
     }
 
@@ -3214,7 +3242,7 @@ public class Main extends XposedModule {
      * which left the old wallpaper's subject sitting on top of the album cover until something
      * else happened to call it again.
      */
-    static void setDepthHidden(final boolean hide, final int attempt) {
+    public static void setDepthHidden(final boolean hide, final int attempt) {
         // Whoever asks, the cut-out stays hidden while something has the lock screen: the video
         // cover's late hand-back (CoverPush.dropVideoCover) cannot know an immersive page is up.
         if (!hide && !LockHold.depthFree()) {
@@ -3341,7 +3369,7 @@ public class Main extends XposedModule {
 
     // ---------------------------------------------------------------- media card
 
-    static View findSysuiView(String id) {
+    public static View findSysuiView(String id) {
         View v = sContainer;
         if (v == null) return null;
         View root = v.getRootView();
@@ -3422,7 +3450,7 @@ public class Main extends XposedModule {
      * bottom came back "not found" by id while a dump of the very same tree listed them by name.
      * The name is read off each view's own Resources, which is exactly why the dump can see them.
      */
-    static View findByName(View v, String name) {
+    public static View findByName(View v, String name) {
         try {
             if (v.getId() != View.NO_ID
                     && name.equals(v.getResources().getResourceEntryName(v.getId()))) {
@@ -3506,7 +3534,7 @@ public class Main extends XposedModule {
     /** Cover-entry effects switched off for a GPU measurement (`op perfoff`); empty in use. */
     static volatile String sPerfOff = "";
 
-    static boolean perfOff(String effect) {
+    public static boolean perfOff(String effect) {
         String off = sPerfOff;
         return !off.isEmpty() && off.contains(effect);
     }
@@ -3520,7 +3548,7 @@ public class Main extends XposedModule {
      * tap it, and the rectangle test asks isShown(). Off the lock screen the card belongs to the
      * shade, where the OEM's own click is the right one.
      */
-    static boolean wantsArtTap() {
+    public static boolean wantsArtTap() {
         return Settings.TAP_TOGGLE.on() && MediaCard.sCardShowing;
     }
 
@@ -3627,7 +3655,7 @@ public class Main extends XposedModule {
     }
 
     /** A scale that could be the OEM's resting one: unit magnitude, either sign. */
-    static boolean resting(float v) {
+    public static boolean resting(float v) {
         return Math.abs(Math.abs(v) - 1f) < 0.02f;
     }
 
@@ -3667,7 +3695,7 @@ public class Main extends XposedModule {
      * Falling back to false when the view cannot be found keeps the tap working on a build that
      * renamed it, rather than silently switching the whole feature off.
      */
-    static boolean bouncerUp() {
+    public static boolean bouncerUp() {
         View b = findSysuiView("keyguard_bouncer_container");
         return b != null && b.isShown();
     }
@@ -3802,7 +3830,7 @@ public class Main extends XposedModule {
     }
 
     /** The card's track when the running morph began; a different one is what cancels it. */
-    static String sMorphKey = "";
+    public static String sMorphKey = "";
 
     private static void beginMorph(boolean toCover) {
         long t0 = System.nanoTime();
@@ -3841,7 +3869,7 @@ public class Main extends XposedModule {
         return sToggleCost.toString();
     }
 
-    static void exitFromTap(String why) {
+    public static void exitFromTap(String why) {
         long t0 = System.nanoTime();
         exitFromTapNow(why);
         noteToggleCost("out", System.nanoTime() - t0);
@@ -4012,7 +4040,7 @@ public class Main extends XposedModule {
         MediaCard.applyCardState();
     }
 
-    static String visName(int v) {
+    public static String visName(int v) {
         return v == View.VISIBLE ? "VISIBLE" : v == View.INVISIBLE ? "INVISIBLE" : "GONE";
     }
 
@@ -4030,7 +4058,7 @@ public class Main extends XposedModule {
      * is gone. Neither of the other two answers is proof of anything and both leave the cover
      * alone: a list that could not be read, and a non-empty one - the ordinary wait.
      */
-    static void releaseUnobservedCover(List<MediaController> sessions) {
+    public static void releaseUnobservedCover(List<MediaController> sessions) {
         if (MediaCard.sCardKnown || !sCoverMode || sessions == null || !sessions.isEmpty()) return;
         Xp.log(TAG + "cover restored with no media session at all - leaving cover mode");
         sTrackKey = "";
@@ -4039,7 +4067,7 @@ public class Main extends XposedModule {
     }
 
     /** The sessions the system holds right now, or null when the question could not be asked. */
-    static List<MediaController> activeSessions() {
+    public static List<MediaController> activeSessions() {
         Context ctx = sAppCtx;
         if (ctx == null) return null;
         try {
@@ -4097,7 +4125,7 @@ public class Main extends XposedModule {
      * MediaSession token, so this is exact - pickController()'s ranking is only the fallback for
      * when we are driven by something other than the card.
      */
-    static synchronized void rebindSession() {
+    public static synchronized void rebindSession() {
         Context ctx = sAppCtx;
         if (ctx == null) return;
         MediaController c = MediaCard.controllerFromCard(ctx);
@@ -4239,7 +4267,7 @@ public class Main extends XposedModule {
      * published on the same song - and then the artist is not asked either, since 汽水 respells
      * it as it goes.
      */
-    static boolean sameTrack(String a, String b) {
+    public static boolean sameTrack(String a, String b) {
         String pa = keyField(a, 0), pb = keyField(b, 0);
         String ta = keyField(a, 1), tb = keyField(b, 1);
         if (pa.isEmpty() || !pa.equals(pb)) return false;
@@ -4263,7 +4291,7 @@ public class Main extends XposedModule {
     }
 
     /** The watched session's title now: what CoverPush checks a precompose is still about. */
-    static String watchedTitle() {
+    public static String watchedTitle() {
         return titleOf(sWatched);
     }
 
@@ -4377,7 +4405,7 @@ public class Main extends XposedModule {
      * Cover mode is the wallpaper and the clock together, so both switches move as one. The
      * wallpaper is composed on the worker, the clock is taken on the main thread.
      */
-    static void setCoverEnabled(final boolean on, final boolean animate) {
+    public static void setCoverEnabled(final boolean on, final boolean animate) {
         setCoverEnabled(on, animate, true);
     }
 
@@ -4386,7 +4414,7 @@ public class Main extends XposedModule {
      * the wallpaper means the source has not caught up yet and is worth waiting for; on a manual
      * push it just means the same song, and waiting 1.7s to conclude that is pure delay.
      */
-    static void setCoverEnabled(final boolean on, final boolean animate,
+    public static void setCoverEnabled(final boolean on, final boolean animate,
                                         final boolean fresh) {
         // The one door every way into the cover goes through, so the master switch is kept here.
         if (on && !Settings.COVER_FEATURE.on()) return;
@@ -4420,7 +4448,7 @@ public class Main extends XposedModule {
      * pulling the shade down handed us the card at its position in the panel, up in the corner,
      * and the preview then drew the lock screen's card up there too.
      */
-    static boolean keyguardShowing() {
+    public static boolean keyguardShowing() {
         refreshSysReads();
         return sSysLocked;
     }
@@ -4449,7 +4477,7 @@ public class Main extends XposedModule {
      * Whether the clock is ours to keep small. Everything that decides "is the clock held" across
      * a sleep and a wake asks this; who holds it is LockHold's.
      */
-    static boolean clockHeld() {
+    public static boolean clockHeld() {
         return LockHold.clockHeld();
     }
 
@@ -4600,7 +4628,7 @@ public class Main extends XposedModule {
         return sSysInteractive;
     }
 
-    static void detachCover() {
+    public static void detachCover() {
         // The session watch belongs to auto mode, not to the (legacy) in-SystemUI ImageView, so
         // dropping that view must not stop the module following the music.
         if (!Settings.AUTO.on() && sWatched != null && sMediaCb != null) {
@@ -4751,7 +4779,7 @@ public class Main extends XposedModule {
     }
 
     /** Whether a class declares this field at all - getObjectField throws when it does not. */
-    static boolean hasField(Object o, String name) {
+    public static boolean hasField(Object o, String name) {
         try {
             for (Class<?> k = o.getClass(); k != null; k = k.getSuperclass()) {
                 k.getDeclaredField(name);
@@ -4767,7 +4795,7 @@ public class Main extends XposedModule {
      * collapse's time_group and the keyguard's zoom among them. The mean of the two axes, since
      * the collapse may scale the width a little differently from the height.
      */
-    static float drawnScale(View v) {
+    public static float drawnScale(View v) {
         float sx = 1f, sy = 1f;
         for (View p = v; p != null; p = p.getParent() instanceof View ? (View) p.getParent() : null) {
             sx *= p.getScaleX();
@@ -4779,7 +4807,7 @@ public class Main extends XposedModule {
     // --------------------------------------------- the OEM's own translation function
 
     /** Calls a method on the AllInOneHourClock / AllInOneMinuteClock views of both trees. */
-    static void callOnClockViews(final String method, final String kind, final float f,
+    public static void callOnClockViews(final String method, final String kind, final float f,
                                          final int n, final boolean b) {
         final View v = sContainer;
         if (v == null || method == null) { Xp.log(TAG + "callclock: need m="); return; }
@@ -4873,7 +4901,7 @@ public class Main extends XposedModule {
      * container - so a findViewById from the root only ever reaches the hour. Anything that
      * changes the clock's geometry has to be applied to both.
      */
-    static View[] clockRoots() {
+    public static View[] clockRoots() {
         View v = sContainer;
         if (v == null) return NO_ROOTS;
         View[] cached = sRootsCache;
@@ -4927,7 +4955,7 @@ public class Main extends XposedModule {
         sRootsFor = null;
     }
 
-    static String viewIdOf(View v) {
+    public static String viewIdOf(View v) {
         try {
             return v.getResources().getResourceEntryName(v.getId());
         } catch (Throwable t) {

@@ -1,6 +1,6 @@
 package com.os4.musiccover.island
 
-import com.os4.musiccover.CoverMorphMotion
+import com.os4.musiccover.cover.CoverMorphMotion
 
 /**
  * The state of a notification's morph between the row and its place in the stack, and of the

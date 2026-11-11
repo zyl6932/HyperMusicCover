@@ -93,12 +93,12 @@ public final class NotifPresence {
      * Asked whenever the room under the clock is worked out again, which is whenever the rows
      * move: throws the switch again if what we passed on no longer matches.
      */
-    static void recheck() {
+    public static void recheck() {
         recheck(false);
     }
 
     /** @param force skip the rate limit - the cover has just let go, and no frame follows. */
-    static void recheck(boolean force) {
+    public static void recheck(boolean force) {
         final Object panel = sPanel;
         final Method m = sUpdate;
         if (panel == null || m == null) return;

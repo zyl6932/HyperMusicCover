@@ -1,5 +1,11 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.card.MediaCard;
+import com.os4.musiccover.clock.ClockCollapse;
+import com.os4.musiccover.clock.ClockGlass;
+import com.os4.musiccover.clock.ClockViews;
+import com.os4.musiccover.cover.AlbumArt;
+import com.os4.musiccover.cover.CoverPush;
 import com.os4.musiccover.lyrics.LockLyrics;
 import android.content.Context;
 import android.content.Intent;
@@ -20,7 +26,7 @@ import android.view.View;
  * comments, references across the line prefixed with Main. or PreviewShots., nothing else
  * changed.
  */
-final class PreviewShots {
+public final class PreviewShots {
     private PreviewShots() {}
 
     /**
@@ -365,7 +371,7 @@ final class PreviewShots {
      * and reported around the card - the sampled rectangle, the artwork's slot - is relative to
      * mi_media_controls, and only an identically placed parent keeps those true.
      */
-    static View cardShotRoot(View card) {
+    public static View cardShotRoot(View card) {
         if (card == null) return null;
         if (!(card.getParent() instanceof View)) return card;
         View p = (View) card.getParent();

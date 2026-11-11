@@ -1,6 +1,6 @@
 package com.os4.musiccover.immersive;
 import com.os4.musiccover.Settings;
-import com.os4.musiccover.ClockCollapse;
+import com.os4.musiccover.clock.ClockCollapse;
 import com.os4.musiccover.EdgeBlurView;
 import com.os4.musiccover.island.LockIslands;
 import com.os4.musiccover.Main;

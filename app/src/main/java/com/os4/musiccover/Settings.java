@@ -1,5 +1,13 @@
 package com.os4.musiccover;
 
+import com.os4.musiccover.card.MediaCard;
+import com.os4.musiccover.clock.ClockCollapse;
+import com.os4.musiccover.cover.CoverCardLayer;
+import com.os4.musiccover.cover.CoverCardStyle;
+import com.os4.musiccover.cover.CoverPush;
+import com.os4.musiccover.cover.MotionCover;
+import com.os4.musiccover.fingerprint.Fingerprint;
+import com.os4.musiccover.wallpaper.KeepDim;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
@@ -1233,7 +1241,7 @@ public final class Settings {
      * installation fingerprint finds that this host's files belong to an installation that is
      * gone; a setting that is already at its default is left alone.
      */
-    static void resetDefaults(Context c) {
+    public static void resetDefaults(Context c) {
         List<Change> changes = new ArrayList<>();
         for (Entry<?> e : ALL) {
             if (!persisted(e)) continue;
