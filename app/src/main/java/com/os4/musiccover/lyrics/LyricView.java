@@ -378,34 +378,44 @@ final class LyricView extends View {
 
     private long lastStep;
 
-    private boolean looping;
     private final int[] loc = new int[2];
 
-    private final Runnable frame = new Runnable() {
+    private final LyricFrameLoop frame = new LyricFrameLoop(new LyricFrameLoop.Host() {
         @Override
-        public void run() {
+        public void enqueue(Runnable next) {
+            postOnAnimation(next);
+        }
+
+        @Override
+        public void cancel(Runnable next) {
+            removeCallbacks(next);
+        }
+
+        @Override
+        public boolean frame() {
+            if (!isAttachedToWindow() || LyricWindow.parked(LyricView.this)) return false;
             noteFrameGap(now());
-            looping = false;
             if (step()) {
                 invalidate();
                 // In its own window: synced now, ahead of the lock screen's. See drawFirst.
+                // Its traversal re-enters preDraw; the frame stays active through that call.
                 if (LyricWindow.owns(LyricView.this)) LyricWindow.drawFirst(LyricView.this);
             }
-            if (needsFrames()) {
-                looping = true;
-                postOnAnimation(this);
-            } else {
-                lastLoopFrame = 0L;
-            }
+            return needsFrames();
         }
-    };
+
+        @Override
+        public void idle() {
+            lastLoopFrame = 0L;
+        }
+    });
 
     private final ViewTreeObserver.OnPreDrawListener preDraw =
             new ViewTreeObserver.OnPreDrawListener() {
                 @Override
                 public boolean onPreDraw() { android.os.Trace.beginSection("MC lyricPreDraw"); try {
                     if (step()) invalidate();
-                    if (!looping && needsFrames()) kick();
+                    if (!frame.active() && needsFrames()) kick();
                     return true;
                 } finally { android.os.Trace.endSection(); } }
             };
@@ -474,9 +484,13 @@ final class LyricView extends View {
 
     /** Something outside changed - a line start, the song, the setting. Wakes the loop. */
     void kick() {
-        if (looping) return;
-        looping = true;
-        postOnAnimation(frame);
+        if (!isAttachedToWindow() || LyricWindow.parked(this)) return;
+        frame.request();
+    }
+
+    /** Parked windows stay attached; stop their callback explicitly, just as on detach. */
+    void stopFrames() {
+        frame.stop();
     }
 
     /**
@@ -535,9 +549,7 @@ final class LyricView extends View {
         paletteWork = null;
         appearance = null;
         Gen.unpreDraw(this, preDraw);
-        removeCallbacks(frame);
-        looping = false;
-        lastLoopFrame = 0L;
+        stopFrames();
         super.onDetachedFromWindow();
     }
 
@@ -1370,7 +1382,7 @@ final class LyricView extends View {
     }
 
     private boolean needsFrames() {
-        if (!isAttachedToWindow()) return false;
+        if (!isAttachedToWindow() || LyricWindow.parked(this)) return false;
         if (show != showTarget()) return true;
         if (popMode == POP_IN || popMode == POP_OUT) return true;
         // The keyguard dimming around us is a movement like any other, and so is the keyguard
@@ -2418,7 +2430,7 @@ final class LyricView extends View {
                         if (b == null) return;
                         blurBmp[i][rows - 1] = b;
                         // While the loop runs its next frame draws it anyway.
-                        if (!looping) invalidate();
+                        if (!frame.active()) invalidate();
                     }
                 });
             }
@@ -2937,7 +2949,7 @@ final class LyricView extends View {
                 // be told apart from one that was measured.
                 + " band=" + (bandOk ? Math.round(bandTop) + ".." + Math.round(bandBottom)
                         + "(" + LockLyrics.bandSource() + ")" : "none")
-                + " looping=" + looping + " parent=" + (getParent() instanceof ViewGroup)
+                + " looping=" + frame.active() + " parent=" + (getParent() instanceof ViewGroup)
                 // The last few frames that moved, oldest first: what the page did while the lock
                 // screen was leaving, and which reading was late with it. Only frames that move
                 // are in it, so a burst is one event. See trace().

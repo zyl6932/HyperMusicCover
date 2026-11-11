@@ -192,6 +192,10 @@ object MiniPlayerRuntime {
         // next run a listener per orphaned view.
         aodDimHandler.removeCallbacks(aodDimSettle)
         aodDimArgs = null
+        for ((view, listener) in pendingAodRedress.toMap()) {
+            runCatching { Gen.unattachState(view, listener) }
+        }
+        pendingAodRedress.clear()
         dressedViews.clear()
         notificationDressedViews.clear()
         // Rows the transient-removal hook is holding for a morph: with the controllers gone the
@@ -602,6 +606,9 @@ object MiniPlayerRuntime {
         java.util.Collections.newSetFromMap(java.util.WeakHashMap())
     private val notificationDressedViews: MutableSet<ImageView> =
         java.util.Collections.newSetFromMap(java.util.WeakHashMap())
+    // Views may never return. Neither this weak-key registry nor its listeners may retain them.
+    // Gen's weak attach registration still removes live listeners when this generation retires.
+    private val pendingAodRedress = WeakHashMap<ImageView, View.OnAttachStateChangeListener>()
 
     /** The last frame's arguments while the AOD's colours are on the views; null otherwise. */
     private var aodDimArgs: Array<Any?>? = null
@@ -820,16 +827,22 @@ object MiniPlayerRuntime {
                 // Out of its window now, dimmed while it was in: dressed again when it comes
                 // back, or it came back dark on a lit screen with nothing left to undo it.
                 later++
-                Gen.attachState(view, object : View.OnAttachStateChangeListener {
+                if (pendingAodRedress.containsKey(view)) continue
+                val listener = object : View.OnAttachStateChangeListener {
                     override fun onViewAttachedToWindow(v: View) {
                         Gen.unattachState(v, this)
-                        if (aodDimArgs == null) {
-                            material(view, cl, view in notificationDressedViews)
+                        val image = v as? ImageView ?: return
+                        pendingAodRedress.remove(image)
+                        // Use the callback's view: capturing `view` here defeats the weak key.
+                        if (Gen.live() && aodDimArgs == null) {
+                            material(image, cl, image in notificationDressedViews)
                             dimNote("redressed on attach")
                         }
                     }
                     override fun onViewDetachedFromWindow(v: View) {}
-                })
+                }
+                pendingAodRedress[view] = listener
+                Gen.weakAttachState(view, listener)
             }
         }
         dimNote("settle: ${if (home) "at the lock screen's own look" else "redressed"}, $later out of window")
@@ -848,6 +861,7 @@ object MiniPlayerRuntime {
 
     /** For `op mini`. */
     private fun describeAodDim(): String = "aodDim=${if (aodDimArgs != null) "on" else "off"}/$aodDimFrames" +
+        " pendingRedress=${pendingAodRedress.size}" +
         " ${describeAodListeners()}" +
         " dimlog=[${synchronized(dimLog) { dimLog.joinToString(" ; ") }}]"
 

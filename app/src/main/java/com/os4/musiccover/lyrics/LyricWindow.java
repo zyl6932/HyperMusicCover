@@ -421,6 +421,7 @@ final class LyricWindow {
         setHdr(false);
         setHost(null);
         sParked = true;
+        v.stopFrames();
         v.setAlpha(0f);
         Main.main().removeCallbacks(DROP_PARKED);
         Main.main().postDelayed(DROP_PARKED, PARK_MS);
