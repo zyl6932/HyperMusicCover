@@ -212,6 +212,21 @@ object ModuleBridge {
          */
         val featuresMissing: List<String> = emptyList(),
         /**
+         * Whether the module reads the app's preferences at all (stage 5.2). Null from a module
+         * older than that - it does not answer the key - and that is what keeps the app sending
+         * ops instead of writing a group nothing will read.
+         */
+        val settingsPrefs: Boolean? = null,
+        /**
+         * Whether the module answers that key at all - what it *can* do, where [settingsPrefs]
+         * says what it is doing. A module that supports the group answers false until the app has
+         * migrated it; reading that as "cannot" would stop the app writing the group the moment
+         * it had finished migrating.
+         */
+        val canReadPrefs: Boolean = false,
+        /** The last write of the app's group the module applied, for the page's confirmation. */
+        val settingsRev: Long = 0L,
+        /**
          * The notification-shade settings, keyed exactly as the module's own CFG_KEYS.
          *
          * Read out of the reply by PREFIX rather than field by field. The module generates its
@@ -371,6 +386,17 @@ object ModuleBridge {
     /** Whether the module that last answered acknowledges ops. Learned from [query]. */
     @Volatile private var moduleAcks = false
 
+    /**
+     * The test build's simulation of a module from before stage 5.2: its query has no
+     * `settings_prefs`, and nothing may be written to the group. That is exactly what a phone
+     * shows between installing this build and restarting SystemUI, and it is the last path a
+     * settings change has before the ops it always used.
+     */
+    @Volatile internal var pretendOldModule = false
+
+    private fun stripsSettings(b: Bundle): Boolean =
+        com.os4.musiccover.BuildConfig.S5_TEST && pretendOldModule && b.getBoolean("alive", false)
+
     /** The last answer [query] gave, good or bad, and null until someone asks in this process. */
     @Volatile private var lastQuery: State? = null
 
@@ -385,6 +411,13 @@ object ModuleBridge {
      * this is that idea without a ViewModel, in the one object every page already asks.
      */
     fun lastAnswer(): State? = lastQuery
+
+    /**
+     * A page's starting point before its query lands. Once the app's copy is the source this is
+     * that copy, so a page opened while SystemUI is away shows the settings it will apply when
+     * SystemUI returns instead of every control at its default.
+     */
+    fun initialState(): State = SettingsStore.overlay(State())
 
     /** When SystemUI was last restarted from here, or seen to go; see [queryAlive]. */
     @Volatile private var restartingSince = 0L
@@ -422,20 +455,41 @@ object ModuleBridge {
         return any
     }
 
+    /**
+     * A setting that has a row: the app's copy takes it (stage 5.3), or the op goes out as it
+     * always did when the group cannot carry it yet. The op is also what a failed confirmation
+     * replays, so it has to stay here rather than being deleted for the new path.
+     */
+    private fun setting(context: Context, spec: SettingSpec, value: Any, replay: () -> Unit) {
+        if (SettingsStore.put(context, spec, value, replay)) return
+        replay()
+    }
+
     fun setAuto(context: Context, on: Boolean) = send(context, "auto") { putExtra("on", on) }
 
     fun setCoverFeature(context: Context, on: Boolean) =
-        send(context, "coverfeature") { putExtra("on", on) }
+        setting(context, SettingSpec.COVER_FEATURE, on) {
+            send(context, "coverfeature") { putExtra("on", on) }
+        }
 
     fun setCover(context: Context, on: Boolean) = send(context, "pushart") { putExtra("on", on) }
 
-    fun setBias(context: Context, v: Float) = send(context, "bias") { putExtra("v", v) }
+    fun setBias(context: Context, v: Float) =
+        setting(context, SettingSpec.BIAS, v) { send(context, "bias") { putExtra("v", v) } }
 
-    fun setCoverStyle(context: Context, key: String, value: Float) =
-        send(context, "coverstyle") {
-            putExtra("key", key)
-            putExtra("v", value)
+    fun setCoverStyle(context: Context, key: String, value: Float) {
+        val replay = {
+            send(context, "coverstyle") {
+                putExtra("key", key)
+                putExtra("v", value)
+            }
         }
+        // Only the mode is a setting; the rest of the style is fixed. A key this app does not
+        // send today would otherwise be stored as if it were the mode.
+        if (key != "mode" || !SettingsStore.put(context, SettingSpec.COVER_STYLE, value.toInt(), replay)) {
+            replay()
+        }
+    }
 
 
     /**
@@ -450,10 +504,14 @@ object ModuleBridge {
      * pages and [SettingsBackup] between them no longer offer the values.
      */
     fun setClockHeight(context: Context, dp: Float) =
-        send(context, "clockscale") { putExtra("v", dp) }
+        setting(context, SettingSpec.CLOCK_HEIGHT, dp) {
+            send(context, "clockscale") { putExtra("v", dp) }
+        }
 
     fun setClockSize(context: Context, fraction: Float) =
-        send(context, "clocksize") { putExtra("v", fraction) }
+        setting(context, SettingSpec.CLOCK_SIZE, fraction) {
+            send(context, "clocksize") { putExtra("v", fraction) }
+        }
 
     fun setClockOffset(context: Context, dp: Float) =
         send(context, "clockoffset") { putExtra("v", dp) }
@@ -470,59 +528,93 @@ object ModuleBridge {
         send(context, "mediacard") { putExtra("hideart", on) }
 
     fun setCardTitleTap(context: Context, on: Boolean) =
-        send(context, "mediacard") { putExtra("titletap", on) }
+        setting(context, SettingSpec.MC_TITLE_TAP, on) {
+            send(context, "mediacard") { putExtra("titletap", on) }
+        }
 
     fun setCardPageButton(context: Context, on: Boolean) =
-        send(context, "mediacard") { putExtra("pagebtn", on) }
+        setting(context, SettingSpec.MC_PAGE_BUTTON, on) {
+            send(context, "mediacard") { putExtra("pagebtn", on) }
+        }
 
     // Its own op rather than a third extra on "mediacard": the switch sits under the card
     // options on screen, but it has nothing to do with the card, and grouping it there on the
     // wire would make moving it later a protocol change.
     fun setHideFingerprint(context: Context, on: Boolean) =
-        send(context, "hidefp") { putExtra("on", on) }
+        setting(context, SettingSpec.HIDE_FP, on) {
+            send(context, "hidefp") { putExtra("on", on) }
+        }
 
     fun setMotionCover(context: Context, on: Boolean) =
-        send(context, "motion") { putExtra("on", on) }
+        setting(context, SettingSpec.MOTION, on) {
+            send(context, "motion") { putExtra("on", on) }
+        }
 
     fun setMotionOnData(context: Context, on: Boolean) =
-        send(context, "motion") { putExtra("data", on) }
+        setting(context, SettingSpec.MOTION_ON_DATA, on) {
+            send(context, "motion") { putExtra("data", on) }
+        }
 
     /** See the note above [setClockHeight]: no row offers this any more, the op still works. */
     fun setAodSmall(context: Context, on: Boolean) =
-        send(context, "aodclock") { putExtra("small", on) }
+        setting(context, SettingSpec.AOD_SMALL, on) {
+            send(context, "aodclock") { putExtra("small", on) }
+        }
 
     fun setForceColon(context: Context, on: Boolean) =
-        send(context, "colon") { putExtra("on", on) }
+        setting(context, SettingSpec.COLON, on) {
+            send(context, "colon") { putExtra("on", on) }
+        }
 
     fun setMediaBarGlow(context: Context, on: Boolean) =
-        send(context, "seekglow") { putExtra("on", on) }
+        setting(context, SettingSpec.SEEK_GLOW, on) {
+            send(context, "seekglow") { putExtra("on", on) }
+        }
 
     /** 启用锁屏歌词, the lyrics' master switch. Saved by the module as lyricmaster. */
     fun setLyrics(context: Context, on: Boolean) =
-        send(context, "lyrics") { putExtra("on", on) }
+        setting(context, SettingSpec.LYRICS, on) {
+            send(context, "lyrics") { putExtra("on", on) }
+        }
 
     fun setLyricsHdr(context: Context, on: Boolean) =
-        send(context, "lyrichdr") { putExtra("on", on) }
+        setting(context, SettingSpec.LYRIC_HDR, on) {
+            send(context, "lyrichdr") { putExtra("on", on) }
+        }
 
     fun setLyricsKeepOn(context: Context, on: Boolean) =
-        send(context, "lyrickeep") { putExtra("on", on) }
+        setting(context, SettingSpec.LYRIC_KEEP_ON, on) {
+            send(context, "lyrickeep") { putExtra("on", on) }
+        }
 
     fun setLyricsTrans(context: Context, on: Boolean) =
-        send(context, "lyrictrans") { putExtra("on", on) }
+        setting(context, SettingSpec.LYRIC_TRANS, on) {
+            send(context, "lyrictrans") { putExtra("on", on) }
+        }
 
     fun setAodBigClock(context: Context, on: Boolean) =
-        send(context, "aodclock") { putExtra("small", !on) }
+        setting(context, SettingSpec.AOD_SMALL, !on) {
+            send(context, "aodclock") { putExtra("small", !on) }
+        }
     fun setLyricsRoma(context: Context, on: Boolean) =
-        send(context, "lyricroma") { putExtra("on", on) }
+        setting(context, SettingSpec.LYRIC_ROMA, on) {
+            send(context, "lyricroma") { putExtra("on", on) }
+        }
     fun setLyricsOnline(context: Context, on: Boolean) =
-        send(context, "lyriconline") { putExtra("on", on) }
+        setting(context, SettingSpec.LYRIC_ONLINE, on) {
+            send(context, "lyriconline") { putExtra("on", on) }
+        }
 
     fun setLyricsAlign(context: Context, mode: Int) =
-        send(context, "lyricalign") { putExtra("v", mode) }
+        setting(context, SettingSpec.LYRIC_ALIGN, mode) {
+            send(context, "lyricalign") { putExtra("v", mode) }
+        }
 
     /** LyricAppearance's JSON; the module parses and validates it. */
     fun setLyricAppearance(context: Context, json: String) =
-        send(context, "lyricappearance") { putExtra("json", json) }
+        setting(context, SettingSpec.LYRIC_APPEARANCE, json) {
+            send(context, "lyricappearance") { putExtra("json", json) }
+        }
 
     /**
      * One of the values the lyric band and its type are made of. "size" and "bgsize" are the
@@ -530,22 +622,39 @@ object ModuleBridge {
      *
      * The module validates every value, including imported settings and adb broadcasts.
      */
-    fun setLyricStyle(context: Context, key: String, value: Float) =
-        send(context, "lyricstyle") {
-            putExtra("key", key)
-            putExtra("v", value)
+    fun setLyricStyle(context: Context, key: String, value: Float) {
+        val replay = {
+            send(context, "lyricstyle") {
+                putExtra("key", key)
+                putExtra("v", value)
+            }
         }
+        val spec = when (key) {
+            "size" -> SettingSpec.LYRIC_SIZE
+            "bgsize" -> SettingSpec.LYRIC_BG_SIZE
+            else -> null
+        }
+        // The two sizes are the entry's kept keys; the band's other four values are fixed and
+        // move only this session, so they keep the op path.
+        if (spec == null || !SettingsStore.put(context, spec, value, replay)) replay()
+    }
 
     fun setFingerprintAvoid(context: Context, mode: Int) =
-        send(context, "fpavoid") { putExtra("mode", mode) }
+        setting(context, SettingSpec.FP_AVOID, mode) {
+            send(context, "fpavoid") { putExtra("mode", mode) }
+        }
 
     /** 「高德公交地铁」. SystemUI holds it and tells 高德, whose process posts the island. */
     fun setTransit(context: Context, on: Boolean) =
-        send(context, "transitcfg") { putExtra("on", on) }
+        setting(context, SettingSpec.TRANSIT, on) {
+            send(context, "transitcfg") { putExtra("on", on) }
+        }
 
     /** 取餐码. SystemUI reads the page and posts the island itself. */
     fun setPickup(context: Context, on: Boolean) =
-        send(context, "pickup") { putExtra("on", on) }
+        setting(context, SettingSpec.PICKUP, on) {
+            send(context, "pickup") { putExtra("on", on) }
+        }
 
     /**
      * 取餐码的云端名单，去 OPPO 那儿拉一次（settings 页那个按钮）。
@@ -631,16 +740,81 @@ object ModuleBridge {
             }
         }
         if (wasSendingMini || sendSeq != before) b = ask(context, "query")
-        var state = fromBundle(b)
+        var state = answered(b)
         if (!state.alive) return state.also { lastQuery = it }
-        moduleAcks = b?.getBoolean("acks", false) == true
         // Whatever was set while it was away goes first, and the answer is asked for again so
         // the page shows those settings rather than the values they replaced.
         if (pending.isNotEmpty() && flush(context.applicationContext)) {
-            state = fromBundle(ask(context, "query"))
+            state = answered(ask(context, "query"))
         }
         lastQuery = state
         return state
+    }
+
+    /**
+     * One query's answer as a page sees it: the app's copy over the settings half once it is the
+     * source (stage 5.3), and the module's own report of what it can do with the group.
+     */
+    private fun answered(b: Bundle?): State {
+        val state = SettingsStore.overlay(fromBundle(b))
+        if (state.alive) {
+            moduleAcks = b?.getBoolean("acks", false) == true
+            SettingsStore.onModuleAnswered(state)
+        }
+        return state
+    }
+
+    /**
+     * Whether the module reads the group, and the last counter it applied; null on a timeout.
+     * [capable] is null when the module did not answer: a process that is merely away keeps
+     * whatever it could do, and signing it off as an old build would send every later change
+     * down the op path for as long as SystemUI is restarting.
+     */
+    internal class SettingsProbe(val alive: Boolean, val capable: Boolean?, val rev: Long)
+
+    internal suspend fun settingsProbe(context: Context): SettingsProbe? {
+        val b = ask(context, "query") ?: return null
+        if (!b.getBoolean("alive", false)) return SettingsProbe(false, null, 0L)
+        val old = stripsSettings(b)
+        val capable = !old && b.containsKey("settings_prefs")
+        return SettingsProbe(true, capable, if (capable) b.getLong("settings_rev", 0L) else 0L)
+    }
+
+    /**
+     * Every setting the module holds, for the migration (stage 5.4). The query answers each one
+     * under the group's own key, so the copy the app takes is the one the module will read back.
+     *
+     * Two keys can be left out. A module that cannot say whether the clock size was ever set
+     * writes none; the size it reports is the one the clock is at right now, and writing that
+     * back would fix the clock to this wallpaper's height instead of following it.
+     */
+    internal suspend fun settingsSnapshot(
+        context: Context,
+        includeUnset: Boolean = false,
+    ): SettingsSnapshot? {
+        val b = ask(context, "query") ?: return null
+        if (!b.getBoolean("alive", false)) return null
+        if (stripsSettings(b) || !b.containsKey("settings_prefs")) return null
+        val values = LinkedHashMap<String, Any>()
+        for (spec in SettingsPlan.specs) {
+            val key = spec.key
+            values[key] = when (spec.kind) {
+                SettingSpec.Kind.BOOL -> b.getBoolean(key, spec.defBool)
+                SettingSpec.Kind.FLOAT -> b.getFloat(key, spec.defFloat)
+                SettingSpec.Kind.INT -> b.getInt(key, spec.defInt)
+                SettingSpec.Kind.STRING -> b.getString(key) ?: spec.defString
+            }
+        }
+        // The migration keeps the clock size out when the module cannot say it was chosen; the
+        // test build's resync takes everything, because it is putting back what the module has.
+        if (!includeUnset && !b.getBoolean("clocksizeset", false)) {
+            values.remove(SettingSpec.CLOCK_SIZE.key)
+        }
+        return SettingsSnapshot(
+            capable = true,
+            rev = b.getLong("settings_rev", 0L),
+            values = values,
+        )
     }
 
     /**
@@ -932,6 +1106,7 @@ object ModuleBridge {
         if (b == null || !b.getBoolean("alive", false)) {
             return State(inert = b?.getBoolean("inert", false) == true)
         }
+        val old = stripsSettings(b)
         return State(
             alive = true,
             cover = b.getBoolean("cover", false),
@@ -990,6 +1165,15 @@ object ModuleBridge {
             fpQuickSystem = b.getBoolean("fpquicksys", true),
             fpQuickOk = b.getBoolean("fpquickok", false),
             featuresMissing = b.getStringArray("features_missing")?.toList().orEmpty(),
+            // Null from a module that predates stage 5.2, which is what tells the app to keep
+            // sending ops instead of writing a group nothing reads.
+            settingsPrefs = if (!old && b.containsKey("settings_prefs")) {
+                b.getBoolean("settings_prefs")
+            } else {
+                null
+            },
+            canReadPrefs = !old && b.containsKey("settings_prefs"),
+            settingsRev = if (old) 0L else b.getLong("settings_rev", 0L),
             pickup = b.bool(SettingSpec.PICKUP),
             rulesDate = b.getString("rulesdate") ?: "",
             rulesCount = b.getInt("rulescount", 0),

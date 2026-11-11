@@ -41,16 +41,24 @@ object LsposedService {
         if (registered) return
         registered = true
         val app = context.applicationContext
+        // Before anything can ask for a setting: the local copy is where every page's value and
+        // every write goes from stage 5.3 on.
+        SettingsStore.init(app)
         XposedServiceHelper.registerListener(object : XposedServiceHelper.OnServiceListener {
             override fun onServiceBind(service: XposedService) {
                 // The app's copy is the setting; the group is only where the module reads it. A
                 // group that was never written, or was lost with LSPosed's data, gets it again.
                 write(service, logLevel(app))
                 bound.value = service
+                // The channel to the group exists from now on: migrate if nothing has yet, and
+                // otherwise push the whole local set back, which is what makes a service that
+                // was away for a while whole again.
+                SettingsStore.onServiceBound(service)
             }
 
             override fun onServiceDied(service: XposedService) {
                 if (bound.value === service) bound.value = null
+                SettingsStore.onServiceDied()
             }
         })
     }

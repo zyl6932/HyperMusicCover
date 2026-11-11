@@ -49,8 +49,12 @@ object SettingsBackup {
         val json = JSONObject(AppSettings.load(context).toJson())
         // With the module not answering there are no real values to write down, and writing the
         // defaults would quietly turn an export into a reset for whoever imports it.
-        val module = ModuleBridge.query(context)
-        if (module.alive) {
+        // Settings come from the app's copy once it is the source (stage 5.3), so an export
+        // works with SystemUI away; the shade page and the mini player's config are still the
+        // module's own and are written only when it answers.
+        val module = SettingsStore.overlay(ModuleBridge.query(context))
+        val alive = module.alive
+        if (alive || SettingsStore.editable()) {
             // The settings that are no longer settings are not written, and not read back on
             // import either: the square's size and place, the clock's offset, the glass
             // end, the spring, the two media card switches, the small AOD clock, the lyrics
@@ -83,12 +87,14 @@ object SettingsBackup {
             }
             json.put(KEY_FP_AVOID, module.fpAvoid)
             json.put(KEY_TRANSIT, module.transit)
-            // Written whole rather than key by key, because the map is built from the module's
-            // own list of keys - this file has no idea what is in it, which is the point.
-            if (module.shade.isNotEmpty()) {
-                json.put(KEY_SHADE, JSONObject(module.shade as Map<*, *>))
+            if (alive) {
+                // Written whole rather than key by key, because the map is built from the module's
+                // own list of keys - this file has no idea what is in it, which is the point.
+                if (module.shade.isNotEmpty()) {
+                    json.put(KEY_SHADE, JSONObject(module.shade as Map<*, *>))
+                }
+                json.put(KEY_MINI, JSONObject(module.miniConfig))
             }
-            json.put(KEY_MINI, JSONObject(module.miniConfig))
         }
         return json.toString(2)
     }
@@ -96,6 +102,16 @@ object SettingsBackup {
     /** Applies both halves. Returns the app settings so the caller can restart the UI with them. */
     fun import(context: Context, json: String): AppSettings {
         val settings = AppSettings.importFromJson(context, json)
+        importModule(context, json)
+        return settings
+    }
+
+    /**
+     * The module's half alone, through the same setters the pages use - so it lands in the app's
+     * copy and is delivered the same way. The test build's restore uses this: a backup taken for
+     * a test must not reset the app's own theme and language on the way in.
+     */
+    fun importModule(context: Context, json: String) {
         try {
             val obj = JSONObject(json)
             if (obj.has(KEY_BIAS)) ModuleBridge.setBias(context, obj.getDouble(KEY_BIAS).toFloat())
@@ -183,6 +199,5 @@ object SettingsBackup {
         } catch (_: Exception) {
             // The app half is already applied; a malformed module half is not worth losing it over.
         }
-        return settings
     }
 }

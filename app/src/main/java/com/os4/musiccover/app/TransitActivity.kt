@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
@@ -26,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.os4.musiccover.ui.component.SettingsNotices
 import com.os4.musiccover.ui.screen.features.TransitDemo
 import com.os4.musiccover.ui.theme.AppTheme
 import com.os4.musiccover.ui.util.PageScaffold
@@ -81,7 +83,9 @@ class TransitActivity : ComponentActivity() {
 @Composable
 private fun TransitPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
     val context = LocalContext.current
-    var module by remember { mutableStateOf(ModuleBridge.State()) }
+    // The app's copy first once it is the source (stage 5.3); see FeaturesPage.
+    var module by remember { mutableStateOf(ModuleBridge.initialState()) }
+    val migrated by SettingsStore.migratedState.collectAsState()
     var asked by remember { mutableStateOf(false) }
     // 取餐码云端名单那一行：正在同步，和上一次失败的原因（成功了就清掉，日期自己会变）。
     var syncing by remember { mutableStateOf(false) }
@@ -99,6 +103,8 @@ private fun TransitPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
         module = ModuleBridge.queryAlive(context)
         asked = true
     }
+    // Editable on the app's copy alone once it is the source; see FeaturesPage.
+    val enabled = module.alive || migrated
 
     PageScaffold(title = stringResource(R.string.features_transit_title), isBlurEnabled = blur,
         onBack = onBack) {
@@ -114,23 +120,26 @@ private fun TransitPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
             // （逐站岛和通勤学习都在它下面），所以它落在抬头之下、学习通勤路线之上。
             SmallTitle(text = stringResource(R.string.commute_title))
             Card(Modifier.nextCard()) {
-                // Only an answer can put this on (ShadePageView says why).
-                SwitchPreference(title = stringResource(R.string.transit_enabled),
-                    summary = if (asked && !module.alive) {
-                        stringResource(R.string.home_status_inactive_hint)
-                    } else {
-                        null
-                    },
-                    checked = module.alive && module.transit, enabled = module.alive,
-                    onCheckedChange = {
-                        module = module.copy(transit = it)
-                        ModuleBridge.setTransit(context, it)
-                    })
+                Column {
+                    SettingsNotices(alive = module.alive)
+                    // Only an answer can put this on (ShadePageView says why).
+                    SwitchPreference(title = stringResource(R.string.transit_enabled),
+                        summary = if (asked && !module.alive && !migrated) {
+                            stringResource(R.string.home_status_inactive_hint)
+                        } else {
+                            null
+                        },
+                        checked = enabled && module.transit, enabled = enabled,
+                        onCheckedChange = {
+                            module = module.copy(transit = it)
+                            ModuleBridge.setTransit(context, it)
+                        })
+                }
             }
         }
         item(key = "commute") {
             // The commute is the trip island's: it folds away under that switch (FoldUnder).
-            FoldUnder(module.alive && module.transit, settled = module.alive) {
+            FoldUnder(enabled && module.transit, settled = enabled) {
                 CommuteSection(refreshKey)
             }
         }
@@ -139,12 +148,12 @@ private fun TransitPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
             Card(Modifier.nextCard()) {
                 SwitchPreference(title = stringResource(R.string.pickup_enabled),
                     // The same hint as the switch above, for a phone that scrolled past it.
-                    summary = if (asked && !module.alive) {
+                    summary = if (asked && !module.alive && !migrated) {
                         stringResource(R.string.home_status_inactive_hint)
                     } else {
                         null
                     },
-                    checked = module.alive && module.pickup, enabled = module.alive,
+                    checked = enabled && module.pickup, enabled = enabled,
                     onCheckedChange = {
                         module = module.copy(pickup = it)
                         ModuleBridge.setPickup(context, it)
@@ -153,7 +162,7 @@ private fun TransitPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                 // are only read for the pickup island.
                 // 云端那一份是 ColorOS 自己的微信小程序名单（93 条），比随包的规则 XML 新也比它全；
                 // 拉一次要过网络，所以给一个手动按钮，副标题显示当前这份的更新日期。
-                FoldUnder(module.alive && module.pickup, settled = module.alive) {
+                FoldUnder(enabled && module.pickup, settled = enabled) {
                     BasicComponent(
                         title = stringResource(R.string.pickup_cloud_refresh),
                         summary = when {

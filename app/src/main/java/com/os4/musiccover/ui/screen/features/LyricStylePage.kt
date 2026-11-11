@@ -32,8 +32,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.os4.musiccover.R
 import com.os4.musiccover.app.ModuleBridge
+import com.os4.musiccover.app.SettingsStore
 import com.os4.musiccover.lyrics.HdrDisplay
 import com.os4.musiccover.lyrics.LyricAppearance
+import com.os4.musiccover.ui.component.SettingsNotices
 import com.os4.musiccover.ui.util.PageScaffold
 import com.os4.musiccover.ui.util.firstCard
 import com.os4.musiccover.ui.util.nextCard
@@ -74,7 +76,9 @@ internal fun LyricStylePageView(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    var module by remember { mutableStateOf(ModuleBridge.State()) }
+    // The app's copy first once it is the source (stage 5.3); see FeaturesPage.
+    var module by remember { mutableStateOf(ModuleBridge.initialState()) }
+    val migrated by SettingsStore.migratedState.collectAsState()
     // Asked and re-asked as the other module pages are: see ShadePageView.
     var asked by remember { mutableStateOf(false) }
     val lost by ModuleBridge.lost.collectAsState()
@@ -88,7 +92,8 @@ internal fun LyricStylePageView(
         module = ModuleBridge.queryAlive(context)
         asked = true
     }
-    val enabled = module.alive
+    // Editable on the app's copy alone once it is the source; see FeaturesPage.
+    val enabled = module.alive || migrated
     val appearance = remember(module.lyricAppearance) { LyricAppearance.parse(module.lyricAppearance) }
 
     // One field or several of the appearance, written through LyricAppearance so what is shown
@@ -147,12 +152,14 @@ internal fun LyricStylePageView(
     ) {
         item(key = "general") {
             Column {
-                // The module not answering is said once, above everything it greys out.
-                if (asked && !module.alive) {
+                // The module not answering is said once, above everything it greys out - unless
+                // the app's copy is the source, when the page is not grey and only waits.
+                if (asked && !module.alive && !migrated) {
                     Card(modifier = Modifier.firstCard()) {
                         BasicComponent(title = stringResource(R.string.home_status_inactive_hint))
                     }
                 }
+                SettingsNotices(alive = module.alive)
                 SmallTitle(text = stringResource(R.string.lyrics_style_general))
                 Card(modifier = Modifier.nextCard()) {
                     val alignModes = listOf(

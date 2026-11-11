@@ -33,6 +33,8 @@ import com.os4.musiccover.app.MiniPlayerActivity
 import com.os4.musiccover.app.TransitActivity
 import com.os4.musiccover.app.FpQuickActivity
 import com.os4.musiccover.app.LyricStyleActivity
+import com.os4.musiccover.app.SettingsStore
+import com.os4.musiccover.ui.component.SettingsNotices
 import com.os4.musiccover.ui.util.PageScaffold
 import kotlinx.coroutines.delay
 import org.json.JSONObject
@@ -178,8 +180,11 @@ internal fun CoverPageView(
 ) {
     val context = LocalContext.current
 
-    var module by remember { mutableStateOf(ModuleBridge.State()) }
+    // Once the app's copy is the source (stage 5.3) the page starts from it rather than from
+    // defaults: a page opened while SystemUI is away has to show the settings it will apply.
+    var module by remember { mutableStateOf(ModuleBridge.initialState()) }
     var group by remember { mutableIntStateOf(0) }
+    val migrated by SettingsStore.migratedState.collectAsState()
 
     // Re-asked until it answers: this screen is reached straight after "重启全部作用域" as often
     // as not, and a single query then lands before SystemUI has a receiver - leaving every
@@ -234,7 +239,9 @@ internal fun CoverPageView(
         }
     }
 
-    val enabled = module.alive
+    // Editable on the app's copy alone once it is the source; the module being away only means
+    // the values wait for it. Before the migration the module is the only source, as it was.
+    val enabled = module.alive || migrated
     // The lyrics tab greys out with the cover's master switch: they only exist inside the cover,
     // but they are a tab away from the switch, and a tab that empties itself reads as broken.
     // The card's rows and the colon stay: they are the OEM's card and clock in every mode.
@@ -281,34 +288,38 @@ internal fun CoverPageView(
         }
         item(key = "settings") {
             Card(modifier = Modifier.nextCard()) {
-                when (group) {
-                    0 -> Column {
-                        // miuix's own pattern (example SwitchSection): the master switch is the
-                        // first row of its card, and what hangs off it folds away under it
-                        // rather than greying out.
-                        SwitchPreference(
-                            title = stringResource(R.string.cover_enabled),
-                            // Why the whole page is grey, said where the eye goes first - as the
-                            // other pages' master switches say it.
-                            summary = if (asked && !module.alive) {
-                                stringResource(R.string.home_status_inactive_hint)
-                            } else {
-                                null
-                            },
-                            checked = module.coverFeature,
-                            enabled = enabled,
-                            onCheckedChange = {
-                                module = module.copy(coverFeature = it)
-                                ModuleBridge.setCoverFeature(context, it)
-                            },
-                        )
-                        FoldUnder(module.coverFeature, settled = module.alive) {
-                            CoverGroup(enabled, module) { module = it }
+                Column {
+                    SettingsNotices(alive = module.alive)
+                    when (group) {
+                        0 -> Column {
+                            // miuix's own pattern (example SwitchSection): the master switch is the
+                            // first row of its card, and what hangs off it folds away under it
+                            // rather than greying out.
+                            SwitchPreference(
+                                title = stringResource(R.string.cover_enabled),
+                                // Why the whole page is grey, said where the eye goes first - as the
+                                // other pages' master switches say it. Not once the app's copy is
+                                // the source: the page is not grey then, only waiting.
+                                summary = if (asked && !module.alive && !migrated) {
+                                    stringResource(R.string.home_status_inactive_hint)
+                                } else {
+                                    null
+                                },
+                                checked = module.coverFeature,
+                                enabled = enabled,
+                                onCheckedChange = {
+                                    module = module.copy(coverFeature = it)
+                                    ModuleBridge.setCoverFeature(context, it)
+                                },
+                            )
+                            FoldUnder(module.coverFeature, settled = enabled) {
+                                CoverGroup(enabled, module) { module = it }
+                            }
+                            ClockGroup(enabled, module.coverFeature, module) { module = it }
                         }
-                        ClockGroup(enabled, module.coverFeature, module) { module = it }
+                        1 -> CardGroup(enabled, module) { module = it }
+                        else -> LyricsGroup(coverOn, module) { module = it }
                     }
-                    1 -> CardGroup(enabled, module) { module = it }
-                    else -> LyricsGroup(coverOn, module) { module = it }
                 }
             }
         }

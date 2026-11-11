@@ -159,6 +159,12 @@ public final class SettingSpec {
     public static final String PREFS_MIGRATED = "_migrated";
     /** The app's write counter, monotonic; the module reports the last one it has applied. */
     public static final String PREFS_REV = "_rev";
+    /**
+     * Set while the local copy holds a value the group has not been given: a write made while
+     * the module could not take the group (an older one, or before the service bound). It has
+     * to outlive the app's process, or a restart before the module comes back would lose it.
+     */
+    public static final String PREFS_DIRTY = "_dirty";
 
     // ---------------------------------------------------------------- the islands
 
