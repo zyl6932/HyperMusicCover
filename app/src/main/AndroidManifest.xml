@@ -104,16 +104,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- Stage 5's test hook. It does nothing unless the build was made with -PmcS5Test=true;
-             see S5TestReceiver. -->
-        <receiver
-            android:name=".app.S5TestReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.os4.musiccover.S5TEST" />
-            </intent-filter>
-        </receiver>
-
         <activity
             android:name=".app.LicenseActivity"
             android:exported="false"

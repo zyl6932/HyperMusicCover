@@ -43,10 +43,6 @@ android {
         // phone: -PmcHrFaults=true. Off in every build CI makes.
         buildConfigField("boolean", "HR_FAULTS",
                 ((findProperty("mcHrFaults") as String?) == "true").toString())
-        // Stage 5's test hook (S5TestReceiver): lets adb dump the local copy and put a backup
-        // back through the same setters the pages use. Off in every build CI makes.
-        buildConfigField("boolean", "S5_TEST",
-                ((findProperty("mcS5Test") as String?) == "true").toString())
     }
 
     signingConfigs {

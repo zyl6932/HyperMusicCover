@@ -386,17 +386,6 @@ object ModuleBridge {
     /** Whether the module that last answered acknowledges ops. Learned from [query]. */
     @Volatile private var moduleAcks = false
 
-    /**
-     * The test build's simulation of a module from before stage 5.2: its query has no
-     * `settings_prefs`, and nothing may be written to the group. That is exactly what a phone
-     * shows between installing this build and restarting SystemUI, and it is the last path a
-     * settings change has before the ops it always used.
-     */
-    @Volatile internal var pretendOldModule = false
-
-    private fun stripsSettings(b: Bundle): Boolean =
-        com.os4.musiccover.BuildConfig.S5_TEST && pretendOldModule && b.getBoolean("alive", false)
-
     /** The last answer [query] gave, good or bad, and null until someone asks in this process. */
     @Volatile private var lastQuery: State? = null
 
@@ -775,8 +764,7 @@ object ModuleBridge {
     internal suspend fun settingsProbe(context: Context): SettingsProbe? {
         val b = ask(context, "query") ?: return null
         if (!b.getBoolean("alive", false)) return SettingsProbe(false, null, 0L)
-        val old = stripsSettings(b)
-        val capable = !old && b.containsKey("settings_prefs")
+        val capable = b.containsKey("settings_prefs")
         return SettingsProbe(true, capable, if (capable) b.getLong("settings_rev", 0L) else 0L)
     }
 
@@ -794,7 +782,7 @@ object ModuleBridge {
     ): SettingsSnapshot? {
         val b = ask(context, "query") ?: return null
         if (!b.getBoolean("alive", false)) return null
-        if (stripsSettings(b) || !b.containsKey("settings_prefs")) return null
+        if (!b.containsKey("settings_prefs")) return null
         val values = LinkedHashMap<String, Any>()
         for (spec in SettingsPlan.specs) {
             val key = spec.key
@@ -1106,7 +1094,6 @@ object ModuleBridge {
         if (b == null || !b.getBoolean("alive", false)) {
             return State(inert = b?.getBoolean("inert", false) == true)
         }
-        val old = stripsSettings(b)
         return State(
             alive = true,
             cover = b.getBoolean("cover", false),
@@ -1167,13 +1154,9 @@ object ModuleBridge {
             featuresMissing = b.getStringArray("features_missing")?.toList().orEmpty(),
             // Null from a module that predates stage 5.2, which is what tells the app to keep
             // sending ops instead of writing a group nothing reads.
-            settingsPrefs = if (!old && b.containsKey("settings_prefs")) {
-                b.getBoolean("settings_prefs")
-            } else {
-                null
-            },
-            canReadPrefs = !old && b.containsKey("settings_prefs"),
-            settingsRev = if (old) 0L else b.getLong("settings_rev", 0L),
+            settingsPrefs = if (b.containsKey("settings_prefs")) b.getBoolean("settings_prefs") else null,
+            canReadPrefs = b.containsKey("settings_prefs"),
+            settingsRev = b.getLong("settings_rev", 0L),
             pickup = b.bool(SettingSpec.PICKUP),
             rulesDate = b.getString("rulesdate") ?: "",
             rulesCount = b.getInt("rulescount", 0),

@@ -45,7 +45,6 @@ object SettingsStore {
     private const val TAG = "MCSettings"
 
     /** The per-write trace, for the test build only: a slider would flood any other build. */
-    private val verbose = com.os4.musiccover.BuildConfig.S5_TEST
 
     private const val PREFS_NAME = "settings"
 
@@ -146,7 +145,6 @@ object SettingsStore {
             }
             if (migrated) synchronized(lock) { outbox.markDirty() }
         }
-        if (verbose) Log.i(TAG, "put $key=$value same=$same deliverable=${deliverable()}")
         if (!deliverable()) return false
         // A page that sets the value it already has has nothing to send.
         if (same) return true
@@ -246,63 +244,6 @@ object SettingsStore {
         Log.w(TAG, "service died")
     }
 
-    /** The app's copy as one line, for the test build's dump (S5TestReceiver). */
-    internal fun dumpLine(): String {
-        val p = prefs ?: return "store not ready"
-        val all = p.all
-        val sb = StringBuilder("migrated=").append(migrated)
-            .append(" rev=").append(outbox.rev)
-            .append(" dirty=").append(outbox.dirty)
-            .append(" user=").append(userId)
-            .append(" capable=").append(capable)
-        for (spec in SettingsPlan.specs) {
-            sb.append(' ').append(spec.key).append('=')
-                .append(if (all.containsKey(spec.key)) all[spec.key] else "-")
-        }
-        return sb.toString()
-    }
-
-    /** Honours a page's changes without waiting out the quiet period; test restore uses it. */
-    internal fun flushNow(context: Context) {
-        init(context)
-        if (verbose) Log.i(TAG, "flushNow, outbox=${synchronized(lock) { !outbox.isEmpty() }}")
-        scope.launch {
-            flushJob?.cancel()
-            commitBatch()
-        }
-    }
-
-    /**
-     * Rewrites the local copy and the group from what the module holds right now, for the test
-     * build's restore: an op put the snapshot back into the module's memory, and this makes the
-     * app's copy and the group say the same before SystemUI restarts. Same values, new counter.
-     */
-    internal fun resync(context: Context) {
-        init(context)
-        scope.launch {
-            val svc = service ?: return@launch
-            val snap = ModuleBridge.settingsSnapshot(context, includeUnset = true) ?: return@launch
-            val mark = synchronized(lock) { outbox.mark() }
-            val r = synchronized(lock) { outbox.nextRev() }
-            val ok = withContext(Dispatchers.IO) {
-                runCatching { writeRemote(svc, snap.values, r, false) }.getOrDefault(false)
-            }
-            if (!ok) {
-                Log.w(TAG, "resync write failed, rev=$r")
-                return@launch
-            }
-            prefs?.edit {
-                for ((key, value) in snap.values) write(this, key, value)
-                putLong(SettingSpec.PREFS_REV, r)
-            }
-            synchronized(lock) { outbox.clean(mark) }
-            clearDirtyMark()
-            moduleRev = r
-            unconfirmedFlow.value = 0
-            Log.i(TAG, "resynced rev=$r keys=${snap.values.size}")
-        }
-    }
-
     // ------------------------------------------------------------------ delivery
 
     /**
@@ -326,12 +267,10 @@ object SettingsStore {
         val mark = synchronized(lock) { outbox.mark() }
         val batch = synchronized(lock) {
             if (outbox.isEmpty()) {
-                if (verbose) Log.i(TAG, "commit: nothing waiting")
                 return
             }
             outbox.drain()
         }
-        if (verbose) Log.i(TAG, "commit: ${batch.size} key(s) ${batch.keys}")
         val svc = service
         if (svc == null || !deliverable()) {
             // The channel went between the change and the batch: send the ops the page would
@@ -512,7 +451,6 @@ object SettingsStore {
     private fun maybeReconcile() {
         if (userId != 0) return
         if (service == null) return
-        if (verbose) Log.i(TAG, "maybe reconcile: moduleRev=$moduleRev rev=${outbox.rev} dirty=${outbox.dirty}")
         if (moduleRev < 0) return
         if (moduleRev >= outbox.rev && !outbox.dirty) return
         if (SystemClock.elapsedRealtime() - lastReconcile < RECONCILE_GAP_MS) return
