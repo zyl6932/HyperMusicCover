@@ -658,8 +658,8 @@ public final class ClockViews {
      * placeCollapsedClock() puts on screen: it pivots on the glyph top, so the top edge does
      * not move with the scale and this y holds for every scale.
      *
-     * Derived the same way placement is - the date at its fixed target, the clock a gap below
-     * it - so the preview follows the rule instead of a second set of numbers that can drift.
+     * Uses the same safe-area destination as the lock screen, including optional decorations
+     * and room constraints, so hidden dates cannot leave the preview at a different position.
      */
     /**
      * {w, h, y, x, pivotX} for the collapsed clock at scale 1, in screen pixels.
@@ -670,10 +670,6 @@ public final class ClockViews {
      * come out centred and left-aligned ones stay left, without the app knowing which is which.
      */
     static float[] clockGeometry() {
-        // The date is not required: it is what the anchored placement hangs the clock from, and
-        // a style with no date view is scaled where it stands. Its height still enters the y the
-        // preview puts the clock at, and with no date there is none to add.
-        View date = visibleDate();
         RectF box = paddedGlyphBox();
         if (box == null) return null;
         View g = null;
@@ -682,9 +678,9 @@ public final class ClockViews {
             if (t != null) { g = t; break; }
         }
         if (g == null) return null;
-        float d = g.getResources().getDisplayMetrics().density;
-        return new float[]{box.width(), box.height(),
-                (date == null ? 0f : ClockCollapse.coverDateY(date) + date.getHeight()) + Main.CLOCK_GAP_DP * d,
+        float top = ClockCollapse.previewClockTop();
+        if (!Float.isFinite(top)) return null;
+        return new float[]{box.width(), box.height(), top,
                 g.getLeft() + box.left, g.getLeft() + Main.clockPivotX(g, glyphBox())};
     }
 
@@ -751,8 +747,8 @@ public final class ClockViews {
      * classic's. Every other style keeps its date under an id of its own - the rhombus style
      * has `current_date` and `notification_date`, the magazine ones `current_date`, the
      * oriental ones `tv_data` and `date_and_time` - so the lookup returned null, and
-     * placeCollapsedClock() refuses to place anything at all without a date to anchor to.
-     * That is why the collapse did nothing on those styles even before the driver question.
+     * the date used to be required for placement. It is now optional content; finding none
+     * must not prevent the clock from being placed against the window safe area.
      *
      * Sticky, because placeCollapsedClock() compares this against the view it placed against
      * last and clears its caches when it changes: a date that alternated between two
