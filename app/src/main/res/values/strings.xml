@@ -121,6 +121,9 @@
     <string name="settings_notice_offline">系统界面未连接，改动先保存在本机，连接后自动同步</string>
     <string name="settings_notice_other_user">当前用户下系统界面读不到这些设置，改动只保存在本机</string>
     <string name="settings_notice_unconfirmed">部分设置未确认，系统界面没有应用</string>
+    <string name="home_install_restart">重启系统界面完成清理</string>
+    <string name="home_install_restart_summary">这是一次新安装；锁屏还在用上次安装的设置和封面</string>
+    <string name="home_install_restart_confirm">重启后，上次安装留下的文件和设置会被清掉，设置恢复默认。</string>
     <string name="home_stale_title">模块已更新</string>
     <string name="home_stale_summary">%1$d 个进程还在运行旧版本</string>
     <string name="home_stale_action">点击重启更新的作用域</string>

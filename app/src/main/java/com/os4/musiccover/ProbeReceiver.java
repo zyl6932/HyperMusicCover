@@ -262,6 +262,10 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
         // the app to keep sending ops instead.
         out.putBoolean("settings_prefs", SettingsPrefs.usesPrefs());
         out.putLong("settings_rev", SettingsPrefs.rev());
+        // The installation this host's files belong to (stage 5.5). The app asks before it
+        // migrates: a different id means its data was wiped and the host still holds the old
+        // installation's settings, which must not be handed over.
+        out.putString("install_id", InstallFingerprint.recorded(c));
         // 设置页那行「手动刷新取餐码云端规则」的副标题，和这一份名单有几个小程序。
         out.putString("rulesdate", PickupCloud.INSTANCE.stamp(PickupCloud.INSTANCE.getUpdatedAt()));
         out.putInt("rulescount", PickupCloud.INSTANCE.count());

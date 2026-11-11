@@ -115,6 +115,23 @@ final class SettingsPrefs {
         Xp.log(TAG + "installed gen=" + HotReload.generation() + " migrated=" + migrated
                 + " rev=" + rev + " read=" + us(SystemClock.elapsedRealtimeNanos() - t0)
                 + " source=" + (sFromPrefs ? "prefs" : "file"));
+        // The group may name an installation whose files this process does not belong to
+        // (stage 5.5). boot() has the Context; the install can run before it does.
+        checkInstall(Main.appContext());
+    }
+
+    /**
+     * Acts on the group's installation id. The group is only read here, never written: the app
+     * is the one that makes ids.
+     */
+    private static void checkInstall(Context c) {
+        SharedPreferences p = sPrefs;
+        if (p == null || c == null) return;
+        try {
+            InstallFingerprint.seen(c, p.getString(SettingSpec.PREFS_INSTALL, null));
+        } catch (Throwable t) {
+            Xp.w(TAG + "reading the installation id failed: " + t);
+        }
     }
 
     /**
@@ -146,6 +163,9 @@ final class SettingsPrefs {
     static void flush(Context c) {
         SharedPreferences p = sPrefs;
         if (p == null || c == null) return;
+        // Before the keys are read: a reinstallation arriving here while SystemUI runs must be
+        // acted on even when the change is the only thing in this batch.
+        checkInstall(c);
         List<String> keys = drain();
         if (keys.isEmpty()) return;
 

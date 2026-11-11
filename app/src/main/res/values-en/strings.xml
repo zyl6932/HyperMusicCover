@@ -121,6 +121,9 @@
     <string name="settings_notice_offline">System UI is not connected; changes are kept here and synced when it returns</string>
     <string name="settings_notice_other_user">System UI cannot read settings from this user; changes stay on this device</string>
     <string name="settings_notice_unconfirmed">Some settings were not confirmed by System UI</string>
+    <string name="home_install_restart">Restart System UI to finish cleaning up</string>
+    <string name="home_install_restart_summary">This is a new installation; the lock screen still uses the last one\'s settings and cover</string>
+    <string name="home_install_restart_confirm">Restarting clears the files and settings the last installation left, and puts the settings back to their defaults.</string>
     <string name="home_stale_title">Module updated</string>
     <string name="home_stale_summary">%1$d processes are still running the old version</string>
     <string name="home_stale_action">Tap to restart them</string>

@@ -1227,6 +1227,35 @@ public final class Settings {
         return LYRIC_APPEARANCE.change(LyricAppearance.parse(json));
     }
 
+    /**
+     * What a first installation holds: every kept setting back to its default, applied as one
+     * batch so the effects run the way they do for a page's change (stage 5.5). Called when the
+     * installation fingerprint finds that this host's files belong to an installation that is
+     * gone; a setting that is already at its default is left alone.
+     */
+    static void resetDefaults(Context c) {
+        List<Change> changes = new ArrayList<>();
+        for (Entry<?> e : ALL) {
+            if (!persisted(e)) continue;
+            Change change = defaultChange(e);
+            if (change != null) changes.add(change);
+        }
+        applyBatch(c, changes);
+    }
+
+    private static Change defaultChange(Entry<?> e) {
+        if (e == COVER_STYLE) return COVER_STYLE.change(CoverCardStyle.defaults());
+        if (e == LYRIC_STYLE) return LYRIC_STYLE.change(LyricStyle.DEFAULT);
+        if (e == LYRIC_APPEARANCE) return LYRIC_APPEARANCE.change(LyricAppearance.DEFAULT);
+        // A first installation has no size of its own: NaN follows the clock's height, where
+        // the spec's default would fix it to one fraction.
+        if (e == CLOCK_SIZE) return CLOCK_SIZE.change(Float.NaN);
+        if (e instanceof Bool) return ((Bool) e).change(e.spec.defBool);
+        if (e instanceof Int) return ((Int) e).change(e.spec.defInt);
+        if (e instanceof Real) return ((Real) e).change(e.spec.defFloat);
+        return null;
+    }
+
     /** Every setting's answer to the query. */
     static void query(Bundle out) {
         for (Entry<?> e : ALL) e.query(out);

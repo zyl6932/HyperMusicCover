@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.edit
 import com.os4.musiccover.SettingSpec
+import java.util.UUID
 import io.github.libxposed.service.XposedService
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -78,6 +79,12 @@ object SettingsStore {
 
     @Volatile private var migrated = false
 
+    /** This installation's id; a new one means the app's data was wiped (stage 5.5). */
+    @Volatile private var installId = ""
+
+    /** The installation the host's own record names; empty until a host that has one answers. */
+    @Volatile private var hostInstallId = ""
+
     /** The Android user this process runs as; anything but 0 cannot reach SystemUI's rows. */
     @Volatile private var userId = 0
 
@@ -85,11 +92,18 @@ object SettingsStore {
     private var migrating = false
     private var lastReconcile = 0L
 
+    /** Set once this installation's id is in the group; a failure leaves it false to retry. */
+    @Volatile private var installSent = false
+
     /** Values waiting for the next batch, keyed the way the group is, with how to replay one. */
     private val outbox = SettingsOutbox<Item>()
 
     private val unconfirmedFlow = MutableStateFlow(0)
     private val migratedFlow = MutableStateFlow(false)
+    private val installPendingFlow = MutableStateFlow(false)
+
+    /** True while the host still acts for an installation this app no longer is. */
+    val installPending: StateFlow<Boolean> = installPendingFlow
 
     /**
      * How many batches the module has not confirmed. A page shows one line while this is above
@@ -115,10 +129,39 @@ object SettingsStore {
             outbox.seedRev(p.getLong(SettingSpec.PREFS_REV, 0L))
             if (p.getBoolean(SettingSpec.PREFS_DIRTY, false)) outbox.markDirty()
             migrated = p.getBoolean(SettingSpec.PREFS_MIGRATED, false)
+            installId = ensureInstallId(p)
             prefs = p
         }
         migratedFlow.value = migrated
-        Log.i(TAG, "init migrated=$migrated rev=${outbox.rev} dirty=${outbox.dirty} user=$userId")
+        Log.i(TAG, "init migrated=$migrated rev=${outbox.rev} dirty=${outbox.dirty}"
+                + " install=$installId user=$userId")
+    }
+
+    /** This installation's id, made on first start; it is what a host compares (stage 5.5). */
+    private fun ensureInstallId(p: SharedPreferences): String {
+        val existing = p.getString(SettingSpec.PREFS_INSTALL, null)
+        if (!existing.isNullOrEmpty()) return existing
+        val id = UUID.randomUUID().toString().replace("-", "")
+        p.edit { putString(SettingSpec.PREFS_INSTALL, id) }
+        return id
+    }
+
+    /**
+     * What a first installation holds. The clock size is left out on purpose: absent means
+     * "follow the clock's height", where a written default would fix one fraction for good.
+     */
+    private fun defaults(): Map<String, Any> {
+        val out = LinkedHashMap<String, Any>()
+        for (spec in SettingsPlan.specs) {
+            if (spec === SettingSpec.CLOCK_SIZE) continue
+            out[spec.key] = when (spec.kind) {
+                SettingSpec.Kind.BOOL -> spec.defBool
+                SettingSpec.Kind.FLOAT -> spec.defFloat
+                SettingSpec.Kind.INT -> spec.defInt
+                SettingSpec.Kind.STRING -> spec.defString
+            }
+        }
+        return out
     }
 
     /**
@@ -217,6 +260,11 @@ object SettingsStore {
         // settings_prefs=false and still reads the group afterwards.
         capable = state.canReadPrefs
         moduleRev = state.settingsRev
+        hostInstallId = state.hostInstallId
+        // The host has acted on this installation when its record names ours. Until then its
+        // files and settings are the old installation's, and a page offers the restart.
+        val pending = hostInstallId.isNotEmpty() && hostInstallId != installId
+        if (installPendingFlow.value != pending) installPendingFlow.value = pending
         // A module that caught up owes nothing more: the "not confirmed" line goes away even
         // when the confirmation itself timed out - a SystemUI restarting under a batch reads
         // the group on its way up and is already there by the next query.
@@ -224,8 +272,30 @@ object SettingsStore {
             if (unconfirmedFlow.value != 0) unconfirmedFlow.value = 0
         }
         if (!state.canReadPrefs) return
+        registerInstall()
         scope.launch {
             if (!migrated) migrate() else maybeReconcile()
+        }
+    }
+
+    /**
+     * Puts this installation's id in the group once. A settings write does it too, but a
+     * migrated install whose counter is already level never writes one - which is exactly the
+     * upgrade to stage 5.5 - and without the id its hosts would never learn about the next
+     * reinstallation.
+     */
+    private fun registerInstall() {
+        if (installSent || installId.isEmpty()) return
+        val svc = service ?: return
+        val r = outbox.rev
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { writeRemote(svc, emptyMap(), r, false, installId) }.getOrDefault(false)
+            }
+            if (ok) {
+                installSent = true
+                Log.i(TAG, "installation $installId registered")
+            }
         }
     }
 
@@ -235,7 +305,10 @@ object SettingsStore {
         Log.i(TAG, "service bound, migrated=$migrated rev=${outbox.rev}")
         if (prefs == null) return
         scope.launch {
-            if (!migrated) migrate() else reconcile()
+            if (!migrated) migrate() else {
+                registerInstall()
+                reconcile()
+            }
         }
     }
 
@@ -282,7 +355,7 @@ object SettingsStore {
         val r = synchronized(lock) { outbox.nextRev() }
         prefs?.edit { putLong(SettingSpec.PREFS_REV, r) }
         val ok = withContext(Dispatchers.IO) {
-            runCatching { writeRemote(svc, batch.mapValues { it.value.value }, r, false) }
+            runCatching { writeRemote(svc, batch.mapValues { it.value.value }, r, false, installId) }
                 .getOrDefault(false)
         }
         if (!ok) {
@@ -341,6 +414,7 @@ object SettingsStore {
         values: Map<String, Any>,
         r: Long,
         migrate: Boolean,
+        install: String? = null,
     ): Boolean {
         val e = svc.getRemotePreferences(SettingSpec.PREFS_GROUP).edit()
         for ((key, value) in values) {
@@ -353,6 +427,9 @@ object SettingsStore {
             }
         }
         if (migrate) e.putBoolean(SettingSpec.PREFS_MIGRATED, true)
+        // Every whole-set write names the installation, so a group whose row was lost gets it
+        // back on the next bind as well as on the next migration.
+        if (install != null) e.putString(SettingSpec.PREFS_INSTALL, install)
         e.putLong(SettingSpec.PREFS_REV, r)
         return e.commit()
     }
@@ -377,13 +454,22 @@ object SettingsStore {
                 Log.i(TAG, "migrate: no answer, trying again on the next query")
                 return
             }
-            if (!snap.capable || snap.values.isEmpty()) {
-                Log.i(TAG, "migrate: module has nothing to hand over (capable=${snap.capable})")
+            if (!snap.capable) {
+                Log.i(TAG, "migrate: the module does not read the group")
+                return
+            }
+            // A host that names another installation still holds that one's settings. Handing
+            // them to this app would make a reinstall restore the old values; the app starts
+            // from defaults and the host acts on the new id the batch carries.
+            val takeover = snap.hostInstallId.isNotEmpty() && snap.hostInstallId != installId
+            val values = if (takeover) defaults() else snap.values
+            if (values.isEmpty()) {
+                Log.i(TAG, "migrate: nothing to hand over")
                 return
             }
             val r = synchronized(lock) { outbox.nextRev() }
             val ok = withContext(Dispatchers.IO) {
-                runCatching { writeRemote(svc, snap.values, r, true) }.getOrDefault(false)
+                runCatching { writeRemote(svc, values, r, true, installId) }.getOrDefault(false)
             }
             // Counting on is harmless: a counter the module never saw only makes the next batch
             // look newer, and the migration runs again with a higher one.
@@ -393,9 +479,14 @@ object SettingsStore {
             }
             synchronized(lock) {
                 prefs?.edit {
-                    for ((key, value) in snap.values) write(this, key, value)
+                    if (takeover) {
+                        // What was left behind from a restored backup, if anything.
+                        for (spec in SettingsPlan.specs) remove(spec.key)
+                    }
+                    for ((key, value) in values) write(this, key, value)
                     putBoolean(SettingSpec.PREFS_MIGRATED, true)
                     putLong(SettingSpec.PREFS_REV, r)
+                    putString(SettingSpec.PREFS_INSTALL, installId)
                     remove(SettingSpec.PREFS_DIRTY)
                 }
                 migrated = true
@@ -404,7 +495,9 @@ object SettingsStore {
             moduleRev = r
             migratedFlow.value = true
             unconfirmedFlow.value = 0
-            Log.i(TAG, "migrated rev=$r keys=${snap.values.size}")
+            if (takeover) installPendingFlow.value = true
+            Log.i(TAG, "migrated rev=$r keys=${values.size} takeover=$takeover"
+                    + " host=${snap.hostInstallId}")
         } finally {
             migrating = false
         }
@@ -433,7 +526,7 @@ object SettingsStore {
         val r = synchronized(lock) { outbox.nextRev() }
         prefs?.edit { putLong(SettingSpec.PREFS_REV, r) }
         val ok = withContext(Dispatchers.IO) {
-            runCatching { writeRemote(svc, values, r, false) }.getOrDefault(false)
+            runCatching { writeRemote(svc, values, r, false, installId) }.getOrDefault(false)
         }
         if (!ok) {
             Log.w(TAG, "reconcile rev=$r write failed")

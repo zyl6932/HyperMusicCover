@@ -52,6 +52,7 @@ import com.os4.musiccover.BuildConfig
 import com.os4.musiccover.app.DonateActivity
 import com.os4.musiccover.app.LsposedService
 import com.os4.musiccover.app.ModuleBridge
+import com.os4.musiccover.app.SettingsStore
 import com.os4.musiccover.R
 import com.os4.musiccover.ui.component.DropdownItem
 import com.os4.musiccover.ui.component.MenuPopupDefaults
@@ -172,6 +173,10 @@ fun HomePageView(
     // Asked from the status card, which is the whole width of the page and where a scroll starts.
     var confirmRestart by remember { mutableStateOf(false) }
     var showMissing by remember { mutableStateOf(false) }
+    // A new installation whose host still belongs to the one that is gone (stage 5.5): the
+    // lock screen is still showing the old settings and cover until SystemUI is restarted.
+    val installPending by SettingsStore.installPending.collectAsState()
+    var confirmInstallRestart by remember { mutableStateOf(false) }
     LaunchedEffect(current, resumeKey, service, state.inert) {
         if (current) stale = withContext(Dispatchers.IO) {
             // The other processes' inert answer first: LSPosed lists them as up to date.
@@ -344,6 +349,20 @@ fun HomePageView(
             }
         }
 
+        // A new installation whose host has not acted on its id yet: its files and settings are
+        // still the old installation's until SystemUI restarts (stage 5.5).
+        if (installPending) {
+            item(key = "install") {
+                Card(modifier = Modifier.nextCard()) {
+                    ArrowPreference(
+                        title = stringResource(R.string.home_install_restart),
+                        summary = stringResource(R.string.home_install_restart_summary),
+                        onClick = { confirmInstallRestart = true },
+                    )
+                }
+            }
+        }
+
         // Only when the module answered and something did not go in: a build of SystemUI that
         // lacks what a feature hooks costs that feature alone now (FeatureHost), and this is
         // where it shows rather than as a module that quietly does less.
@@ -481,6 +500,35 @@ fun HomePageView(
                             state = state.copy(inert = false)
                             refresh()
                         }
+                    }
+                },
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+        }
+    }
+
+    WindowDialog(
+        show = confirmInstallRestart,
+        title = stringResource(R.string.home_install_restart),
+        summary = stringResource(R.string.home_install_restart_confirm),
+        onDismissRequest = { confirmInstallRestart = false },
+    ) {
+        val dismiss = LocalDismissState.current
+        Row(horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(
+                modifier = Modifier.weight(1f),
+                text = stringResource(R.string.update_cancel),
+                onClick = { dismiss?.invoke() },
+            )
+            Spacer(Modifier.width(20.dp))
+            TextButton(
+                modifier = Modifier.weight(1f),
+                text = stringResource(R.string.restart_menu),
+                onClick = {
+                    confirmInstallRestart = false
+                    scope.launch {
+                        withContext(Dispatchers.IO) { ModuleBridge.restartSystemUi() }
+                        refresh()
                     }
                 },
                 colors = ButtonDefaults.textButtonColorsPrimary(),

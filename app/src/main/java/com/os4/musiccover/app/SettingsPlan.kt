@@ -70,6 +70,8 @@ internal class SettingsSnapshot(
     val capable: Boolean,
     val rev: Long,
     val values: Map<String, Any>,
+    /** The installation the host's own files belong to; empty from a host that has no id yet. */
+    val hostInstallId: String,
 )
 
 /**

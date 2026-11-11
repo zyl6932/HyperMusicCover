@@ -227,6 +227,12 @@ object ModuleBridge {
         /** The last write of the app's group the module applied, for the page's confirmation. */
         val settingsRev: Long = 0L,
         /**
+         * The installation this host's files belong to (stage 5.5); empty from a host that has
+         * never seen one. A different id from the app's own means its data was wiped and the
+         * host still holds the old installation.
+         */
+        val hostInstallId: String = "",
+        /**
          * The notification-shade settings, keyed exactly as the module's own CFG_KEYS.
          *
          * Read out of the reply by PREFIX rather than field by field. The module generates its
@@ -802,6 +808,7 @@ object ModuleBridge {
             capable = true,
             rev = b.getLong("settings_rev", 0L),
             values = values,
+            hostInstallId = b.getString("install_id") ?: "",
         )
     }
 
@@ -1157,6 +1164,7 @@ object ModuleBridge {
             settingsPrefs = if (b.containsKey("settings_prefs")) b.getBoolean("settings_prefs") else null,
             canReadPrefs = b.containsKey("settings_prefs"),
             settingsRev = b.getLong("settings_rev", 0L),
+            hostInstallId = b.getString("install_id") ?: "",
             pickup = b.bool(SettingSpec.PICKUP),
             rulesDate = b.getString("rulesdate") ?: "",
             rulesCount = b.getInt("rulescount", 0),

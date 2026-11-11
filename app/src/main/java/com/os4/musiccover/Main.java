@@ -1607,6 +1607,14 @@ public class Main extends XposedModule {
             Xp.w(TAG + "hello to the wallpaper process failed: " + t);
         }
         ModuleState.loadState();
+        // The installation whose files this process has (stage 5.5). After the state file is
+        // read, so a reset is what the process ends up holding; every host has files of its own,
+        // and only SystemUI installs the settings table the reset moves.
+        try {
+            InstallFingerprint.check(ctx);
+        } catch (Throwable t) {
+            Xp.w(TAG + "install fingerprint failed: " + t);
+        }
         // Changes the app wrote while this process was starting: the install read may have run
         // before its main loop did. Values were already set there; this applies any that differ.
         try {

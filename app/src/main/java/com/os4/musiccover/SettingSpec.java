@@ -165,6 +165,12 @@ public final class SettingSpec {
      * to outlive the app's process, or a restart before the module comes back would lose it.
      */
     public static final String PREFS_DIRTY = "_dirty";
+    /**
+     * The app installation these settings belong to. The app makes a new one whenever its data
+     * is gone (uninstalled, or its data cleared); a host that sees a different one clears the
+     * files and settings of the installation that is gone (stage 5.5).
+     */
+    public static final String PREFS_INSTALL = "_install";
 
     // ---------------------------------------------------------------- the islands
 
