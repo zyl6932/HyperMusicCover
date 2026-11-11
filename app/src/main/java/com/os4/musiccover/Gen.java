@@ -501,7 +501,9 @@ public final class Gen {
         for (AttachReg a : attachStates) {
             if (kept(dryRun, a)) continue;
             try {
-                a.view.removeOnAttachStateChangeListener(a.listener);
+                View view = a.view();
+                View.OnAttachStateChangeListener listener = a.listener();
+                if (view != null && listener != null) view.removeOnAttachStateChangeListener(listener);
             } catch (Throwable ignored) {
             }
         }
@@ -804,10 +806,26 @@ public final class Gen {
     private static final class AttachReg {
         final View view;
         final View.OnAttachStateChangeListener listener;
+        final java.lang.ref.WeakReference<View> weakView;
+        final java.lang.ref.WeakReference<View.OnAttachStateChangeListener> weakListener;
 
         AttachReg(View view, View.OnAttachStateChangeListener listener) {
-            this.view = view;
-            this.listener = listener;
+            this(view, listener, false);
+        }
+
+        AttachReg(View view, View.OnAttachStateChangeListener listener, boolean weak) {
+            this.view = weak ? null : view;
+            this.listener = weak ? null : listener;
+            weakView = weak ? new java.lang.ref.WeakReference<>(view) : null;
+            weakListener = weak ? new java.lang.ref.WeakReference<>(listener) : null;
+        }
+
+        View view() {
+            return weakView == null ? view : weakView.get();
+        }
+
+        View.OnAttachStateChangeListener listener() {
+            return weakListener == null ? listener : weakListener.get();
         }
     }
 
@@ -1311,9 +1329,21 @@ public final class Gen {
         attachStates.add(new AttachReg(v, l));
     }
 
+    /** A detached view may never return. Its own listener list keeps l alive, not this ledger. */
+    public static void weakAttachState(View v, View.OnAttachStateChangeListener l) {
+        if (refused("a weak attach listener")) return;
+        pruneAttachStates();
+        v.addOnAttachStateChangeListener(l);
+        attachStates.add(new AttachReg(v, l, true));
+    }
+
+    private static void pruneAttachStates() {
+        attachStates.removeIf(r -> r.view() == null || r.listener() == null);
+    }
+
     public static void unattachState(View v, View.OnAttachStateChangeListener l) {
         v.removeOnAttachStateChangeListener(l);
-        attachStates.removeIf(r -> r.view == v && r.listener == l);
+        attachStates.removeIf(r -> r.view() == v && r.listener() == l);
     }
 
     public static void layoutChange(View v, View.OnLayoutChangeListener l) {
@@ -1417,6 +1447,7 @@ public final class Gen {
 
     /** What this generation holds, for the probe and for the hot-reload log line. */
     static String report() {
+        pruneAttachStates();
         return "class=" + Integer.toHexString(System.identityHashCode(Gen.class))
                 + " live=" + live()
                 + " quiescing=" + quiescing
