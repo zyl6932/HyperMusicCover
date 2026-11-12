@@ -468,13 +468,14 @@ internal object LockIslands {
                 result
             }
         }.onFailure { Xp.w("MCIsland: removals unavailable: $it") }
-        // Hooks fail on their own: a build without this one only drops a card a moment late.
+        // HyperOS dispatches posts through postNotification(Ranking, StatusBarNotification).
+        // Read the notification by type: the first argument is its ranking, not the post itself.
         runCatching {
             val collection = Xp.findClass("com.android.systemui.statusbar.notification.collection." +
                 "NotifCollection", classLoader)
-            Xp.hookAll("sysui.island.posted", collection, "onNotificationPosted") { chain ->
+            Xp.hookAll("sysui.island.posted", collection, "postNotification") { chain ->
                 val result = chain.proceed()
-                (chain.args.firstOrNull() as? StatusBarNotification)?.key?.let { key ->
+                (chain.args.firstOrNull { it is StatusBarNotification } as? StatusBarNotification)?.key?.let { key ->
                     val at = android.os.SystemClock.uptimeMillis()
                     Gen.post { if (key in released) postedAt[key] = at }
                 }
