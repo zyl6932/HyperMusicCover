@@ -5,6 +5,7 @@ import com.os4.musiccover.NotifPresence;
 import com.os4.musiccover.Settings;
 import com.os4.musiccover.Xp;
 import com.os4.musiccover.card.MediaCard;
+import com.os4.musiccover.lyrics.LockLyrics;
 import com.os4.musiccover.wallpaper.KeepDim;
 import com.os4.musiccover.Gen;
 
@@ -88,6 +89,24 @@ public final class ClockCollapse {
      * Cleared by releaseNow() and by any entry; see the AOD branch of frame().
      */
     private static boolean sAodHoldPending;
+
+    /**
+     * A held doze that was established from the doze's own box instead of from the lock screen -
+     * see holdFromDoze(). Its colour is the doze's, not a lock screen's: there was no lock
+     * screen showing when the cover's clock had to be placed, so there is no reading to hold.
+     * AodColour leaves the glyphs alone for exactly this doze, which is what they looked like
+     * before the clock was held at all.
+     */
+    private static boolean sAodLateHeld;
+
+    /**
+     * The OEM's y as the last cover look left it.
+     *
+     * A latch from the doze has no lock screen hold to put back, and the OEM draws its glyphs
+     * in a face chosen by y - an unheld doze draws the thin one. Kept across a release (unlike
+     * sAodHoldY) so a sleep taken after the unlock can still ask for the lock screen's face.
+     */
+    private static float sLastCoverY = Float.NaN;
 
     /**
      * Whether this doze is the FULL-SCREEN one, latched at the start of sleep like sAodHeld.
@@ -408,6 +427,31 @@ public final class ClockCollapse {
         return sAodHeld;
     }
 
+    /** Whether this held doze was placed from its own box - no lock screen colour to hold. */
+    static boolean aodLateHeld() {
+        return sAodLateHeld;
+    }
+
+    /** Records the OEM's y a settled cover look holds - see sLastCoverY and holdFromDoze(). */
+    private static void rememberCoverY() {
+        Float held = Main.sHoldY;
+        if (held == null || Float.isNaN(held)) return;
+        sLastCoverY = held;
+        ModuleState.saveStateSoon();
+    }
+
+    /** The OEM's y the last cover look held - for ModuleState; NaN is nothing to keep yet. */
+    public static float coverYState() {
+        return sLastCoverY;
+    }
+
+    /** A y read back from the state file, from a lock screen this process has not drawn. */
+    public static void restoreCoverY(float y) {
+        // A value from another layout (a different clock size or density) would be a face the
+        // lock screen never drew; the sane range is the screen, not a constant.
+        if (y > 0f && y < 20000f) sLastCoverY = y;
+    }
+
     /** Whether this doze is the full-screen one - for AodColour.holdAodColour(). */
     public static boolean aodFullScreen() {
         return sAodFullScreen;
@@ -471,6 +515,7 @@ public final class ClockCollapse {
         // The keyguard is being entered: whatever was still waiting on the doze's layout is not
         // this entry's business any more.
         sAodHoldPending = false;
+        sAodLateHeld = false;
         if (wake) {
             sWaking = false;
             Main.noteAwake();
@@ -630,6 +675,7 @@ public final class ClockCollapse {
                 // A plain exit that was already flying: keep flying, but land in the AOD.
                 sAodHeld = false;
                 sAodHoldPending = false;
+                sAodLateHeld = false;
                 sExitToAod = true;
                 sYFrom = sYTo = Float.NaN;
                 return;
@@ -643,6 +689,7 @@ public final class ClockCollapse {
                 // pose on it once its box stands still (frame()'s AOD branch). Anything else
                 // has no lock screen under the clock; watch the AOD so the wake has a start.
                 sAodHeld = false;
+                sAodLateHeld = false;
                 // No container means no pre-draw to watch: there is nothing to latch on, and
                 // installing would be the only way frame() could ever run.
                 sAodHoldPending = keepInAod() && Main.sContainer != null;
@@ -674,6 +721,7 @@ public final class ClockCollapse {
             // own transforms on time_group, which the OEM does not read.
             sAodHeld = true;
             sAodHoldPending = false;
+            sAodLateHeld = false;
             // The colour too: a held doze is showing the lock screen's clock, so it holds the
             // lock screen's glass instead of the doze's neutral. Read here because this is the
             // last moment it is still the lock screen's - the doze inks its own over it.
@@ -693,6 +741,7 @@ public final class ClockCollapse {
         }
         sAodHeld = false;
         sAodHoldPending = false;
+        sAodLateHeld = false;
         sDozeSettleUnit = Float.NaN;
         sCenterFrom = sCenterK;
         sCenterTo = 0f;
@@ -1589,6 +1638,9 @@ public final class ClockCollapse {
         if (sPhase == Phase.ENTER) {
             sPhase = Phase.ON;
             sPoseTop = Float.NaN;
+            // The face this lock screen settled in, kept across a restart for a sleep taken
+            // from the desktop - see sLastCoverY and holdFromDoze().
+            rememberCoverY();
             Xp.log(TAG + "clock: cover look settled");
         } else if (sPhase == Phase.EXIT) {
             if (sExitToAod) {
@@ -1619,6 +1671,7 @@ public final class ClockCollapse {
         sExitToAod = false;
         sAodHeld = false;
         sAodHoldPending = false;
+        sAodLateHeld = false;
         // The colour this class remembered was read off a lock screen that is gone; a doze
         // latched later must not be painted with it (see holdFromDoze). ClockGlass.restoreGlass
         // above only puts the views back - it keeps the reading.
@@ -1639,6 +1692,12 @@ public final class ClockCollapse {
         clearTransforms();
         Float held = Main.sHoldY;
         Main.sHoldY = null;
+        // The face the lock screen was drawn in, kept for a doze latched without a pose of its
+        // own. A release is the last moment it is this lock screen's - see sLastCoverY.
+        if (held != null && !Float.isNaN(held)) {
+            sLastCoverY = held;
+            ModuleState.saveStateSoon();
+        }
         // Given the rows' room too: applyY is our own write, which the notifY hooks let past
         // roomForRows, and the raw figure squeezed the clock the exit had just landed full.
         float natural = exitY(naturalY());
@@ -2381,7 +2440,17 @@ public final class ClockCollapse {
         if (!(p.unit > 0f) || Float.isNaN(p.top)) return false;
         sAodHoldPending = false;
         sAodHeld = true;
+        // No lock screen colour was read for this doze; AodColour must leave the glyphs as the
+        // doze has them rather than paint the neutral it uses when there is no reading at all.
+        // That is the colour the same sleep had before the clock was held.
+        sAodLateHeld = true;
         sCenterK = 1f;
+        // The lock screen's face, kept across the release. Without it the OEM draws the doze's
+        // own thin one and the small clock reads lighter than the same clock one sleep later.
+        if (!Float.isNaN(sLastCoverY)) {
+            sAodHoldY = sLastCoverY;
+            hold(sLastCoverY);
+        }
         AodColour.holdAodColour();
         sFromTop = p.top;
         sFromUnit = p.unit;
@@ -2394,8 +2463,12 @@ public final class ClockCollapse {
         writePose(m, p.top, p.unit, p.date, false);
         // A transform alone does not redraw, and the doze's next frame may be a second away.
         invalidate();
+        // The page is in a held doze from this frame on. Let it come up now rather than on the
+        // tick's next beat, which in the doze can be a second away.
+        LockLyrics.onAodHeld();
         Xp.log(TAG + "clock: held the AOD from the keyguard's box (top=" + Main.r1(p.top)
-                + " unit=" + Main.r1(p.unit) + " date=" + Main.r1(p.date) + ")");
+                + " unit=" + Main.r1(p.unit) + " date=" + Main.r1(p.date)
+                + " y=" + Main.r1(sAodHoldY) + ")");
         return true;
     }
 

@@ -144,6 +144,12 @@ public final class ModuleState {
             key("clockref", () -> Float.isNaN(ClockCollapse.refUnitState())
                             ? null : String.valueOf(ClockCollapse.refUnitState()),
                     v -> ClockCollapse.restoreRefUnit(Float.parseFloat(v))),
+            // The OEM's y the last cover look held. A sleep taken from the desktop has no lock
+            // screen hold of its own, and the doze draws its thin face without one - kept across
+            // a restart for exactly that first sleep (ClockCollapse.holdFromDoze).
+            key("covery", () -> Float.isNaN(ClockCollapse.coverYState())
+                            ? null : String.valueOf(ClockCollapse.coverYState()),
+                    v -> ClockCollapse.restoreCoverY(Float.parseFloat(v))),
             setting(Settings.MC_TITLE_TAP),
             setting(Settings.MC_PAGE_BUTTON),
             setting(Settings.TAP_TOGGLE),
