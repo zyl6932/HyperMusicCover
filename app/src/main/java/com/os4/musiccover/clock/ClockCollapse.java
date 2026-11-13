@@ -74,6 +74,22 @@ public final class ClockCollapse {
     private static boolean sAodHeld;
 
     /**
+     * A doze asked to keep the cover's clock while the keyguard had not been laid out for it.
+     *
+     * The screen can fall asleep from OFF: the unlock let the clock go, the desktop does not
+     * enter the cover again, and only then does the power button go down. There is no pose to
+     * keep and no transform on the clock, so toAod() cannot latch the doze the way it does from
+     * ON/ENTER - that leaves the OEM's full clock and the lyrics without an ink to sit under
+     * (issue #134). Rather than derive a pose from a layout that does not exist yet, the doze is
+     * watched: frame() measures the clock the full-screen AOD lays the keyguard out with, and
+     * once two frames agree the cover's pose is derived from that real box and written on. Until
+     * then nothing is held, so a doze where the keyguard never turns up keeps the OEM's clock.
+     *
+     * Cleared by releaseNow() and by any entry; see the AOD branch of frame().
+     */
+    private static boolean sAodHoldPending;
+
+    /**
      * Whether this doze is the FULL-SCREEN one, latched at the start of sleep like sAodHeld.
      *
      * Latched for the same reason and read for one question: who the doze clock's COLOUR belongs
@@ -452,6 +468,9 @@ public final class ClockCollapse {
             return;
         }
         Phase was = sPhase;
+        // The keyguard is being entered: whatever was still waiting on the doze's layout is not
+        // this entry's business any more.
+        sAodHoldPending = false;
         if (wake) {
             sWaking = false;
             Main.noteAwake();
@@ -610,24 +629,36 @@ public final class ClockCollapse {
                 if (sExitToAod) return;
                 // A plain exit that was already flying: keep flying, but land in the AOD.
                 sAodHeld = false;
+                sAodHoldPending = false;
                 sExitToAod = true;
                 sYFrom = sYTo = Float.NaN;
                 return;
             case OFF:
                 if (!Main.clockHeld()) return;
-                // Cover mode without our clock - unlocked, say. Nothing to walk back; watch the
-                // AOD so the wake has a start.
+                // Cover mode without our clock - unlocked, say. What the doze gets depends on
+                // why the phase was OFF: a full-screen doze IS the lock screen dimmed, so the
+                // cover's clock belongs in it (#134) - but there is no pose to keep yet, and no
+                // transform on the clock to leave there. Do not derive one from a layout that
+                // does not exist: watch the keyguard the doze lays out, and hold the cover's
+                // pose on it once its box stands still (frame()'s AOD branch). Anything else
+                // has no lock screen under the clock; watch the AOD so the wake has a start.
                 sAodHeld = false;
+                // No container means no pre-draw to watch: there is nothing to latch on, and
+                // installing would be the only way frame() could ever run.
+                sAodHoldPending = keepInAod() && Main.sContainer != null;
                 sPhase = Phase.AOD;
                 sAodTop = Float.NaN;
                 install();
-                Xp.log(TAG + "clock: watching the AOD");
+                Xp.log(TAG + (sAodHoldPending
+                        ? "clock: into the AOD waiting for the keyguard to lay out"
+                        : "clock: watching the AOD"));
                 return;
             default:
                 break;
         }
         if (!flying) {
             sAodHeld = false;
+            sAodHoldPending = false;
             releaseNow("to AOD with no container");
             return;
         }
@@ -642,6 +673,7 @@ public final class ClockCollapse {
             // clock's translation and posts it to the AOD plugin, and the clock is held by our
             // own transforms on time_group, which the OEM does not read.
             sAodHeld = true;
+            sAodHoldPending = false;
             // The colour too: a held doze is showing the lock screen's clock, so it holds the
             // lock screen's glass instead of the doze's neutral. Read here because this is the
             // last moment it is still the lock screen's - the doze inks its own over it.
@@ -660,6 +692,7 @@ public final class ClockCollapse {
             return;
         }
         sAodHeld = false;
+        sAodHoldPending = false;
         sDozeSettleUnit = Float.NaN;
         sCenterFrom = sCenterK;
         sCenterTo = 0f;
@@ -1585,6 +1618,11 @@ public final class ClockCollapse {
         sPhase = Phase.OFF;
         sExitToAod = false;
         sAodHeld = false;
+        sAodHoldPending = false;
+        // The colour this class remembered was read off a lock screen that is gone; a doze
+        // latched later must not be painted with it (see holdFromDoze). ClockGlass.restoreGlass
+        // above only puts the views back - it keeps the reading.
+        ClockGlass.sAodCoverGlassSet = false;
         sAodFullScreen = false;
         sAodHoldY = Float.NaN;
         sT = 1f;
@@ -2318,6 +2356,49 @@ public final class ClockCollapse {
         return pose;
     }
 
+    /**
+     * Holds the cover's clock on a doze whose keyguard had not been laid out at sleep.
+     *
+     * The box is the one this doze actually draws (see the AOD branch of frame()), not a match
+     * for the lock screen's: the full-screen AOD lays the keyguard out itself, so this is the
+     * first real pose this sleep has. The cover's pose is derived from it and written on in the
+     * same frame - nothing is animated, because the screen is already dozing and a spring behind
+     * a panel that is not drawing would never settle.
+     *
+     * What is NOT here is as deliberate: the OEM's y is left where it is (there is no lock
+     * screen hold to put back) and the glass is the doze's own (there was no lock screen ink to
+     * read it off). That makes the glyph face and the colour the doze's rather than the lock
+     * screen's - the price of a sleep taken with no cover up, and the reason this is only used
+     * when nothing measureable existed at the hand-over.
+     *
+     * @return false when the box still does not describe a pose - the caller keeps waiting.
+     */
+    private static boolean holdFromDoze(Live m) {
+        if (!(m.unit > 0f)) return false;
+        float full = fullUnitFor(Phase.AOD, m);
+        if (!(full > 0f)) full = m.unit;
+        CoverPose p = coverPose(m, full, roomBelow());
+        if (!(p.unit > 0f) || Float.isNaN(p.top)) return false;
+        sAodHoldPending = false;
+        sAodHeld = true;
+        sCenterK = 1f;
+        AodColour.holdAodColour();
+        sFromTop = p.top;
+        sFromUnit = p.unit;
+        sFromDate = p.date;
+        // This is what the doze is showing now, so the wake starts from it rather than capturing
+        // a pose off the OEM's clock the moment the screen comes up.
+        sAodTop = p.top;
+        sAodUnit = p.unit;
+        sAodDate = p.date;
+        writePose(m, p.top, p.unit, p.date, false);
+        // A transform alone does not redraw, and the doze's next frame may be a second away.
+        invalidate();
+        Xp.log(TAG + "clock: held the AOD from the keyguard's box (top=" + Main.r1(p.top)
+                + " unit=" + Main.r1(p.unit) + " date=" + Main.r1(p.date) + ")");
+        return true;
+    }
+
     static float previewClockTop() {
         Live m = PREVIEW_LIVE;
         if (!measure(m)) return Float.NaN;
@@ -2447,6 +2528,10 @@ public final class ClockCollapse {
                     sAodUnit = m.unit;
                     sAodDate = m.dateTop;
                     sAodLayout = layoutNow();
+                    // The keyguard this doze laid out is standing still, so its box is a real
+                    // pose at last - the first one this sleep has. Hold the cover's clock from
+                    // it (#134) instead of leaving the doze the OEM's full one.
+                    if (sAodHoldPending && keepInAod() && holdFromDoze(m)) return;
                 }
                 sAodPendTop = m.inkTop;
                 sAodPendUnit = m.unit;
