@@ -39,6 +39,21 @@ public final class AodColour {
     }
 
     /**
+     * Whether the doze's colour is ours to hold - {@link #aodColourOurs()} for the mode, and out
+     * for a doze held from its own box with no lock screen colour read.
+     *
+     * That doze never had a lock screen showing when the cover's clock had to be placed, so
+     * there is no reading of ours to hold - and the neutral is not a substitute for one: it
+     * turns the small clock grey where this same sleep had the doze's own colour before the
+     * clock was held at all. Both places that paint the doze ask this, so holding the glyphs and
+     * intercepting the OEM's palette push cannot disagree.
+     */
+    static boolean colourHeldByUs() {
+        if (!aodColourOurs()) return false;
+        return !(ClockCollapse.aodLateHeld() && !ClockGlass.sAodCoverGlassSet);
+    }
+
+    /**
      * Holds the always-on clock's glyphs at the colour they are ours to hold.
      *
      * The colour lives in `glassData[11..13]` and is uploaded from the view's own field when the
@@ -52,7 +67,7 @@ public final class AodColour {
      * @return true when a glyph was rewritten and so needs the redraw
      */
     static boolean holdAodColour() {
-        if (!Main.sCoverMode || Main.sScreenOn || !aodColourOurs()) return false;
+        if (!Main.sCoverMode || Main.sScreenOn || !colourHeldByUs()) return false;
         // A doze that kept the cover's clock is showing the LOCK SCREEN's clock, so it holds the
         // colour and the fill the lock screen had. Read at the moment of sleep, before the doze had
         // inked anything with its own palette. The capture is only ever taken for a held doze, so
