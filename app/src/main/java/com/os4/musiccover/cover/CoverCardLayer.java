@@ -409,7 +409,7 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         if (getVisibility() == VISIBLE) {
             Xp.log("[MCCard] hidden outside keyguard on " + from);
         }
-        if (getVisibility() != GONE || ticking || opacity != 0f) hideImmediately();
+        if (getVisibility() != INVISIBLE || ticking || opacity != 0f) hideImmediately();
     }
 
     /**
@@ -494,7 +494,12 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         videoAlpha = 0f;
         CardVideo.want(false);
         exitWithCard = false;
-        if (getVisibility() != GONE) setVisibility(GONE);
+        // INVISIBLE, not GONE: the square stays in the tree so the next pre-draw can judge it
+        // and bring it back. GONE took it out of the parent's draw path, and in a doze nothing
+        // else asked it to come back - the layer was missing for the whole sleep and only a
+        // lit-screen redraw returned it. The clock and the lyrics never leave the tree for the
+        // same reason.
+        if (getVisibility() != INVISIBLE) setVisibility(INVISIBLE);
         wash.hideNow();
     }
 
@@ -593,6 +598,9 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
             post(new Runnable() { @Override public void run() { start(); } });
             return;
         }
+        // Hidden as INVISIBLE rather than GONE so it stays in the tree (see hideImmediately);
+        // anything that wants frames has a reason to show it again.
+        if (getVisibility() != VISIBLE) setVisibility(VISIBLE);
         if (ticking) return;
         ticking = true;
         lastFrame = 0L;
@@ -834,7 +842,12 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         if (!ClockCollapse.aodHeld() && (phase == ClockCollapse.Phase.AOD
                 || (phase == ClockCollapse.Phase.EXIT && !ClockCollapse.exiting()))) {
             afterBigClock = true;
-        } else if (phase == ClockCollapse.Phase.ON || phase == ClockCollapse.Phase.OFF) {
+        } else if (phase == ClockCollapse.Phase.ON || phase == ClockCollapse.Phase.OFF
+                // A doze held late (ClockCollapse.holdFromDoze): the big clock never stood
+                // over the square this sleep, so there is nothing to stay hidden under. Without
+                // this the flag latched on the frame before the hold and the square answered 0
+                // for the whole doze, only coming back on the lit screen.
+                || (phase == ClockCollapse.Phase.AOD && ClockCollapse.aodHeld())) {
             afterBigClock = false;
         }
         boolean bigWake = afterBigClock && phase == ClockCollapse.Phase.ENTER;

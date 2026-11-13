@@ -5,6 +5,7 @@ import com.os4.musiccover.NotifPresence;
 import com.os4.musiccover.Settings;
 import com.os4.musiccover.Xp;
 import com.os4.musiccover.card.MediaCard;
+import com.os4.musiccover.cover.CoverCardLayer;
 import com.os4.musiccover.lyrics.LockLyrics;
 import com.os4.musiccover.wallpaper.KeepDim;
 import com.os4.musiccover.Gen;
@@ -2466,6 +2467,9 @@ public final class ClockCollapse {
         // The page is in a held doze from this frame on. Let it come up now rather than on the
         // tick's next beat, which in the doze can be a second away.
         LockLyrics.onAodHeld();
+        // The square is in the tree but was hidden while the phone was unlocked, and the doze
+        // does not redraw on its own: ask it for the frames that bring it back.
+        CoverCardLayer.refresh();
         Xp.log(TAG + "clock: held the AOD from the keyguard's box (top=" + Main.r1(p.top)
                 + " unit=" + Main.r1(p.unit) + " date=" + Main.r1(p.date)
                 + " y=" + Main.r1(sAodHoldY) + ")");
