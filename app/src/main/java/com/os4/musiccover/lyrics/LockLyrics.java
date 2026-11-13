@@ -1404,6 +1404,17 @@ public final class LockLyrics {
         Main.main().removeCallbacks(WATCH);
     }
 
+    /**
+     * A held doze has just been established from the doze's own box (ClockCollapse.holdFromDoze):
+     * the page belongs to it from this frame, so ask the view for a frame now instead of leaving
+     * it to the tick's next beat - in a doze that beat can be a second away.
+     */
+    public static void onAodHeld() {
+        LyricView v = sView;
+        if (v != null) v.kick();
+        startTick();
+    }
+
     public static void refresh() {
         // 保留壁纸 hangs the clock on the lyric page, and this is where the page comes and goes.
         Main.syncCoverHold(Main.screenOnCached());
