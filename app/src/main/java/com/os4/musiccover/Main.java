@@ -1770,7 +1770,12 @@ public class Main extends XposedModule {
         lf.addAction(Intent.ACTION_SCREEN_OFF);
         lf.addAction(Intent.ACTION_SCREEN_ON);
         lf.addAction(Intent.ACTION_USER_PRESENT);
-        Gen.receiver(ctx, lifecycle, lf, Context.RECEIVER_NOT_EXPORTED);
+        // EXPORTED, not NOT_EXPORTED: on HyperOS 4.0.6 / Android 17 the unlock broadcast is not
+        // delivered to a NOT_EXPORTED receiver any more (4.0.5 delivered it), so the clock was
+        // never released on unlock and a sleep from the desktop kept walking the old path. All
+        // three actions are protected broadcasts - only the system can send them - so widening
+        // the receiver does not let another app drive it.
+        Gen.receiver(ctx, lifecycle, lf, Context.RECEIVER_EXPORTED);
         Xp.log(TAG + "lifecycle receiver registered (screen off / user present)");
         // Last: a marker left by a hot-reloaded generation means this process did not survive
         // it, and this build must not be hot reloaded into again (see HotReload.onBoot).
