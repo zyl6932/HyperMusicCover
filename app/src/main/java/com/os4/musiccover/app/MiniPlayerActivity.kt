@@ -153,7 +153,6 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                         // colours and soft glass and there is nothing to turn off. See
                         // MiniPlayerConfig.NOTIFICATION_MATERIAL.
                         SwitchPreference(title = stringResource(R.string.mini_widen),
-                            summary = stringResource(R.string.mini_widen_summary),
                             checked = config.optBoolean(MiniPlayerConfig.ADAPTIVE_WIDTH),
                             enabled = ready,
                             onCheckedChange = { push(MiniPlayerConfig.ADAPTIVE_WIDTH, it) })
@@ -201,7 +200,6 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                             enabled = ready,
                             onCheckedChange = { push(MiniPlayerConfig.STATUS_AT_DATE, it) })
                         SwitchPreference(title = stringResource(R.string.mini_fod_lift),
-                            summary = stringResource(R.string.mini_fod_lift_summary),
                             checked = config.optBoolean(MiniPlayerConfig.FOD_LIFT),
                             enabled = ready,
                             onCheckedChange = { push(MiniPlayerConfig.FOD_LIFT, it) })

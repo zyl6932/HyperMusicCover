@@ -210,9 +210,9 @@ internal fun LyricStylePageView(
                     val hdrScreen = remember { HdrDisplay.supported(context) }
                     SwitchPreference(
                         title = stringResource(R.string.lyrics_hdr),
-                        summary = stringResource(
-                            if (hdrScreen) R.string.lyrics_hdr_summary else R.string.lyrics_hdr_unsupported
-                        ),
+                        // No summary on a screen that can use it: the window it costs was measured
+                        // and paid for (see LyricWindow). The one without headroom still says why.
+                        summary = if (hdrScreen) null else stringResource(R.string.lyrics_hdr_unsupported),
                         checked = module.lyricsHdr && hdrScreen,
                         enabled = enabled && hdrScreen,
                         onCheckedChange = {
