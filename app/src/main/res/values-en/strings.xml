@@ -174,7 +174,9 @@
     <string name="lyrics_style_general">General</string>
     <string name="lyrics_style_text">Text</string>
     <string name="lyrics_size">Size</string>
+    <string name="lyrics_weight">Weight</string>
     <string name="lyrics_style_main">Lead</string>
+    <string name="lyrics_style_trans">Translation</string>
     <string name="lyrics_style_backing">Backing vocal</string>
     <string name="lyrics_color">Colour</string>
     <string name="lyrics_color_official">Official</string>

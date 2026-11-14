@@ -132,14 +132,21 @@ public final class SettingSpec {
     public static final SettingSpec LYRIC_ONLINE = bool("lyriconline", true);
     /** 0 left, 1 centre, 2 right. */
     public static final SettingSpec LYRIC_ALIGN = integer("lyricalign", 0, 0, 2);
-    /** The lead's and the backing vocal's size, in sp. */
+    /** The lead's, the translation's and the backing vocal's size, in sp. */
     public static final SettingSpec LYRIC_SIZE = real("lyricsize", 25f);
     public static final SettingSpec LYRIC_BG_SIZE = real("lyricbgsize", 17f);
-    /** The band's other four values. Fixed; reported for the preview. */
+    public static final SettingSpec LYRIC_TRANS_SIZE = real("lyrictranssize", 15f);
+    /**
+     * The three voices' weights, in the hundreds. 300..700 is the lock screen font's own axis;
+     * above 700 Android synthesises a bold rather than the axis.
+     */
+    public static final SettingSpec LYRIC_WEIGHT = integer("lyricweight", 500, 300, 700);
+    public static final SettingSpec LYRIC_BG_WEIGHT = integer("lyricbgweight", 500, 300, 700);
+    public static final SettingSpec LYRIC_TRANS_WEIGHT = integer("lyrictransweight", 500, 300, 700);
+    /** The band's other three values. Fixed; reported for the preview. */
     public static final SettingSpec LYRIC_FILL = real("lyricfill", 1f);
     public static final SettingSpec LYRIC_POS = real("lyricpos", 0.5f);
     public static final SettingSpec LYRIC_SIDE = real("lyricside", 30f);
-    public static final SettingSpec LYRIC_WEIGHT = integer("lyricweight", 500, 100, 900);
     /** Colours and opacity of the lead and the backing vocal, as LyricAppearance's JSON. */
     public static final SettingSpec LYRIC_APPEARANCE = text("lyricappearance", "");
 

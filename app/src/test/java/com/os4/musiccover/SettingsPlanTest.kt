@@ -21,11 +21,17 @@ class SettingsPlanTest {
             .filter { Settings.persisted(it) }
             .map { it.spec.key }
             .toSet()
-        // The app's list is one key per row, and the lyric style's second key has no entry of
-        // its own on the module's side: it is the same Ref, filed under two names.
-        val app = SettingsPlan.specs.map { it.key }.toSet() - SettingSpec.LYRIC_BG_SIZE.key
+        // The app's list is one key per row, and the lyric style's other five keys have no entry
+        // of their own on the module's side: it is the same Ref, filed under six names.
+        val app = SettingsPlan.specs.map { it.key }.toSet() - setOf(
+            SettingSpec.LYRIC_BG_SIZE.key,
+            SettingSpec.LYRIC_TRANS_SIZE.key,
+            SettingSpec.LYRIC_WEIGHT.key,
+            SettingSpec.LYRIC_BG_WEIGHT.key,
+            SettingSpec.LYRIC_TRANS_WEIGHT.key,
+        )
         assertEquals(module, app)
-        assertEquals(31, SettingsPlan.specs.size)
+        assertEquals(35, SettingsPlan.specs.size)
     }
 
     @Test
@@ -38,9 +44,13 @@ class SettingsPlanTest {
     }
 
     @Test
-    fun theStyleIsTheOnlySettingWithTwoKeys() {
+    fun theStyleIsTheOnlySettingWithSixKeys() {
         assertTrue(SettingsPlan.isLyricStyleKey(SettingSpec.LYRIC_SIZE.key))
         assertTrue(SettingsPlan.isLyricStyleKey(SettingSpec.LYRIC_BG_SIZE.key))
+        assertTrue(SettingsPlan.isLyricStyleKey(SettingSpec.LYRIC_TRANS_SIZE.key))
+        assertTrue(SettingsPlan.isLyricStyleKey(SettingSpec.LYRIC_WEIGHT.key))
+        assertTrue(SettingsPlan.isLyricStyleKey(SettingSpec.LYRIC_BG_WEIGHT.key))
+        assertTrue(SettingsPlan.isLyricStyleKey(SettingSpec.LYRIC_TRANS_WEIGHT.key))
         assertFalse(SettingsPlan.isLyricStyleKey(SettingSpec.LYRICS.key))
         assertFalse(SettingsPlan.isLyricStyleKey(SettingSpec.BIAS.key))
     }

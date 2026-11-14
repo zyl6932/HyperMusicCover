@@ -172,7 +172,8 @@ object SettingsStore {
     fun put(context: Context, spec: SettingSpec, value: Any, replay: () -> Unit): Boolean =
         putKey(context, spec.key, value, replay)
 
-    /** The lyric style's two halves go in one at a time; every other setting has one key. */
+    /** The lyric style's three sizes and three weights go in one at a time; every other setting
+     * has one key. */
     fun putKey(context: Context, key: String, value: Any, replay: () -> Unit): Boolean {
         init(context)
         val p = prefs ?: return false
@@ -242,6 +243,10 @@ object SettingsStore {
             lyricsAlign = p.getInt(SettingSpec.LYRIC_ALIGN.key, state.lyricsAlign),
             lyricSizeSp = p.getFloat(SettingSpec.LYRIC_SIZE.key, state.lyricSizeSp),
             lyricBgSizeSp = p.getFloat(SettingSpec.LYRIC_BG_SIZE.key, state.lyricBgSizeSp),
+            lyricTransSizeSp = p.getFloat(SettingSpec.LYRIC_TRANS_SIZE.key, state.lyricTransSizeSp),
+            lyricWeight = p.getInt(SettingSpec.LYRIC_WEIGHT.key, state.lyricWeight),
+            lyricBgWeight = p.getInt(SettingSpec.LYRIC_BG_WEIGHT.key, state.lyricBgWeight),
+            lyricTransWeight = p.getInt(SettingSpec.LYRIC_TRANS_WEIGHT.key, state.lyricTransWeight),
             lyricAppearance = p.getString(SettingSpec.LYRIC_APPEARANCE.key, state.lyricAppearance)
                 ?: state.lyricAppearance,
             fpAvoid = p.getInt(SettingSpec.FP_AVOID.key, state.fpAvoid),

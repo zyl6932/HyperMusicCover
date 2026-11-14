@@ -60,8 +60,10 @@ import top.yukonga.miuix.kmp.window.WindowDialog
  *
  * Two cards (user, 2026-10-23). The first holds what applies to every line - alignment, the
  * translation and romanisation under it, the HDR highlight. The second is the words themselves,
- * with a switch between the lead and the backing vocal over one set of rows - size, colour,
- * opacity - so each voice's settings sit together and the two read as the same thing twice.
+ * with a switch between the lead, the translation and the backing vocal over one set of rows -
+ * weight, size, colour, opacity - so each voice's settings sit together and the three read as the
+ * same thing three times. (The translation's size and appearance became settings on 2026-11-15,
+ * user: "我实际是要调翻译的字号".)
  *
  * No preview: every change goes to the lock screen as it is made, except the sizes, which are
  * sent when the finger lifts - a size lays every line out again, and doing that per frame of a
@@ -113,6 +115,10 @@ internal fun LyricStylePageView(
             lyricsAlign = 0,
             lyricSizeSp = DEFAULT_SIZE,
             lyricBgSizeSp = DEFAULT_BG_SIZE,
+            lyricTransSizeSp = DEFAULT_TRANS_SIZE,
+            lyricWeight = DEFAULT_WEIGHT,
+            lyricBgWeight = DEFAULT_WEIGHT,
+            lyricTransWeight = DEFAULT_WEIGHT,
             lyricsTrans = true,
             lyricsRoma = false,
             lyricsHdr = false,
@@ -121,6 +127,10 @@ internal fun LyricStylePageView(
         ModuleBridge.setLyricsAlign(context, 0)
         ModuleBridge.setLyricStyle(context, "size", DEFAULT_SIZE)
         ModuleBridge.setLyricStyle(context, "bgsize", DEFAULT_BG_SIZE)
+        ModuleBridge.setLyricStyle(context, "transsize", DEFAULT_TRANS_SIZE)
+        ModuleBridge.setLyricWeight(context, "weight", DEFAULT_WEIGHT)
+        ModuleBridge.setLyricWeight(context, "bgweight", DEFAULT_WEIGHT)
+        ModuleBridge.setLyricWeight(context, "transweight", DEFAULT_WEIGHT)
         ModuleBridge.setLyricsTrans(context, true)
         ModuleBridge.setLyricsRoma(context, false)
         ModuleBridge.setLyricsHdr(context, false)
@@ -128,7 +138,7 @@ internal fun LyricStylePageView(
     }
     var confirmReset by remember { mutableStateOf(false) }
 
-    // 0 the lead, 1 the backing vocal: which voice the second card's rows are for.
+    // 0 the lead, 1 the translation, 2 the backing vocal: which voice the second card's rows are for.
     var voice by remember { mutableIntStateOf(0) }
     // Which voice the colour picker is open for - "main", "bg" - or null when it is shut. The
     // mode only becomes CUSTOM when a colour is chosen, so cancelling leaves it as it was.
@@ -214,25 +224,55 @@ internal fun LyricStylePageView(
             }
         }
         item(key = "voices") {
-            val backing = voice == 1
-            val role = if (backing) "bg" else "main"
-            val mode = if (backing) appearance.bgMode else appearance.mainMode
-            val rgb = if (backing) appearance.bgColor else appearance.mainColor
-            val opacity = if (backing) appearance.bgOpacity else appearance.mainOpacity
+            val translating = voice == 1
+            val backing = voice == 2
+            val role = when {
+                backing -> "bg"
+                translating -> "trans"
+                else -> "main"
+            }
+            val mode = when {
+                backing -> appearance.bgMode
+                translating -> appearance.transMode
+                else -> appearance.mainMode
+            }
+            val rgb = when {
+                backing -> appearance.bgColor
+                translating -> appearance.transColor
+                else -> appearance.mainColor
+            }
+            val opacity = when {
+                backing -> appearance.bgOpacity
+                translating -> appearance.transOpacity
+                else -> appearance.mainOpacity
+            }
             Column {
                 SmallTitle(text = stringResource(R.string.lyrics_style_text))
                 Card(modifier = Modifier.nextCard()) {
                     TabRowWithContour(
                         tabs = listOf(
                             stringResource(R.string.lyrics_style_main),
+                            stringResource(R.string.lyrics_style_trans),
                             stringResource(R.string.lyrics_style_backing),
                         ),
                         selectedTabIndex = voice,
                         onTabSelected = { voice = it },
                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
                     )
-                    if (backing) {
-                        ValueSlider(
+                    when (voice) {
+                        1 -> ValueSlider(
+                            title = stringResource(R.string.lyrics_size),
+                            value = module.lyricTransSizeSp,
+                            valueRange = 10f..30f,
+                            enabled = enabled,
+                            detent = DEFAULT_TRANS_SIZE,
+                            label = { "${it.roundToInt()} sp" },
+                            onValueChange = { module = module.copy(lyricTransSizeSp = it.roundToInt().toFloat()) },
+                            onValueChangeFinished = {
+                                ModuleBridge.setLyricStyle(context, "transsize", module.lyricTransSizeSp)
+                            },
+                        )
+                        2 -> ValueSlider(
                             title = stringResource(R.string.lyrics_size),
                             value = module.lyricBgSizeSp,
                             valueRange = 10f..30f,
@@ -244,8 +284,7 @@ internal fun LyricStylePageView(
                                 ModuleBridge.setLyricStyle(context, "bgsize", module.lyricBgSizeSp)
                             },
                         )
-                    } else {
-                        ValueSlider(
+                        else -> ValueSlider(
                             title = stringResource(R.string.lyrics_size),
                             value = module.lyricSizeSp,
                             valueRange = 18f..36f,
@@ -258,6 +297,38 @@ internal fun LyricStylePageView(
                             },
                         )
                     }
+                    // The same voice's weight, on the font's own steps. A weight moves every
+                    // glyph's width, so it lays the lines out again as a size does - sent on
+                    // release for the same reason.
+                    val weight = when (voice) {
+                        1 -> module.lyricTransWeight
+                        2 -> module.lyricBgWeight
+                        else -> module.lyricWeight
+                    }
+                    ValueSlider(
+                        title = stringResource(R.string.lyrics_weight),
+                        value = weight.toFloat(),
+                        valueRange = 300f..700f,
+                        enabled = enabled,
+                        keyPoints = WEIGHT_STEPS,
+                        label = { "${roundWeight(it)}" },
+                        onValueChange = {
+                            val w = roundWeight(it)
+                            module = when (voice) {
+                                1 -> module.copy(lyricTransWeight = w)
+                                2 -> module.copy(lyricBgWeight = w)
+                                else -> module.copy(lyricWeight = w)
+                            }
+                        },
+                        onValueChangeFinished = {
+                            val key = when (voice) {
+                                1 -> "transweight"
+                                2 -> "bgweight"
+                                else -> "weight"
+                            }
+                            ModuleBridge.setLyricWeight(context, key, weight)
+                        },
+                    )
                     // The dropdown, and beside it the custom colour as a swatch that reopens the
                     // picker. miuix's dropdown row takes nothing at its end, so the swatch is its
                     // neighbour rather than part of it.
@@ -304,7 +375,11 @@ internal fun LyricStylePageView(
                         value = opacity * 100f,
                         valueRange = 0f..100f,
                         enabled = enabled,
-                        detent = (if (backing) DEFAULT_BG_OPACITY else 1f) * 100f,
+                        detent = (when {
+                            backing -> DEFAULT_BG_OPACITY
+                            translating -> LyricAppearance.DEFAULT_TRANS_OPACITY
+                            else -> 1f
+                        }) * 100f,
                         label = { "${it.roundToInt()}%" },
                         onValueChange = { setAppearance("${role}Opacity" to it.roundToInt() / 100.0) },
                     )
@@ -378,5 +453,12 @@ internal fun LyricStylePageView(
 /** The sizes the module ships with: LyricStyle.DEFAULT. */
 private const val DEFAULT_SIZE = 25f
 private const val DEFAULT_BG_SIZE = 17f
+private const val DEFAULT_TRANS_SIZE = 15f
+/** The weights, on the lock screen font's own axis: 300 thin .. 700 bold. */
+private const val DEFAULT_WEIGHT = 500
+private val WEIGHT_STEPS = listOf(300f, 400f, 500f, 600f, 700f)
+
+/** The slider's position as the nearest hundred, which is the only value the font has. */
+private fun roundWeight(value: Float): Int = (value / 100f).roundToInt() * 100
 /** LyricAppearance.DEFAULT's backing vocal; the lead's is 1. */
 private const val DEFAULT_BG_OPACITY = 0.72f

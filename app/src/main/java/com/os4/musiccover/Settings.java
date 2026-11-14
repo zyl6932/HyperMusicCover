@@ -1052,9 +1052,10 @@ public final class Settings {
                     v -> Settings.LYRIC_ALIGN.set(Settings.LYRIC_ALIGN.checked(Integer.parseInt(v))));
 
     /**
-     * Immutable snapshot: the UI, renderer and state loader all use the same validated values. The two
-     * sizes are the user's (the 歌词外观 page); the band's other four values are fixed and not kept,
-     * see LyricStyle. Clamped by LyricStyle.with, from the file as from an op.
+     * Immutable snapshot: the UI, renderer and state loader all use the same validated values. The
+     * three sizes and three weights are the user's (the 歌词外观 page); the band's other three
+     * values are fixed and not kept, see LyricStyle. Clamped by LyricStyle.with, from the file as
+     * from an op.
      */
     public static final Ref<LyricStyle> LYRIC_STYLE =
             new Ref<LyricStyle>(SettingSpec.LYRIC_SIZE, LyricStyle.DEFAULT)
@@ -1067,16 +1068,35 @@ public final class Settings {
                     && Float.compare(a.pos, b.pos) == 0
                     && Float.compare(a.sideDp, b.sideDp) == 0
                     && Float.compare(a.sizeSp, b.sizeSp) == 0
-                    && Float.compare(a.bgSizeSp, b.bgSizeSp) == 0 && a.weight == b.weight)
+                    && Float.compare(a.bgSizeSp, b.bgSizeSp) == 0
+                    && Float.compare(a.transSizeSp, b.transSizeSp) == 0
+                    && a.weight == b.weight && a.bgWeight == b.bgWeight
+                    && a.transWeight == b.transWeight)
             .file("lyricsize", () -> String.valueOf(Settings.LYRIC_STYLE.get().sizeSp),
                     v -> Settings.LYRIC_STYLE.set(
                             Settings.LYRIC_STYLE.get().with("size", Float.parseFloat(v))))
             .file("lyricbgsize", () -> String.valueOf(Settings.LYRIC_STYLE.get().bgSizeSp),
                     v -> Settings.LYRIC_STYLE.set(
                             Settings.LYRIC_STYLE.get().with("bgsize", Float.parseFloat(v))))
+            .file("lyrictranssize", () -> String.valueOf(Settings.LYRIC_STYLE.get().transSizeSp),
+                    v -> Settings.LYRIC_STYLE.set(
+                            Settings.LYRIC_STYLE.get().with("transsize", Float.parseFloat(v))))
+            // The weights are whole hundreds on the wire; the file keeps them as the ints they are.
+            .file("lyricweight", () -> String.valueOf(Settings.LYRIC_STYLE.get().weight),
+                    v -> Settings.LYRIC_STYLE.set(
+                            Settings.LYRIC_STYLE.get().with("weight", Float.parseFloat(v))))
+            .file("lyricbgweight", () -> String.valueOf(Settings.LYRIC_STYLE.get().bgWeight),
+                    v -> Settings.LYRIC_STYLE.set(
+                            Settings.LYRIC_STYLE.get().with("bgweight", Float.parseFloat(v))))
+            .file("lyrictransweight", () -> String.valueOf(Settings.LYRIC_STYLE.get().transWeight),
+                    v -> Settings.LYRIC_STYLE.set(
+                            Settings.LYRIC_STYLE.get().with("transweight", Float.parseFloat(v))))
             .answer(out -> {
                 LyricStyle s = Settings.LYRIC_STYLE.get();
                 out.putFloat(SettingSpec.LYRIC_BG_SIZE.key, s.bgSizeSp);
+                out.putFloat(SettingSpec.LYRIC_TRANS_SIZE.key, s.transSizeSp);
+                out.putInt(SettingSpec.LYRIC_BG_WEIGHT.key, s.bgWeight);
+                out.putInt(SettingSpec.LYRIC_TRANS_WEIGHT.key, s.transWeight);
                 out.putFloat(SettingSpec.LYRIC_FILL.key, s.fill);
                 out.putFloat(SettingSpec.LYRIC_POS.key, s.pos);
                 out.putFloat(SettingSpec.LYRIC_SIDE.key, s.sideDp);
@@ -1227,8 +1247,11 @@ public final class Settings {
         return COVER_STYLE.change(COVER_STYLE.get().with("mode", mode));
     }
 
-    static Change lyricStyle(float sizeSp, float bgSizeSp) {
-        return LYRIC_STYLE.change(LYRIC_STYLE.get().with("size", sizeSp).with("bgsize", bgSizeSp));
+    static Change lyricStyle(float sizeSp, float bgSizeSp, float transSizeSp,
+                             int weight, int bgWeight, int transWeight) {
+        return LYRIC_STYLE.change(LYRIC_STYLE.get().with("size", sizeSp)
+                .with("bgsize", bgSizeSp).with("transsize", transSizeSp)
+                .with("weight", weight).with("bgweight", bgWeight).with("transweight", transWeight));
     }
 
     static Change lyricAppearance(String json) {

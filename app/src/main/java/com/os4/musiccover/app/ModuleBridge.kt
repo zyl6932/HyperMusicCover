@@ -159,8 +159,13 @@ object ModuleBridge {
         val lyricSideDp: Float = SettingSpec.LYRIC_SIDE.defFloat,
         val lyricSizeSp: Float = SettingSpec.LYRIC_SIZE.defFloat,
         val lyricWeight: Int = SettingSpec.LYRIC_WEIGHT.defInt,
+        /** The backing vocal's and the translation's weights, beside lyricWeight. */
+        val lyricBgWeight: Int = SettingSpec.LYRIC_BG_WEIGHT.defInt,
+        val lyricTransWeight: Int = SettingSpec.LYRIC_TRANS_WEIGHT.defInt,
         /** The backing vocal's size, beside lyricSizeSp. */
         val lyricBgSizeSp: Float = SettingSpec.LYRIC_BG_SIZE.defFloat,
+        /** The translation's (and romanisation's) size, which used to be a fixed share of the lead. */
+        val lyricTransSizeSp: Float = SettingSpec.LYRIC_TRANS_SIZE.defFloat,
         /** Colours and opacity of the lead and the backing vocal, as LyricAppearance's JSON. */
         val lyricAppearance: String = SettingSpec.LYRIC_APPEARANCE.defString,
         /**
@@ -612,8 +617,8 @@ object ModuleBridge {
         }
 
     /**
-     * One of the values the lyric band and its type are made of. "size" and "bgsize" are the
-     * 歌词外观 page's and saved; the rest are fixed and move only for the session.
+     * One of the values the lyric band and its type are made of. "size", "bgsize" and "transsize"
+     * are the 歌词外观 page's and saved; the rest are fixed and move only for the session.
      *
      * The module validates every value, including imported settings and adb broadcasts.
      */
@@ -627,10 +632,31 @@ object ModuleBridge {
         val spec = when (key) {
             "size" -> SettingSpec.LYRIC_SIZE
             "bgsize" -> SettingSpec.LYRIC_BG_SIZE
+            "transsize" -> SettingSpec.LYRIC_TRANS_SIZE
             else -> null
         }
-        // The two sizes are the entry's kept keys; the band's other four values are fixed and
+        // The three sizes are the entry's kept keys; the band's other three values are fixed and
         // move only this session, so they keep the op path.
+        if (spec == null || !SettingsStore.put(context, spec, value, replay)) replay()
+    }
+
+    /**
+     * One of the three weights. Kept in the app's copy as the Int it is, and sent as the Float
+     * the lyricstyle op's one extra carries - the module rounds it back to the hundreds.
+     */
+    fun setLyricWeight(context: Context, key: String, value: Int) {
+        val replay = {
+            send(context, "lyricstyle") {
+                putExtra("key", key)
+                putExtra("v", value.toFloat())
+            }
+        }
+        val spec = when (key) {
+            "weight" -> SettingSpec.LYRIC_WEIGHT
+            "bgweight" -> SettingSpec.LYRIC_BG_WEIGHT
+            "transweight" -> SettingSpec.LYRIC_TRANS_WEIGHT
+            else -> null
+        }
         if (spec == null || !SettingsStore.put(context, spec, value, replay)) replay()
     }
 
@@ -1148,7 +1174,10 @@ object ModuleBridge {
             lyricSideDp = b.real(SettingSpec.LYRIC_SIDE),
             lyricSizeSp = b.real(SettingSpec.LYRIC_SIZE),
             lyricWeight = b.int(SettingSpec.LYRIC_WEIGHT),
+            lyricBgWeight = b.int(SettingSpec.LYRIC_BG_WEIGHT),
+            lyricTransWeight = b.int(SettingSpec.LYRIC_TRANS_WEIGHT),
             lyricBgSizeSp = b.real(SettingSpec.LYRIC_BG_SIZE),
+            lyricTransSizeSp = b.real(SettingSpec.LYRIC_TRANS_SIZE),
             lyricAppearance = b.getString(SettingSpec.LYRIC_APPEARANCE.key) ?: SettingSpec.LYRIC_APPEARANCE.defString,
             sessionLyric = b.getBoolean("sessionlyric", false),
             lyricSource = b.getString("lyricsrc") ?: "none",

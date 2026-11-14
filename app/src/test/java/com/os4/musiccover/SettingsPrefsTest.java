@@ -42,8 +42,12 @@ public class SettingsPrefsTest {
             String key = e == Settings.LYRIC_STYLE ? SettingSpec.LYRIC_SIZE.key : e.spec.key;
             assertSame(e.spec.key, e, SettingsPrefs.entryForKey(key));
         }
-        // The style's other half is the same entry, not a second one.
+        // The style's other keys are the same entry, not a second one.
         assertSame(Settings.LYRIC_STYLE, SettingsPrefs.entryForKey(SettingSpec.LYRIC_BG_SIZE.key));
+        assertSame(Settings.LYRIC_STYLE, SettingsPrefs.entryForKey(SettingSpec.LYRIC_TRANS_SIZE.key));
+        assertSame(Settings.LYRIC_STYLE, SettingsPrefs.entryForKey(SettingSpec.LYRIC_WEIGHT.key));
+        assertSame(Settings.LYRIC_STYLE, SettingsPrefs.entryForKey(SettingSpec.LYRIC_BG_WEIGHT.key));
+        assertSame(Settings.LYRIC_STYLE, SettingsPrefs.entryForKey(SettingSpec.LYRIC_TRANS_WEIGHT.key));
     }
 
     /** Not one of ours, and not one that is kept: both answer null rather than a wrong entry. */

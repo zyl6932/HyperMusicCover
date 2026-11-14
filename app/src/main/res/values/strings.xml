@@ -180,7 +180,9 @@
     <string name="lyrics_style_general">通用</string>
     <string name="lyrics_style_text">文字</string>
     <string name="lyrics_size">字号</string>
+    <string name="lyrics_weight">字重</string>
     <string name="lyrics_style_main">主歌词</string>
+    <string name="lyrics_style_trans">翻译</string>
     <string name="lyrics_style_backing">和声</string>
     <string name="lyrics_color">颜色</string>
     <string name="lyrics_color_official">官方</string>

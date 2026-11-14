@@ -6,15 +6,15 @@ import com.os4.musiccover.SettingSpec
  * The settings the app keeps in its own preferences (architecture plan, stage 5.3), and the keys
  * one of them is read back under.
  *
- * The module's half of the table is Settings.persisted(): thirty entries and thirty-one keys,
- * because the lyric style has two. The list is repeated here rather than read from there, because
+ * The module's half of the table is Settings.persisted(): thirty entries and thirty-five keys,
+ * because the lyric style has six. The list is repeated here rather than read from there, because
  * this process must not load Settings - it reaches Main, and Main extends XposedModule, which the
  * app has no libxposed to resolve. SettingsPlanTest holds the two lists equal.
  */
 internal object SettingsPlan {
 
     /**
-     * One entry per key, in the module's table order. The lyric style's two sit next to each
+     * One entry per key, in the module's table order. The lyric style's six sit next to each
      * other; every other setting is a single key.
      */
     val specs: List<SettingSpec> = listOf(
@@ -45,15 +45,21 @@ internal object SettingsPlan {
         SettingSpec.LYRIC_ALIGN,
         SettingSpec.LYRIC_SIZE,
         SettingSpec.LYRIC_BG_SIZE,
+        SettingSpec.LYRIC_TRANS_SIZE,
+        SettingSpec.LYRIC_WEIGHT,
+        SettingSpec.LYRIC_BG_WEIGHT,
+        SettingSpec.LYRIC_TRANS_WEIGHT,
         SettingSpec.LYRIC_APPEARANCE,
         SettingSpec.TRANSIT,
         SettingSpec.PICKUP,
         SettingSpec.PICKUP_CARD,
     )
 
-    /** The other half of the lyric style's entry. */
+    /** The rest of the lyric style's entry. */
     fun isLyricStyleKey(key: String): Boolean =
         key == SettingSpec.LYRIC_SIZE.key || key == SettingSpec.LYRIC_BG_SIZE.key
+                || key == SettingSpec.LYRIC_TRANS_SIZE.key || key == SettingSpec.LYRIC_WEIGHT.key
+                || key == SettingSpec.LYRIC_BG_WEIGHT.key || key == SettingSpec.LYRIC_TRANS_WEIGHT.key
 }
 
 /**

@@ -15,13 +15,15 @@ public final class LyricStyle {
     /**
      * The band the lyrics are always drawn in.
      *
-     * Every one of these was a slider. The two sizes are again (the 歌词外观 page, 2026-10-22),
-     * saved and read back; the other four have no row and loadState does not read them. They
-     * are the values this shipped with, except the weight, which comes down from 600 to 500 -
-     * the one that was worth changing on the way past. The backing vocal's 17sp is the size it
-     * always had beside the 25sp lead. `op lyricstyle` still moves all six for the session.
+     * Every one of these was a slider. The three sizes and the three weights are again (the
+     * 歌词外观 page, 2026-10-22 and 2026-11-15), saved and read back; the band's other three
+     * values have no row and loadState does not read them. They are the values this shipped
+     * with, except the lead's weight, which comes down from 600 to 500 - the one that was worth
+     * changing on the way past. The backing vocal's 17sp is the size it always had beside the
+     * 25sp lead, and the translation's 15sp is what the fixed 15/25 of the lead came to.
+     * `op lyricstyle` moves all of them for the session.
      */
-    public static final LyricStyle DEFAULT = new LyricStyle(1f, 0.5f, 30f, 25f, 17f, 500);
+    public static final LyricStyle DEFAULT = new LyricStyle(1f, 0.5f, 30f, 25f, 17f, 15f, 500, 500, 500);
 
     /** The band's height as a share of the room, MIN_FILL..1; never under MIN_ROWS rows. */
     public final float fill;
@@ -31,42 +33,75 @@ public final class LyricStyle {
     public final float sizeSp;
     /** Independent backing-vocal size, matching the official 17 sp default. */
     public final float bgSizeSp;
+    /**
+     * The translation's and romanisation's size, which share one layout. It used to be a fixed
+     * share of the lead (15/25); it is the user's since 2026-11-15, and 15 sp is what that share
+     * came to at the default lead size.
+     */
+    public final float transSizeSp;
+    /**
+     * The three voices' weights (300..700, in steps of 100). The lead's was configurable by op
+     * since the beginning; all three are the user's since 2026-11-15. A weight changes every
+     * glyph's width, so it lays the lines out again exactly as a size does.
+     */
     public final int weight;
+    public final int bgWeight;
+    public final int transWeight;
 
     /** Rows of the main size the band may not shrink under. LyricView holds the same number. */
     private static final float MIN_ROWS = 2.4f;
 
-    private LyricStyle(float fill, float pos, float sideDp, float sizeSp, float bgSizeSp, int weight) {
+    private LyricStyle(float fill, float pos, float sideDp, float sizeSp, float bgSizeSp,
+                       float transSizeSp, int weight, int bgWeight, int transWeight) {
         this.fill = fill;
         this.pos = pos;
         this.sideDp = sideDp;
         this.sizeSp = sizeSp;
         this.bgSizeSp = bgSizeSp;
+        this.transSizeSp = transSizeSp;
         this.weight = weight;
+        this.bgWeight = bgWeight;
+        this.transWeight = transWeight;
     }
 
     /** Non-finite input changes nothing; finite input is kept inside the UI's supported range. */
     public LyricStyle with(String key, float value) {
         if (!Float.isFinite(value)) return this;
         float f = fill, p = pos, side = sideDp, size = sizeSp, bgSize = bgSizeSp;
-        int fontWeight = weight;
+        float transSize = transSizeSp;
+        int fontWeight = weight, bgFontWeight = bgWeight, transFontWeight = transWeight;
         if ("fill".equals(key)) f = clamp(value, MIN_FILL, 1f);
         else if ("pos".equals(key)) p = clamp(value, 0f, 1f);
         else if ("side".equals(key)) side = clamp(value, 0f, 64f);
         else if ("size".equals(key)) size = clamp(value, 18f, 36f);
         else if ("bgsize".equals(key)) bgSize = clamp(value, 10f, 30f);
-        else if ("weight".equals(key)) {
-            // MiSans VF, the lock screen's font, has a weight axis that ends at 700.
-            fontWeight = Math.max(300, Math.min(700, Math.round(value / 100f) * 100));
-        } else return this;
+        else if ("transsize".equals(key)) transSize = clamp(value, 10f, 30f);
+        else if ("weight".equals(key)) fontWeight = clampWeight(value);
+        else if ("bgweight".equals(key)) bgFontWeight = clampWeight(value);
+        else if ("transweight".equals(key)) transFontWeight = clampWeight(value);
+        else return this;
         if (f == fill && p == pos && side == sideDp
-                && size == sizeSp && bgSize == bgSizeSp && fontWeight == weight) return this;
-        return new LyricStyle(f, p, side, size, bgSize, fontWeight);
+                && size == sizeSp && bgSize == bgSizeSp && transSize == transSizeSp
+                && fontWeight == weight && bgFontWeight == bgWeight
+                && transFontWeight == transWeight) return this;
+        return new LyricStyle(f, p, side, size, bgSize, transSize,
+                fontWeight, bgFontWeight, transFontWeight);
+    }
+
+    /**
+     * MiSans VF, the lock screen's font, has a weight axis that ends at 700; above it Android
+     * synthesises a bold rather than the axis, so the range stops there. The axis' own steps are
+     * the hundreds, and a slider that can sit between them would only pick the nearer one.
+     */
+    private static int clampWeight(float value) {
+        return Math.max(300, Math.min(700, Math.round(value / 100f) * 100));
     }
 
     boolean sameLayout(LyricStyle other) {
         return other != null && sideDp == other.sideDp && sizeSp == other.sizeSp
-                && bgSizeSp == other.bgSizeSp && weight == other.weight;
+                && bgSizeSp == other.bgSizeSp && transSizeSp == other.transSizeSp
+                && weight == other.weight && bgWeight == other.bgWeight
+                && transWeight == other.transWeight;
     }
 
     /** Safe screen-space clipping band, written into a reusable two-float buffer. */
