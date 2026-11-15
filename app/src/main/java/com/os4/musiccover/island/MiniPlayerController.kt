@@ -134,6 +134,7 @@ internal class MiniPlayerController(
             position()
             followShortcuts()
         }
+        ensureStackOrder()
         shortcutDiscs.updateDiscs()
         binding.lottiesFollowSight()
         true
@@ -647,8 +648,11 @@ internal class MiniPlayerController(
         val frame = maxOf(shortcutDiscs.discFrame(d), smallRestWidth() + dp(16f))
         val view = smallIsland ?: ShortcutDisc(context).also {
             smallIsland = it
-            // Right after the lock screen's layer, which puts it just under the pill.
-            host.addView(it, lockScreenLayerIndex(), ViewGroup.LayoutParams(frame, shortcutDiscs.discFrame(d)))
+            // Right after the lock screen's layer, and never after the front pill when stacked.
+            val layer = lockScreenLayerIndex()
+            val index = player?.takeIf { p -> p.parent === host }
+                ?.let { p -> minOf(layer, host.indexOfChild(p)) } ?: layer
+            host.addView(it, index, ViewGroup.LayoutParams(frame, shortcutDiscs.discFrame(d)))
             Gen.ownView(host, it)
         }
         val frameHeight = shortcutDiscs.discFrame(d)
@@ -1686,10 +1690,16 @@ internal class MiniPlayerController(
     internal val spreadMotion: SpreadMotion = SpreadMotion(this, this, this, this, flightState, this, stackHost, cardExchange,
         groupMotion, swapMotion) { noteMorphMotion }
     fun spreadCollapseAt(x: Float, y: Float): Boolean = spreadMotion.spreadCollapseAt(x, y)
+    fun springSpreadMoving(): Boolean = spreadMotion.springMoving()
+    fun observeListTouch(event: android.view.MotionEvent) = spreadMotion.observeListTouch(event)
     fun beginSpreadCollapse(startY: Float): Boolean = spreadMotion.beginSpreadCollapse(startY)
     fun moveSpreadCollapse(y: Float) = spreadMotion.moveSpreadCollapse(y)
     fun endSpreadCollapse(velocityY: Float, cancelled: Boolean) = spreadMotion.endSpreadCollapse(velocityY, cancelled)
     fun beginStackSpread(startY: Float): Boolean = spreadMotion.beginStackSpread(startY)
+    fun beginSpringPull(startY: Float, small: Boolean): Boolean = spreadMotion.beginSpringPull(startY, small)
+    fun moveSpringPull(y: Float) = spreadMotion.moveSpringPull(y)
+    fun endSpringPull(velocityY: Float, cancelled: Boolean) = spreadMotion.endSpringPull(velocityY, cancelled)
+    fun cancelSpringPull() = spreadMotion.cancelSpringPull()
     fun spreadClockProgress(): Float? = spreadMotion.spreadClockProgress()
     fun spreadListShown(): Boolean = spreadMotion.spreadListShown()
     fun spreadFolding(): Boolean = spreadMotion.spreadFolding()
@@ -1742,6 +1752,7 @@ internal class MiniPlayerController(
 
     fun destroy() {
         destroyed = true
+        spreadMotion.clearSpringOpening()
         Gen.unprefListener(prefs, prefListener)
         runCatching { Gen.unpreDraw(host, preDraw) }
         runCatching { Gen.unlayoutChange(left, leftLayoutListener) }
@@ -2149,6 +2160,15 @@ internal class MiniPlayerController(
         }
     }
 
+    override fun openSpringMusic(lift: Float): Boolean {
+        player?.clearNudge()
+        clearSmallNudge()
+        if (!beginDragMorph(fromNative = false)) return false
+        morph?.drag(0f, lift)
+        releaseDrag(toNative = true, velocity = 0f)
+        return true
+    }
+
     fun takesRows(): Boolean = config.getBoolean(MiniPlayerConfig.ENABLED) && LockIslands.notes.isNotEmpty()
 
     fun wantsCardSwipe(): Boolean {
@@ -2292,6 +2312,7 @@ internal class MiniPlayerController(
             configStale = false
             val wasStacked = stackedStyle()
             config = JSONObject(MiniPlayerConfig.fromPreferences(prefs))
+            spreadMotion.springConfigChanged()
             if (wasStacked != stackedStyle()) shortcutDiscs.squeeze.reset()
             configuredHeightDp = MiniPlayerConfig.visibleHeightDp(config.toString())
         }
@@ -2454,7 +2475,10 @@ internal class MiniPlayerController(
         }
         val view = player ?: MiniPlayerView(context).also {
             player = it
-            host.addView(it, lockScreenLayerIndex(), ViewGroup.LayoutParams(1, 1))
+            val layer = lockScreenLayerIndex()
+            val index = smallIsland?.takeIf { s -> s.parent === host }
+                ?.let { s -> maxOf(layer, host.indexOfChild(s) + 1) } ?: layer
+            host.addView(it, index, ViewGroup.LayoutParams(1, 1))
             Gen.ownView(host, it)
         }
         if (music != null) binding.trackMusic(music)
@@ -2492,6 +2516,10 @@ internal class MiniPlayerController(
 
     override fun updateVisibility() { android.os.Trace.beginSection("MC updateVisibility"); try {
         val view = player
+        // A short held pull stops posting once its spring rests. Scene changes still have to
+        // clear that lift even if no more touch event or spring frame will arrive.
+        if (!Main.screenOnCached() || MiniPlayerScene.aodActive || MiniPlayerScene.keyguardGoingAway)
+            spreadMotion.cancelSpringPull(animate = false)
         // Spread out as the stack's list, the row, the small island and the media card are the
         // spread's (endSpread hands them back).
         if (spreadMotion.spread != null) {
@@ -2527,6 +2555,7 @@ internal class MiniPlayerController(
         val presentable = if (MUSIC_ISLAND in islandKeys && flightState.noteMorphKey != MUSIC_ISLAND)
             Main.miniPlayerPresentable() else Main.miniPlayerIslandsPresentable()
         val sceneVisible = keyguardOwned && presentable && !MiniPlayerScene.blocksMiniPlayer
+        if (!sceneVisible) spreadMotion.cancelSpringPull(animate = false)
         // Unlocking or a session ending mid-morph: straight to where it was going.
         if (!keyguardOwned) morph?.cancel()
         // The discs are the lock screen's, not the row's: with no island at all - no music, no
@@ -2965,9 +2994,25 @@ internal class MiniPlayerController(
         return PillRest(pillWidth, height, (start + end) / 2f, centerY)
     }
 
+    override fun ensureStackOrder() {
+        smallIsland?.let(::ensureBelowPill)
+    }
+
+    override fun ensureBelowPill(view: View) {
+        val pill = player ?: return
+        if (view === pill || view.parent !== host || pill.parent !== host) return
+        val pillIdx = host.indexOfChild(pill)
+        val viewIdx = host.indexOfChild(view)
+        if (pillIdx < 0 || viewIdx <= pillIdx) return
+        host.removeView(view)
+        host.addView(view, pillIdx)
+        Gen.ownView(host, view)
+    }
+
     override fun position() {
         // The buttons laid out again may have moved the floor; the pill need not be up for it.
         runCatching { MiniPlayerRuntime.checkStackFloor() }
+        ensureStackOrder()
         val view = player ?: return
         if (view.visibility != View.VISIBLE || spreadMotion.spread != null) return
         val small = smallKey != null

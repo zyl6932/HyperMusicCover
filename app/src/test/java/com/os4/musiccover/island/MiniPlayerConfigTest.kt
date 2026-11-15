@@ -6,6 +6,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MiniPlayerConfigTest {
+    @Test fun springExpansionIsOptInAndSurvivesOtherSettingsChanges() {
+        val upgraded = JSONObject(MiniPlayerConfig.normalizedJson("{\"enabled\":true}"))
+        assertFalse(upgraded.getBoolean(MiniPlayerConfig.SPRING_EXPAND))
+        upgraded.put(MiniPlayerConfig.SPRING_EXPAND, true)
+        upgraded.put(MiniPlayerConfig.STYLE, MiniPlayerConfig.STYLE_STACK)
+        val saved = MiniPlayerConfig.normalizedJson(upgraded.toString())
+        assertTrue(JSONObject(MiniPlayerConfig.normalizedJson(saved)).getBoolean(MiniPlayerConfig.SPRING_EXPAND))
+        upgraded.put(MiniPlayerConfig.SPRING_EXPAND, false)
+        assertFalse(JSONObject(MiniPlayerConfig.normalizedJson(upgraded.toString()))
+            .getBoolean(MiniPlayerConfig.SPRING_EXPAND))
+    }
+
     @Test fun ordinaryNotificationsStayInTheSystemListByDefaultAndAfterUpgrade() {
         assertTrue(JSONObject(MiniPlayerConfig.defaultJson())
             .getBoolean(MiniPlayerConfig.NORMALS_IN_STACK))

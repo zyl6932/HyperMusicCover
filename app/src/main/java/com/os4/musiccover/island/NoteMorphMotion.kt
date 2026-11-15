@@ -64,9 +64,11 @@ internal class NoteMorphMotion(
         // they are. No flight: the rows were never out of the stack for one to land on.
         if (spreadMotion.spread != null) return
         if (key == STACK_ISLAND && LockIslands.foldsNatively()) {
-            if (!spreadMotion.openSingleApp("tap")) spreadMotion.openSpread("tap")
+            if (!spreadMotion.openSingleApp("tap")) spreadMotion.openSpread("tap",
+                springSeat = if (key == rowState.smallKey) SEAT_SMALL else SEAT_BIG)
             return
         }
+        if (spreadMotion.openSpringTap(key)) return
         // Pulled down and on its way home still: a tap on its place - its logical place, the
         // pill or the small island it is landing in - turns it round from where it is, as a tap
         // turns a switch (the super island's canClick waits for nothing). It used to do nothing
@@ -445,6 +447,14 @@ internal class NoteMorphMotion(
             val stackedSmall = views.stackedStyle() && flightState.flightHome == HOME_SMALL
             val stackedAlpha = MiniPlayerGeometry.STACK_BACK_ALPHA +
                 (1f - MiniPlayerGeometry.STACK_BACK_ALPHA) * progress
+            val landing = !morph.toNative && progress < FLIGHT_HANDOFF
+            if (stackedSmall) {
+                val behindPill = landing || (!morph.toNative && progress < 0.5f) ||
+                    (morph.toNative && progress < 0.35f)
+                if (behindPill) views.ensureBelowPill(f)
+                val targetZ = if (behindPill) 0f else MORPH_Z
+                if (f.translationZ != targetZ) f.translationZ = targetZ
+            }
             if (flightState.flightOut) {
                 if (stackedSmall) f.alpha = stackedAlpha
                 return
@@ -454,7 +464,6 @@ internal class NoteMorphMotion(
                 rowHost.trace("f c=${"%.3f".format(progress)} box=${b.cx().toInt()},${b.w.toInt()}x${b.h.toInt()} " +
                     "fa=${"%.2f".format(f.alpha)} land=${flightState.flightLanding} " + rowState.smallState())
             }
-            val landing = !morph.toNative && progress < FLIGHT_HANDOFF
             if (landing != flightState.flightLanding) {
                 flightState.flightLanding = landing
                 // Shown at once, whole, with its own picture: it is what the flight becomes.
