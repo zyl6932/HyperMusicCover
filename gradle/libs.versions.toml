@@ -1,11 +1,11 @@
 [versions]
-agp = "9.4.0"
+agp = "9.4.1"
 kotlin = "2.4.10"
 coreKtx = "1.19.0"
 lifecycleRuntimeKtx = "2.11.0"
 activityCompose = "1.13.0"
-composeBom = "2026.08.00"
-miuix = "0.9.4-rc01"
+composeBom = "2026.05.01"
+miuix = "0.9.4"
 # The changelog renderer: CommonMark -> HTML, plus the WebView helpers that serve the
 # github-markdown-css sheets out of assets without file:// access.
 commonmark = "0.30.0"
@@ -19,7 +19,7 @@ lyricsCore = "0.4.7"
 lyriconSubscriber = "0.1.70"
 # HCT, for the lyric colours taken from the cover (LyricPalette). miuix already brings this
 # version in; named here because the module now calls it directly.
-materialColorUtilities = "5.0.0"
+materialColorUtilities = "5.0.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

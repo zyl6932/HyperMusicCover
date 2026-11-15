@@ -191,4 +191,35 @@ public final class SettingSpec {
      * state file still keeps it as "card".
      */
     public static final SettingSpec PICKUP_CARD = bool("pickupcard", true);
+
+    // ---------------------------------------------------------------- lock screen status widgets
+
+    /** Master switch for the lock screen status widgets. */
+    public static final SettingSpec WIDGET_ENABLED = bool("widgeton", true);
+    /** Large weather card. */
+    public static final SettingSpec WIDGET_WEATHER = bool("widgetweather", true);
+    /** Large battery card. */
+    public static final SettingSpec WIDGET_BATTERY = bool("widgetbattery", true);
+    /** Small disc: next alarm. */
+    public static final SettingSpec WIDGET_ALARM = bool("widgetalarm", false);
+    /** Small disc: sunrise / sunset. */
+    public static final SettingSpec WIDGET_SUN = bool("widgetsun", false);
+    /** Small disc: humidity. */
+    public static final SettingSpec WIDGET_HUMIDITY = bool("widgethumidity", false);
+    /** Small disc: AQI. */
+    public static final SettingSpec WIDGET_AQI = bool("widgetaqi", false);
+    /** Small disc: feels like. */
+    public static final SettingSpec WIDGET_FEELS = bool("widgetfeels", false);
+    /** Small disc: wind. */
+    public static final SettingSpec WIDGET_WIND = bool("widgetwind", false);
+    /** Small disc: steps. */
+    public static final SettingSpec WIDGET_STEPS = bool("widgetsteps", false);
+    /** Small disc: standing count. */
+    public static final SettingSpec WIDGET_STAND = bool("widgetstand", false);
+    /** Hide the widgets while lock screen lyrics are on screen. */
+    public static final SettingSpec WIDGET_HIDE_LYRICS = bool("widgethidemusic", false);
+    /** Weather big card material background. */
+    public static final SettingSpec WIDGET_WEATHER_BG = bool("widgetweatherbg", true);
+    /** Battery big card material background. */
+    public static final SettingSpec WIDGET_BATTERY_BG = bool("widgetbatterybg", true);
 }

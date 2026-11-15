@@ -1149,6 +1149,37 @@ public final class Settings {
             .op("pickup", "card", Absent.IGNORE).absent(true)
             .file("card");
 
+    // ------------------------------------------------------- lock screen status widgets
+
+    public static final Bool WIDGET_ENABLED = new Bool(SettingSpec.WIDGET_ENABLED)
+            .op("widgeton", "on", Absent.IGNORE).absent(true).file("widgeton");
+    public static final Bool WIDGET_WEATHER = new Bool(SettingSpec.WIDGET_WEATHER)
+            .op("widgetweather", "on", Absent.IGNORE).absent(true).file("widgetweather");
+    public static final Bool WIDGET_BATTERY = new Bool(SettingSpec.WIDGET_BATTERY)
+            .op("widgetbattery", "on", Absent.IGNORE).absent(true).file("widgetbattery");
+    public static final Bool WIDGET_ALARM = new Bool(SettingSpec.WIDGET_ALARM)
+            .op("widgetalarm", "on", Absent.IGNORE).absent(false).file("widgetalarm");
+    public static final Bool WIDGET_SUN = new Bool(SettingSpec.WIDGET_SUN)
+            .op("widgetsun", "on", Absent.IGNORE).absent(false).file("widgetsun");
+    public static final Bool WIDGET_HUMIDITY = new Bool(SettingSpec.WIDGET_HUMIDITY)
+            .op("widgethumidity", "on", Absent.IGNORE).absent(false).file("widgethumidity");
+    public static final Bool WIDGET_AQI = new Bool(SettingSpec.WIDGET_AQI)
+            .op("widgetaqi", "on", Absent.IGNORE).absent(false).file("widgetaqi");
+    public static final Bool WIDGET_FEELS = new Bool(SettingSpec.WIDGET_FEELS)
+            .op("widgetfeels", "on", Absent.IGNORE).absent(false).file("widgetfeels");
+    public static final Bool WIDGET_WIND = new Bool(SettingSpec.WIDGET_WIND)
+            .op("widgetwind", "on", Absent.IGNORE).absent(false).file("widgetwind");
+    public static final Bool WIDGET_STEPS = new Bool(SettingSpec.WIDGET_STEPS)
+            .op("widgetsteps", "on", Absent.IGNORE).absent(false).file("widgetsteps");
+    public static final Bool WIDGET_STAND = new Bool(SettingSpec.WIDGET_STAND)
+            .op("widgetstand", "on", Absent.IGNORE).absent(false).file("widgetstand");
+    public static final Bool WIDGET_HIDE_LYRICS = new Bool(SettingSpec.WIDGET_HIDE_LYRICS)
+            .op("widgethidemusic", "on", Absent.IGNORE).absent(false).file("widgethidemusic");
+    public static final Bool WIDGET_WEATHER_BG = new Bool(SettingSpec.WIDGET_WEATHER_BG)
+            .op("widgetweatherbg", "on", Absent.IGNORE).absent(true).file("widgetweatherbg");
+    public static final Bool WIDGET_BATTERY_BG = new Bool(SettingSpec.WIDGET_BATTERY_BG)
+            .op("widgetbatterybg", "on", Absent.IGNORE).absent(true).file("widgetbatterybg");
+
     // ---------------------------------------------------------------- the doors
 
     /** Every entry, in the table's order. */

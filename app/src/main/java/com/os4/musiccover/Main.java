@@ -42,6 +42,7 @@ import com.os4.musiccover.island.LockIslands;
 import com.os4.musiccover.island.MiniPlayerCollapseGesture;
 import com.os4.musiccover.island.MiniPlayerConfig;
 import com.os4.musiccover.island.MiniPlayerRuntime;
+import com.os4.musiccover.widget.StatusWidgetRuntime;
 import com.os4.musiccover.island.NotificationSink;
 import com.os4.musiccover.island.NumStateProbe;
 import com.os4.musiccover.immersive.ImmersiveHost;
@@ -786,6 +787,8 @@ public class Main extends XposedModule {
                 Feature.of("feature:pass_blur_scale", false, c -> PassBlurScaleFix.install()),
                 // The mini player hangs off the shortcut row, not the clock container.
                 Feature.of("feature:mini_player", false, c -> MiniPlayerRuntime.install(c.host)),
+                // 实验：锁屏底部状态小组件（天气/电池/闹钟），挂在快捷键行同一 hook 上。
+                Feature.of("feature:status_widget", false, c -> StatusWidgetRuntime.install(c.host)),
                 // The clock's colour extraction once it is still, not on every step.
                 Feature.of("feature:palette_throttle", false,
                         c -> PaletteThrottle.INSTANCE.install(c.host)),
