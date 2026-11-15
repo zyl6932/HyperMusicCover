@@ -30,6 +30,7 @@ import com.os4.musiccover.app.ModuleBridge
 import com.os4.musiccover.R
 import com.os4.musiccover.app.ShadeActivity
 import com.os4.musiccover.app.MiniPlayerActivity
+import com.os4.musiccover.app.WidgetActivity
 import com.os4.musiccover.app.TransitActivity
 import com.os4.musiccover.app.FpQuickActivity
 import com.os4.musiccover.app.LyricStyleActivity
@@ -111,6 +112,13 @@ private fun FeatureList(
                         title = stringResource(R.string.features_mini_title),
                         summary = stringResource(R.string.features_mini_summary),
                         onClick = { onOpen(MiniPlayerActivity::class.java) },
+                    )
+                }
+                Card(modifier = Modifier.nextCard()) {
+                    ArrowPreference(
+                        title = stringResource(R.string.features_widget_title),
+                        summary = stringResource(R.string.features_widget_summary),
+                        onClick = { onOpen(WidgetActivity::class.java) },
                     )
                 }
                 Card(modifier = Modifier.nextCard()) {

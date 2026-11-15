@@ -240,6 +240,35 @@
     <string name="features_mini_summary">音乐、通知与导航</string>
     <string name="features_transit_title">主动智能</string>
     <string name="features_transit_summary">为您提供主动、贴心的智能服务~</string>
+    <string name="features_widget_title">锁屏小组件</string>
+    <string name="features_widget_summary">天气、电量、闹钟与环境信息</string>
+
+    <!-- 锁屏小组件页：总开关、大卡、小圆片、其他。 -->
+    <string name="widget_page_title">锁屏小组件</string>
+    <string name="widget_enabled">启用锁屏小组件</string>
+    <string name="widget_rule_summary">最多两个大卡片；两个大卡片时不放小圆片，一个大卡片时最多两个小圆片</string>
+    <string name="widget_section_big">大卡片</string>
+    <string name="widget_weather">天气</string>
+    <string name="widget_weather_summary">温度、天气状况、城市与高低温</string>
+    <string name="widget_battery">电量</string>
+    <string name="widget_battery_summary">电量百分比与设备名</string>
+    <string name="widget_section_small">小圆片</string>
+    <string name="widget_alarm">下一个闹钟</string>
+    <string name="widget_sun">日出日落</string>
+    <string name="widget_humidity">湿度</string>
+    <string name="widget_aqi">空气质量</string>
+    <string name="widget_feels">体感温度</string>
+    <string name="widget_wind">风向风力</string>
+    <string name="widget_steps">步数</string>
+    <string name="widget_stand">站立</string>
+    <string name="widget_section_other">其他</string>
+    <string name="widget_hide_lyrics">锁屏歌词存在时隐藏小组件</string>
+    <string name="widget_hide_lyrics_summary">歌词显示在锁屏时，自动收起这些小组件</string>
+    <string name="widget_weather_bg">天气大卡背景</string>
+    <string name="widget_weather_bg_summary">单独控制天气卡片的柔光玻璃底，关闭后只显示文字</string>
+    <string name="widget_battery_bg">电量大卡背景</string>
+    <string name="widget_battery_bg_summary">单独控制电量卡片的柔光玻璃底，关闭后只显示文字</string>
+    <string name="widget_preview_empty">未选择小组件</string>
 
     <!-- The bus and subway trip's page, which the features page opens: one switch. -->
     <string name="transit_enabled">地铁行程上岛</string>

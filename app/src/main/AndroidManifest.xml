@@ -146,6 +146,12 @@
             android:theme="@style/Theme.HyperMusicCover" />
 
         <activity
+            android:name=".app.WidgetActivity"
+            android:exported="false"
+            android:label="@string/features_widget_title"
+            android:theme="@style/Theme.HyperMusicCover" />
+
+        <activity
             android:name=".app.TransitActivity"
             android:exported="false"
             android:label="@string/features_transit_title"

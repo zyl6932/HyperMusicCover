@@ -199,6 +199,21 @@ object ModuleBridge {
         val transit: Boolean = SettingSpec.TRANSIT.defBool,
         /** 取餐码: a 微信 order page's pickup code on the island (Settings.PICKUP). */
         val pickup: Boolean = SettingSpec.PICKUP.defBool,
+        // ------------------------------------------------- lock screen status widgets
+        val widgetOn: Boolean = SettingSpec.WIDGET_ENABLED.defBool,
+        val widgetWeather: Boolean = SettingSpec.WIDGET_WEATHER.defBool,
+        val widgetBattery: Boolean = SettingSpec.WIDGET_BATTERY.defBool,
+        val widgetAlarm: Boolean = SettingSpec.WIDGET_ALARM.defBool,
+        val widgetSun: Boolean = SettingSpec.WIDGET_SUN.defBool,
+        val widgetHumidity: Boolean = SettingSpec.WIDGET_HUMIDITY.defBool,
+        val widgetAqi: Boolean = SettingSpec.WIDGET_AQI.defBool,
+        val widgetFeels: Boolean = SettingSpec.WIDGET_FEELS.defBool,
+        val widgetWind: Boolean = SettingSpec.WIDGET_WIND.defBool,
+        val widgetSteps: Boolean = SettingSpec.WIDGET_STEPS.defBool,
+        val widgetStand: Boolean = SettingSpec.WIDGET_STAND.defBool,
+        val widgetHideLyrics: Boolean = SettingSpec.WIDGET_HIDE_LYRICS.defBool,
+        val widgetWeatherBg: Boolean = SettingSpec.WIDGET_WEATHER_BG.defBool,
+        val widgetBatteryBg: Boolean = SettingSpec.WIDGET_BATTERY_BG.defBool,
         /**
          * 取餐码云端名单的状态：ColorOS 那一份自己的更新日期（空字符串＝从未同步过），
          * 和它有几个小程序。设置页那行「手动刷新取餐码云端规则」的副标题读的就是它。
@@ -473,6 +488,10 @@ object ModuleBridge {
         }
 
     fun setCover(context: Context, on: Boolean) = send(context, "pushart") { putExtra("on", on) }
+
+    /** 锁屏小组件：一个多选开关对应一个 SettingSpec 与 op，下发 `on`。 */
+    fun setWidget(context: Context, spec: SettingSpec, op: String, on: Boolean) =
+        setting(context, spec, on) { send(context, op) { putExtra("on", on) } }
 
     fun setBias(context: Context, v: Float) =
         setting(context, SettingSpec.BIAS, v) { send(context, "bias") { putExtra("v", v) } }
@@ -1195,6 +1214,20 @@ object ModuleBridge {
             settingsRev = b.getLong("settings_rev", 0L),
             hostInstallId = b.getString("install_id") ?: "",
             pickup = b.bool(SettingSpec.PICKUP),
+            widgetOn = b.bool(SettingSpec.WIDGET_ENABLED),
+            widgetWeather = b.bool(SettingSpec.WIDGET_WEATHER),
+            widgetBattery = b.bool(SettingSpec.WIDGET_BATTERY),
+            widgetAlarm = b.bool(SettingSpec.WIDGET_ALARM),
+            widgetSun = b.bool(SettingSpec.WIDGET_SUN),
+            widgetHumidity = b.bool(SettingSpec.WIDGET_HUMIDITY),
+            widgetAqi = b.bool(SettingSpec.WIDGET_AQI),
+            widgetFeels = b.bool(SettingSpec.WIDGET_FEELS),
+            widgetWind = b.bool(SettingSpec.WIDGET_WIND),
+            widgetSteps = b.bool(SettingSpec.WIDGET_STEPS),
+            widgetStand = b.bool(SettingSpec.WIDGET_STAND),
+            widgetHideLyrics = b.bool(SettingSpec.WIDGET_HIDE_LYRICS),
+            widgetWeatherBg = b.bool(SettingSpec.WIDGET_WEATHER_BG),
+            widgetBatteryBg = b.bool(SettingSpec.WIDGET_BATTERY_BG),
             rulesDate = b.getString("rulesdate") ?: "",
             rulesCount = b.getInt("rulescount", 0),
             shade = b.keySet()
