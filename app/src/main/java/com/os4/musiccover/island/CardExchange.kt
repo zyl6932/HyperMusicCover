@@ -520,11 +520,15 @@ internal class CardExchange(
      */
     private fun orderMovers(x: Switch) {
         val pillShown = !exchangeHoldsPill()
+        val hasPillMover = x.movers.values.any { it.place == LAND_PILL }
         for (m in x.movers.values) {
-            val z = when {
-                !m.headedHome -> if (pillShown) 0f else 1f
-                m.place == LAND_PILL -> 2f
-                else -> -1f
+            val tuckedSmall = pillShown && !hasPillMover && views.stackedStyle() &&
+                m.place == LAND_SMALL && m.headedHome && m.landed
+            if (tuckedSmall) views.ensureBelowPill(m.view)
+            val z = if (tuckedSmall) 0f else MORPH_Z + when {
+                !m.headedHome -> if (pillShown) 1f else 2f
+                m.place == LAND_PILL -> 3f
+                else -> 0f
             }
             if (m.view.translationZ != z) m.view.translationZ = z
         }

@@ -152,6 +152,7 @@ public final class CardTouch {
     static boolean sCardSwipeShared;
 
     static boolean sCardSwipeSpread;
+    static boolean sCardSpringCatch;
 
     /** The swipe started on a notification's row that came out of the row of islands. */
     static String sCardSwipeRow;
@@ -166,13 +167,14 @@ public final class CardTouch {
     public static int cardSwipe(MotionEvent ev) { android.os.Trace.beginSection("MC t.cardSwipe"); try {
         switch (ev.getActionMasked()) {
             case MotionEvent.ACTION_DOWN: {
-                if (sCardSwipeFired && sCardSwipeSpread) {
+                if ((sCardSwipeFired || sCardSpringCatch) && sCardSwipeSpread) {
                     MiniPlayerRuntime.endSpreadCollapse(ev, true);
                 }
                 sCardSwipeFired = false;
                 sCardSwipeShared = false;
                 sCardSwipeSpread = !Main.sGestureOnCentre && !ChargeAnim.sGestureOnCharge
                         && MiniPlayerRuntime.spreadCollapseAt(ev.getRawX(), ev.getRawY());
+                sCardSpringCatch = sCardSwipeSpread && MiniPlayerRuntime.springSpreadMoving();
                 sCardSwipeRow = null;
                 sCardPinReleased = false;
                 boolean onCard = MiniPlayerRuntime.wantsNativeCardSwipe()
@@ -184,10 +186,15 @@ public final class CardTouch {
                 sCardScrollTarget = onCard || sCardSwipeSpread || sCardSwipeRow != null;
                 // A list scrolled away from its top is read back up by this gesture, not pulled
                 // home: the rest boundary is read here, once, for the whole of it.
-                boolean atTop = MiniPlayerRuntime.nativeStackAtTop(true);
+                boolean atTop = sCardSpringCatch || MiniPlayerRuntime.nativeStackAtTop(true);
                 sCardCollapse.start(sCardScrollTarget && atTop);
                 sCardSwipeX = ev.getRawX();
                 sCardSwipeY = ev.getRawY();
+                // Reserve the live transition at DOWN. Waiting for slop let it finish and
+                // discard its springs between DOWN and the first reversing MOVE.
+                if (sCardSpringCatch && !MiniPlayerRuntime.beginSpreadCollapse(ev, sCardSwipeY)) {
+                    sCardSpringCatch = false;
+                }
                 // For `op mini`: why a pull on the card did or did not take. A pull down in the
                 // cover once did nothing until the player was restarted (2026-09-25), and nothing
                 // said which of these it was.
@@ -206,10 +213,23 @@ public final class CardTouch {
                     return sCardSwipeShared ? SWIPE_NONE : SWIPE_HELD;
                 }
                 if (!sCardScrollTarget) return SWIPE_NONE;
+                if (sCardSpringCatch) MiniPlayerRuntime.moveSpreadCollapse(ev);
                 float dx = ev.getRawX() - sCardSwipeX, dy = ev.getRawY() - sCardSwipeY;
                 float slop = android.view.ViewConfiguration.get(Main.sAppCtx).getScaledTouchSlop();
-                boolean pull = sCardCollapse.getArmed()
-                        && sCardCollapse.move(dx, dy, slop, MiniPlayerRuntime.nativeStackAtTop(false));
+                boolean pull;
+                if (sCardSpringCatch) {
+                    // Catch either direction on a moving row. The ordinary list still uses
+                    // the downward-only classifier so scrolling up cannot collapse it.
+                    if (Math.abs(dx) > slop && Math.abs(dx) >= Math.abs(dy)) {
+                        MiniPlayerRuntime.endSpreadCollapse(ev, true);
+                        sCardSpringCatch = false;
+                        sCardCollapse.reset();
+                    }
+                    pull = sCardCollapse.getArmed() && Math.abs(dy) > slop && Math.abs(dy) > Math.abs(dx) * 1.2f;
+                } else {
+                    pull = sCardCollapse.getArmed()
+                            && sCardCollapse.move(dx, dy, slop, MiniPlayerRuntime.nativeStackAtTop(false));
+                }
                 if (!pull) {
                     // Scrolling it: a card held where it landed goes with the list from here,
                     // or it stays behind while the rows around it move.
@@ -222,7 +242,7 @@ public final class CardTouch {
                 sCardSwipeFired = true;
                 Main.sArtSwallow = false;
                 if (sCardSwipeSpread) {
-                    if (!MiniPlayerRuntime.beginSpreadCollapse(ev, sCardSwipeY)) {
+                    if (!sCardSpringCatch && !MiniPlayerRuntime.beginSpreadCollapse(ev, sCardSwipeY)) {
                         sCardSwipeFired = false;
                         return SWIPE_NONE;
                     }
@@ -267,7 +287,7 @@ public final class CardTouch {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
                 boolean held = sCardSwipeFired && !sCardSwipeShared;
-                if (sCardSwipeFired) {
+                if (sCardSwipeFired || sCardSpringCatch) {
                     if (sCardSwipeSpread) MiniPlayerRuntime.endSpreadCollapse(ev,
                             ev.getActionMasked() == MotionEvent.ACTION_CANCEL);
                     else MiniPlayerRuntime.dragEnd(ev,
@@ -276,6 +296,7 @@ public final class CardTouch {
                 sCardCollapse.reset();
                 sCardSwipeFired = sCardSwipeShared = false;
                 sCardSwipeSpread = false;
+                sCardSpringCatch = false;
                 sCardScrollTarget = sCardPinReleased = false;
                 return held ? SWIPE_HELD : SWIPE_NONE;
             }

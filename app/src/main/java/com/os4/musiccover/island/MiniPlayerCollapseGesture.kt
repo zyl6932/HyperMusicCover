@@ -44,3 +44,39 @@ internal class MiniPlayerCollapseGesture {
                 scrollY <= restingScrollY.coerceAtLeast(0f) + 1f
     }
 }
+
+/** The OEM fallback must respect the same whole-gesture ownership as CardTouch, including gaps. */
+internal class SpreadListGesture {
+    private val classifier = MiniPlayerCollapseGesture()
+    private var observed = false
+    private var pulling = false
+    var canFold: Boolean = true
+        private set
+
+    fun down(atTop: Boolean) {
+        observed = true
+        pulling = false
+        canFold = false
+        classifier.start(atTop)
+    }
+
+    fun move(dx: Float, dy: Float, slop: Float, atTop: Boolean) {
+        if (!observed || pulling) return
+        pulling = classifier.move(dx, dy, slop, atTop)
+        canFold = pulling
+    }
+
+    fun end(cancelled: Boolean) {
+        if (cancelled) canFold = false
+        // Keep ownership through the OEM's fling/hands-up callback, until the next DOWN.
+        classifier.reset()
+    }
+
+    fun claim() {
+        // CardTouch now makes the direction decision. A residual OEM overscroll must not
+        // turn a cancelled/short pull into a second fold through watchOpen's fallback.
+        observed = false
+        canFold = false
+        classifier.reset()
+    }
+}

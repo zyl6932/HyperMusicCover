@@ -65,4 +65,44 @@ class MiniPlayerCollapseGestureTest {
         assertTrue(gesture.move(2f, 30f, 10f, true))
         assertFalse(gesture.move(2f, 60f, 10f, true))
     }
+
+    @Test fun longListFallbackKeepsScrollingOwnershipThroughReturningToTopAndFling() {
+        val fallback = SpreadListGesture()
+        // Rest remains 749 after scrolling to 1500 and letting the list stop there.
+        fallback.down(MiniPlayerCollapseGesture.atListTop(1500, 749f))
+        fallback.move(0f, 500f, 10f, false)
+        fallback.move(0f, 900f, 10f, true)
+        fallback.end(cancelled = false)
+        assertFalse(fallback.canFold)
+        fallback.down(true)
+        fallback.move(0f, 30f, 10f, true)
+        assertTrue(fallback.canFold)
+    }
+
+    @Test fun anUpwardReadGestureInAGapDoesNotFoldWhenItReverses() {
+        val fallback = SpreadListGesture()
+        fallback.down(true)
+        fallback.move(0f, -100f, 10f, false)
+        fallback.move(0f, 200f, 10f, true)
+        fallback.end(cancelled = false)
+        assertFalse(fallback.canFold)
+        fallback.down(true)
+        fallback.move(0f, 50f, 10f, true)
+        fallback.end(cancelled = true)
+        assertFalse(fallback.canFold)
+    }
+
+    @Test fun aClaimedShortPullCannotFoldAgainThroughTheOemFallbackAfterRelease() {
+        val fallback = SpreadListGesture()
+        fallback.down(true)
+        fallback.move(0f, 30f, 10f, true)
+        assertTrue(fallback.canFold)
+        fallback.claim()
+        fallback.move(0f, 40f, 10f, true)
+        fallback.end(cancelled = false)
+        assertFalse(fallback.canFold)
+        fallback.down(true)
+        fallback.move(0f, 100f, 10f, true)
+        assertTrue(fallback.canFold)
+    }
 }

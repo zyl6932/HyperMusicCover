@@ -571,6 +571,7 @@ internal class GroupMotion(
         if (!on) return
         val stack = stackHost.notificationStack() ?: return
         Gen.preDraw(stack, pilePreDraw)
+        MorphStackLayer.orderLast(stack)
         pileObserved = stack
     }
 

@@ -76,6 +76,10 @@ internal interface RowViews {
     fun fitToPill(view: MiniPlayerView, small: Boolean)
     /** The small island's pulse when the island out as its card goes back into hiding. */
     fun startSmallPulse(key: String?)
+    /** Keeps the rear stacked island ordered under the front pill in host child order. */
+    fun ensureStackOrder()
+    /** Moves [view] just before the pill in host child order so Z=0f stays underneath it. */
+    fun ensureBelowPill(view: View)
     /** Where in the host the pill goes, over the lock screen's own layer. */
     fun lockScreenLayerIndex(): Int
     /** A view's centre as drawn, every ancestor's transform included, in host pixels. */
@@ -163,6 +167,8 @@ internal interface RowHost {
     fun resetIslandDrag()
     fun updateNativeSuppression(suppress: Boolean)
     fun ensureNativeHeaderVisible()
+    /** The threshold opened a lone music island, which has no notification list to spread. */
+    fun openSpringMusic(lift: Float): Boolean
     /** One line in the row's landing trace (`op mini`). */
     fun trace(what: String)
     /** Listens to the row's own card morphs (the controller's). */

@@ -3,9 +3,12 @@ package com.os4.musiccover.island
 import com.os4.musiccover.Main
 import com.os4.musiccover.Gen
 import com.os4.musiccover.Xp
+import com.os4.musiccover.cover.CoverMorphMotion.Box
 import android.view.Choreographer
 import android.view.View
 import android.view.ViewTreeObserver
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -47,7 +50,8 @@ internal class SpreadMotion(
      * folded stack, NUMBER) and the cards' end (the list), read every frame. Opening, that is the
      * stack's own scroll to its list; closing, the finger's pull and the stack's own settling
      * after it (NumState's hands-up keeps it from resting half way). So the finger, the list and
-     * every island move as one and turn as one, with no spring of their own to disagree.
+     * every island move as one and turn as one. The optional spring opening instead commits
+     * at the capsule's threshold and gives every row its own response (SpringSpreadRows).
      */
 
     class Spread(val items: List<SpreadItem>, val stackSeat: Int, val stacked: Boolean) {
@@ -83,9 +87,238 @@ internal class SpreadMotion(
         var lastFrameAt = 0L
         /** The progress the clock was last asked to follow (ClockRoom.roomForRows). */
         var clockP = Float.NaN
+        var springAnimating = false
+        var springLift = 0f
+        var springSeat = SEAT_BIG
+        var springOrigin: Box? = null
+        var springCollapsed = false
+        var springRows: SpringSpreadRows? = null
+        var springCompanions: SpringSpreadCompanions? = null
+        var springTargetOpen = true
+        var springPose: SpringSpreadState? = null
+        var springSwipe: SpringSpreadSwipe? = null
+        var springLiftMotion: SpreadSpring? = null
+        var springAt = 0L
+        val listGesture = SpreadListGesture()
+        var touchX = 0f
+        var touchY = 0f
     }
 
     var spread: Spread? = null
+
+    private class SpringPull(val startY: Float, val small: Boolean, val musicOnly: Boolean, initialDp: Float) {
+        val motion = IslandSpringPull(initialDp)
+        var lastFrame = 0L
+        var y = startY
+    }
+    private var springPull: SpringPull? = null
+
+    /** Start on vertical touch slop; the spring's displacement, not the finger, commits it. */
+    fun beginSpringPull(startY: Float, small: Boolean): Boolean {
+        if (!rowState.config.optBoolean(MiniPlayerConfig.ENABLED) ||
+            !rowState.config.optBoolean(MiniPlayerConfig.SPRING_EXPAND) || !NumState.available ||
+            rowState.islandKeys.isEmpty() || busyForStackSpread() ||
+            views.player?.visibility != View.VISIBLE) return false
+        val musicOnly = rowState.islandKeys.all { it == MUSIC_ISLAND } && !stackHasRows()
+        if (musicOnly && !rowState.canDrag(fromNative = false, small = small)) return false
+        cancelSpringPull()
+        val lift = -(if (small) views.smallNudgeY() else views.player?.nudgeY ?: 0f)
+        springPull = SpringPull(startY, small, musicOnly, lift / views.density())
+        return true
+    }
+
+    fun moveSpringPull(y: Float) {
+        val pull = springPull ?: run { moveSpringTouch(y); return }
+        pull.y = y
+        pull.motion.move((pull.startY - y) / views.density())
+        Gen.unframe(springPullFrame)
+        Gen.frame(springPullFrame)
+    }
+
+    fun endSpringPull(velocityY: Float, cancelled: Boolean) {
+        val pull = springPull ?: run { endSpringTouch(velocityY, cancelled); return }
+        pull.motion.release(-velocityY, views.density(), cancelled)
+        if (pull.motion.committed) commitSpringPull(pull) else cancelSpringPull()
+    }
+
+    fun cancelSpringPull(animate: Boolean = true) {
+        spread?.springSwipe = null
+        if (!animate) releaseSpringTail()
+        val pull = springPull ?: return
+        springPull = null
+        Gen.unframe(springPullFrame)
+        if (!animate) {
+            if (pull.small) views.clearSmallNudge() else views.player?.clearNudge()
+        } else if (pull.small) views.springSmallNudgeBack(0f, 0f)
+        else views.player?.springNudgeBack(0f, 0f)
+    }
+
+    private val springPullFrame = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            val pull = springPull ?: return
+            if (rowState.destroyed || !rowState.config.optBoolean(MiniPlayerConfig.SPRING_EXPAND) ||
+                !rowState.config.optBoolean(MiniPlayerConfig.ENABLED) || !Main.keyguardLocked() ||
+                !Main.screenOnCached() || MiniPlayerScene.aodActive || MiniPlayerScene.keyguardGoingAway ||
+                views.player?.isShown != true) {
+                cancelSpringPull(animate = false)
+                return
+            }
+            val dt = if (pull.lastFrame == 0L) 1f / 120f
+                else ((frameTimeNanos - pull.lastFrame) / 1e9f).coerceIn(0f, 0.05f)
+            pull.lastFrame = frameTimeNanos
+            pull.motion.step(dt)
+            val lift = pull.motion.value * views.density()
+            if (pull.small) views.setSmallNudge(0f, -lift) else views.player?.setNudge(0f, -lift)
+            if (pull.motion.committed) commitSpringPull(pull)
+            else if (!pull.motion.atRest()) Gen.frame(this)
+        }
+    }
+
+    private fun commitSpringPull(pull: SpringPull) {
+        springPull = null
+        Gen.unframe(springPullFrame)
+        val lift = pull.motion.value * views.density()
+        if (pull.musicOnly) {
+            rowHost.openSpringMusic(lift)
+            return
+        }
+        openSpread("spring threshold", springAnimating = true, springLift = lift,
+            springSeat = if (pull.small) SEAT_SMALL else SEAT_BIG)
+        if (!pull.motion.ended) spread?.springSwipe = SpringSpreadSwipe(pull.y, open = true)
+        if (spread == null) {
+            views.player?.springNudgeBack(0f, 0f)
+            views.springSmallNudgeBack(0f, 0f)
+        }
+    }
+
+    /** Also called on retirement, where the controller tears down the remaining spread itself. */
+    fun clearSpringOpening() {
+        releaseSpringTail()
+        cancelSpringPull(animate = false)
+        spread?.springRows?.close()
+        spread?.springRows = null
+        spread?.springCompanions?.close()
+        spread?.springCompanions = null
+    }
+
+    fun springConfigChanged() {
+        if (rowState.config.optBoolean(MiniPlayerConfig.ENABLED) &&
+            rowState.config.optBoolean(MiniPlayerConfig.SPRING_EXPAND)) return
+        cancelSpringPull()
+        releaseSpringTail()
+        val s = spread ?: return
+        if (!s.springAnimating) return
+        s.springRows?.close()
+        s.springRows = null
+        s.springCompanions?.close()
+        s.springCompanions = null
+        // Configuration changes are on the main thread: return every owned view immediately.
+        if (!rowState.config.optBoolean(MiniPlayerConfig.ENABLED))
+            endSpread(folded = false, why = "islands disabled")
+        else if (s.phase == SPREAD_WAIT) endSpread(folded = true, why = "spring disabled before rows")
+        else finishOpen(s, NumState.position() ?: s.cardsY)
+    }
+
+    private var springTail: SpringSpreadRows? = null
+    private var springCompanionTail: SpringSpreadCompanions? = null
+    private val springTailRelease = Runnable { releaseSpringTail() }
+
+    private fun releaseSpringTail() {
+        Gen.removeCallbacks(springTailRelease)
+        val tail = springTail
+        springTail = null
+        tail?.close()
+        springCompanionTail?.close()
+        springCompanionTail = null
+    }
+
+    fun springMoving(): Boolean = spread?.springAnimating == true
+
+    fun companionTop(view: View): Float? = spread?.springCompanions?.drawnTop(view)
+        ?: springCompanionTail?.drawnTop(view)
+
+    /** Observe before either the island route or the OEM can consume a notification-list touch. */
+    fun observeListTouch(event: MotionEvent) {
+        val s = spread?.takeIf { it.phase == SPREAD_OPEN && !it.springAnimating } ?: return
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // A layout change may move the list's true top; user scroll never defines it.
+                s.cardsY = NumState.listScroll() ?: s.cardsY
+                s.touchX = event.rawX
+                s.touchY = event.rawY
+                s.listGesture.down(MiniPlayerCollapseGesture.atListTop(NumState.scrollY(), s.cardsY.toFloat()))
+            }
+            MotionEvent.ACTION_MOVE -> s.listGesture.move(event.rawX - s.touchX, event.rawY - s.touchY,
+                ViewConfiguration.get(views.context).scaledTouchSlop.toFloat(),
+                MiniPlayerCollapseGesture.atListTop(NumState.scrollY(), s.cardsY.toFloat()))
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> s.listGesture.end(event.actionMasked == MotionEvent.ACTION_CANCEL)
+        }
+    }
+
+    private fun springEnabled(): Boolean = rowState.config.optBoolean(MiniPlayerConfig.ENABLED) &&
+        rowState.config.optBoolean(MiniPlayerConfig.SPRING_EXPAND)
+
+    /** Tapping a notification uses the same list transition, without a held threshold stage. */
+    fun openSpringTap(key: String): Boolean {
+        if (!springEnabled() || !NumState.available || busyForStackSpread() ||
+            rowState.expandedKey() != null || key != rowState.selectedIsland && key != rowState.smallKey ||
+            views.player?.visibility != View.VISIBLE) return false
+        openSpread("spring tap", springAnimating = true,
+            springSeat = if (key == rowState.smallKey) SEAT_SMALL else SEAT_BIG)
+        return spread != null
+    }
+
+    private fun moveSpringTouch(y: Float) {
+        val s = spread ?: return
+        s.springSwipe?.move(y)?.let { retargetSpring(s, it) }
+    }
+
+    private fun endSpringTouch(velocityY: Float, cancelled: Boolean) {
+        val s = spread ?: return
+        s.springSwipe?.release(velocityY, cancelled)?.let { retargetSpring(s, it) }
+        s.springSwipe = null
+    }
+
+    /** Keep the native list laid out until every row has arrived home, including a reversal. */
+    private fun retargetSpring(s: Spread, open: Boolean) {
+        if (!springEnabled()) return
+        if (s.phase == SPREAD_WAIT) {
+            // Keep the gesture through the pipeline wait; another reversal can still reopen it.
+            s.springTargetOpen = open
+            return
+        }
+        val now = android.os.SystemClock.uptimeMillis()
+        if (!s.springAnimating) {
+            if (s.phase != SPREAD_OPEN || open) return
+            s.islandsY = NumState.scrollTo("NUMBER") ?: s.islandsY
+            s.cardsY = NumState.position() ?: s.cardsY
+            s.springOrigin = if (s.springSeat == SEAT_SMALL) views.smallBoxOnScreen()
+                else views.player?.restBoxOnScreen()
+            s.springLift = 0f
+            s.springLiftMotion = SpreadSpring(0f, 0.35f, 0f)
+            s.springPose = SpringSpreadState(1f)
+            s.springAnimating = true
+            s.springCompanions?.pose(1f)
+            startSpreadMorphs(s, toCards = false)
+            s.items.filter { it.morph == null }.forEach { it.native?.let(stackHost::showRow) }
+            stackHost.notificationStack()?.let { stack ->
+                s.springRows = SpringSpreadRows(stack, s.items, s.springOrigin, now,
+                    collapsed = true, opening = false,
+                    preserved = s.springCompanions?.views.orEmpty()).also { it.start() }
+            }
+            NumState.stopAt(s.cardsY)
+        }
+        s.springPose?.advance(now)
+        s.springPose?.aim(open)
+        s.springRows?.aim(open, now)
+        s.springLiftMotion?.target = 0f
+        s.springTargetOpen = open
+        s.phase = if (open) SPREAD_OPENING else SPREAD_CLOSING
+        s.since = now
+        s.springAt = now
+        s.still = 0
+        spreadTrace("spring turned ${if (open) "out" else "home"} at ${s.progress}")
+    }
 
     /**
      * The list was open when the phone was unlocked: it opens again on the next lock screen, once
@@ -115,7 +348,17 @@ internal class SpreadMotion(
 
     fun spreadCollapseAt(x: Float, y: Float): Boolean {
         val s = spread ?: return false
-        if (s.phase != SPREAD_OPEN && s.phase != SPREAD_CLOSING) return false
+        if (s.phase != SPREAD_OPEN && s.phase != SPREAD_CLOSING && !s.springAnimating) return false
+        if (s.springAnimating) {
+            if (s.items.any { item -> item.morph?.containerBox()?.let { box ->
+                    x >= box.x && x < box.x + box.w && y >= box.y && y < box.y + box.h
+                } == true }) return true
+            if (s.items.any { item -> item.morph?.miniEndBox()?.let { box ->
+                    SpringSpreadPlan.catchesOrigin(box, s.springLift, x, y)
+                } == true }) return true
+            val origin = s.springOrigin
+            if (origin != null && SpringSpreadPlan.catchesOrigin(origin, s.springLift, x, y)) return true
+        }
         val stack = stackHost.notificationStack() ?: return false
         val rect = android.graphics.Rect()
         return (0 until stack.childCount).any { i ->
@@ -128,7 +371,14 @@ internal class SpreadMotion(
 
     fun beginSpreadCollapse(startY: Float): Boolean {
         val s = spread ?: return false
+        if (springEnabled() && (s.springAnimating || s.phase == SPREAD_OPEN)) {
+            s.listGesture.claim()
+            s.springSwipe = SpringSpreadSwipe(startY, s.springTargetOpen)
+            spreadTrace("spring touch caught at ${s.progress}")
+            return true
+        }
         if (s.phase != SPREAD_OPEN && s.phase != SPREAD_CLOSING) return false
+        s.listGesture.claim()
         if (s.phase == SPREAD_OPEN) {
             s.islandsY = NumState.scrollTo("NUMBER") ?: s.islandsY
             startSpreadMorphs(s, toCards = false)
@@ -162,6 +412,7 @@ internal class SpreadMotion(
 
     fun moveSpreadCollapse(y: Float) {
         val s = spread ?: return
+        if (s.springSwipe != null) { moveSpringTouch(y); return }
         val finger = s.collapseFinger?.takeIf { !it.ended } ?: return
         finger.y = y
         val p = finger.progress()
@@ -170,6 +421,7 @@ internal class SpreadMotion(
 
     fun endSpreadCollapse(velocityY: Float, cancelled: Boolean) {
         val s = spread ?: return
+        if (s.springSwipe != null) { endSpringTouch(velocityY, cancelled); return }
         val finger = s.collapseFinger?.takeIf { !it.ended } ?: return
         finger.target = if (MiniPlayerStackGesture.commits(
                 finger.y - finger.startY, velocityY, views.density(), cancelled)) 0f else 1f
@@ -281,7 +533,9 @@ internal class SpreadMotion(
      * The stack island tapped or pulled open: the whole row out. With another motion under way -
      * a card out, a switch, a flight - only the stack opens, as it did before (openStack).
      */
-    fun openSpread(why: String, finger: SpreadFinger? = null) { android.os.Trace.beginSection("MC openSpread"); try {
+    fun openSpread(why: String, finger: SpreadFinger? = null,
+                   springAnimating: Boolean = finger == null && springEnabled(),
+                   springLift: Float = 0f, springSeat: Int = SEAT_BIG) { android.os.Trace.beginSection("MC openSpread"); try {
         if (spread != null) return
         val busy = busyForSpread()
         if (busy || views.player?.visibility != View.VISIBLE) {
@@ -289,10 +543,15 @@ internal class SpreadMotion(
             LockIslands.openStack(why)
             return
         }
+        val previousCompanions = if (springAnimating) springCompanionTail else null
+        if (previousCompanions != null) springCompanionTail = null
+        releaseSpringTail()
         swapMotion.endSwap()
         rowHost.endRow()
         rowHost.resetIslandDrag()
-        views.clearSmallNudge()
+        edits.stackLeadKey = null
+        edits.appLeadKeys.clear()
+        if (!springAnimating || springSeat != SEAT_SMALL) views.clearSmallNudge()
         val big = rowState.selectedIsland
         val small = rowState.smallKey
         fun seatOf(key: String) = when (key) {
@@ -320,6 +579,18 @@ internal class SpreadMotion(
         val lead = if (stackSeat == SEAT_BIG || stackSeat == SEAT_SMALL)
             listOf(SpreadItem(STACK_ISLAND, stackSeat)) else emptyList()
         val s = Spread(lead + items, stackSeat, views.stackedStyle())
+        s.springAnimating = springAnimating
+        s.springLift = springLift
+        s.springSeat = springSeat
+        if (springAnimating) {
+            val origin = if (springSeat == SEAT_SMALL) views.smallBoxOnScreen()
+                else views.player?.restBoxOnScreen()
+            s.springOrigin = origin?.let { Box(it.x, it.y - springLift, it.w, it.h) }
+            // Capture before releasing rows changes NUMBER/STACK. Individual numStateAlpha
+            // values are not sufficient: the OEM also hides rows by stacking depth.
+            s.springCollapsed = NumState.inNumber == true ||
+                !rowState.config.optBoolean(MiniPlayerConfig.NORMALS_IN_STACK, true)
+        }
         s.since = android.os.SystemClock.uptimeMillis()
         // Read before the spread's rows come in (setSpread runs the pipeline on the next frame).
         s.focusBefore = NumState.focusCount()
@@ -328,6 +599,27 @@ internal class SpreadMotion(
         // A card held where it landed goes with the list from here.
         stackHost.releaseNativeScrollPin()
         views.player?.setInteractionsEnabled(false)
+        if (s.springAnimating) {
+            // A card already open before this gesture stays in place through the wait too.
+            // Resolve its identity now, before startSpreadMorphs fills the rest of the items.
+            s.items.filter { it.wasOut }.forEach { it.native = rowState.nativeFor(it.key) }
+            // Releasing the focus rows can rearrange ordinary notifications before they have
+            // even laid out. Hold those at their pre-pipeline positions through SPREAD_WAIT.
+            stackHost.notificationStack()?.let { stack ->
+                val owned = s.items.mapNotNull { rowState.nativeFor(it.key) }
+                val candidates = (0 until stack.childCount).map(stack::getChildAt).filter { view ->
+                    SpringCompanionPlan.keepsCard(view.isShown && StackRowGeometry(view).alpha() > 0.01f,
+                        owned.any { stackHost.isInside(it, view) },
+                        view.javaClass.name.contains("MediaHeader"),
+                        stackHost.rowKey(view)?.let { LockIslands.noteFor(it)?.focus } == true)
+                }
+                s.springCompanions = previousCompanions?.also { it.restart(candidates) }
+                    ?: SpringSpreadCompanions(stack, candidates).also { it.start() }
+                s.springRows = SpringSpreadRows(stack, s.items, s.springOrigin, 0L,
+                    s.springCollapsed, preserved = s.springCompanions?.views.orEmpty()).also { it.start() }
+            }
+            if (s.springCompanions == null) previousCompanions?.close()
+        }
         // Every focus notification's row into the stack, out of sight till its morph takes it.
         LockIslands.setSpread(true)
         spreadTrace("spread asked ($why): " + describeSpread())
@@ -344,6 +636,18 @@ internal class SpreadMotion(
                 listKept = s.phase == SPREAD_OPEN && s.progress >= 0.5f
                 endSpread(folded = s.progress < 0.5f, why = "lock screen gone")
                 return
+            }
+            if (s.springAnimating && (!Main.screenOnCached() || MiniPlayerScene.aodActive)) {
+                if (s.phase == SPREAD_WAIT) {
+                    endSpread(folded = true, why = "spring interrupted before rows")
+                    return
+                }
+                if (s.springTargetOpen) finishOpen(s, NumState.position() ?: s.cardsY)
+                else {
+                    NumState.stopAt(s.islandsY)
+                    endSpread(folded = true, why = "spring fold interrupted by sleep")
+                    return
+                }
             }
             // No frames for a while: the screen was off.
             val frameAt = android.os.SystemClock.uptimeMillis()
@@ -397,12 +701,39 @@ internal class SpreadMotion(
         s.islandsY = NumState.scrollTo("NUMBER") ?: NumState.position() ?: 0
         // As far as the stack really scrolls: aimed past it, the spread stood short of its end.
         s.cardsY = NumState.listScroll() ?: s.islandsY
+        val starts = s.springRows?.startBoxes().orEmpty()
+        s.springRows?.close()
+        s.springRows = null
+        if (s.springAnimating) views.clearSmallNudge()
         startSpreadMorphs(s, toCards = true)
         s.phase = SPREAD_OPENING
         s.since = android.os.SystemClock.uptimeMillis()
         s.visualAt = s.since
         s.still = 0
         s.lastY = Int.MIN_VALUE
+        if (s.springAnimating) {
+            s.springPose = SpringSpreadState(0f).also { it.aim(s.springTargetOpen); it.advance(s.since) }
+            s.springLiftMotion = SpreadSpring(s.springLift, 0.35f, 0f)
+            s.springAt = s.since
+            // Capture all other rows before moving the OEM list. A visible ordinary row starts
+            // where it already is; one folded away starts under the island. Groups stay whole.
+            s.items.filter { it.morph == null }.forEach { it.native?.let(stackHost::showRow) }
+            stackHost.notificationStack()?.let { stack ->
+                s.springRows = SpringSpreadRows(stack, s.items, s.springOrigin, s.since,
+                    s.springCollapsed, starts, initialLift = s.springLift,
+                    preserved = s.springCompanions?.views.orEmpty()).also { it.start() }
+            }
+            s.springRows?.aim(s.springTargetOpen, s.since)
+            s.phase = if (s.springTargetOpen) SPREAD_OPENING else SPREAD_CLOSING
+            applySpread(s, 0f)
+            LockIslands.openStack("spring spread", scroll = false)
+            // Layout is the OEM's; visible movement is ours. Applying both animations would
+            // drag every row's destination along during its spring and erase the cascade.
+            if (!NumState.stopAt(s.cardsY)) {
+                endSpread(folded = true, why = "spring list unavailable")
+            }
+            return
+        }
         // Under a finger the stack goes where it takes it (followFinger), from where it is now.
         LockIslands.openStack("spread", scroll = held == null)
         if (held != null) {
@@ -472,7 +803,11 @@ internal class SpreadMotion(
             val m = MiniCardMorph(view, native, toCards, spreadListener, noteMorphMotion.landingFor(item.key, native),
                 restBox = if (small) { { views.smallBoxOnScreen() } } else null,
                 circle = small && !s.stacked,
-                holdMaterial = item.lead && !s.stacked)
+                holdMaterial = item.lead && !s.springAnimating,
+                springContent = s.springAnimating,
+                stackedRole = if (!s.stacked) MorphStackLayer.ROLE_NONE
+                    else if (item.seat == SEAT_BIG) MorphStackLayer.ROLE_FRONT
+                    else MorphStackLayer.ROLE_REAR)
             if (!m.startDragging()) {
                 if (small) views.recycleSmallView(view)
                 if (item.lead) {
@@ -519,20 +854,29 @@ internal class SpreadMotion(
 
     private fun applySpread(s: Spread, p: Float) {
         s.progress = p
+        if (s.springAnimating) s.springCompanions?.pose(p)
         var hiddenTurn = 0
+        val springNow = android.os.SystemClock.uptimeMillis()
         for (item in s.items) {
-            val itemProgress = if (s.stacked && item.seat == SEAT_HIDDEN && !item.wasOut) {
+            if (s.springAnimating && s.springRows?.owns(item.native) == true) continue
+            val pose = if (s.springAnimating) s.springRows?.pose(item.native, springNow) ?: s.springPose else null
+            val itemProgress = if (s.springAnimating) {
+                pose?.position?.value ?: p
+            } else if (s.stacked && item.seat == SEAT_HIDDEN && !item.wasOut) {
                 hiddenTurn++
                 val delay = (hiddenTurn * 0.075f).coerceAtMost(0.225f)
                 ((p - delay) / (1f - delay)).coerceIn(0f, 1f)
             } else p
             val m = item.morph
             if (m != null) {
-                m.led(itemProgress)
+                m.led(itemProgress, if (s.springAnimating && item.seat == s.springSeat)
+                    (s.springLiftMotion?.value ?: s.springLift) * (1f - itemProgress.coerceIn(0f, 1f)) else 0f,
+                    opacity = pose?.opacity?.value ?: itemProgress,
+                    sharpness = pose?.sharpness?.value ?: itemProgress)
                 if (s.stacked && item.standIn) item.view?.alpha = when (item.seat) {
-                    SEAT_SMALL -> MiniPlayerGeometry.STACK_BACK_ALPHA +
-                        (1f - MiniPlayerGeometry.STACK_BACK_ALPHA) * itemProgress
-                    SEAT_HIDDEN -> itemProgress
+                    SEAT_SMALL -> (MiniPlayerGeometry.STACK_BACK_ALPHA +
+                        (1f - MiniPlayerGeometry.STACK_BACK_ALPHA) * itemProgress).coerceIn(0f, 1f)
+                    SEAT_HIDDEN -> itemProgress.coerceIn(0f, 1f)
                     else -> 1f
                 }
                 continue
@@ -542,7 +886,7 @@ internal class SpreadMotion(
             // No morph: its card fades in with the list, its place fades out, and back.
             item.native?.takeIf { it.isAttachedToWindow }?.let {
                 if (kotlin.math.abs(it.transitionAlpha - itemProgress) > 0.002f)
-                    it.transitionAlpha = itemProgress
+                    it.transitionAlpha = itemProgress.coerceIn(0f, 1f)
             }
             fadeSeat(item.seat, 1f - itemProgress)
         }
@@ -620,11 +964,12 @@ internal class SpreadMotion(
     private fun setFoldAlpha(row: View, a: Float) {
         runCatching {
             val injector = Xp.callMethod(row, "getInjector")
-            if (Xp.getObjectField(injector, "numStateAlpha") as Float == a) return
             Xp.setObjectField(injector, "numStateAlpha", a)
             val folme = Xp.getObjectField(Xp.getObjectField(Xp.callMethod(row, "getViewState"),
                 "mInjector"), "folmeAlpha") as Float
-            Xp.callMethod(row, "setExtAlpha", folme * a)
+            val ext = if (a >= 0.999f) a else folme * a
+            Xp.callMethod(row, "setExtAlpha", ext)
+            runCatching { Xp.callMethod(row, "setSuperAlpha", ext * row.alpha) }
         }
     }
 
@@ -636,12 +981,49 @@ internal class SpreadMotion(
         } ?: return
         val alpha = if (seat == SEAT_SMALL && views.stackedStyle())
             a * MiniPlayerGeometry.STACK_BACK_ALPHA else a
+        if (seat == SEAT_BIG && views.stackedStyle()) {
+            val z = if (alpha > 0.01f) MORPH_Z + 10f else 0f
+            if (v.translationZ != z) v.translationZ = z
+        }
         if (alpha > 0f && v.visibility != View.VISIBLE) v.visibility = View.VISIBLE
         if (kotlin.math.abs(v.alpha - alpha) > 0.002f) v.alpha = alpha
     }
 
     /** Opening or closing: every island on the stack's scroll, until the stack rests at an end. */
     private fun moveSpread(s: Spread) {
+        if (s.springAnimating) {
+            // Native CANCEL/settling callbacks can restart an OEM scroll after takeover.
+            // Keep the destination list laid out until our own springs finish the fold.
+            if (NumState.scrollY() != s.cardsY) NumState.setScroll(s.cardsY, stopAnimation = true)
+            val now = android.os.SystemClock.uptimeMillis()
+            val seconds = ((now - s.since) / 1000f).coerceAtLeast(0f)
+            val dt = ((now - s.springAt) / 1000f).coerceIn(0f, 0.05f)
+            s.springAt = now
+            s.springLiftMotion?.step(dt)
+            s.springRows?.setLift(s.springLiftMotion?.value ?: 0f)
+            val main = s.springPose ?: return
+            main.advance(now)
+            val p = main.position.value
+            s.rawProgress = p
+            if (s.items.any { it.morph?.active == false }) {
+                endSpread(folded = false, why = "spring morph interrupted")
+                return
+            }
+            applySpread(s, p)
+            followClock(s)
+            val mainReady = if (s.springTargetOpen) main.atRest() else main.position.atRest()
+            val settled = (mainReady && s.springLiftMotion?.atRest() != false || seconds >= 1.6f) &&
+                s.springRows?.settled(now) != false
+            if (settled && s.springSwipe == null) {
+                if (s.springTargetOpen) finishOpen(s, NumState.position() ?: s.cardsY)
+                else {
+                    if (NumState.stopAt(s.islandsY))
+                        endSpread(folded = true, why = "spring folded")
+                    else finishOpen(s, NumState.position() ?: s.cardsY)
+                }
+            }
+            return
+        }
         s.finger?.takeIf { !it.ended && s.phase == SPREAD_OPENING }?.let { followFinger(s, it) }
         val y = NumState.position() ?: return
         s.collapseFinger?.step()
@@ -766,7 +1148,7 @@ internal class SpreadMotion(
      * four frames with the card still over the list, and shrank back if the finger did (#122).
      */
     fun spreadClockProgress(): Float? = spread
-        ?.takeIf { it.phase == SPREAD_OPENING || it.phase == SPREAD_CLOSING }?.progress
+        ?.takeIf { it.phase == SPREAD_OPENING || it.phase == SPREAD_CLOSING }?.progress?.coerceIn(0f, 1f)
 
     /** The spread is open as the list: what the stack tells the clock now is the list's place. */
     fun spreadListShown(): Boolean = spread?.phase == SPREAD_OPEN
@@ -827,19 +1209,30 @@ internal class SpreadMotion(
 
     /** The list is open: the cards are the lock screen's own, the row's views put away. */
     private fun finishOpen(s: Spread, y: Int) {
+        val springOpening = s.springAnimating
+        if (springOpening) s.items.forEach { it.morph?.led(1f) }
+        s.springRows?.close()
+        s.springRows = null
+        s.springCompanions?.pause()
+        s.springAnimating = false
+        s.springTargetOpen = true
+        s.springPose = null
         s.collapseFinger = null
         letLeadGoWhenSettled()
         // Whether the hand-off tail about to be kept is one the pill draws itself.
         val leadPill = s.items.firstOrNull { it.lead }?.view === views.player
         for (item in s.items) {
             val m = item.morph
-            if (m != null && item.lead && !s.stacked && m.active) {
+            val keepsTail = m != null && item.lead && !s.stacked && !springOpening && m.active
+            if (keepsTail) {
                 // The pill fades out on the row, which draws its own glass again from now
                 // (MiniCardMorph.handOff); put away once it has gone.
                 endLeadTail()
                 leadTail = m
+                val tailView = item.view.takeIf { item.standIn }
                 m.handOff {
                     if (leadTail === m) leadTail = null
+                    tailView?.let(views::recycleSmallView)
                     if (spread?.phase == SPREAD_OPEN) {
                         views.player?.visibility = View.INVISIBLE
                         views.player?.alpha = 1f
@@ -847,7 +1240,7 @@ internal class SpreadMotion(
                 }
             } else m?.cancel()
             item.morph = null
-            item.view?.let { if (item.standIn) views.recycleSmallView(it) }
+            item.view?.let { if (item.standIn && !keepsTail) views.recycleSmallView(it) }
             item.view = null
             item.standIn = false
             item.native?.let(stackHost::showRow)
@@ -866,6 +1259,8 @@ internal class SpreadMotion(
         views.smallIsland?.alpha = if (views.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
         if (s.items.any { it.key == MUSIC_ISLAND }) rowHost.ensureNativeHeaderVisible()
         s.phase = SPREAD_OPEN
+        s.progress = 1f
+        s.rawProgress = 1f
         s.cardsY = y
         s.still = 0
         s.lastInNumber = NumState.inNumber
@@ -900,6 +1295,7 @@ internal class SpreadMotion(
         // Asleep it is left be; woken, the stack goes back to the list if it is not there.
         val now = android.os.SystemClock.uptimeMillis()
         if (MiniPlayerScene.aodActive || !Main.screenOnCached()) {
+            s.springSwipe = null
             s.slept = true
             s.wokeAt = 0L
             return
@@ -915,6 +1311,7 @@ internal class SpreadMotion(
                 (NumState.inNumber == true || NumState.busy())) return
             s.wokeAt = 0L
         }
+        if (s.springSwipe != null) return
         val y = NumState.position() ?: return
         val islandsY = NumState.scrollTo("NUMBER") ?: return
         s.lastY = y
@@ -927,7 +1324,16 @@ internal class SpreadMotion(
         val inNumber = NumState.inNumber
         val folded = s.lastInNumber == false && inNumber == true
         s.lastInNumber = inNumber
-        if (folded || listPulled() && toward > views.dp(SPREAD_PULL_DP)) {
+        val atTop = MiniPlayerCollapseGesture.atListTop(NumState.scrollY(), s.cardsY.toFloat())
+        val pullHome = s.listGesture.canFold && atTop && listPulled() &&
+            toward > views.dp(SPREAD_PULL_DP)
+        if (s.listGesture.canFold && folded || pullHome) {
+            if (springEnabled()) {
+                // A pull begun in a gap between cards can still be the OEM's touch route.
+                // Hold the list layout while the same spring path takes every row home.
+                retargetSpring(s, open = false)
+                return
+            }
             s.islandsY = islandsY
             startSpreadMorphs(s, toCards = false)
             s.phase = SPREAD_CLOSING
@@ -943,7 +1349,8 @@ internal class SpreadMotion(
             spreadTrace("spread closing (${if (folded) "folded" else "pulled"}): " + describeSpread())
             return
         }
-        if (!listPulled() && !NumState.busy()) s.cardsY = y
+        // Do not replace cardsY with an idle scroll position. With a long list that made
+        // every later DOWN look like the top, and scrolling back immediately folded it.
     }
 
     /**
@@ -958,10 +1365,26 @@ internal class SpreadMotion(
      */
     fun endSpread(folded: Boolean, why: String) {
         val s = spread ?: return
+        val keepTail = folded && s.springAnimating && !s.springTargetOpen && s.phase == SPREAD_CLOSING &&
+            Main.keyguardLocked() && Main.screenOnCached() && !MiniPlayerScene.keyguardGoingAway &&
+            !MiniPlayerScene.aodActive
+        val tail = if (keepTail) s.springRows else null
+        val companions = if (keepTail) s.springCompanions else null
+        if (tail != null) s.springRows = null
+        if (companions != null) s.springCompanions = null
+        clearSpringOpening()
         endLeadTail()
         spread = null
         Gen.unframe(spreadFrame)
         holdLeadThroughFold(null)
+        // The NUMBER fade is applied after setOwnScrollY. Keep ordinary rows at their folded
+        // pose until it takes ownership, rather than flashing the whole list for that frame.
+        if (tail != null || companions != null) {
+            springTail = tail
+            springCompanionTail = companions
+            companions?.handBack()
+            Gen.postDelayed(springTailRelease, LEAD_LET_GO_MAX_MS)
+        }
         for (item in s.items) {
             item.morph?.cancel()
             item.morph = null
@@ -984,11 +1407,14 @@ internal class SpreadMotion(
             if (folded && !stays) stackHost.hideRowUntilGone(native, item.key)
             else stackHost.showRow(native)
         }
+        if (views.player?.inMorph() != true) views.player?.translationZ = 0f
         views.player?.alpha = 1f
         if (folded) views.player?.visibility = View.VISIBLE
         // Let go before the rows were in: the pill was held where the finger lifted it.
         views.player?.springNudgeBack(0f, 0f)
+        views.springSmallNudgeBack(0f, 0f)
         views.smallIsland?.alpha = if (views.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
+        views.ensureStackOrder()
         // The small island's place as the fold left it: whoever came down into it stays. Nobody
         // did, and a card out from before came home: that one comes up there, growing in (the
         // row's own appearing) - after the pill, next in the row, it would have been left out.

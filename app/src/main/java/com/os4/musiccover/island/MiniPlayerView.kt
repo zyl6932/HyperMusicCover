@@ -8,6 +8,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
@@ -53,6 +55,20 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
      */
     private val content = FrameLayout(context)
     private var liveArt: View? = null
+    private val stackClipPath = Path()
+    private val stackCoverPath = Path()
+    private val stackClipRect = RectF()
+    private var stackClipActive = false
+    private var stackClipHeight = 0f
+    /** The material always exposes a native round rect; the parent owns overlap clipping. */
+    private val materialOutline = object : ViewOutlineProvider() {
+        override fun getOutline(view: View, outline: Outline) {
+            val bottom = if (stackClipActive) stackClipHeight.roundToInt() else view.height
+            if (bottom <= 0 || stackClipActive && stackClipPath.isEmpty) outline.setEmpty()
+            else outline.setRoundRect(0, 0, view.width, bottom,
+                minOf(if (morphing) morphRadius else view.height / 2f, bottom / 2f))
+        }
+    }
     private val title = EdgeBlurText(context)
     private val artist = EdgeBlurText(context)
     private val textColumn = LinearLayout(context)
@@ -196,13 +212,15 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         // it, so the glass is cut to the same shape as the frame it fills.
         outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
-                outline.setRoundRect(0, 0, view.width, view.height,
+                if (stackClipActive) {
+                    if (stackClipPath.isEmpty) outline.setEmpty() else outline.setPath(stackClipPath)
+                } else outline.setRoundRect(0, 0, view.width, view.height,
                     if (morphing) morphRadius else view.height / 2f)
             }
         }
         materialLayer.scaleType = ImageView.ScaleType.FIT_XY
         materialLayer.clipToOutline = true
-        materialLayer.shape = outlineProvider
+        materialLayer.shape = materialOutline
         addView(materialLayer, LayoutParams(-1, -1))
         addView(content, LayoutParams(-1, -1))
         artwork.scaleType = ImageView.ScaleType.CENTER_CROP
@@ -288,21 +306,21 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
                 materialLayer = MaterialElement(context).apply {
                     scaleType = ImageView.ScaleType.FIT_XY
                     clipToOutline = true
-                    shape = this@MiniPlayerView.outlineProvider
+                    shape = materialOutline
                 }
                 addView(materialLayer, 0, LayoutParams(-1, -1))
             }
             lastMaterial = material
             materialAgain = {
                 applyMaterial(materialLayer)
-                materialLayer.outlineProvider = outlineProvider
+                materialLayer.outlineProvider = materialOutline
                 materialLayer.clipToOutline = true
             }
             applyMaterial(materialLayer)
             // The card's recipe gives the layer its own 24dp outline; the pill's shape - and the
             // morph's changing corner - is ours. MaterialElement keeps it so between dressings
             // too: the AOD's dim sets the card's corner again every frame.
-            materialLayer.outlineProvider = outlineProvider
+            materialLayer.outlineProvider = materialOutline
             materialLayer.clipToOutline = true
             updateGeometry(config.getDouble(MiniPlayerConfig.HEIGHT_RADIUS).toFloat())
         }
@@ -875,6 +893,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
 
     fun endMorph() {
         if (!morphing) return
+        clearMorphStackClip()
         morphing = false
         // The play button back in its own place, where a row move had carried it (setMorphFrame).
         if (layoutOnly) {
@@ -975,7 +994,58 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
 
     override fun dispatchDraw(canvas: Canvas) {
         if (transitionAlpha <= 0f) return
+        if (!stackClipActive) {
+            super.dispatchDraw(canvas)
+            return
+        }
+        canvas.save()
+        canvas.clipPath(stackClipPath)
         super.dispatchDraw(canvas)
+        canvas.restore()
+    }
+
+    /** The native notification row above this island clips its rounded lower card from it. */
+    fun setMorphStackClip(frame: CoverMorphMotion.Box, ownHeight: Float,
+                          covers: List<StackOcclusion.Shape>) {
+        if (covers.isEmpty() && ownHeight >= frame.h - 0.5f) {
+            clearMorphStackClip()
+            return
+        }
+        if (frame.w <= 0f || frame.h <= 0f) return
+        val sx = width / frame.w
+        val sy = height / frame.h
+        stackClipPath.reset()
+        stackClipHeight = (ownHeight * sy).coerceIn(0f, height.toFloat())
+        stackClipRect.set(0f, 0f, width.toFloat(), stackClipHeight)
+        if (stackClipRect.height() > 0f) {
+            val radius = minOf(morphRadius, stackClipRect.height() / 2f)
+            stackClipPath.addRoundRect(stackClipRect, radius, radius, Path.Direction.CW)
+            for (shape in covers) {
+                val box = shape.box
+                stackClipRect.set((box.x - frame.x) * sx, (box.y - frame.y) * sy,
+                    (box.x + box.w - frame.x) * sx, (box.y + box.h - frame.y) * sy)
+                stackCoverPath.reset()
+                val radiusX = minOf(shape.radius, box.w / 2f, box.h / 2f) * sx
+                val radiusY = minOf(shape.radius, box.w / 2f, box.h / 2f) * sy
+                stackCoverPath.addRoundRect(stackClipRect, radiusX, radiusY, Path.Direction.CW)
+                stackClipPath.op(stackCoverPath, Path.Op.DIFFERENCE)
+            }
+        }
+        stackClipActive = true
+        // Keep the overlap clip on the containing view. Feeding this difference Path to the
+        // material itself replaces its native round-rect glass with a flat fallback.
+        invalidateOutline()
+        materialLayer.invalidateOutline()
+        invalidate()
+    }
+
+    fun clearMorphStackClip() {
+        if (!stackClipActive) return
+        stackClipActive = false
+        stackClipPath.reset()
+        invalidateOutline()
+        materialLayer.invalidateOutline()
+        invalidate()
     }
 
     fun setContentAlpha(alpha: Float) {

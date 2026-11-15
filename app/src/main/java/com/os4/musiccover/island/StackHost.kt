@@ -215,7 +215,8 @@ internal class StackHost(
                 if (c.visibility == View.GONE || c.height <= 0) continue
                 val name = c.javaClass.name
                 if (!name.contains("ExpandableNotificationRow") && !name.contains("MediaHeader")) continue
-                val t = stackTargetY(c) + c.top
+                val companionTop = spreadMotion.companionTop(c)
+                val t = companionTop ?: (stackTargetY(c) + c.top)
                 // One of the spread's cards, hidden or drawn at nothing while its island's morph
                 // has it: weighed where the morph is taking it, from its island's place to its own
                 // by the spread's progress. Skipped as not drawn, the clock kept its size till the
@@ -257,7 +258,7 @@ internal class StackHost(
                 if (home || c in hiddenRows && !coming || c.visibility != View.VISIBLE ||
                     c.alpha <= 0.01f && !coming || folded) { skipped++; continue }
                 if (t < top) { top = t; from = c }
-                val d = c.top + c.translationY
+                val d = companionTop ?: (c.top + c.translationY)
                 if (d < drawnTop) drawnTop = d
             }
             contentDrawnTop = ClockRoomPolicy.contentTop(stackY.toFloat(), drawnTop)
@@ -761,7 +762,9 @@ internal class StackHost(
      * opened it to: the same scroll its progress is measured on.
      */
     fun nativeStackAtTop(readRest: Boolean): Boolean {
-        val spreadRest = spreadMotion.spread?.takeIf { it.phase == SPREAD_OPEN || it.phase == SPREAD_CLOSING }
+        val spreadRest = spreadMotion.spread?.takeIf {
+            it.phase == SPREAD_OPEN || it.phase == SPREAD_CLOSING || it.springAnimating
+        }
             ?.cardsY?.toFloat()
         if (readRest) restScrollY = spreadRest
             ?: if (LockIslands.isReleased(STACK_ISLAND)) listRestScroll() else 0f

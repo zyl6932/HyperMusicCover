@@ -1042,15 +1042,18 @@ object MiniPlayerRuntime {
      * decides above the view tree; this runs from the shade window's dispatch, before it.
      */
     @JvmStatic fun routeTouch(ev: MotionEvent): Boolean { android.os.Trace.beginSection("MC t.route"); try {
+        live().forEach { it.observeListTouch(ev) }
         val action = ev.actionMasked
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) releasePress()
         if (action == MotionEvent.ACTION_DOWN) {
+            routedOwner?.cancelSpringPull()
             routedX = ev.rawX
             routedY = ev.rawY
             routedDrag = false
             routedSwiped = false
             routedMorph = false
             routedSpread = false
+            routedSpring = false
             routedStack = false
             routedPullRefused = false
             // What the last gesture was, in case it never reached its UP or CANCEL here.
@@ -1141,7 +1144,8 @@ object MiniPlayerRuntime {
                 // Up on the music: the rows its card takes along are asked for now, so they are
                 // there by the time the pull opens it.
                 if (!routedIsland && dy < 0f && -dy >= kotlin.math.abs(dx)) {
-                    routedOwner?.anticipateRows(routedSmall)
+                    routedSpring = routedOwner?.beginSpringPull(routedY, routedSmall) == true
+                    if (!routedSpring) routedOwner?.anticipateRows(routedSmall)
                 }
             } else {
                 // An exchange running: a tap turns it round or cuts it short, and nothing else.
@@ -1166,6 +1170,19 @@ object MiniPlayerRuntime {
             }
         }
         val nx = pillNudgeX(dx, d)
+        if (routedSpring) {
+            when (action) {
+                MotionEvent.ACTION_MOVE -> routedOwner?.moveSpringPull(ev.rawY)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    routedTracker?.computeCurrentVelocity(1000)
+                    routedOwner?.endSpringPull(routedTracker?.yVelocity ?: 0f,
+                        action == MotionEvent.ACTION_CANCEL)
+                    endRoute()
+                }
+            }
+            // Continue consuming the gesture while the spread handles subsequent reversals.
+            return true
+        }
         when (action) {
             MotionEvent.ACTION_MOVE -> {
                 if (!routedMorph && !routedIsland && !routedStack && !routedNote && !routedSpread &&
@@ -1266,6 +1283,7 @@ object MiniPlayerRuntime {
     private var routedDrag = false
     private var routedMorph = false
     private var routedSpread = false
+    private var routedSpring = false
     private var routedStack = false
     private var routedTracker: VelocityTracker? = null
 
@@ -1304,10 +1322,12 @@ object MiniPlayerRuntime {
     internal const val PRESS_SMALL = -2
 
     private fun endRoute() {
+        routedOwner?.cancelSpringPull()
         routedOwner?.stopAnticipating()
         routedIsland = false
         routedNote = false
         routedSpread = false
+        routedSpring = false
         routedStack = false
         routedOwner = null
         routed = null
@@ -1688,6 +1708,8 @@ object MiniPlayerRuntime {
 
     @JvmStatic fun spreadCollapseAt(x: Float, y: Float): Boolean =
         live().any { it.spreadCollapseAt(x, y) }
+
+    @JvmStatic fun springSpreadMoving(): Boolean = live().any { it.springSpreadMoving() }
 
     private var spreadCollapseOwner: MiniPlayerController? = null
     private var spreadCollapseTracker: VelocityTracker? = null

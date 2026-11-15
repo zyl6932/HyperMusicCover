@@ -103,6 +103,12 @@ internal object NumState {
 
     private fun handsUp(model: Any, info: Any?, target: Float): Float? {
         if (!folding || info == null || !LockIslands.foldsToCount()) return null
+        // CardTouch sends the OEM a CANCEL when it catches a moving row. The live springs
+        // own the fold now; this legacy hands-up override must not fold their layout early.
+        if (MiniPlayerRuntime.springSpreadMoving()) return null
+        // An open long list may stop at STACK during ordinary scrolling. Only the spread's
+        // explicit downward gesture owns its collapse, never this legacy pile-to-NUMBER rule.
+        if (MiniPlayerRuntime.spreadListShown()) return null
         val event = (Xp.getObjectField(info, "stackShowEvent") as? Enum<*>)?.name
         if (event != "HANDS_UP" || Xp.getObjectField(info, "isNumberState") == true) return null
         if ((Xp.getObjectField(info, "normalNotifCount") as Number).toInt() <= 0) return null
@@ -308,15 +314,26 @@ internal object NumState {
      * The stack put at scroll [y] this frame, no animation (a finger has it): as goTo's unanimated
      * way, a running scroll of its own stopped first. False when it could not be.
      */
-    fun setScroll(y: Int): Boolean = runCatching {
+    fun setScroll(y: Int, stopAnimation: Boolean = false): Boolean = runCatching {
         val model = model() ?: return false
         val stack = MiniPlayerRuntime.stackForProbe() ?: return false
         val refactor = Xp.callMethod(Xp.getObjectField(model, "notifContainerRefactor"), "get")
-        if ((Xp.callMethod(refactor, "getOwnScrollY") as Number).toInt() == y) return true
+        val current = (Xp.callMethod(refactor, "getOwnScrollY") as Number).toInt()
+        if (current == y && !stopAnimation) return true
         Xp.callMethod(Xp.callMethod(refactor, "getOverScroller"), "abortAnimation")
         Xp.callMethod(stack, "setOwnScrollY", y)
         true
     }.getOrDefault(false)
+
+    /** A spring owns the visible rows now; discard the OEM pull as well as its scroll animator. */
+    fun stopAt(y: Int): Boolean {
+        runCatching {
+            val stack = MiniPlayerRuntime.stackForProbe() ?: return@runCatching
+            Xp.callMethod(stack, "setOverScrollAmount", 0f, true, false)
+            Xp.callMethod(stack, "setOverScrollAmount", 0f, false, false)
+        }
+        return setScroll(y, stopAnimation = true)
+    }
 
     @Suppress("UNCHECKED_CAST")
     private fun topChangeType(injector: Any, name: String): Any {
