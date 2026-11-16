@@ -15,6 +15,17 @@
 -dontwarn io.github.libxposed.**
 -keep class io.github.libxposed.api.** { *; }
 
+# The SuperLyric API ships consumer rules for the @Wire fields and the AIDL stubs, but not for
+# the hidden android.os.ServiceManager it looks the service up through - not on the compile
+# classpath, present at runtime inside SystemUI, so the dangling reference is expected.
+-dontwarn android.os.ServiceManager
+#
+# The rest of it is kept whole because two paths are reflective and would only fail in release:
+# WireCodec builds every struct with getDeclaredConstructor().newInstance(), which no keep rule
+# covers, and the legacy 3.x transport reads SuperLyricData back off a Parcel by class name. Both
+# degrade quietly - the first throws WireFormatException on every frame, the second finds nothing.
+-keep class com.hchen.superlyricapi.** { *; }
+
 # ColorOS's pickup plugin (assets/coloros/pcr_plugin.apk) is loaded at runtime into its own class
 # loader whose parent is this module's, and it resolves Gson and the Kotlin stdlib out of this dex
 # by name - we dex them because the plugin's OEM host supplies them and the plugin bundles neither.

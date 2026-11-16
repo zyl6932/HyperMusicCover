@@ -17,6 +17,9 @@ webkit = "1.17.0"
 # Apache-2.0, which the AGPL-3.0 this module is under takes in without complaint.
 lyricsCore = "0.4.7"
 lyriconSubscriber = "0.1.70"
+# The other lyric bridge, fed by the SuperLyric module's system service. JitPack-hosted; what its
+# own consumer rules leave uncovered is set in app/proguard-rules.pro.
+superLyricApi = "4.0"
 # HCT, for the lyric colours taken from the cover (LyricPalette). miuix already brings this
 # version in; named here because the module now calls it directly.
 materialColorUtilities = "5.0.0"
@@ -42,6 +45,7 @@ material-color-utilities = { group = "com.materialkolor", name = "material-color
 
 lyrics-core = { group = "com.mocharealm.accompanist", name = "lyrics-core", version.ref = "lyricsCore" }
 lyricon-subscriber = { group = "io.github.proify.lyricon", name = "subscriber", version.ref = "lyriconSubscriber" }
+superlyric-api = { group = "com.github.HChenX", name = "SuperLyricApi", version.ref = "superLyricApi" }
 commonmark = { group = "org.commonmark", name = "commonmark", version.ref = "commonmark" }
 commonmark-ext-gfm-tables = { group = "org.commonmark", name = "commonmark-ext-gfm-tables", version.ref = "commonmark" }
 commonmark-ext-gfm-strikethrough = { group = "org.commonmark", name = "commonmark-ext-gfm-strikethrough", version.ref = "commonmark" }

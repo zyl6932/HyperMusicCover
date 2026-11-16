@@ -25,6 +25,7 @@ import com.os4.musiccover.island.MiniPlayerRuntime;
 import com.os4.musiccover.island.NumState;
 import com.os4.musiccover.lyrics.LockLyrics;
 import com.os4.musiccover.lyrics.LyriconSource;
+import com.os4.musiccover.lyrics.SuperLyricSource;
 import com.os4.musiccover.pickup.PickupIsland;
 import com.os4.musiccover.shade.ShadeLayer;
 
@@ -166,6 +167,7 @@ public final class SystemUiRetire {
     private static void retireLyrics() {
         LockLyrics.retire();
         LyriconSource.detach();
+        SuperLyricSource.detach();
     }
 
     /** 2. The card layer, the morph copy, and the legacy cover view with its guard. */

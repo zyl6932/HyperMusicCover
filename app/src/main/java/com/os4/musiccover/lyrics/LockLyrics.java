@@ -1045,17 +1045,19 @@ public final class LockLyrics {
     private static int sInfoTries;
 
     /**
-     * The bridge has just published a song with lyrics (PR #103). Its answer often lands after the
-     * lookup for the track has already gone past it and settled on a catalogue, or on nothing; the
-     * lookup is run again, in its usual order, so the bridge's lyric takes its place. Not when
-     * what is up already came from the player's own session, its file, or the bridge itself:
-     * a re-run would only find that again.
+     * A lyric bridge has just published a song with lyrics (PR #103): the Lyricon bridge, or the
+     * SuperLyric server, which calls into this same routine for the same reason. That answer
+     * often lands after the lookup for the track has already gone past it and settled on a
+     * catalogue, or on nothing; the lookup is run again, in its usual order, so the bridge's
+     * lyric takes its place. Not when what is up already came from the player's own session, its
+     * file, or either bridge: a re-run would only find that again.
      */
     static void onProviderLyrics() {
         Main.main().post(() -> {
             if (!Settings.LYRICS.on() || sDemo || sKey.isEmpty() || sController == null) return;
             if (!sLines.isEmpty() && (sSource == LyricSource.SRC_LYRIC_INFO
-                    || sSource == LyricSource.SRC_LOCAL || sSource == LyricSource.SRC_LYRICON)) {
+                    || sSource == LyricSource.SRC_LOCAL || sSource == LyricSource.SRC_LYRICON
+                    || sSource == LyricSource.SRC_SUPERLYRIC)) {
                 return;
             }
             CACHE.remove(sKey);
@@ -1529,6 +1531,8 @@ public final class LockLyrics {
                 return "local";
             case LyricSource.SRC_LYRICON:
                 return "lyricon";
+            case LyricSource.SRC_SUPERLYRIC:
+                return "superlyric";
             case LyricSource.SRC_DATABASE:
                 return "amll";
             case LyricSource.SRC_NETEASE:
