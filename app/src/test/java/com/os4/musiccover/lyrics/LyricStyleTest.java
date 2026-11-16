@@ -67,6 +67,10 @@ public class LyricStyleTest {
         assertEquals(1f, s.with("pos", 5f).pos, 0f);
         assertEquals(700, s.with("weight", 9999f).weight);
         assertEquals(500, s.with("weight", 549f).weight);
+        assertEquals(300, s.with("weight", 0f).weight);
+        assertEquals(700, s.with("bgweight", 9999f).bgWeight);
+        assertEquals(300, s.with("transweight", 0f).transWeight);
+        assertEquals(500, s.with("bgweight", 549f).bgWeight);
         assertNull(band(s, Float.NaN, 500f, 25f));
     }
 
@@ -76,5 +80,7 @@ public class LyricStyleTest {
         assertFalse(s.sameLayout(s.with("side", 40f)));
         assertFalse(s.sameLayout(s.with("size", 30f)));
         assertFalse(s.sameLayout(s.with("weight", 700f)));
+        assertFalse(s.sameLayout(s.with("bgweight", 700f)));
+        assertFalse(s.sameLayout(s.with("transweight", 700f)));
     }
 }

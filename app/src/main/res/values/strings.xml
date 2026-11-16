@@ -21,7 +21,7 @@
     <string name="clock_size">时钟大小</string>
     <string name="clock_force_colon">时钟强制显示冒号</string>
     <string name="clock_force_colon_summary">部分样式不生效</string>
-    <string name="clock_aod_big">息屏时显示大时钟</string>
+    <string name="clock_aod_big">AOD息屏时显示大时钟</string>
     <string name="restart_menu">重启</string>
     <string name="restart_systemui">重启系统界面</string>
     <string name="restart_wallpaper">重启壁纸</string>
@@ -180,7 +180,9 @@
     <string name="lyrics_style_general">通用</string>
     <string name="lyrics_style_text">文字</string>
     <string name="lyrics_size">字号</string>
+    <string name="lyrics_weight">字重</string>
     <string name="lyrics_style_main">主歌词</string>
+    <string name="lyrics_style_trans">翻译</string>
     <string name="lyrics_style_backing">和声</string>
     <string name="lyrics_color">颜色</string>
     <string name="lyrics_color_official">官方</string>
@@ -196,8 +198,7 @@
     <string name="lyrics_align_left">居左</string>
     <string name="lyrics_align_center">居中</string>
     <string name="lyrics_align_right">居右</string>
-    <string name="lyrics_hdr">HDR 高光歌词（实验性功能）</string>
-    <string name="lyrics_hdr_summary">可能引起掉帧</string>
+    <string name="lyrics_hdr">HDR 高光歌词</string>
     <string name="lyrics_hdr_unsupported">此屏幕不支持 HDR</string>
     <string name="lyrics_keep_on">播放歌词时屏幕常亮</string>
     <string name="hide_fingerprint">隐藏锁屏指纹图标</string>
@@ -273,17 +274,15 @@
     <string name="mini_group_by_app">按应用合并普通通知</string>
     <string name="mini_group_by_app_summary">堆叠时，同一应用的普通通知放在同一层；点击展开该应用的通知</string>
     <string name="mini_media_collapsed">播放音乐时不自动展开封面</string>
-    <string name="mini_media_collapsed_summary">开始播放时先显示锁屏岛，点击后再展开音乐封面</string>
+    <string name="mini_media_collapsed_summary">播放时显示锁屏岛</string>
     <string name="mini_height">锁屏岛高度</string>
     <string name="mini_height_summary">同时调整两侧锁屏快捷功能的图标大小</string>
-    <string name="mini_widen">锁屏快捷功能关闭时加宽</string>
-    <string name="mini_widen_summary">锁屏快捷功能关闭后，锁屏岛占用空出的位置</string>
+    <string name="mini_widen">快捷功能关闭后加宽锁屏岛</string>
     <string name="mini_normals_in_stack">普通通知不上岛</string>
     <string name="mini_nav_keep_on">导航时屏幕常亮</string>
-    <string name="mini_status_at_date">状态信息在日期后</string>
+    <string name="mini_status_at_date">原底部状态信息显示在日期后</string>
     <string name="mini_status_at_date_summary">关闭后显示在底部</string>
-    <string name="mini_fod_lift">避开屏下指纹</string>
-    <string name="mini_fod_lift_summary">光学短焦指纹位置较低的机型，把胶囊抬到指纹区上方</string>
+    <string name="mini_fod_lift">锁屏岛避开屏下短焦指纹</string>
     <string name="mini_nav_keep_on_summary">显示高德导航或公交页面时</string>
 
     <!-- What the two demonstrations are called, page by page. Only the title: the page under it

@@ -38,6 +38,10 @@ object SettingsBackup {
     private const val KEY_LYRICS_ALIGN = "lyricsAlignment"
     private const val KEY_LYRICS_SIZE = "lyricsSize"
     private const val KEY_LYRICS_BG_SIZE = "lyricsBackingSize"
+    private const val KEY_LYRICS_TRANS_SIZE = "lyricsTranslationSize"
+    private const val KEY_LYRICS_WEIGHT = "lyricsWeight"
+    private const val KEY_LYRICS_BG_WEIGHT = "lyricsBackingWeight"
+    private const val KEY_LYRICS_TRANS_WEIGHT = "lyricsTranslationWeight"
     private const val KEY_LYRICS_APPEARANCE = "lyricsAppearance"
     private const val KEY_FP_AVOID = "fingerprintAvoid"
     private const val KEY_TRANSIT = "amapTransit"
@@ -58,8 +62,8 @@ object SettingsBackup {
             // The settings that are no longer settings are not written, and not read back on
             // import either: the square's size and place, the clock's offset, the glass
             // end, the spring, the two media card switches, the small AOD clock, the lyrics
-            // switch and the four values of the lyric band besides its two sizes. Each is fixed where it
-            // is used now, so a backup that carries one is a backup of something that can no
+            // switch and the four values of the lyric band besides its three sizes. Each is fixed
+            // where it is used now, so a backup that carries one is a backup of something that can no
             // longer be set - see Main and LyricStyle. The keys are gone from this file rather
             // than kept for compatibility: importing a value nothing can hold is the one outcome
             // worse than not importing it.
@@ -82,6 +86,10 @@ object SettingsBackup {
             json.put(KEY_LYRICS_ALIGN, module.lyricsAlign)
             json.put(KEY_LYRICS_SIZE, module.lyricSizeSp.toDouble())
             json.put(KEY_LYRICS_BG_SIZE, module.lyricBgSizeSp.toDouble())
+            json.put(KEY_LYRICS_TRANS_SIZE, module.lyricTransSizeSp.toDouble())
+            json.put(KEY_LYRICS_WEIGHT, module.lyricWeight)
+            json.put(KEY_LYRICS_BG_WEIGHT, module.lyricBgWeight)
+            json.put(KEY_LYRICS_TRANS_WEIGHT, module.lyricTransWeight)
             if (module.lyricAppearance.isNotEmpty()) {
                 json.put(KEY_LYRICS_APPEARANCE, JSONObject(module.lyricAppearance))
             }
@@ -173,6 +181,19 @@ object SettingsBackup {
             }
             if (obj.has(KEY_LYRICS_BG_SIZE)) {
                 ModuleBridge.setLyricStyle(context, "bgsize", obj.getDouble(KEY_LYRICS_BG_SIZE).toFloat())
+            }
+            if (obj.has(KEY_LYRICS_TRANS_SIZE)) {
+                ModuleBridge.setLyricStyle(context, "transsize",
+                    obj.getDouble(KEY_LYRICS_TRANS_SIZE).toFloat())
+            }
+            if (obj.has(KEY_LYRICS_WEIGHT)) {
+                ModuleBridge.setLyricWeight(context, "weight", obj.getInt(KEY_LYRICS_WEIGHT))
+            }
+            if (obj.has(KEY_LYRICS_BG_WEIGHT)) {
+                ModuleBridge.setLyricWeight(context, "bgweight", obj.getInt(KEY_LYRICS_BG_WEIGHT))
+            }
+            if (obj.has(KEY_LYRICS_TRANS_WEIGHT)) {
+                ModuleBridge.setLyricWeight(context, "transweight", obj.getInt(KEY_LYRICS_TRANS_WEIGHT))
             }
             if (obj.has(KEY_LYRICS_APPEARANCE)) {
                 ModuleBridge.setLyricAppearance(context, obj.getJSONObject(KEY_LYRICS_APPEARANCE).toString())

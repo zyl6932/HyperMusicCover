@@ -174,7 +174,9 @@
     <string name="lyrics_style_general">General</string>
     <string name="lyrics_style_text">Text</string>
     <string name="lyrics_size">Size</string>
+    <string name="lyrics_weight">Weight</string>
     <string name="lyrics_style_main">Lead</string>
+    <string name="lyrics_style_trans">Translation</string>
     <string name="lyrics_style_backing">Backing vocal</string>
     <string name="lyrics_color">Colour</string>
     <string name="lyrics_color_official">Official</string>
@@ -190,8 +192,7 @@
     <string name="lyrics_align_left">Left</string>
     <string name="lyrics_align_center">Center</string>
     <string name="lyrics_align_right">Right</string>
-    <string name="lyrics_hdr">HDR highlight (experimental)</string>
-    <string name="lyrics_hdr_summary">May drop frames</string>
+    <string name="lyrics_hdr">HDR highlight</string>
     <string name="lyrics_hdr_unsupported">This screen does not support HDR</string>
     <string name="lyrics_keep_on">Keep the screen on for lyrics</string>
     <string name="hide_fingerprint">Hide lock screen fingerprint icon</string>
@@ -263,17 +264,15 @@
     <string name="mini_group_by_app">Group ordinary notifications by app</string>
     <string name="mini_group_by_app_summary">In stacked layout, ordinary notifications from the same app share one layer. Tap to expand that app’s notifications</string>
     <string name="mini_media_collapsed">Keep music artwork collapsed</string>
-    <string name="mini_media_collapsed_summary">Show the island when playback starts. Tap it to expand the music artwork</string>
+    <string name="mini_media_collapsed_summary">Show the lock screen island on playback</string>
     <string name="mini_height">Island height</string>
     <string name="mini_height_summary">Also resize the lock screen quick function icons on either side</string>
-    <string name="mini_widen">Widen when lock screen quick functions are off</string>
-    <string name="mini_widen_summary">The island fills the space left by disabled lock screen quick functions</string>
+    <string name="mini_widen">Widen the lock screen island when quick functions are off</string>
     <string name="mini_normals_in_stack">Keep ordinary notifications off islands</string>
     <string name="mini_nav_keep_on">Keep the screen on while navigating</string>
-    <string name="mini_status_at_date">Status info after the date</string>
+    <string name="mini_status_at_date">Bottom status info shown after the date</string>
     <string name="mini_status_at_date_summary">Off: back at the bottom</string>
-    <string name="mini_fod_lift">Clear of the fingerprint sensor</string>
-    <string name="mini_fod_lift_summary">On phones with a low optical sensor, lifts the pill above it</string>
+    <string name="mini_fod_lift">Keep the lock screen island clear of the under-display short-focus fingerprint sensor</string>
     <string name="mini_nav_keep_on_summary">While an Amap navigation or transit page is up</string>
 
     <!-- What the two demonstrations are called, page by page; see the default strings for the rule. -->

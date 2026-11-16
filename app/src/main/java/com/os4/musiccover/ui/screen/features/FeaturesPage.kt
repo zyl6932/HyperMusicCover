@@ -754,6 +754,8 @@ internal fun ValueSlider(
     valueRange: ClosedFloatingPointRange<Float>,
     enabled: Boolean,
     detent: Float? = null,
+    /** Several key points, for a slider whose values are steps rather than a range of its own. */
+    keyPoints: List<Float>? = null,
     label: (Float) -> String = ::format,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: (() -> Unit)? = null,
@@ -784,9 +786,10 @@ internal fun ValueSlider(
             // Step is what makes a key point produce a tick at all; the default effect only fires
             // at the two ends of the track (SliderHapticEffect.Edge), and those ends keep firing
             // either way, because the edge haptic is played before the key point is looked at.
-            hapticEffect = if (detent != null) SliderDefaults.SliderHapticEffect.Step
+            hapticEffect = if (detent != null || keyPoints != null)
+                               SliderDefaults.SliderHapticEffect.Step
                            else SliderDefaults.DefaultHapticEffect,
-            keyPoints = detent?.let { listOf(it) },
+            keyPoints = keyPoints ?: detent?.let { listOf(it) },
             // The library's magnet would pull the value onto the key point from 2% of the range
             // away, which is a snap rather than a tick, and it would take the values just either
             // side of the detent out of what this slider can be set to. Off, deliberately: the

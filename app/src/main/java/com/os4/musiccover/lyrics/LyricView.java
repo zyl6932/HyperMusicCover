@@ -60,13 +60,10 @@ final class LyricView extends View {
 
     // ---- the look. Sizes are sp/dp; nothing here is a pixel.
     private static final float TEXT_SP = 25f;
-    private static final float TRANS_SP = 15f;
     /** The background vocal under a line: smaller, dimmer, and lifting less than the lead. */
     private static final float BG_SP = 17f;
-    private static final int BG_WEIGHT = 500;
     private static final float BG_GAP_DP = 3f;
     private static final float BG_LIFT = 0.6f;
-    private static final int TRANS_WEIGHT = 500;
     /** Between one line's last row (or its translation) and the next line. */
     private static final float GAP_DP = 22f;
     private static final float TRANS_GAP_DP = 5f;
@@ -82,7 +79,6 @@ final class LyricView extends View {
     private static final float ABOVE_ALPHA = 0.6f;
     /** How saturated the dim text's tint may be; Apple's reads as a pale version of the cover. */
     private static final float TINT_SAT = 0.28f;
-    private static final float TRANS_ALPHA = 0.62f;
     private static final float INACTIVE_SCALE = 0.97f;
     /** The lit lines at full size, as AMLL draws them; the rest INACTIVE_SCALE. */
     private static final float ACTIVE_SCALE = 1f;
@@ -261,7 +257,7 @@ final class LyricView extends View {
     private int paletteRequest;
     private float tintR = 1f, tintG = 1f, tintB = 1f;
     private LyricAppearance appearance;
-    private int mainDim = -1, mainLit = -1, bgDim = -1, bgLit = -1;
+    private int mainDim = -1, mainLit = -1, bgDim = -1, bgLit = -1, transDim = -1;
     private volatile int blurGeneration;
     private final Matrix gradMatrix = new Matrix();
     private final LinearGradient[] grads = new LinearGradient[3];
@@ -459,11 +455,12 @@ final class LyricView extends View {
         sidePx = style.sidePx(getWidth(), shortSide(), density, textPx);
         paint.setTextSize(textPx);
         paint.setTypeface(Typeface.create(Typeface.DEFAULT, style.weight, false));
-        transPaint.setTextSize(textPx * TRANS_SP / TEXT_SP);
-        transPaint.setTypeface(Typeface.create(Typeface.DEFAULT, TRANS_WEIGHT, false));
+        transPaint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,
+                style.transSizeSp, getResources().getDisplayMetrics()));
+        transPaint.setTypeface(Typeface.create(Typeface.DEFAULT, style.transWeight, false));
         bgPaint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,
                 style.bgSizeSp, getResources().getDisplayMetrics()));
-        bgPaint.setTypeface(Typeface.create(Typeface.DEFAULT, BG_WEIGHT, false));
+        bgPaint.setTypeface(Typeface.create(Typeface.DEFAULT, style.bgWeight, false));
     }
 
     /**
@@ -1574,11 +1571,16 @@ final class LyricView extends View {
         final TextPaint p = new TextPaint(paint);
         p.setTextSize(buildTextPx);
         p.setTypeface(Typeface.create(Typeface.DEFAULT, style.weight, false));
+        // The paints' sizes and weights are set here rather than inherited: the copies below are
+        // made from the paints of the layout in use, whose style is not necessarily this one.
         final TextPaint bp = new TextPaint(bgPaint);
         bp.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,
                 style.bgSizeSp, getResources().getDisplayMetrics()));
+        bp.setTypeface(Typeface.create(Typeface.DEFAULT, style.bgWeight, false));
         final TextPaint tp = new TextPaint(transPaint);
-        tp.setTextSize(buildTextPx * TRANS_SP / TEXT_SP);
+        tp.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,
+                style.transSizeSp, getResources().getDisplayMetrics()));
+        tp.setTypeface(Typeface.create(Typeface.DEFAULT, style.transWeight, false));
         if (ls.isEmpty()) {
             wantVersion = wantWidth = -1;
             wantTrans = transOn;
@@ -2246,7 +2248,9 @@ final class LyricView extends View {
         if (src == tintSrc && appearance == next) return;
         tintSrc = src;
         appearance = next;
-        boolean needsCover = next.mainMode == LyricAppearance.COVER || next.bgMode == LyricAppearance.COVER;
+        boolean needsCover = next.mainMode == LyricAppearance.COVER
+                || next.bgMode == LyricAppearance.COVER
+                || next.transMode == LyricAppearance.COVER;
         if (needsCover && (coverPalette == null || coverPalette.seed != src)) requestPalette(src);
         else if (paletteWork != null) {
             paletteRequest++;
@@ -2274,23 +2278,26 @@ final class LyricView extends View {
         mainLit = resolveColor(next.mainMode, next.mainColor, -1, false, true);
         bgDim = resolveColor(next.bgMode, next.bgColor, ti, true, false);
         bgLit = resolveColor(next.bgMode, next.bgColor, -1, true, true);
+        // The translation never lights up, so its lit colour is never asked for.
+        transDim = resolveColor(next.transMode, next.transColor, ti, false, false);
         // Each text role has its own color and alpha baked into the blur. Tinting the whole
         // bitmap would overwrite the backing vocal's settings and multiply its alpha twice.
         bmpPaint.setColorFilter(null);
         if (oldMainDim != mainDim || oldBgDim != bgDim ||
                 builtMainOpacity != next.mainOpacity || builtBgOpacity != next.bgOpacity ||
-                builtTranslationTint != ti) {
+                builtTransOpacity != next.transOpacity || builtTransDim != transDim) {
             builtMainOpacity = next.mainOpacity;
             builtBgOpacity = next.bgOpacity;
-            builtTranslationTint = ti;
+            builtTransOpacity = next.transOpacity;
+            builtTransDim = transDim;
             blurGeneration++;
             blurBmp = new Bitmap[lines.size()][BLUR_MAX_ROWS];
             blurPending.clear();
         }
     }
 
-    private float builtMainOpacity = -1f, builtBgOpacity = -1f;
-    private int builtTranslationTint;
+    private float builtMainOpacity = -1f, builtBgOpacity = -1f, builtTransOpacity = -1f;
+    private int builtTransDim;
 
     private void requestPalette(final int seed) {
         if (paletteWork != null) blurHandler().removeCallbacks(paletteWork);
@@ -2340,10 +2347,10 @@ final class LyricView extends View {
         return android.graphics.Color.pack(r * gain, g * gain, b * gain, clamp01(alpha), EXTENDED);
     }
 
+    /** The translation's ink: its own colour and opacity, white as it fades in and out. */
     private long translationInk(float alpha, float whiteness) {
-        float w = clamp01(whiteness);
-        float r = tintR + (1f - tintR) * w, g = tintG + (1f - tintG) * w, b = tintB + (1f - tintB) * w;
-        return android.graphics.Color.pack(r, g, b, clamp01(alpha), EXTENDED);
+        LyricAppearance a = appearance == null ? LyricAppearance.DEFAULT : appearance;
+        return blendInk(transDim, -1, whiteness, alpha * a.transOpacity, 1f);
     }
 
     /** The distance a blur radius belongs to. */
@@ -2406,7 +2413,7 @@ final class LyricView extends View {
         final TextPaint bp = new TextPaint(bgPaint);
         p.setColor(android.graphics.Color.toArgb(ink(1f, 0f)));
         bp.setColor(android.graphics.Color.toArgb(ink(1f, 0f, true)));
-        tp.setColor(android.graphics.Color.toArgb(translationInk(TRANS_ALPHA, 0f)));
+        tp.setColor(android.graphics.Color.toArgb(translationInk(1f, 0f)));
         final int pad = blurPad;
         final float transGap = lyricGap(TRANS_GAP_DP);
         final float bgGap = lyricGap(BG_GAP_DP);
@@ -2612,7 +2619,7 @@ final class LyricView extends View {
         if (t == null) return;
         int save = c.save();
         c.translate(0f, transTop(i));
-        t.getPaint().setColor(translationInk(a * TRANS_ALPHA * transReveal(), 0f));
+        t.getPaint().setColor(translationInk(a * transReveal(), 0f));
         t.draw(c);
         t.getPaint().setColor(0xFFFFFFFF);
         c.restoreToCount(save);

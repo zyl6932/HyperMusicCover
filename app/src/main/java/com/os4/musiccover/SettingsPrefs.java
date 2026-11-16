@@ -227,9 +227,13 @@ final class SettingsPrefs {
         for (Settings.Entry<?> e : Settings.all()) {
             if (!Settings.persisted(e)) continue;
             if (e == Settings.LYRIC_STYLE) {
-                // Two keys, one entry: either one means the whole style is read again.
-                if (SettingSpec.LYRIC_SIZE.key.equals(key)
-                        || SettingSpec.LYRIC_BG_SIZE.key.equals(key)) {
+                // Six keys, one entry: any one means the whole style is read again.
+                if (key.equals(SettingSpec.LYRIC_SIZE.key)
+                        || key.equals(SettingSpec.LYRIC_BG_SIZE.key)
+                        || key.equals(SettingSpec.LYRIC_TRANS_SIZE.key)
+                        || key.equals(SettingSpec.LYRIC_WEIGHT.key)
+                        || key.equals(SettingSpec.LYRIC_BG_WEIGHT.key)
+                        || key.equals(SettingSpec.LYRIC_TRANS_WEIGHT.key)) {
                     return e;
                 }
                 continue;
@@ -243,15 +247,24 @@ final class SettingsPrefs {
     private static Settings.Change changeFor(Settings.Entry<?> e, SharedPreferences p) {
         SettingSpec s = e.spec;
         if (e == Settings.LYRIC_STYLE) {
-            // One entry, two keys: a batch that moved one of them must not reset the other. What
-            // the module holds now is the best answer for a key the group does not carry.
-            if (!p.contains(SettingSpec.LYRIC_SIZE.key) && !p.contains(SettingSpec.LYRIC_BG_SIZE.key)) {
+            // One entry, six keys: a batch that moved one of them must not reset the others.
+            // What the module holds now is the best answer for a key the group does not carry.
+            if (!p.contains(SettingSpec.LYRIC_SIZE.key)
+                    && !p.contains(SettingSpec.LYRIC_BG_SIZE.key)
+                    && !p.contains(SettingSpec.LYRIC_TRANS_SIZE.key)
+                    && !p.contains(SettingSpec.LYRIC_WEIGHT.key)
+                    && !p.contains(SettingSpec.LYRIC_BG_WEIGHT.key)
+                    && !p.contains(SettingSpec.LYRIC_TRANS_WEIGHT.key)) {
                 return null;
             }
             com.os4.musiccover.lyrics.LyricStyle cur = Settings.LYRIC_STYLE.get();
             return Settings.lyricStyle(
                     p.getFloat(SettingSpec.LYRIC_SIZE.key, cur.sizeSp),
-                    p.getFloat(SettingSpec.LYRIC_BG_SIZE.key, cur.bgSizeSp));
+                    p.getFloat(SettingSpec.LYRIC_BG_SIZE.key, cur.bgSizeSp),
+                    p.getFloat(SettingSpec.LYRIC_TRANS_SIZE.key, cur.transSizeSp),
+                    p.getInt(SettingSpec.LYRIC_WEIGHT.key, cur.weight),
+                    p.getInt(SettingSpec.LYRIC_BG_WEIGHT.key, cur.bgWeight),
+                    p.getInt(SettingSpec.LYRIC_TRANS_WEIGHT.key, cur.transWeight));
         }
         // A key the group does not carry leaves the value the module already has. The migration
         // (stage 5.4) writes only what the state file held, and the clock size is the one setting

@@ -233,7 +233,7 @@ public final class ClockGlass {
                 // our album art - and that palette would repaint the clock a moment after the
                 // screen goes off. So the colour is dropped and the first lightness the doze inks
                 // with is held instead, which is what holdAodColour() holds too.
-                if (Main.sCoverMode && !Main.sScreenOn && AodColour.aodColourOurs() && args[0] instanceof float[]) {
+                if (Main.sCoverMode && !Main.sScreenOn && AodColour.colourHeldByUs() && args[0] instanceof float[]) {
                     float[] a = (float[]) args[0];
                     if (a.length >= 42) {
                         // Luminance, not max: the palette's gold is (1.0, 0.694, 0.384), whose
