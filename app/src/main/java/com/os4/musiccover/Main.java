@@ -1701,6 +1701,9 @@ public class Main extends XposedModule {
                     sScreenOn = true;
                     sAodGrey = Float.NaN;
                     ClockGlass.applyGlassBrightness();
+                    // Re-tell the wallpaper side the lyric page's answer: a doze recreate or a
+                    // lost broadcast can leave it holding the blurred cover after the wake.
+                    LockLyrics.resendOnWake();
                 } else if (Intent.ACTION_SCREEN_OFF.equals(a)) {
                     sScreenOn = false;
                     sAodGrey = Float.NaN;
@@ -2714,6 +2717,16 @@ public class Main extends XposedModule {
     /** 保留壁纸: cover mode leaves the wallpaper alone. See CoverCardStyle.KEEP. */
     public static boolean keepsWallpaper() {
         return Settings.COVER_STYLE.get().mode == CoverCardStyle.KEEP;
+    }
+
+    /**
+     * The wallpaper is what the user sees behind everything - 保留壁纸, and the square card set to
+     * keep it as its background. The lyric page's veil belongs to the wallpaper in both: only the
+     * card's own background differs, and that is composed from it.
+     */
+    public static boolean wallpapersBehind() {
+        if (keepsWallpaper()) return true;
+        return Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD && Settings.CARD_WALLPAPER.on();
     }
 
     /** The clock is small for the cover, or flying back from it. KeepDim's gate. */

@@ -358,6 +358,18 @@ private fun CoverGroup(
                 ModuleBridge.setCoverStyle(context, "mode", it.toFloat())
             },
         )
+        // Square card only: keep the native wallpaper as the blurred background, or fall back
+        // to the blurred cover like the other card styles.
+        if (module.coverStyle == 1) SwitchPreference(
+            title = stringResource(R.string.cover_card_wallpaper),
+            summary = stringResource(R.string.cover_card_wallpaper_summary),
+            checked = module.cardWallpaper,
+            enabled = enabled,
+            onCheckedChange = {
+                onChange(module.copy(cardWallpaper = it))
+                ModuleBridge.setCardWallpaper(context, it)
+            },
+        )
         // The square's size, place and corners were sliders here and are fixed - it fills the room
         // it has, sits in the middle of it, and takes the media card's own corner radius, all of
         // which are the same answer on every device. See CoverCardStyle.

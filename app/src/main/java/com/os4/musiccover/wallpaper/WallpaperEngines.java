@@ -355,6 +355,36 @@ public final class WallpaperEngines {
             }
             noteKeepDrawLocked();
         }
+        uploadKeepDim(WallpaperProbe.sKeepDim);
+    }
+
+    /**
+     * Drop the veil and stop its pump: the cover is gone, so there is nothing left to dim. The
+     * wallpaper process keeps the last target in case the zero broadcast never arrived; with the
+     * cover cleared here that held value has to go too, or the next draw - including the desktop's
+     * on a shared program - samples a stale veil.
+     */
+    public static void clearKeepDim() {
+        synchronized (WallpaperProbe.KEEP_LOCK) {
+            WallpaperProbe.sKeepDim = 0f;
+            WallpaperProbe.sKeepFrom = 0f;
+            WallpaperProbe.sKeepTo = 0f;
+            WallpaperProbe.sKeepAt = 0L;
+            WallpaperProbe.sKeepPumping = false;
+        }
+        WallpaperProbe.KEEP_MAIN.removeCallbacks(KEEP_PUMP);
+    }
+
+    /**
+     * Zero the veil on whatever program the desktop's draw is using. The keyguard's own draw
+     * carries the real value; on a build where lock and home share one program, leaving the
+     * uniform alone lets the stale lock-side value dim the desktop wallpaper too.
+     */
+    public static void clearKeepUniform() {
+        uploadKeepDim(0f);
+    }
+
+    private static void uploadKeepDim(float v) {
         android.opengl.GLES20.glGetIntegerv(android.opengl.GLES20.GL_CURRENT_PROGRAM,
                 sCurProgram, 0);
         final int prog = sCurProgram[0];
@@ -364,7 +394,7 @@ public final class WallpaperEngines {
                     : android.opengl.GLES20.glGetUniformLocation(prog, "uKeepDim");
         }
         if (sKeepDimLoc >= 0) {
-            android.opengl.GLES20.glUniform1f(sKeepDimLoc, WallpaperProbe.sKeepDim);
+            android.opengl.GLES20.glUniform1f(sKeepDimLoc, v);
         }
     }
 

@@ -109,6 +109,12 @@ public class WallpaperProbe {
     public static volatile Bitmap sArt;
     /** Which of the two cover compositions the current source represents. */
     public static volatile boolean sCardMode;
+    /**
+     * The card's background is the native wallpaper, blurred over there, rather than the album.
+     * When the lyrics come up this mode draws the sharp wallpaper (the 保留壁纸 answer) with the
+     * keep-dim veil over it, instead of frosting the blurred picture.
+     */
+    public static volatile boolean sWallpaperBg;
     /** When the running fade-out of the cover began, and how long it runs; 0 when none is. */
     private static volatile long sLeaveAt, sLeaveMs;
 
@@ -833,17 +839,23 @@ public class WallpaperProbe {
                         // the GL matrix from these, so another size lands the wallpaper askew.
                         // Read once: a retirement clears these from the main thread while
                         // this is the GL thread's.
+                        // The base goes through the sharp gate, not straight to sArt: in the
+                        // card-on-wallpaper mode the lyric page sits over the sharp native
+                        // wallpaper, and fitting sArt here would put the blurred picture back
+                        // over the orig the getBitmap short-circuit already handed up.
+                        Bitmap gateBase = WallpaperArt.sharpFittedArt();
+                        if (gateBase == null) gateBase = art;
                         Bitmap fitted;
                         Bitmap had = sFitted;
-                        if (art.getWidth() == w && art.getHeight() == h) {
-                            fitted = art;                   // composed at exactly this size
-                        } else if (had != null && sFittedOf == art
+                        if (gateBase.getWidth() == w && gateBase.getHeight() == h) {
+                            fitted = gateBase;              // composed at exactly this size
+                        } else if (had != null && sFittedOf == gateBase
                                 && had.getWidth() == w && had.getHeight() == h) {
                             fitted = had;                   // already fitted for this texture
                         } else {
-                            fitted = WallpaperArt.centerCrop(art, w, h);
+                            fitted = WallpaperArt.centerCrop(gateBase, w, h);
                             sFitted = fitted;
-                            sFittedOf = art;
+                            sFittedOf = gateBase;
                         }
                         fitted = WallpaperArt.frostedIfWanted(fitted);
                         args[0] = fitted;
@@ -853,7 +865,7 @@ public class WallpaperProbe {
                         if (sTmUploaded == 0L) sTmUploaded = SystemClock.uptimeMillis();
                         Xp.log(TAG + "wallpaper texture REPLACED " + describe(orig)
                                 + " -> " + describe(fitted)
-                                + (fitted == art ? " (no rescale)" : ""));
+                                + (fitted == gateBase ? " (no rescale)" : ""));
                     }
                 }
                 return chain.proceed(args);
@@ -1155,6 +1167,7 @@ public class WallpaperProbe {
             Class<?> glw = Xp.findClass("com.miui.miwallpaper.opengl.ImageGLWallpaper", sCl);
             Xp.hookAll("wall.render.gl_draw", glw, "draw", chain -> {
                 if (sKeyguardDrawing) WallpaperEngines.applyKeepDim();
+                else WallpaperEngines.clearKeepUniform();
                 return chain.proceed();
             });
             Xp.log(TAG + "keep-dim uniform hooked");
@@ -1381,6 +1394,9 @@ public class WallpaperProbe {
                         }
                     } else if ("art".equals(op)) {
                         sCardMode = i.getBooleanExtra("cardmode", false);
+                        // The kept-cover message omits this extra; absent means "keep the mode
+                        // already held", not "the wallpaper background is off".
+                        if (i.hasExtra("wpbg")) sWallpaperBg = i.getBooleanExtra("wpbg", false);
                         final Context cc = c;
                         boolean reload = i.getBooleanExtra("reload", false);
                         // A fade needs both ends of it in this process. Missing either one is
@@ -1419,6 +1435,11 @@ public class WallpaperProbe {
                             sTmKind = i.hasExtra("src") ? "source" : "jpeg";
                         }
                         if (i.getBooleanExtra("off", false)) {
+                            // The veil belongs to the lyric page over a cover; with the cover gone
+                            // there is nothing to dim, so drop any target this side was holding. A
+                            // zero broadcast that never arrived must not survive into the next
+                            // draw - the desktop's on a shared program included.
+                            WallpaperEngines.clearKeepDim();
                             // A live wallpaper has no texture to fade back to - the way back
                             // is handing the surface to its player again.
                             if (VideoTakeover.videoPath()) {
@@ -1575,6 +1596,10 @@ public class WallpaperProbe {
                     } else if ("lyricblur".equals(op)) {
                         final boolean on = i.getBooleanExtra("on", false);
                         sMsgSeq++;
+                        // The card-on-wallpaper background rides the same message: if the other
+                        // side lost its mode between pushes (a process restart, a doze recreate),
+                        // this restores it alongside the blur decision.
+                        if (i.hasExtra("wpbg")) sWallpaperBg = i.getBooleanExtra("wpbg", false);
                         if (!i.hasExtra("blurseq")
                                 || WallpaperArt.takeBlurDecision(i.getLongExtra("blurseq", 0L), on, "lyrics")) {
                             WallpaperArt.setLyricBlur(on);
@@ -1760,9 +1785,9 @@ public class WallpaperProbe {
             S_DESK_ON_LOCK = 32, S_SHADE = 33, S_SHADE_AT = 34, S_LOCK_VIDEO = 35,
             S_FRAME_REQ = 36, S_KEEP_DIM = 37, S_KEEP_FROM = 38, S_KEEP_TO = 39,
             S_KEEP_AT = 40, S_KEEP_MS = 41, S_GL_TID = 42, S_ASKS = 43, S_TOKEN = 44,
-            S_CTX = 45, S_TEX_SIZES = 46;
+            S_CTX = 45, S_TEX_SIZES = 46, S_WP_BG = 47;
     /** What every build of this schema hands over; later fields are read only when present. */
-    private static final int S_LEN = 46;
+    private static final int S_LEN = 47;
 
     /**
      * The runtime state the next generation cannot look up again, and nothing else: settings
@@ -1782,6 +1807,7 @@ public class WallpaperProbe {
                 sSharedLock, sDesktopKgShown, sDesktopOnLock, sShadeOn, sShadeAt, VideoTakeover.sLockIsVideo,
                 sFrameReq, sKeepDim, sKeepFrom, sKeepTo, sKeepAt, sKeepDurMs,
                 sKeyguardGlTid, sAsks, ProbeGuard.learnedToken(), sCtx, texSizes(),
+                sWallpaperBg,
         };
     }
 
@@ -1815,6 +1841,7 @@ public class WallpaperProbe {
         }
         if (f[S_ART] instanceof Bitmap) sArt = (Bitmap) f[S_ART];
         if (f[S_CARD] instanceof Boolean) sCardMode = (Boolean) f[S_CARD];
+        if (f[S_WP_BG] instanceof Boolean) sWallpaperBg = (Boolean) f[S_WP_BG];
         if (f[S_ORIG] instanceof Bitmap) sOrig = (Bitmap) f[S_ORIG];
         sOrigPrint = intAt(f, S_ORIG_PRINT, sOrigPrint);
         sLyricBlur = boolAt(f, S_BLUR, sLyricBlur);
@@ -1913,6 +1940,9 @@ public class WallpaperProbe {
             Xp.w(TAG + "no context after the reload; the receivers wait for a cold start");
             return;
         }
+        // Restored state can carry a veil from the last holder; with no cover up it has nothing
+        // to sit over, so drop it rather than let it follow the wallpaper to the desktop.
+        if (sArt == null) WallpaperEngines.clearKeepDim();
         register(sCtx);
         if (sKeepAt != 0L) WallpaperEngines.startKeepPump();
         Xp.log(TAG + "adopted art=" + describe(sArt) + " card=" + sCardMode

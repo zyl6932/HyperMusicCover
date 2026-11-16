@@ -4,6 +4,7 @@ import com.os4.musiccover.Main;
 import com.os4.musiccover.ProbeGuard;
 import com.os4.musiccover.card.MediaCard;
 import com.os4.musiccover.cover.CoverPush;
+import com.os4.musiccover.lyrics.LockLyrics;
 import android.content.Intent;
 
 /**
@@ -85,9 +86,13 @@ public final class KeepDim {
      * does it, but a clock that was already held draws no entry frames to ride.
      */
     public static void resume() {
-        if (Main.keepsWallpaper() && Main.coverHoldsClock()) {
-            apply(MediaCard.cardProgress());
+        if (Main.keepsWallpaper()) {
+            if (Main.coverHoldsClock()) apply(MediaCard.cardProgress());
+            return;
         }
+        // The square card on the wallpaper's background: the veil is the lyric page's, so it is
+        // asked for by whether that page is up rather than by any progress.
+        if (Main.wallpapersBehind()) LockLyrics.syncWallpaperVeil();
     }
 
     private static void send(float v) {

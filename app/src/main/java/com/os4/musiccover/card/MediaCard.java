@@ -103,7 +103,11 @@ public final class MediaCard {
     /** One frame of the card fade, from ClockCollapse's progress. */
     public static void setCardProgressFrom(float p) {
         // 保留壁纸's veil rides the same number, and only while the clock is the cover's.
-        KeepDim.apply(Main.keepsWallpaper() && Main.coverHoldsClock() ? p : 0f);
+        // The square card on the wallpaper's background keeps its clock small throughout, so
+        // there is no entry here whose progress could stand for the lyric page: that one's veil
+        // is driven by the page itself (LockLyrics.syncWallpaperVeil) and is left alone here.
+        if (Main.keepsWallpaper()) KeepDim.apply(Main.coverHoldsClock() ? p : 0f);
+        else if (!Main.wallpapersBehind()) KeepDim.apply(0f);
         // The clock can be held for an immersive page alone, and the card is not part of that
         // look. The cover's exit is let through: that is its card fading back.
         if (!Main.sCoverMode && !LockHold.exitingFor(LockHold.Owner.COVER)) p = 0f;
