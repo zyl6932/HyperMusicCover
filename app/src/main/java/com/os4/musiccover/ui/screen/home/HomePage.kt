@@ -88,6 +88,7 @@ import com.os4.musiccover.ui.util.AppDialogButton
 import com.os4.musiccover.ui.util.AppDialogButtonRole
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import androidx.compose.foundation.layout.size
+import com.os4.musiccover.ui.util.LocalCardGlass
 import com.os4.musiccover.ui.util.LocalOs4Ui
 import top.yukonga.miuix.kmp.basic.DropdownEntry as MiuixDropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem as MiuixDropdownItem
@@ -272,7 +273,7 @@ fun HomePageView(
                 // The status card keeps its own status colour and press feedback; it only takes
                 // the card panels' rim and shadow so it does not look flat beside them. The
                 // fallback is the empty modifier: the card's own fill is what shows through.
-                val statusFrame = if (LocalOs4Ui.current) {
+                val statusFrame = if (LocalOs4Ui.current && LocalCardGlass.current) {
                     Modifier.glassPanel(
                         backdrop = null,
                         shape = GlassShape(CardDefaults.CornerRadius),

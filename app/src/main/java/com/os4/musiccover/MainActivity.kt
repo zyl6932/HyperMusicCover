@@ -226,13 +226,14 @@ class MainActivity : ComponentActivity() {
                         isLiquidGlass = isLiquidGlass,
                         isBlurEnabled = isBlurEnabled,
                         useOs4Ui = useOs4Ui,
+                        cardGlass = settings.cardGlass,
                         language = LocaleHelper.getSavedLanguage(this@MainActivity).code,
                         welcomeShown = welcomeShown,
                     )
                 )
             }
 
-            AppTheme(themeMode = themeMode, useOs4Ui = useOs4Ui) {
+            AppTheme(themeMode = themeMode, useOs4Ui = useOs4Ui, cardGlass = settings.cardGlass) {
                 // What the pages actually draw on. Recording it here is what lets the next cold
                 // start paint the same colour before Compose exists - including the Monet modes
                 // and a theme forced against the system's.

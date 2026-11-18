@@ -103,7 +103,7 @@ class FpAppPickActivity : ComponentActivity() {
             .getOrDefault(ColorSchemeMode.System)
         val forShortcut = intent.getBooleanExtra(EXTRA_SHORTCUT, false)
         setContent {
-            AppTheme(themeMode = theme, useOs4Ui = settings.useOs4Ui) {
+            AppTheme(themeMode = theme, useOs4Ui = settings.useOs4Ui, cardGlass = settings.cardGlass) {
                 AppPicker(settings.isBlurEnabled, forShortcut, ::finish) { app ->
                     if (forShortcut) {
                         shortcut.launch(Intent(this, FpShortcutPickActivity::class.java)
@@ -133,7 +133,7 @@ class FpShortcutPickActivity : ComponentActivity() {
         val pkg = intent.getStringExtra(EXTRA_PKG).orEmpty()
         val appLabel = intent.getStringExtra(EXTRA_LABEL).orEmpty()
         setContent {
-            AppTheme(themeMode = theme, useOs4Ui = settings.useOs4Ui) {
+            AppTheme(themeMode = theme, useOs4Ui = settings.useOs4Ui, cardGlass = settings.cardGlass) {
                 ShortcutPicker(settings.isBlurEnabled, pkg, ::finish) { sc ->
                     answer(JSONObject().put("t", "shortcut").put("pkg", pkg).put("id", sc.id)
                         .put("label", sc.label).put("app", appLabel))

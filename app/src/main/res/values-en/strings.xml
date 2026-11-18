@@ -37,6 +37,8 @@
     <string name="ui_style">Interface Style</string>
     <string name="ui_style_os4">OS4</string>
     <string name="ui_style_os3">OS3</string>
+    <string name="card_glass">Card bloom glass</string>
+    <string name="card_glass_summary">Add an edge stroke and shadow to cards</string>
     <string name="welcome_show_again">Show welcome page</string>
     <string name="welcome_show_again_summary">Replay the splash animation shown on first launch</string>
     <string name="settings_language">Language</string>

@@ -37,6 +37,8 @@
     <string name="ui_style">界面风格</string>
     <string name="ui_style_os4">OS4</string>
     <string name="ui_style_os3">OS3</string>
+    <string name="card_glass">卡片柔光玻璃</string>
+    <string name="card_glass_summary">给卡片加上描边和阴影</string>
     <string name="welcome_show_again">查看欢迎页</string>
     <string name="welcome_show_again_summary">重新播放首次启动时的开屏动画</string>
     <string name="settings_language">语言</string>

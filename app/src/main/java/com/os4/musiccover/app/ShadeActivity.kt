@@ -37,7 +37,7 @@ class ShadeActivity : ComponentActivity() {
         val isBlurEnabled = savedSettings.isBlurEnabled
 
         setContent {
-            AppTheme(themeMode = themeMode, useOs4Ui = savedSettings.useOs4Ui) {
+            AppTheme(themeMode = themeMode, useOs4Ui = savedSettings.useOs4Ui, cardGlass = savedSettings.cardGlass) {
                 ShadePageView(
                     isBlurEnabled = isBlurEnabled,
                     refreshKey = resumes,

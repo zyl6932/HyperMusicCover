@@ -33,6 +33,15 @@ val LocalOs4Ui = staticCompositionLocalOf { false }
 val LocalPageBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 
 /**
+ * Whether OS4's cards draw their bloom frame: the edge stroke and the shadow.
+ *
+ * The miuix demo draws cards without either; this app adds them, and the theme page lets the
+ * user turn them off again. It only decides the frame - the card's fill and the rest of the
+ * glass interface do not change.
+ */
+val LocalCardGlass = staticCompositionLocalOf { true }
+
+/**
  * A backdrop that paints nothing but the page's surface colour.
  *
  * For glass that cannot sample a real recording without sampling itself - a tab row inside the

@@ -42,6 +42,8 @@ fun ThemePageView(
     useOs4Ui: Boolean,
     os4Supported: Boolean,
     onUseOs4UiChange: (Boolean) -> Unit,
+    cardGlass: Boolean,
+    onCardGlassChange: (Boolean) -> Unit,
     isFloatingNavbar: Boolean,
     onFloatingNavbarChange: (Boolean) -> Unit,
     isLiquidGlass: Boolean,
@@ -76,7 +78,6 @@ fun ThemePageView(
                             onSelectedIndexChange = { onUseOs4UiChange(it == 0) },
                         )
                     }
-
                     val modes = listOf(
                         stringResource(R.string.theme_system),
                         stringResource(R.string.theme_light),
@@ -105,6 +106,16 @@ fun ThemePageView(
                         onSelectedIndexChange = { onModeChange(modesEnum[it]) },
                         onExpandedChange = { expanded = it }
                     )
+
+                    // Only means something while OS4 is the interface being drawn.
+                    if (os4Supported && useOs4Ui) {
+                        SwitchPreference(
+                            title = stringResource(R.string.card_glass),
+                            summary = stringResource(R.string.card_glass_summary),
+                            checked = cardGlass,
+                            onCheckedChange = onCardGlassChange,
+                        )
+                    }
 
                     // The three switches below only describe the OS3 chrome, which OS4 replaces
                     // wholesale. Folded rather than disabled, and only folded while OS4 is what

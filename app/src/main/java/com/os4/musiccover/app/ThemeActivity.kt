@@ -52,13 +52,19 @@ class ThemeActivity : ComponentActivity() {
                 settings = change(settings).also { AppSettings.save(this@ThemeActivity, it) }
             }
 
-            AppTheme(themeMode = currentMode, useOs4Ui = settings.useOs4Ui) {
+            AppTheme(
+                themeMode = currentMode,
+                useOs4Ui = settings.useOs4Ui,
+                cardGlass = settings.cardGlass,
+            ) {
                 ThemePageView(
                     currentMode = currentMode,
                     onModeChange = { mode -> update { it.copy(themeMode = mode.name) } },
                     useOs4Ui = settings.useOs4Ui,
                     os4Supported = isRuntimeShaderSupported(),
                     onUseOs4UiChange = { on -> update { it.copy(useOs4Ui = on) } },
+                    cardGlass = settings.cardGlass,
+                    onCardGlassChange = { on -> update { it.copy(cardGlass = on) } },
                     isFloatingNavbar = settings.isFloatingNavbar,
                     onFloatingNavbarChange = { on -> update { it.copy(isFloatingNavbar = on) } },
                     isLiquidGlass = settings.isLiquidGlass,

@@ -151,7 +151,7 @@ class FpQuickActivity : ComponentActivity() {
         val theme = runCatching { ColorSchemeMode.valueOf(settings.themeMode) }
             .getOrDefault(ColorSchemeMode.System)
         setContent {
-            AppTheme(themeMode = theme, useOs4Ui = settings.useOs4Ui) { FpQuickPage(settings.isBlurEnabled, resumes, ::finish) }
+            AppTheme(themeMode = theme, useOs4Ui = settings.useOs4Ui, cardGlass = settings.cardGlass) { FpQuickPage(settings.isBlurEnabled, resumes, ::finish) }
         }
     }
 

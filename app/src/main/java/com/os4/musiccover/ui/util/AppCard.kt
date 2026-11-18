@@ -27,6 +27,9 @@ import top.yukonga.miuix.kmp.material.GlassShadows
  * panel (edge light, shadow, fallback fill) is drawn behind it by wrapping it. OS3 is
  * untouched: the same Card, with the same colours.
  *
+ * [LocalCardGlass] can turn the panel off - the miuix demo's cards have no rim or shadow, and
+ * the theme page exposes that as a switch. Off is the plain [Card] with its own fill.
+ *
  * The panel deliberately samples no backdrop. The page backdrop records the cards themselves,
  * so a card sampling it would blur a picture of itself and ring against the previous frame.
  * What reads as glass here is instead the edge stroke, the shadow, and the translucent fill,
@@ -43,7 +46,7 @@ fun AppCard(
     colors: CardColors = CardDefaults.defaultColors(),
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    if (!LocalOs4Ui.current) {
+    if (!LocalOs4Ui.current || !LocalCardGlass.current) {
         Card(
             modifier = modifier,
             cornerRadius = cornerRadius,

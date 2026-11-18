@@ -33,7 +33,7 @@ class DonateActivity : ComponentActivity() {
         }
 
         setContent {
-            AppTheme(themeMode = themeMode, useOs4Ui = savedSettings.useOs4Ui) {
+            AppTheme(themeMode = themeMode, useOs4Ui = savedSettings.useOs4Ui, cardGlass = savedSettings.cardGlass) {
                 DonatePageContent(
                     onBack = { finish() },
                     isBlurEnabled = savedSettings.isBlurEnabled,

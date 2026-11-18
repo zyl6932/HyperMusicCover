@@ -16,6 +16,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import com.os4.musiccover.ui.util.LocalCardGlass
 import com.os4.musiccover.ui.util.LocalOs4Ui
 import com.os4.musiccover.ui.util.LocalPageBackdrop
 import com.os4.musiccover.ui.util.rememberSurfaceBackdrop
@@ -36,6 +37,8 @@ fun AppTheme(
      * rather than showing glass bars over plain ones.
      */
     useOs4Ui: Boolean,
+    /** Whether OS4 cards draw the bloom frame (edge stroke and shadow). */
+    cardGlass: Boolean = true,
     content: @Composable () -> Unit
 ) {
     // 可用模式: System, Light, Dark, MonetSystem, MonetLight, MonetDark
@@ -60,7 +63,10 @@ fun AppTheme(
                     insetsController.isAppearanceLightNavigationBars = !isDark
                 }
             }
-            CompositionLocalProvider(LocalOs4Ui provides os4Ui) {
+            CompositionLocalProvider(
+                LocalOs4Ui provides os4Ui,
+                LocalCardGlass provides cardGlass,
+            ) {
                 if (os4Ui) {
                     // The fallback every glass popup samples when nothing nearer published a
                     // recording: the page colour, so a dialog opened beside the page frame is

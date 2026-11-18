@@ -35,7 +35,7 @@ class LicenseActivity : ComponentActivity() {
         val isBlurEnabled = savedSettings.isBlurEnabled
 
         setContent {
-            AppTheme(themeMode = themeMode, useOs4Ui = savedSettings.useOs4Ui) {
+            AppTheme(themeMode = themeMode, useOs4Ui = savedSettings.useOs4Ui, cardGlass = savedSettings.cardGlass) {
                 LicensePageContent(onBack = { finish() }, isBlurEnabled = isBlurEnabled)
             }
         }

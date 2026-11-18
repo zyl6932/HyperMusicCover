@@ -43,7 +43,7 @@ class CoverActivity : ComponentActivity() {
         val isBlurEnabled = savedSettings.isBlurEnabled
 
         setContent {
-            AppTheme(themeMode = themeMode, useOs4Ui = savedSettings.useOs4Ui) {
+            AppTheme(themeMode = themeMode, useOs4Ui = savedSettings.useOs4Ui, cardGlass = savedSettings.cardGlass) {
                 CoverPageView(
                     isBlurEnabled = isBlurEnabled,
                     refreshKey = resumes,

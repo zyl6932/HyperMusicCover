@@ -21,6 +21,11 @@ data class AppSettings(
      * without runtime shaders falls back to them on its own (`LocalOs4Ui` is false there).
      */
     val useOs4Ui: Boolean = true,
+    /**
+     * Whether the OS4 cards draw the bloom frame - the edge stroke and the shadow. Off leaves a
+     * plain card, the way the miuix demo draws its cards; the card's own fill is unchanged.
+     */
+    val cardGlass: Boolean = true,
     val language: String = "",
     /**
      * Whether the welcome page has been through. It is not a setting anyone can switch off - the
@@ -35,6 +40,7 @@ data class AppSettings(
         put("isLiquidGlass", isLiquidGlass)
         put("isBlurEnabled", isBlurEnabled)
         put("useOs4Ui", useOs4Ui)
+        put("cardGlass", cardGlass)
         put("language", language)
         put("welcomeShown", welcomeShown)
     }.toString(2)
@@ -46,6 +52,7 @@ data class AppSettings(
         private const val KEY_LIQUID_GLASS = "liquid_glass"
         private const val KEY_BLUR_ENABLED = "blur_enabled"
         private const val KEY_OS4_UI = "os4_ui"
+        private const val KEY_CARD_GLASS = "card_glass"
         private const val KEY_WELCOME_SHOWN = "welcome_shown"
 
         fun fromJson(json: String): AppSettings = try {
@@ -56,6 +63,7 @@ data class AppSettings(
                 isLiquidGlass = obj.optBoolean("isLiquidGlass", false),
                 isBlurEnabled = obj.optBoolean("isBlurEnabled", true),
                 useOs4Ui = obj.optBoolean("useOs4Ui", true),
+                cardGlass = obj.optBoolean("cardGlass", true),
                 language = obj.optString("language", ""),
                 welcomeShown = obj.optBoolean("welcomeShown", true),
             )
@@ -71,6 +79,7 @@ data class AppSettings(
                 isLiquidGlass = prefs.getBoolean(KEY_LIQUID_GLASS, false),
                 isBlurEnabled = prefs.getBoolean(KEY_BLUR_ENABLED, true),
                 useOs4Ui = prefs.getBoolean(KEY_OS4_UI, true),
+                cardGlass = prefs.getBoolean(KEY_CARD_GLASS, true),
                 language = LocaleHelper.getSavedLanguage(context).code,
                 // A first launch is the only one that has no settings at all. Anyone whose
                 // preferences predate this key has used the app for a while and should not be
@@ -90,6 +99,7 @@ data class AppSettings(
                 putBoolean(KEY_LIQUID_GLASS, settings.isLiquidGlass)
                 putBoolean(KEY_BLUR_ENABLED, settings.isBlurEnabled)
                 putBoolean(KEY_OS4_UI, settings.useOs4Ui)
+                putBoolean(KEY_CARD_GLASS, settings.cardGlass)
                 putBoolean(KEY_WELCOME_SHOWN, settings.welcomeShown)
             }
             val lang = LocaleHelper.Language.entries.find { it.code == settings.language }
