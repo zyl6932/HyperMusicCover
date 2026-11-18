@@ -56,8 +56,10 @@ import com.os4.musiccover.ui.util.LocalPageBackdrop
 import com.os4.musiccover.ui.util.isInDarkTheme
 import com.os4.musiccover.ui.welcome.SplashIcon
 import com.os4.musiccover.ui.welcome.WelcomeScreen
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.FloatingNavigationBar
 import top.yukonga.miuix.kmp.basic.FloatingNavigationBarItem
 import top.yukonga.miuix.kmp.basic.FloatingToolbarDefaults
@@ -452,6 +454,20 @@ private fun MainScreen(
     )
     val icons = listOf(MiuixIcons.Home, MiuixIcons.Settings)
 
+    // The settings tab carries a dot while a release is waiting. The check runs once when the
+    // app starts (see below); this only picks up its answer. `UpdateCheck.result` is a plain
+    // volatile field rather than Compose state, so an answer that lands after this composed is
+    // polled for, bounded, and the poll also stops once a check has been recorded either way.
+    var hasUpdate by remember { mutableStateOf(UpdateCheck.result != null) }
+    LaunchedEffect(resumeKey) {
+        hasUpdate = UpdateCheck.result != null
+        repeat(120) {
+            if (hasUpdate || UpdateCheck.isFresh()) return@LaunchedEffect
+            delay(500)
+            hasUpdate = UpdateCheck.result != null
+        }
+    }
+
     /**
      * One flag per page rather than one counter shared by all of them.
      *
@@ -539,6 +555,7 @@ private fun MainScreen(
                 selectedIndex = selectedIndex,
                 backdrop = backdrop,
                 blurActive = isBlurEnabled,
+                showSettingsBadge = hasUpdate,
                 onItemSelected = { index -> goToPage(index) },
             )
         }
@@ -594,13 +611,18 @@ private fun BottomNavigationBar(
     selectedIndex: Int,
     backdrop: LayerBackdrop?,
     blurActive: Boolean,
+    showSettingsBadge: Boolean,
     onItemSelected: (Int) -> Unit,
 ) {
-    // miuix's demo leaves the filled bars to their container and only the floating one sizes
-    // itself. With four tabs a full-width bar gave each tab the width the demo shows; with two
-    // it doubles it. These are the demo's per-tab widths, so the bar stays the width it had and
-    // is centred instead of stretched.
-    val standardWidth = (items.size * 100).dp
+    // The settings tab is always the last one, which is what the update dot hangs on.
+    val settingsTab = items.lastIndex
+    val badge: (@Composable () -> Unit)? =
+        if (showSettingsBadge) ({ Badge() }) else null
+
+    // miuix's demo lets the floating capsule bars size themselves and leaves the standard bar to
+    // its container. With four tabs the capsule bars gave each tab the width the demo shows; with
+    // two it doubles it, so the capsules are given the width they had and centred instead of
+    // stretched. The standard bar stays full width - it is a surface, not a capsule.
     val liquidWidth = (items.size * 74).dp + 96.dp
 
     // In OS4 the bar is glass, whatever the OS3 trio was set to. Those settings stay stored,
@@ -611,6 +633,7 @@ private fun BottomNavigationBar(
             icons = icons,
             selectedIndex = selectedIndex,
             backdrop = backdrop,
+            showSettingsBadge = showSettingsBadge,
             onItemSelected = onItemSelected,
         )
         return
@@ -632,6 +655,7 @@ private fun BottomNavigationBar(
                     onItemClick = onItemSelected,
                     backdrop = backdrop,
                     isBlurActive = blurActive,
+                    badge = { index -> if (index == settingsTab) badge else null },
                 )
             }
         }
@@ -667,54 +691,53 @@ private fun BottomNavigationBar(
                         onClick = { onItemSelected(index) },
                         icon = icons[index],
                         label = label,
-                        enabled = true
+                        enabled = true,
+                        badge = if (index == settingsTab) badge else null,
                     )
                 }
             }
         }
 
         else -> {
+            // The standard bar is a full-width surface under the page, not a floating capsule:
+            // narrowing it left the blur and the colour only under the two tabs and the page
+            // showing through on either side. It keeps its width and stretches its two tabs.
             val barColor = if (blurActive) Color.Transparent else MiuixTheme.colorScheme.surface
             Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(standardWidth)
-                        .then(
-                            if (blurActive && backdrop != null) {
-                                Modifier.textureBlur(
-                                    backdrop = backdrop,
-                                    shape = RectangleShape,
-                                    blurRadius = 25f,
-                                    colors = BlurDefaults.blurColors(
-                                        blendColors = listOf(
-                                            BlendColorEntry(color = MiuixTheme.colorScheme.surface.copy(0.5f)),
-                                        ),
+                modifier = Modifier
+                    .then(
+                        if (blurActive && backdrop != null) {
+                            Modifier.textureBlur(
+                                backdrop = backdrop,
+                                shape = RectangleShape,
+                                blurRadius = 25f,
+                                colors = BlurDefaults.blurColors(
+                                    blendColors = listOf(
+                                        BlendColorEntry(color = MiuixTheme.colorScheme.surface.copy(0.5f)),
                                     ),
-                                )
-                            } else {
-                                Modifier
-                            }
-                        )
-                        .background(barColor)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = {},
-                        )
-                ) {
-                    NavigationBar(color = barColor) {
-                        items.forEachIndexed { index, label ->
-                            NavigationBarItem(
-                                selected = selectedIndex == index,
-                                onClick = { onItemSelected(index) },
-                                icon = icons[index],
-                                label = label,
-                                enabled = true
+                                ),
                             )
+                        } else {
+                            Modifier
                         }
+                    )
+                    .background(barColor)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    )
+            ) {
+                NavigationBar(color = barColor) {
+                    items.forEachIndexed { index, label ->
+                        NavigationBarItem(
+                            selected = selectedIndex == index,
+                            onClick = { onItemSelected(index) },
+                            icon = icons[index],
+                            label = label,
+                            enabled = true,
+                            badge = if (index == settingsTab) badge else null,
+                        )
                     }
                 }
             }
@@ -735,13 +758,16 @@ private fun BottomNavigationBarOs4(
     icons: List<androidx.compose.ui.graphics.vector.ImageVector>,
     selectedIndex: Int,
     backdrop: LayerBackdrop?,
+    showSettingsBadge: Boolean,
     onItemSelected: (Int) -> Unit,
 ) {
-    val glassItems = remember(items, icons) {
+    val settingsTab = items.lastIndex
+    val glassItems = remember(items, icons, showSettingsBadge) {
         List(items.size) { i ->
             GlassNavigationItem(
                 icon = icons[i],
                 label = items[i],
+                badge = if (showSettingsBadge && i == settingsTab) ({ Badge() }) else null,
             )
         }
     }

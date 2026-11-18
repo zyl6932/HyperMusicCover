@@ -80,6 +80,7 @@ import com.os4.musiccover.ui.util.isInDarkTheme
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.BadgedBox
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.NavigationItem
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
@@ -326,7 +327,7 @@ internal fun IosLiquidGlassNavigationBar(
                 verticalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterVertically),
                 horizontalAlignment = CenterHorizontally,
             ) {
-                Box {
+                BadgedBox(badge = { badge(index)?.invoke() }) {
                     Icon(
                         modifier = Modifier.size(22.dp),
                         imageVector = item.icon,
