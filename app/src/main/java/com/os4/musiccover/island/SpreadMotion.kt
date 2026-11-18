@@ -1259,6 +1259,9 @@ internal class SpreadMotion(
         views.smallIsland?.alpha = if (views.stackedStyle()) MiniPlayerGeometry.STACK_BACK_ALPHA else 1f
         if (s.items.any { it.key == MUSIC_ISLAND }) rowHost.ensureNativeHeaderVisible()
         s.phase = SPREAD_OPEN
+        // The opening gesture's UP arrived in SPREAD_OPENING and its end() never ran; the list
+        // is at rest with no owner, so the OEM's own fold is the list's again.
+        s.listGesture.rested()
         s.progress = 1f
         s.rawProgress = 1f
         s.cardsY = y

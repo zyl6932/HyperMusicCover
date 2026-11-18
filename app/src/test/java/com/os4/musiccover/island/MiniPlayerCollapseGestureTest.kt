@@ -92,6 +92,29 @@ class MiniPlayerCollapseGestureTest {
         assertFalse(fallback.canFold)
     }
 
+    @Test fun aTapHandsTheOemFallbackBackWhenTheFingerLifts() {
+        val fallback = SpreadListGesture()
+        fallback.down(true)
+        // No move at all: the tap decided nothing and must not keep the OEM's own fold ignored.
+        fallback.end(cancelled = false)
+        assertTrue(fallback.canFold)
+        // A short drag under the slop is the same: nothing was decided.
+        fallback.down(true)
+        fallback.move(2f, 3f, 10f, true)
+        fallback.end(cancelled = false)
+        assertTrue(fallback.canFold)
+    }
+
+    @Test fun aListThatRestsOpenHandsTheOemFallbackBack() {
+        val fallback = SpreadListGesture()
+        fallback.down(false)
+        fallback.move(0f, 500f, 10f, false)
+        assertFalse(fallback.canFold)
+        // The opening gesture's UP is seen while the spread is still opening and never ends here.
+        fallback.rested()
+        assertTrue(fallback.canFold)
+    }
+
     @Test fun aClaimedShortPullCannotFoldAgainThroughTheOemFallbackAfterRelease() {
         val fallback = SpreadListGesture()
         fallback.down(true)

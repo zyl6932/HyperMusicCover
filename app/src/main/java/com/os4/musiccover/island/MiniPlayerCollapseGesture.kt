@@ -50,25 +50,37 @@ internal class SpreadListGesture {
     private val classifier = MiniPlayerCollapseGesture()
     private var observed = false
     private var pulling = false
+    /** The list took this gesture: scrolled, read upward or dismissed sideways. */
+    private var owned = false
     var canFold: Boolean = true
         private set
 
     fun down(atTop: Boolean) {
         observed = true
         pulling = false
+        owned = false
         canFold = false
         classifier.start(atTop)
     }
 
     fun move(dx: Float, dy: Float, slop: Float, atTop: Boolean) {
         if (!observed || pulling) return
-        pulling = classifier.move(dx, dy, slop, atTop)
-        canFold = pulling
+        if (classifier.move(dx, dy, slop, atTop)) {
+            pulling = true
+            canFold = true
+        } else if (!classifier.armed) {
+            // The classifier disarmed itself: this gesture is the list's, not the fold's.
+            owned = true
+        }
     }
 
     fun end(cancelled: Boolean) {
         if (cancelled) canFold = false
-        // Keep ownership through the OEM's fling/hands-up callback, until the next DOWN.
+        // A tap decided nothing, so the OEM fallback is the list's again as soon as the finger
+        // lifts; otherwise a single tap left a spread open over a stack the OEM had folded.
+        else if (!pulling && !owned) canFold = true
+        // An owned gesture keeps its ownership through the OEM's fling/hands-up callback,
+        // until the next DOWN.
         classifier.reset()
     }
 
@@ -76,7 +88,20 @@ internal class SpreadListGesture {
         // CardTouch now makes the direction decision. A residual OEM overscroll must not
         // turn a cancelled/short pull into a second fold through watchOpen's fallback.
         observed = false
+        owned = true
         canFold = false
+        classifier.reset()
+    }
+
+    /**
+     * The list just came to rest open with no gesture owning it: the opening gesture's UP is
+     * seen in SPREAD_OPENING and never reaches [end], so it has to be given back here.
+     */
+    fun rested() {
+        observed = false
+        pulling = false
+        owned = false
+        canFold = true
         classifier.reset()
     }
 }
