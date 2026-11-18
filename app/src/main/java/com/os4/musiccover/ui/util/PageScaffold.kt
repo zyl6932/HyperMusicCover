@@ -2,6 +2,7 @@ package com.os4.musiccover.ui.util
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
@@ -29,6 +30,7 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.glass.GlassIconButton
 import top.yukonga.miuix.kmp.glass.GlassTopAppBar
@@ -106,7 +108,6 @@ private fun PageScaffoldOs4(
 ) {
     val scrollBehavior = MiuixScrollBehavior()
     val backdrop = rememberBlurBackdrop()
-    val style = GlassDefaults.style(isInDarkTheme())
 
     CompositionLocalProvider(LocalPageBackdrop provides backdrop) {
         Scaffold(
@@ -116,13 +117,11 @@ private fun PageScaffoldOs4(
             // outside every recording; this one is the host for the screens of their own.
             floatingActionButton = floatingActionButton,
             topBar = {
-                GlassTopAppBar(
+                GlassPageBar(
                     title = title,
-                    scrollBehavior = scrollBehavior,
                     backdrop = backdrop,
-                    progressiveBlur = backdrop != null,
-                    style = style,
-                    navigationIcon = { if (onBack != null) PageBackButtonOs4(onBack) },
+                    scrollBehavior = scrollBehavior,
+                    onBack = onBack,
                     actions = { actions() },
                 )
             },
@@ -235,6 +234,39 @@ fun PageBackButton(onBack: () -> Unit) {
             tint = MiuixTheme.colorScheme.onBackground,
         )
     }
+}
+
+/**
+ * The OS4 top bar, for the pages that build their own frame instead of [PageScaffold].
+ *
+ * Everything OS4-specific about a bar lives here so the three frames cannot drift: the glass
+ * style, the progressive band, and the glass back button. `expandable` stays off on the About
+ * page, whose large title and its collapse are in the page body and would otherwise fight the
+ * bar's own.
+ */
+@Composable
+fun GlassPageBar(
+    title: String,
+    backdrop: LayerBackdrop?,
+    scrollBehavior: ScrollBehavior?,
+    onBack: (() -> Unit)? = null,
+    expandable: Boolean = true,
+    defaultWindowInsetsPadding: Boolean = true,
+    titleAlpha: () -> Float = { 1f },
+    actions: @Composable RowScope.() -> Unit = {},
+) {
+    GlassTopAppBar(
+        title = title,
+        scrollBehavior = scrollBehavior,
+        backdrop = backdrop,
+        progressiveBlur = backdrop != null,
+        style = GlassDefaults.style(isInDarkTheme()),
+        expandable = expandable,
+        defaultWindowInsetsPadding = defaultWindowInsetsPadding,
+        titleAlpha = titleAlpha,
+        navigationIcon = { if (onBack != null) PageBackButtonOs4(onBack) },
+        actions = actions,
+    )
 }
 
 /** The same control as a glass pill, inside the OS4 top bar. */

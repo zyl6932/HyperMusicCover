@@ -1,6 +1,7 @@
 package com.os4.musiccover.ui.screen.settings
 
 import com.os4.musiccover.ui.util.nextCard
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import android.app.Activity
 import android.content.Intent
@@ -96,7 +97,7 @@ fun SettingsPageView(
         item(key = "settings") {
             Column {
                 SmallTitle(text = stringResource(R.string.settings_interface))
-                Card(
+                AppCard(
                     modifier = Modifier.nextCard()
                 ) {
                     // Everything that repaints the app - theme mode, the floating bar, its glass,
@@ -137,7 +138,7 @@ fun SettingsPageView(
                 }
 
                 SmallTitle(text = stringResource(R.string.settings_language))
-                Card(
+                AppCard(
                     modifier = Modifier.nextCard()
                 ) {
                     val languageNames = listOf(
@@ -172,7 +173,7 @@ fun SettingsPageView(
                 // everything that changes the app and before the data rows only for grouping's
                 // sake. Every process the module is in follows it at once (LsposedService).
                 SmallTitle(text = stringResource(R.string.settings_debug))
-                Card(
+                AppCard(
                     modifier = Modifier.nextCard()
                 ) {
                     val levelNames = listOf(
@@ -194,7 +195,7 @@ fun SettingsPageView(
                 }
 
                 SmallTitle(text = stringResource(R.string.settings_data))
-                Card(
+                AppCard(
                     modifier = Modifier.nextCard()
                 ) {
                     Column {

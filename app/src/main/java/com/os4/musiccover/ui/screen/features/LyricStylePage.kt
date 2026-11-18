@@ -37,6 +37,7 @@ import com.os4.musiccover.lyrics.HdrDisplay
 import com.os4.musiccover.lyrics.LyricAppearance
 import com.os4.musiccover.ui.component.SettingsNotices
 import com.os4.musiccover.ui.util.PageScaffold
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import com.os4.musiccover.ui.util.nextCard
 import kotlin.math.roundToInt
@@ -165,13 +166,13 @@ internal fun LyricStylePageView(
                 // The module not answering is said once, above everything it greys out - unless
                 // the app's copy is the source, when the page is not grey and only waits.
                 if (asked && !module.alive && !migrated) {
-                    Card(modifier = Modifier.firstCard()) {
+                    AppCard(modifier = Modifier.firstCard()) {
                         BasicComponent(title = stringResource(R.string.home_status_inactive_hint))
                     }
                 }
                 SettingsNotices(alive = module.alive)
                 SmallTitle(text = stringResource(R.string.lyrics_style_general))
-                Card(modifier = Modifier.nextCard()) {
+                AppCard(modifier = Modifier.nextCard()) {
                     val alignModes = listOf(
                         stringResource(R.string.lyrics_align_left),
                         stringResource(R.string.lyrics_align_center),
@@ -248,7 +249,7 @@ internal fun LyricStylePageView(
             }
             Column {
                 SmallTitle(text = stringResource(R.string.lyrics_style_text))
-                Card(modifier = Modifier.nextCard()) {
+                AppCard(modifier = Modifier.nextCard()) {
                     TabRowWithContour(
                         tabs = listOf(
                             stringResource(R.string.lyrics_style_main),

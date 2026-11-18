@@ -1,6 +1,7 @@
 package com.os4.musiccover.app
 import com.os4.musiccover.R
 import com.os4.musiccover.ui.util.nextCard
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import com.os4.musiccover.ui.util.FoldUnder
 import android.content.Context
@@ -111,7 +112,7 @@ private fun TransitPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
         item(key = "demo") {
             // What the trip's island does, played on a drawn phone, before the switch (as the
             // islands' own page has it).
-            Card(Modifier.firstCard()) {
+            AppCard(Modifier.firstCard()) {
                 TransitDemo(Modifier.padding(top = 16.dp))
             }
         }
@@ -119,7 +120,7 @@ private fun TransitPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
             // 通勤这一节的抬头，和这一节的第一张卡：「启用高德公交地铁」。这个开关管的是整节
             // （逐站岛和通勤学习都在它下面），所以它落在抬头之下、学习通勤路线之上。
             SmallTitle(text = stringResource(R.string.commute_title))
-            Card(Modifier.nextCard()) {
+            AppCard(Modifier.nextCard()) {
                 Column {
                     SettingsNotices(alive = module.alive)
                     // Only an answer can put this on (ShadePageView says why).
@@ -145,7 +146,7 @@ private fun TransitPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
         }
         item(key = "pickup") {
             SmallTitle(text = stringResource(R.string.pickup_title))
-            Card(Modifier.nextCard()) {
+            AppCard(Modifier.nextCard()) {
                 SwitchPreference(title = stringResource(R.string.pickup_enabled),
                     // The same hint as the switch above, for a phone that scrolled past it.
                     summary = if (asked && !module.alive && !migrated) {
@@ -221,7 +222,7 @@ private fun CommuteSection(refreshKey: Int) {
         state = ModuleBridge.commute(context)
         asked = true
     }
-    Card(Modifier.nextCard()) {
+    AppCard(Modifier.nextCard()) {
         SwitchPreference(title = stringResource(R.string.commute_learn),
             summary = if (asked && !state.reached) {
                 stringResource(R.string.commute_unreached)

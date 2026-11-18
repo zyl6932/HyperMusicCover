@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.os4.musiccover.BuildConfig
 import com.os4.musiccover.R
 import com.os4.musiccover.ui.util.openQqGroup
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.openTelegramGroup
 import com.os4.musiccover.updater.InstallOutcome
 import com.os4.musiccover.updater.UpdateApi
@@ -482,7 +483,7 @@ private fun UpdateLinksDialog(show: Boolean, onDismiss: () -> Unit) {
     ) {
         val dismiss = LocalDismissState.current
         Column {
-            Card(modifier = Modifier.padding(bottom = 8.dp)) {
+            AppCard(modifier = Modifier.padding(bottom = 8.dp)) {
                 BasicComponent(
                     title = "GitHub",
                     onClick = {

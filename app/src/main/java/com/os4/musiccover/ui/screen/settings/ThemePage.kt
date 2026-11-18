@@ -1,6 +1,7 @@
 package com.os4.musiccover.ui.screen.settings
 
 import com.os4.musiccover.ui.util.nextCard
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import com.os4.musiccover.ui.util.FoldUnder
 import androidx.compose.foundation.layout.Column
@@ -55,7 +56,7 @@ fun ThemePageView(
         onBack = onBack,
     ) {
         item(key = "theme") {
-            Card(
+            AppCard(
                 modifier = Modifier.firstCard()
                     .padding(bottom = 12.dp)
             ) {

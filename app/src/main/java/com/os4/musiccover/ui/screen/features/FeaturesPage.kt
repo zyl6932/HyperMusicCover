@@ -1,6 +1,7 @@
 package com.os4.musiccover.ui.screen.features
 
 import com.os4.musiccover.ui.util.nextCard
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import com.os4.musiccover.ui.util.FoldUnder
 import android.content.Intent
@@ -106,28 +107,28 @@ private fun FeatureList(
             // The order is the user's (2026-09-30): the islands, the cover, the shade; 高德's trip
             // went last when it got its switch (2026-10-07).
             Column {
-                Card(modifier = Modifier.firstCard()) {
+                AppCard(modifier = Modifier.firstCard()) {
                     ArrowPreference(
                         title = stringResource(R.string.features_mini_title),
                         summary = stringResource(R.string.features_mini_summary),
                         onClick = { onOpen(MiniPlayerActivity::class.java) },
                     )
                 }
-                Card(modifier = Modifier.nextCard()) {
+                AppCard(modifier = Modifier.nextCard()) {
                     ArrowPreference(
                         title = stringResource(R.string.features_cover_title),
                         summary = stringResource(R.string.features_cover_summary),
                         onClick = { onOpen(CoverActivity::class.java) },
                     )
                 }
-                Card(modifier = Modifier.nextCard()) {
+                AppCard(modifier = Modifier.nextCard()) {
                     ArrowPreference(
                         title = stringResource(R.string.features_shade_title),
                         summary = stringResource(R.string.features_shade_summary),
                         onClick = { onOpen(ShadeActivity::class.java) },
                     )
                 }
-                Card(modifier = Modifier.nextCard()) {
+                AppCard(modifier = Modifier.nextCard()) {
                     ArrowPreference(
                         title = stringResource(R.string.features_transit_title),
                         summary = stringResource(R.string.features_transit_summary),
@@ -135,7 +136,7 @@ private fun FeatureList(
                     )
                 }
                 // 指纹快捷功能 last, as the newest (2026-10-21).
-                Card(modifier = Modifier.nextCard()) {
+                AppCard(modifier = Modifier.nextCard()) {
                     ArrowPreference(
                         title = stringResource(R.string.features_fpquick_title),
                         summary = stringResource(R.string.features_fpquick_summary),
@@ -268,7 +269,7 @@ internal fun CoverPageView(
             // not reach the bar - so an upward swipe collapsed nothing, on the one page whose
             // picture is the tallest thing on it. The tab row below it scrolls with it for the
             // same reason, as DonatePage's does.
-            Card(Modifier.firstCard()) {
+            AppCard(Modifier.firstCard()) {
                 CoverDemo(
                     coverStyle = module.coverStyle,
                     bias = module.bias,
@@ -287,7 +288,7 @@ internal fun CoverPageView(
             )
         }
         item(key = "settings") {
-            Card(modifier = Modifier.nextCard()) {
+            AppCard(modifier = Modifier.nextCard()) {
                 Column {
                     SettingsNotices(alive = module.alive)
                     when (group) {

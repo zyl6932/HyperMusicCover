@@ -8,6 +8,7 @@
 package com.os4.musiccover.ui.screen.home
 
 import com.os4.musiccover.ui.util.nextCard
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import android.annotation.SuppressLint
 import android.content.Intent
@@ -281,6 +282,9 @@ fun HomePageView(
                         .height(IntrinsicSize.Min),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // Deliberately still a Card: this one's colour is the status (problem,
+                    // working, fine) and its press feedback is part of it, so it is not a
+                    // settings panel and does not become glass.
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.defaultColors(color = statusColor),
@@ -353,7 +357,7 @@ fun HomePageView(
         // still the old installation's until SystemUI restarts (stage 5.5).
         if (installPending) {
             item(key = "install") {
-                Card(modifier = Modifier.nextCard()) {
+                AppCard(modifier = Modifier.nextCard()) {
                     ArrowPreference(
                         title = stringResource(R.string.home_install_restart),
                         summary = stringResource(R.string.home_install_restart_summary),
@@ -369,7 +373,7 @@ fun HomePageView(
         val missing = if (state.alive) state.featuresMissing else emptyList()
         if (missing.isNotEmpty()) {
             item(key = "features_missing") {
-                Card(modifier = Modifier.nextCard()) {
+                AppCard(modifier = Modifier.nextCard()) {
                     ArrowPreference(
                         title = stringResource(R.string.home_features_missing, missing.size),
                         summary = stringResource(R.string.home_features_missing_summary),
@@ -395,7 +399,7 @@ fun HomePageView(
         // The module's own version was a fifth row and is gone: the status card above already
         // carries it, and the same number twice on one page is one of them to read.
         item(key = "device") {
-            Card(modifier = Modifier.nextCard()) {
+            AppCard(modifier = Modifier.nextCard()) {
                 Column {
                     BasicComponent(
                         title = stringResource(R.string.home_device_name),
@@ -423,7 +427,7 @@ fun HomePageView(
         //
         // No top padding of its own: the device card above already carries 12dp underneath it.
         item(key = "donate") {
-            Card(modifier = Modifier.nextCard()) {
+            AppCard(modifier = Modifier.nextCard()) {
                 ArrowPreference(
                     title = stringResource(R.string.donate_title),
                     summary = stringResource(R.string.donate_home_summary),

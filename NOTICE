@@ -39,6 +39,18 @@ the AGPL-3.0. These files are not relicensed.
   scoring every by-name lyric source uses to pick a song are adapted from that
   project. The files carrying those changes are marked in their headers.
 
+  InstallerX Revived (https://github.com/wxxsfxyzm/InstallerX-Revived)
+  The OS4 settings shell follows that project's glass migration (its commit
+  a16a10b): glass dropdowns and dialogs rendered through the Miuix Scaffold
+  above a page backdrop, the plain-options test that decides when a dropdown
+  can be glass, and the split between the content a bar samples and the
+  recording popups sample.
+
+  Mishka (https://github.com/YuKongA/Mishka)
+  The two-level backdrop arrangement and the OS4 migration rules this
+  project's glass frame follows come from that project's Miuix glass
+  migration guide.
+
 Apache License, Version 2.0
 ---------------------------
 One-way compatible with the AGPL-3.0, so these files are distributed here as

@@ -4,6 +4,7 @@ package com.os4.musiccover.app
 import com.os4.musiccover.island.MiniPlayerConfig
 import com.os4.musiccover.R
 import com.os4.musiccover.ui.util.FoldUnder
+import com.os4.musiccover.ui.util.AppCard
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -99,12 +100,12 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
         onBack = onBack) {
         item(key = "demo") {
             // What the islands do, played on a drawn phone, before the switches that turn them on.
-            Card(Modifier.firstCard()) {
+            AppCard(Modifier.firstCard()) {
                 IslandDemo(Modifier.padding(top = 16.dp))
             }
         }
         item(key = "master") {
-            Card(Modifier.nextCard()) {
+            AppCard(Modifier.nextCard()) {
                 SwitchPreference(title = stringResource(R.string.mini_enabled),
                     // Why it cannot be moved, as every master switch in the app says it: not
                     // answering at all, or answering from a build older than these settings.
@@ -124,7 +125,7 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
             FoldUnder(on, settled = ready) {
                 Column {
                     SmallTitle(text = stringResource(R.string.mini_section_look))
-                    Card(Modifier.nextCard()) {
+                    AppCard(Modifier.nextCard()) {
                         AppDropdownPreference(
                             title = stringResource(R.string.mini_style),
                             items = listOf(stringResource(R.string.mini_style_row), stringResource(R.string.mini_style_stack)),
@@ -158,7 +159,7 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                             onCheckedChange = { push(MiniPlayerConfig.ADAPTIVE_WIDTH, it) })
                     }
                     SmallTitle(text = stringResource(R.string.mini_section_notifications))
-                    Card(Modifier.nextCard()) {
+                    AppCard(Modifier.nextCard()) {
                         // Above the grouping it switches off: with ordinary notifications staying
                         // in the system list there is nothing for that row to group.
                         SwitchPreference(title = stringResource(R.string.mini_normals_in_stack),
@@ -182,7 +183,7 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                         }
                     }
                     SmallTitle(text = stringResource(R.string.mini_section_other))
-                    Card(Modifier.nextCard()) {
+                    AppCard(Modifier.nextCard()) {
                         // A switch was here and is gone: the shortcuts always go with the
                         // full-screen doze now. See MiniPlayerConfig.HIDE_AOD_SHORTCUTS.
                         // A switch was here and is gone: a long line scrolls once and rests cut.

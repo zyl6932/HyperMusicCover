@@ -1,6 +1,7 @@
 package com.os4.musiccover.ui.screen.about
 
 import com.os4.musiccover.ui.util.nextCard
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -182,7 +183,7 @@ fun CreditsPageContent(
         onBack = onBack,
     ) {
         item(key = "intro") {
-            Card(modifier = Modifier.firstCard()) {
+            AppCard(modifier = Modifier.firstCard()) {
                 BasicComponent(summary = stringResource(R.string.credits_intro))
             }
         }
@@ -190,7 +191,7 @@ fun CreditsPageContent(
         groups.forEach { (heading, credits) ->
             item(key = heading) {
                 SmallTitle(text = stringResource(heading))
-                Card(modifier = Modifier.nextCard()) {
+                AppCard(modifier = Modifier.nextCard()) {
                     credits.forEach { credit ->
                         ArrowPreference(
                             title = credit.name,

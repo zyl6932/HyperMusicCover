@@ -90,6 +90,7 @@ import com.os4.musiccover.R
 import com.os4.musiccover.ui.screen.features.ValueSlider
 import com.os4.musiccover.ui.theme.AppTheme
 import com.os4.musiccover.ui.util.FoldUnder
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.PageScaffold
 import com.os4.musiccover.ui.util.firstCard
 import com.os4.musiccover.ui.util.nextCard
@@ -345,7 +346,7 @@ private fun FpQuickPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
             }
         }) {
         item(key = "switch") {
-            Card(Modifier.firstCard()) {
+            AppCard(Modifier.firstCard()) {
                 // Only an answer can put this on (ShadePageView says why).
                 SwitchPreference(title = stringResource(R.string.fpquick_enabled),
                     summary = when {
@@ -384,7 +385,7 @@ private fun FpQuickPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
             FoldUnder(editing, settled = module.alive) {
                 Column {
                     SmallTitle(text = stringResource(R.string.fpquick_layout))
-                    Card(Modifier.nextCard()) {
+                    AppCard(Modifier.nextCard()) {
                         HiveEditor(config.slots, onTap = { i ->
                             target = i
                             dialog = if (i < config.slots.size && !isEmpty(config.slots[i])) {
@@ -401,7 +402,7 @@ private fun FpQuickPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
             FoldUnder(editing, settled = module.alive) {
                 Column {
                     SmallTitle(text = stringResource(R.string.fpquick_items))
-                    Card(Modifier.nextCard()) {
+                    AppCard(Modifier.nextCard()) {
                         val filled = config.filled
                         ItemList(filled.map { it.second },
                             // A new order of the same items into the same places.

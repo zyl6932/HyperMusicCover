@@ -1,6 +1,7 @@
 package com.os4.musiccover.ui.screen.features
 
 import com.os4.musiccover.ui.util.nextCard
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import com.os4.musiccover.ui.util.FoldUnder
 import androidx.compose.foundation.layout.Column
@@ -84,7 +85,7 @@ internal fun ShadePageView(
     ) {
         item(key = "master") {
             Column {
-                Card(modifier = Modifier.firstCard()) {
+                AppCard(modifier = Modifier.firstCard()) {
                     SwitchPreference(
                         title = stringResource(R.string.shade_enabled),
                         // Said here rather than left to a greyed-out page: a switch that cannot
@@ -106,7 +107,7 @@ internal fun ShadePageView(
                 FoldUnder(master, settled = module.alive) {
                     Column {
                         SmallTitle(text = stringResource(R.string.shade_section_behaviour))
-                        Card(modifier = Modifier.nextCard()) {
+                        AppCard(modifier = Modifier.nextCard()) {
                             // Index is the module's mode: 0 hands the shade back, 1 keeps the last cover.
                             val modes = listOf(
                                 stringResource(R.string.shade_mode_restore),

@@ -8,6 +8,7 @@
 package com.os4.musiccover.ui.screen.about
 
 import com.os4.musiccover.ui.util.nextCard
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -28,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -38,6 +40,9 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.os4.musiccover.R
 import com.os4.musiccover.ui.util.BlurredBar
+import com.os4.musiccover.ui.util.GlassPageBar
+import com.os4.musiccover.ui.util.LocalOs4Ui
+import com.os4.musiccover.ui.util.LocalPageBackdrop
 import com.os4.musiccover.ui.util.PageBackButton
 import com.os4.musiccover.ui.util.pageScrollModifiers
 import com.os4.musiccover.ui.util.rememberBlurBackdrop
@@ -62,22 +67,32 @@ fun LicensePageContent(
 ) {
     val topAppBarScrollBehavior = MiuixScrollBehavior()
     val backdrop = rememberBlurBackdrop()
-    val blurActive = isBlurEnabled && backdrop != null
+    val os4 = LocalOs4Ui.current
+    val blurActive = (isBlurEnabled || os4) && backdrop != null
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
 
     Scaffold(
         topBar = {
-            BlurredBar(backdrop, blurActive, topAppBarScrollBehavior) {
-                TopAppBar(
+            if (os4) {
+                GlassPageBar(
                     title = stringResource(R.string.third_party_licenses_title),
-                    color = barColor,
+                    backdrop = backdrop,
                     scrollBehavior = topAppBarScrollBehavior,
-                    // Shared with every other page that has a back arrow. This page keeps its
-                    // own Scaffold rather than using PageScaffold: its list is inset by the
-                    // display cutout on top of the window insets the frame already applies,
-                    // which no other page does.
-                    navigationIcon = { PageBackButton(onBack) },
+                    onBack = onBack,
                 )
+            } else {
+                BlurredBar(backdrop, blurActive, topAppBarScrollBehavior) {
+                    TopAppBar(
+                        title = stringResource(R.string.third_party_licenses_title),
+                        color = barColor,
+                        scrollBehavior = topAppBarScrollBehavior,
+                        // Shared with every other page that has a back arrow. This page keeps its
+                        // own Scaffold rather than using PageScaffold: its list is inset by the
+                        // display cutout on top of the window insets the frame already applies,
+                        // which no other page does.
+                        navigationIcon = { PageBackButton(onBack) },
+                    )
+                }
             }
         },
         popupHost = { },
@@ -118,39 +133,43 @@ fun LicensePageContent(
             )
         }
 
-        Box(
-            modifier = if (isBlurEnabled && backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier
-        ) {
-            LazyColumn(
-                overscrollEffect = null,
-                state = lazyListState,
+        CompositionLocalProvider(LocalPageBackdrop provides backdrop.takeIf { blurActive }) {
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pageScrollModifiers(
-                        showTopAppBar = true,
-                        topAppBarScrollBehavior = topAppBarScrollBehavior,
-                    )
-                    .padding(
-                        start = contentPadding.calculateStartPadding(layoutDirection),
-                        end = contentPadding.calculateEndPadding(layoutDirection),
-                    ),
-                contentPadding = PaddingValues(
-                    top = contentPadding.calculateTopPadding(),
-                    bottom = contentPadding.calculateBottomPadding(),
-                ),
+                    .then(if (blurActive) Modifier.layerBackdrop(backdrop) else Modifier)
             ) {
-                // One card of rows, as the credits page and miuix's example list theirs: a card
-                // per library was a column of single-row islands (2026-10-14).
-                item(key = "libraries") {
-                    Card(modifier = Modifier.firstCard()) {
-                        libraries.forEach { library ->
-                            ArrowPreference(
-                                title = library.name,
-                                summary = "${library.artifactVersion} · ${library.website}",
-                                onClick = {
-                                    uriHandler.openUri(library.website)
-                                },
-                            )
+                    LazyColumn(
+                    overscrollEffect = null,
+                    state = lazyListState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pageScrollModifiers(
+                            showTopAppBar = true,
+                            topAppBarScrollBehavior = topAppBarScrollBehavior,
+                        )
+                        .padding(
+                            start = contentPadding.calculateStartPadding(layoutDirection),
+                            end = contentPadding.calculateEndPadding(layoutDirection),
+                        ),
+                    contentPadding = PaddingValues(
+                        top = contentPadding.calculateTopPadding(),
+                        bottom = contentPadding.calculateBottomPadding(),
+                    ),
+                ) {
+                    // One card of rows, as the credits page and miuix's example list theirs: a card
+                    // per library was a column of single-row islands (2026-10-14).
+                    item(key = "libraries") {
+                        AppCard(modifier = Modifier.firstCard()) {
+                            libraries.forEach { library ->
+                                ArrowPreference(
+                                    title = library.name,
+                                    summary = "${library.artifactVersion} · ${library.website}",
+                                    onClick = {
+                                        uriHandler.openUri(library.website)
+                                    },
+                                )
+                            }
                         }
                     }
                 }

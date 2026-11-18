@@ -1,6 +1,7 @@
 package com.os4.musiccover.ui.screen.donate
 
 import com.os4.musiccover.ui.util.nextCard
+import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import android.content.ContentValues
 import android.content.Context
@@ -117,7 +118,7 @@ fun DonatePageContent(
         onBack = onBack,
     ) {
         item(key = "thanks") {
-            Card(modifier = Modifier.firstCard()) {
+            AppCard(modifier = Modifier.firstCard()) {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                     MiuixText(
                         text = stringResource(R.string.donate_thanks_title),
@@ -144,7 +145,7 @@ fun DonatePageContent(
         }
 
         item(key = "code") {
-            Card(modifier = Modifier.nextCard()) {
+            AppCard(modifier = Modifier.nextCard()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
