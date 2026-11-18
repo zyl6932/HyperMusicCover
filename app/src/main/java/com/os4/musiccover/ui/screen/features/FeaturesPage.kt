@@ -25,14 +25,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
-import com.os4.musiccover.app.CoverActivity
 import com.os4.musiccover.island.MiniPlayerConfig
 import com.os4.musiccover.app.ModuleBridge
 import com.os4.musiccover.R
-import com.os4.musiccover.app.ShadeActivity
-import com.os4.musiccover.app.MiniPlayerActivity
-import com.os4.musiccover.app.TransitActivity
-import com.os4.musiccover.app.FpQuickActivity
 import com.os4.musiccover.app.LyricStyleActivity
 import com.os4.musiccover.app.SettingsStore
 import com.os4.musiccover.ui.component.SettingsNotices
@@ -54,99 +49,6 @@ import com.os4.musiccover.ui.util.AppDialog
 import com.os4.musiccover.ui.util.AppDialogButton
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
-
-/**
- * The features tab: a card per feature, each opening a screen of its own.
- *
- * The tab lists rather than controls because its two subjects have nothing to do with each
- * other - one is what the lock screen shows, the other is what happens over the desktop - and
- * between them they are long enough that the second would have been buried under the first.
- *
- * Each card starts an Activity, which is what `AboutPage` does to reach the licence list and
- * what `LicenseActivity` therefore already established as the house pattern for a sub-screen.
- * The transition, the back gesture and the predictive-back animation on Android 13+ are the
- * platform's; a sub-page swapped in place here would have had to imitate all three.
- */
-@Composable
-fun FeaturesPageView(
-    isBlurEnabled: Boolean,
-    extraBottomPadding: Dp = 0.dp,
-) {
-    val context = LocalContext.current
-    FeatureList(isBlurEnabled, extraBottomPadding) { target ->
-        // An Activity, not a page swapped in place - the same thing AboutPage does to reach the
-        // licence list, and the reason is the transition: a whole screen arriving is the
-        // platform's own animation, it brings its own back handling, and nothing here has to
-        // imitate any of it. A sub-page animated inside this one only ever approximates that.
-        context.startActivity(Intent(context, target))
-    }
-}
-
-/**
- * The tab itself: one card per feature, each opening a screen of its own.
- *
- * This used to BE the lock screen page. It became a list when the notification shade arrived,
- * because the two have nothing to do with each other - one is what the lock screen shows, the
- * other is what happens over the desktop - and between them they are long enough that the second
- * would have been buried under the first.
- */
-@Composable
-private fun FeatureList(
-    isBlurEnabled: Boolean,
-    extraBottomPadding: Dp,
-    onOpen: (Class<*>) -> Unit,
-) {
-    PageScaffold(
-        title = stringResource(R.string.tab_features),
-        isBlurEnabled = isBlurEnabled,
-        extraBottomPadding = extraBottomPadding,
-    ) {
-        item(key = "features") {
-            // A card per feature - each is a page of its own, and the user wants them read as
-            // four things, not as four rows of one list (2026-10-14: merged, then split again).
-            // The order is the user's (2026-09-30): the islands, the cover, the shade; 高德's trip
-            // went last when it got its switch (2026-10-07).
-            Column {
-                AppCard(modifier = Modifier.firstCard()) {
-                    ArrowPreference(
-                        title = stringResource(R.string.features_mini_title),
-                        summary = stringResource(R.string.features_mini_summary),
-                        onClick = { onOpen(MiniPlayerActivity::class.java) },
-                    )
-                }
-                AppCard(modifier = Modifier.nextCard()) {
-                    ArrowPreference(
-                        title = stringResource(R.string.features_cover_title),
-                        summary = stringResource(R.string.features_cover_summary),
-                        onClick = { onOpen(CoverActivity::class.java) },
-                    )
-                }
-                AppCard(modifier = Modifier.nextCard()) {
-                    ArrowPreference(
-                        title = stringResource(R.string.features_shade_title),
-                        summary = stringResource(R.string.features_shade_summary),
-                        onClick = { onOpen(ShadeActivity::class.java) },
-                    )
-                }
-                AppCard(modifier = Modifier.nextCard()) {
-                    ArrowPreference(
-                        title = stringResource(R.string.features_transit_title),
-                        summary = stringResource(R.string.features_transit_summary),
-                        onClick = { onOpen(TransitActivity::class.java) },
-                    )
-                }
-                // 指纹快捷功能 last, as the newest (2026-10-21).
-                AppCard(modifier = Modifier.nextCard()) {
-                    ArrowPreference(
-                        title = stringResource(R.string.features_fpquick_title),
-                        summary = stringResource(R.string.features_fpquick_summary),
-                        onClick = { onOpen(FpQuickActivity::class.java) },
-                    )
-                }
-            }
-        }
-    }
-}
 
 /**
  * Everything the module can be told about the lock screen, with what cover mode is played above.

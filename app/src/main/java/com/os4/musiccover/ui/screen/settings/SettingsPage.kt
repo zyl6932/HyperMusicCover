@@ -11,6 +11,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
@@ -25,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import com.os4.musiccover.BuildConfig
 import com.os4.musiccover.LauncherIcon
 import com.os4.musiccover.app.AboutActivity
+import com.os4.musiccover.app.DonateActivity
 import com.os4.musiccover.app.LocaleHelper
 import com.os4.musiccover.LogLevel
 import com.os4.musiccover.app.LsposedService
@@ -38,6 +43,7 @@ import androidx.compose.runtime.LaunchedEffect
 import com.os4.musiccover.ui.util.PageScaffold
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -257,6 +263,29 @@ fun SettingsPageView(
                         onClick = {
                             context.startActivity(Intent(context, AboutActivity::class.java))
                         }
+                    )
+                    // The donation row used to be the last card on the home page. It sits with
+                    // the About row now, one card rather than two: both are about the app itself
+                    // rather than about anything it does.
+                    ArrowPreference(
+                        title = stringResource(R.string.donate_title),
+                        summary = stringResource(R.string.donate_home_summary),
+                        startAction = {
+                            Icon(
+                                modifier = Modifier
+                                    .padding(end = 12.dp)
+                                    .size(28.dp),
+                                imageVector = Icons.Rounded.Favorite,
+                                // Fixed rather than themed: the heart is the whole signal here,
+                                // and in the dynamic-colour scheme it would otherwise take
+                                // whatever colour the wallpaper happened to give it.
+                                tint = Color(0xFFF2545B),
+                                contentDescription = null,
+                            )
+                        },
+                        onClick = {
+                            context.startActivity(Intent(context, DonateActivity::class.java))
+                        },
                     )
                 }
             }

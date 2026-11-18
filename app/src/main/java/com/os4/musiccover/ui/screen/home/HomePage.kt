@@ -12,8 +12,6 @@ import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import android.annotation.SuppressLint
 import android.content.Intent
-import android.os.Build
-import android.provider.Settings
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.indication
@@ -36,7 +34,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,8 +54,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.os4.musiccover.BuildConfig
-import com.os4.musiccover.app.DonateActivity
+import com.os4.musiccover.app.CoverActivity
+import com.os4.musiccover.app.FpQuickActivity
 import com.os4.musiccover.app.LsposedService
+import com.os4.musiccover.app.MiniPlayerActivity
+import com.os4.musiccover.app.ShadeActivity
+import com.os4.musiccover.app.TransitActivity
 import com.os4.musiccover.app.ModuleBridge
 import com.os4.musiccover.app.SettingsStore
 import com.os4.musiccover.R
@@ -69,7 +70,6 @@ import com.os4.musiccover.ui.util.isInDarkTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -118,24 +118,6 @@ fun HomePageView(
     val scrollBehavior = MiuixScrollBehavior()
     val title = stringResource(R.string.tab_home)
 
-    // These used to run on every re-composition, and two of them are not reads of this process:
-    // `Settings.Global` is a ContentProvider call into system_server and `getPackageInfo` was a
-    // PackageManager call into it as well. None of the answers can change while the app is up, so
-    // each is asked for once.
-    val unknown = stringResource(R.string.home_unknown)
-    val deviceModel = remember(unknown) { Build.MODEL.ifEmpty { unknown } }
-    val deviceName = remember(context, deviceModel) {
-        Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)
-            ?: deviceModel
-    }
-    val systemVersion = remember {
-        "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
-    }
-    val loadingText = stringResource(R.string.home_loading)
-    var hyperOSVersion by remember { mutableStateOf(loadingText) }
-    LaunchedEffect(Unit) {
-        hyperOSVersion = withContext(Dispatchers.IO) { SystemVersion.hyperOs(loadingText) }
-    }
     // BuildConfig rather than the installed package's metadata: it is the same string for this
     // build and it costs nothing, where the package manager had to be asked every time.
     val moduleVersion = "v" + BuildConfig.VERSION_NAME
@@ -488,61 +470,53 @@ fun HomePageView(
             }
         }
 
-        // No heading over this one. The four rows say what they are - a heading reading
-        // "device information" over a list of device facts only repeated them - and the gap it
-        // used to hold is now the card's own, so the card sits exactly where it always did.
-        // The module's own version was a fifth row and is gone: the status card above already
-        // carries it, and the same number twice on one page is one of them to read.
-        item(key = "device") {
-            AppCard(modifier = Modifier.nextCard()) {
-                Column {
-                    BasicComponent(
-                        title = stringResource(R.string.home_device_name),
-                        summary = deviceName,
+        // The five feature screens used to have a tab of their own. They stand where the device
+        // facts used to, and not as five cards: the first three are all about what the lock
+        // screen shows and read as one subject, so they share a card. 高德's trip switch always
+        // sat apart since it got one (2026-10-07), and 指纹快捷功能 is the newest (2026-10-21).
+        item(key = "features") {
+            Column {
+                AppCard(modifier = Modifier.nextCard()) {
+                    ArrowPreference(
+                        title = stringResource(R.string.features_mini_title),
+                        summary = stringResource(R.string.features_mini_summary),
+                        onClick = {
+                            context.startActivity(Intent(context, MiniPlayerActivity::class.java))
+                        },
                     )
-                    BasicComponent(
-                        title = stringResource(R.string.home_device_model),
-                        summary = deviceModel,
+                    ArrowPreference(
+                        title = stringResource(R.string.features_cover_title),
+                        summary = stringResource(R.string.features_cover_summary),
+                        onClick = {
+                            context.startActivity(Intent(context, CoverActivity::class.java))
+                        },
                     )
-                    BasicComponent(
-                        title = stringResource(R.string.home_hyperos_version),
-                        summary = hyperOSVersion,
-                    )
-                    BasicComponent(
-                        title = stringResource(R.string.home_android_version),
-                        summary = systemVersion,
+                    ArrowPreference(
+                        title = stringResource(R.string.features_shade_title),
+                        summary = stringResource(R.string.features_shade_summary),
+                        onClick = {
+                            context.startActivity(Intent(context, ShadeActivity::class.java))
+                        },
                     )
                 }
-            }
-        }
-
-        // Last on the page, under the device list. Asking comes after everything the page was
-        // opened for, never before it. It is a row rather than a button because everything else
-        // the user can tap in this app is a row, and a lone button here would read as a demand.
-        //
-        // No top padding of its own: the device card above already carries 12dp underneath it.
-        item(key = "donate") {
-            AppCard(modifier = Modifier.nextCard()) {
-                ArrowPreference(
-                    title = stringResource(R.string.donate_title),
-                    summary = stringResource(R.string.donate_home_summary),
-                    startAction = {
-                        Icon(
-                            modifier = Modifier
-                                .padding(end = 12.dp)
-                                .size(28.dp),
-                            imageVector = Icons.Rounded.Favorite,
-                            // Fixed rather than themed: the heart is the whole signal here, and
-                            // in the dynamic-colour scheme it would otherwise take whatever
-                            // colour the wallpaper happened to give it.
-                            tint = Color(0xFFF2545B),
-                            contentDescription = null,
-                        )
-                    },
-                    onClick = {
-                        context.startActivity(Intent(context, DonateActivity::class.java))
-                    },
-                )
+                AppCard(modifier = Modifier.nextCard()) {
+                    ArrowPreference(
+                        title = stringResource(R.string.features_transit_title),
+                        summary = stringResource(R.string.features_transit_summary),
+                        onClick = {
+                            context.startActivity(Intent(context, TransitActivity::class.java))
+                        },
+                    )
+                }
+                AppCard(modifier = Modifier.nextCard()) {
+                    ArrowPreference(
+                        title = stringResource(R.string.features_fpquick_title),
+                        summary = stringResource(R.string.features_fpquick_summary),
+                        onClick = {
+                            context.startActivity(Intent(context, FpQuickActivity::class.java))
+                        },
+                    )
+                }
             }
         }
     }
@@ -642,29 +616,6 @@ fun HomePageView(
                 role = AppDialogButtonRole.Primary,
             )
         }
-    }
-}
-
-private object SystemVersion {
-    /** ro.* properties are the only place the HyperOS version is written down. */
-    private fun prop(key: String): String = try {
-        @Suppress("PrivateApi")
-        val cls = Class.forName("android.os.SystemProperties")
-        val get = cls.getMethod("get", String::class.java, String::class.java)
-        (get.invoke(null, key, "") as? String).orEmpty()
-    } catch (_: Throwable) {
-        ""
-    }
-
-    /**
-     * The incremental alone: it already starts with the release name (OS4.0.0.35.XPBCNXM), so
-     * printing the name in front of it just stutters - "OS4.0 · OS4.0.0.35.XPBCNXM".
-     */
-    fun hyperOs(fallback: String): String {
-        val incremental = prop("ro.mi.os.version.incremental").ifEmpty { Build.DISPLAY }
-        if (incremental.isNotEmpty()) return incremental
-        val name = prop("ro.mi.os.version.name").ifEmpty { prop("ro.miui.ui.version.name") }
-        return name.ifEmpty { fallback }
     }
 }
 

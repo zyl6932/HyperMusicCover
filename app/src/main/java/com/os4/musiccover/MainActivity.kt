@@ -23,7 +23,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -46,7 +48,6 @@ import androidx.compose.ui.unit.dp
 import com.os4.musiccover.ui.component.PagerNavigationSpringSpec
 import com.os4.musiccover.ui.component.liquid.IosLiquidGlassNavigationBar
 import com.os4.musiccover.updater.UpdateCheck
-import com.os4.musiccover.ui.screen.features.FeaturesPageView
 import com.os4.musiccover.ui.screen.home.HomePageView
 import com.os4.musiccover.ui.screen.settings.SettingsPageView
 import com.os4.musiccover.ui.theme.AppTheme
@@ -75,7 +76,6 @@ import top.yukonga.miuix.kmp.glass.GlassNavigationItem
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Home
 import top.yukonga.miuix.kmp.icon.extended.Settings
-import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.material.EdgeStrokes
 import top.yukonga.miuix.kmp.material.GlassDefaults
 import top.yukonga.miuix.kmp.material.edgeStroke
@@ -441,17 +441,16 @@ private fun MainScreen(
     onBlurEnabledChange: (Boolean) -> Unit,
     onShowWelcome: () -> Unit,
 ) {
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val pagerState = rememberPagerState(pageCount = { 2 })
     var selectedIndex by remember { mutableIntStateOf(0) }
     var isNavigating by remember { mutableStateOf(false) }
     var navJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val scope = rememberCoroutineScope()
     val items = listOf(
         stringResource(R.string.tab_home),
-        stringResource(R.string.tab_features),
         stringResource(R.string.tab_settings),
     )
-    val icons = listOf(MiuixIcons.Home, MiuixIcons.Tune, MiuixIcons.Settings)
+    val icons = listOf(MiuixIcons.Home, MiuixIcons.Settings)
 
     /**
      * One flag per page rather than one counter shared by all of them.
@@ -575,12 +574,7 @@ private fun MainScreen(
                             extraBottomPadding = navBarHeight,
                         )
 
-                        1 -> FeaturesPageView(
-                            isBlurEnabled = isBlurEnabled,
-                            extraBottomPadding = navBarHeight,
-                        )
-
-                        2 -> SettingsPageView(
+                        1 -> SettingsPageView(
                             isBlurEnabled = isBlurEnabled,
                             extraBottomPadding = navBarHeight,
                             onShowWelcome = onShowWelcome,
@@ -602,6 +596,13 @@ private fun BottomNavigationBar(
     blurActive: Boolean,
     onItemSelected: (Int) -> Unit,
 ) {
+    // miuix's demo leaves the filled bars to their container and only the floating one sizes
+    // itself. With four tabs a full-width bar gave each tab the width the demo shows; with two
+    // it doubles it. These are the demo's per-tab widths, so the bar stays the width it had and
+    // is centred instead of stretched.
+    val standardWidth = (items.size * 100).dp
+    val liquidWidth = (items.size * 74).dp + 96.dp
+
     // In OS4 the bar is glass, whatever the OS3 trio was set to. Those settings stay stored,
     // untouched, and come back with the OS3 interface.
     if (LocalOs4Ui.current) {
@@ -620,14 +621,19 @@ private fun BottomNavigationBar(
             val navigationItems = remember(items, icons) {
                 List(items.size) { i -> NavigationItem(items[i], icons[i]) }
             }
-            IosLiquidGlassNavigationBar(
-                modifier = Modifier.padding(horizontal = 12.dp),
-                items = navigationItems,
-                selectedIndex = selectedIndex,
-                onItemClick = onItemSelected,
-                backdrop = backdrop,
-                isBlurActive = blurActive,
-            )
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                IosLiquidGlassNavigationBar(
+                    modifier = Modifier.width(liquidWidth),
+                    items = navigationItems,
+                    selectedIndex = selectedIndex,
+                    onItemClick = onItemSelected,
+                    backdrop = backdrop,
+                    isBlurActive = blurActive,
+                )
+            }
         }
 
         1 -> {
@@ -670,39 +676,45 @@ private fun BottomNavigationBar(
         else -> {
             val barColor = if (blurActive) Color.Transparent else MiuixTheme.colorScheme.surface
             Box(
-                modifier = Modifier
-                    .then(
-                        if (blurActive && backdrop != null) {
-                            Modifier.textureBlur(
-                                backdrop = backdrop,
-                                shape = RectangleShape,
-                                blurRadius = 25f,
-                                colors = BlurDefaults.blurColors(
-                                    blendColors = listOf(
-                                        BlendColorEntry(color = MiuixTheme.colorScheme.surface.copy(0.5f)),
-                                    ),
-                                ),
-                            )
-                        } else {
-                            Modifier
-                        }
-                    )
-                    .background(barColor)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {},
-                    )
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
             ) {
-                NavigationBar(color = barColor) {
-                    items.forEachIndexed { index, label ->
-                        NavigationBarItem(
-                            selected = selectedIndex == index,
-                            onClick = { onItemSelected(index) },
-                            icon = icons[index],
-                            label = label,
-                            enabled = true
+                Box(
+                    modifier = Modifier
+                        .width(standardWidth)
+                        .then(
+                            if (blurActive && backdrop != null) {
+                                Modifier.textureBlur(
+                                    backdrop = backdrop,
+                                    shape = RectangleShape,
+                                    blurRadius = 25f,
+                                    colors = BlurDefaults.blurColors(
+                                        blendColors = listOf(
+                                            BlendColorEntry(color = MiuixTheme.colorScheme.surface.copy(0.5f)),
+                                        ),
+                                    ),
+                                )
+                            } else {
+                                Modifier
+                            }
                         )
+                        .background(barColor)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        )
+                ) {
+                    NavigationBar(color = barColor) {
+                        items.forEachIndexed { index, label ->
+                            NavigationBarItem(
+                                selected = selectedIndex == index,
+                                onClick = { onItemSelected(index) },
+                                icon = icons[index],
+                                label = label,
+                                enabled = true
+                            )
+                        }
                     }
                 }
             }
@@ -733,12 +745,18 @@ private fun BottomNavigationBarOs4(
             )
         }
     }
-    GlassNavigationBar(
-        items = glassItems,
-        selectedIndex = selectedIndex,
-        onSelect = onItemSelected,
-        backdrop = backdrop,
-        modifier = Modifier.padding(horizontal = 24.dp),
-        style = GlassDefaults.style(isInDarkTheme()),
-    )
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center,
+    ) {
+        GlassNavigationBar(
+            items = glassItems,
+            selectedIndex = selectedIndex,
+            onSelect = onItemSelected,
+            backdrop = backdrop,
+            // The demo's four-tab bar: 8dp of content padding each side plus 84dp a tab.
+            modifier = Modifier.width((items.size * 84).dp + 16.dp),
+            style = GlassDefaults.style(isInDarkTheme()),
+        )
+    }
 }
