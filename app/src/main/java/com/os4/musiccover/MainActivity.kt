@@ -31,6 +31,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -54,6 +55,8 @@ import com.os4.musiccover.ui.screen.features.FeaturesPageView
 import com.os4.musiccover.ui.screen.home.HomePageView
 import com.os4.musiccover.ui.screen.settings.SettingsPageView
 import com.os4.musiccover.ui.theme.AppTheme
+import com.os4.musiccover.ui.util.LocalOs4Ui
+import com.os4.musiccover.ui.util.LocalPageBackdrop
 import com.os4.musiccover.ui.util.isInDarkTheme
 import com.os4.musiccover.ui.welcome.SplashIcon
 import com.os4.musiccover.ui.welcome.WelcomeScreen
@@ -480,6 +483,11 @@ private fun MainScreen(
     }
 
     val surfaceColor = MiuixTheme.colorScheme.surface
+    // OS4 records this whether the blur switch is on or not: the glass bars have nothing to
+    // sample otherwise, and the switch only governs the OS3 chrome. OS3 keeps the old gate,
+    // where recording with blur off was a second render nobody read.
+    val os4 = LocalOs4Ui.current
+    val backdropActive = isBlurEnabled || os4
     val backdrop = rememberLayerBackdrop {
         drawRect(surfaceColor)
         drawContent()
@@ -549,44 +557,52 @@ private fun MainScreen(
                 // Gated on the setting, not just on the bar that samples it. Recording a layer
                 // is a second render of everything inside it, and with blur off nothing was
                 // reading this one - the bar had already switched to its opaque colour.
-                .then(if (isBlurEnabled) Modifier.layerBackdrop(backdrop) else Modifier)
+                .then(if (backdropActive) Modifier.layerBackdrop(backdrop) else Modifier)
                 .background(surfaceColor)
         ) {
-            HorizontalPager(
-                state = pagerState,
-                beyondViewportPageCount = 1,
-                overscrollEffect = null,
-                modifier = Modifier.fillMaxSize(),
-            ) { page ->
-                when (page) {
-                    0 -> HomePageView(
-                        isBlurEnabled = isBlurEnabled,
-                        isCurrent = isHomeCurrent,
-                        resumeKey = resumeKey,
-                        extraBottomPadding = navBarHeight,
-                    )
+            // The fallback page for anything drawn inside the pager that records no backdrop
+            // of its own (the pages under PageScaffold provide their own): its dialogs still
+            // get something to sample, and the root popup host lives outside this recording,
+            // so a dialog never samples itself.
+            CompositionLocalProvider(
+                LocalPageBackdrop provides backdrop.takeIf { backdropActive },
+            ) {
+                HorizontalPager(
+                    state = pagerState,
+                    beyondViewportPageCount = 1,
+                    overscrollEffect = null,
+                    modifier = Modifier.fillMaxSize(),
+                ) { page ->
+                    when (page) {
+                        0 -> HomePageView(
+                            isBlurEnabled = isBlurEnabled,
+                            isCurrent = isHomeCurrent,
+                            resumeKey = resumeKey,
+                            extraBottomPadding = navBarHeight,
+                        )
 
-                    1 -> FeaturesPageView(
-                        isBlurEnabled = isBlurEnabled,
-                        extraBottomPadding = navBarHeight,
-                    )
+                        1 -> FeaturesPageView(
+                            isBlurEnabled = isBlurEnabled,
+                            extraBottomPadding = navBarHeight,
+                        )
 
-                    2 -> SettingsPageView(
-                        isBlurEnabled = isBlurEnabled,
-                        extraBottomPadding = navBarHeight,
-                        onShowWelcome = onShowWelcome,
-                    )
+                        2 -> SettingsPageView(
+                            isBlurEnabled = isBlurEnabled,
+                            extraBottomPadding = navBarHeight,
+                            onShowWelcome = onShowWelcome,
+                        )
 
-                    3 -> AboutPageContent(
-                        openLicensePage = {
-                            context.startActivity(Intent(context, LicenseActivity::class.java))
-                        },
-                        openCreditsPage = {
-                            context.startActivity(Intent(context, CreditsActivity::class.java))
-                        },
-                        isBlurEnabled = isBlurEnabled,
-                        isCurrent = isAboutCurrent,
-                    )
+                        3 -> AboutPageContent(
+                            openLicensePage = {
+                                context.startActivity(Intent(context, LicenseActivity::class.java))
+                            },
+                            openCreditsPage = {
+                                context.startActivity(Intent(context, CreditsActivity::class.java))
+                            },
+                            isBlurEnabled = isBlurEnabled,
+                            isCurrent = isAboutCurrent,
+                        )
+                    }
                 }
             }
         }

@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -28,8 +30,12 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.glass.GlassIconButton
+import top.yukonga.miuix.kmp.glass.GlassTopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.glass.ChevronBackward
+import top.yukonga.miuix.kmp.material.GlassDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -56,6 +62,103 @@ fun PageScaffold(
     onBack: (() -> Unit)? = null,
     actions: @Composable () -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
+    content: LazyListScope.() -> Unit,
+) {
+    if (LocalOs4Ui.current) {
+        PageScaffoldOs4(
+            title = title,
+            extraBottomPadding = extraBottomPadding,
+            onBack = onBack,
+            actions = actions,
+            floatingActionButton = floatingActionButton,
+            content = content,
+        )
+    } else {
+        PageScaffoldOs3(
+            title = title,
+            isBlurEnabled = isBlurEnabled,
+            extraBottomPadding = extraBottomPadding,
+            onBack = onBack,
+            actions = actions,
+            floatingActionButton = floatingActionButton,
+            content = content,
+        )
+    }
+}
+
+/**
+ * The OS4 frame: the same list and insets as [PageScaffoldOs3], under a glass top bar.
+ *
+ * The bar samples the page body through a backdrop rather than blurring a copy of it, and the
+ * body is what that backdrop records - never the bar itself: a bar inside its own recording
+ * would sample the frame it is drawing, and the blur would feed back on itself. The recording
+ * is handed to the page's dropdowns and dialogs through [LocalPageBackdrop], which render
+ * outside it.
+ */
+@Composable
+private fun PageScaffoldOs4(
+    title: String,
+    extraBottomPadding: Dp,
+    onBack: (() -> Unit)?,
+    actions: @Composable () -> Unit,
+    floatingActionButton: @Composable () -> Unit,
+    content: LazyListScope.() -> Unit,
+) {
+    val scrollBehavior = MiuixScrollBehavior()
+    val backdrop = rememberBlurBackdrop()
+    val style = GlassDefaults.style(isInDarkTheme())
+
+    CompositionLocalProvider(LocalPageBackdrop provides backdrop) {
+        Scaffold(
+            // The default popup host, unlike OS3: the glass dropdowns and dialogs are Compose
+            // popups and need a Miuix Scaffold to render into. A page inside MainActivity
+            // still hosts them at the root scaffold above (renderInRootScaffold), which is
+            // outside every recording; this one is the host for the screens of their own.
+            floatingActionButton = floatingActionButton,
+            topBar = {
+                GlassTopAppBar(
+                    title = title,
+                    scrollBehavior = scrollBehavior,
+                    backdrop = backdrop,
+                    progressiveBlur = backdrop != null,
+                    style = style,
+                    navigationIcon = { if (onBack != null) PageBackButtonOs4(onBack) },
+                    actions = { actions() },
+                )
+            },
+            contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout)
+                .only(WindowInsetsSides.Horizontal),
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // Directly after fillMaxSize and before anything that pads the content:
+                    // the recording layer's bounds are the sample's bounds, and narrowing them
+                    // shifts every blur that reads them.
+                    .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
+            ) {
+                PageList(
+                    scrollBehavior = scrollBehavior,
+                    contentPadding = PaddingValues(
+                        top = innerPadding.calculateTopPadding(),
+                        bottom = innerPadding.calculateBottomPadding() + extraBottomPadding,
+                    ),
+                    content = content,
+                )
+            }
+        }
+    }
+}
+
+/** The OS3 frame, kept exactly as it was: the switch has to be able to take the user back. */
+@Composable
+private fun PageScaffoldOs3(
+    title: String,
+    isBlurEnabled: Boolean,
+    extraBottomPadding: Dp,
+    onBack: (() -> Unit)?,
+    actions: @Composable () -> Unit,
+    floatingActionButton: @Composable () -> Unit,
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
@@ -130,6 +233,24 @@ fun PageBackButton(onBack: () -> Unit) {
             imageVector = MiuixIcons.Back,
             contentDescription = stringResource(R.string.rules_cancel),
             tint = MiuixTheme.colorScheme.onBackground,
+        )
+    }
+}
+
+/** The same control as a glass pill, inside the OS4 top bar. */
+@Composable
+private fun PageBackButtonOs4(onBack: () -> Unit) {
+    GlassIconButton(onClick = onBack) {
+        val layoutDirection = LocalLayoutDirection.current
+        Icon(
+            modifier = Modifier
+                .size(24.dp)
+                .graphicsLayer {
+                    if (layoutDirection == LayoutDirection.Rtl) scaleX = -1f
+                },
+            imageVector = MiuixIcons.Glass.ChevronBackward,
+            contentDescription = stringResource(R.string.rules_cancel),
+            tint = MiuixTheme.colorScheme.onSurface,
         )
     }
 }
