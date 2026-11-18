@@ -35,6 +35,7 @@ import com.os4.musiccover.lyrics.LyricSource;
 import com.os4.musiccover.lyrics.LyriconSource;
 import com.os4.musiccover.lyrics.NcmLyrics;
 import com.os4.musiccover.lyrics.OnlineLyrics;
+import com.os4.musiccover.lyrics.SuperLyricSource;
 import com.os4.musiccover.lyrics.TrackIdentity;
 import com.os4.musiccover.lyrics.WebLyrics;
 import com.os4.musiccover.island.DateStatus;
@@ -992,6 +993,12 @@ public class Main extends XposedModule {
             LyriconSource.attach(sContainer.getContext().getApplicationContext());
         } catch (Throwable t) {
             Xp.w(TAG + "Lyricon attach failed: " + t);
+        }
+        // Its own try: the bridge failing to attach must not take the server down with it.
+        try {
+            SuperLyricSource.attach();
+        } catch (Throwable t) {
+            Xp.w(TAG + "SuperLyric attach failed: " + t);
         }
         // The keyguard is rebuilt on some transitions, taking our cover with it, so
         // re-attach rather than assume the view is still in the tree.

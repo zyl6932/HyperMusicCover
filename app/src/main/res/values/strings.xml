@@ -168,6 +168,7 @@
     <string name="lyrics_source_none">无歌词来源</string>
     <string name="lyrics_source_session">播放器提供</string>
     <string name="lyrics_source_lyricon">Lyricon 插件</string>
+    <string name="lyrics_source_superlyric">SuperLyric</string>
     <string name="lyrics_source_local">歌曲文件</string>
     <string name="lyrics_source_amll">AMLL 数据库</string>
     <string name="lyrics_source_ttmlhub">AMLL TTML 库</string>

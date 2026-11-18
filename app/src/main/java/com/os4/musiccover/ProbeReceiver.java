@@ -26,6 +26,7 @@ import com.os4.musiccover.lyrics.LyricSource;
 import com.os4.musiccover.lyrics.LyriconSource;
 import com.os4.musiccover.lyrics.NcmLyrics;
 import com.os4.musiccover.lyrics.OnlineLyrics;
+import com.os4.musiccover.lyrics.SuperLyricSource;
 import com.os4.musiccover.lyrics.WebLyrics;
 import com.os4.musiccover.island.DateStatus;
 import com.os4.musiccover.island.MiniPlayerConfig;
@@ -266,6 +267,7 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
         // LyricInfo package are absent. See FeaturesPage.
         out.putString("lyricsrc", LockLyrics.sourceName());
         out.putBoolean("lyricon", LyriconSource.installed());
+        out.putBoolean("superlyric", SuperLyricSource.installed());
         out.putInt("lyricmaxlines", LockLyrics.sMaxLines);
         // Whether anything has actually written a lyric to a session, which is
         // what tells a working provider module from a merely installed one.
@@ -666,6 +668,8 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             }
         } else if ("lyricon".equals(op)) {
             setResultData(LyriconSource.describe());
+        } else if ("superlyric".equals(op)) {
+            setResultData(SuperLyricSource.describe());
         } else if ("local".equals(op)) {
             // On a worker: this one reads the media database and then the file, and
             // a broadcast receiver runs on the main thread.

@@ -517,9 +517,10 @@ private fun LyricsGroup(
     // The other is the one case worth a warning: neither LyricInfo nor a Lyricon central is on
     // the phone, so nothing here reads a player's own lyric and every word has to come from a
     // file or a lookup. Both are checked because they are two different modules doing the same
-    // job - LyricInfo hooks eight players, Lyricon takes whatever publishes to it - and either
-    // one is enough.
-    val missingModule = !providerInstalled && !module.lyriconInstalled
+    // job - LyricInfo hooks eight players, the two lyric bridges take whatever publishes to
+    // them - and any one is enough.
+    val missingModule = !providerInstalled && !module.lyriconInstalled &&
+            !module.superlyricInstalled
     val source = lyricSourceLabel(module.lyricSource)
     val title = when {
         missingModule -> stringResource(R.string.lyrics_provider_title_missing)
@@ -844,6 +845,7 @@ private const val PROVIDER_NOTICE_SECONDS = 15
 private fun lyricSourceLabel(source: String): String? = when (source) {
     "session" -> stringResource(R.string.lyrics_source_session)
     "lyricon" -> stringResource(R.string.lyrics_source_lyricon)
+    "superlyric" -> stringResource(R.string.lyrics_source_superlyric)
     "local" -> stringResource(R.string.lyrics_source_local)
     "amll" -> stringResource(R.string.lyrics_source_amll)
     "ttmlhub" -> stringResource(R.string.lyrics_source_ttmlhub)

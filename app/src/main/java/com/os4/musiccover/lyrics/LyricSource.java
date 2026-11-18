@@ -50,6 +50,8 @@ public final class LyricSource {
     static final int SRC_LOCAL = 6;
     /** A LyricProvider plugin, through the Lyricon bridge this module subscribes to. */
     static final int SRC_LYRICON = 7;
+    /** A player's lyric pushed by a SuperLyric server - the bridge's peer, not its replacement. */
+    static final int SRC_SUPERLYRIC = 11;
     /** The AMLL database, keyed by the platform's song id. */
     static final int SRC_DATABASE = 2;
     /** Found by name on NetEase - the fallback for a session carrying neither of the above. */
@@ -936,12 +938,17 @@ public final class LyricSource {
                 if (r.lines.isEmpty()) {
                     lyricon(controller, r);
                 }
+                // The other bridge, after the Lyricon one: same standing, same memory-read cost.
+                if (r.lines.isEmpty()) {
+                    superlyric(controller, r);
+                }
                 // A placeholder from either of those two says only that whoever filled it had no
                 // lyric - MeiloX's bridge sends one line of "纯音乐" for a song it has none for -
                 // not that the song has no words. Dropped, and the search goes on: taken as a
                 // catalogue's verdict it stopped a streaming player's .lrc being read (花海,
                 // 2026-10-22). A file player's own file saying so is still believed, below.
-                if (r.source == SRC_LYRIC_INFO || r.source == SRC_LYRICON) {
+                if (r.source == SRC_LYRIC_INFO || r.source == SRC_LYRICON
+                        || r.source == SRC_SUPERLYRIC) {
                     dropPlaceholder(r);
                     dropUntimed(r);
                 }
@@ -1462,6 +1469,32 @@ public final class LyricSource {
         } catch (Throwable t) {
             Xp.w("[MCLyric] the Lyricon bridge failed: " + t);
             r.why = join(before, "Lyricon error");
+        }
+    }
+
+    /**
+     * The SuperLyric server's copy, after the Lyricon bridge has had its say.
+     *
+     * Same shape of answer as the bridge: the receiver holds whatever the player last pushed,
+     * so this is a read of memory, not a request - no bind, no wait except the short one a
+     * coming lyric is worth. A device with no SuperLyric module always answers nothing, which
+     * is why it can sit here unconditionally. Asked second: where both are installed, the
+     * bridge has always answered and keeps answering.
+     */
+    private static void superlyric(MediaController c, Rows r) {
+        String before = r.why;
+        try {
+            List<LyricLine> lines = SuperLyricSource.linesFor(TrackIdentity.of(c),
+                    c == null ? null : c.getPackageName());
+            if (lines == null || lines.isEmpty()) {
+                return;
+            }
+            r.lines = lines;
+            r.source = SRC_SUPERLYRIC;
+            r.why = lines.size() + " lines from the SuperLyric server";
+        } catch (Throwable t) {
+            Xp.w("[MCLyric] the SuperLyric server failed: " + t);
+            r.why = join(before, "SuperLyric error");
         }
     }
 
