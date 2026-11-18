@@ -10,11 +10,14 @@ package com.os4.musiccover.ui.theme
 
 import android.app.Activity
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import com.os4.musiccover.ui.util.LocalOs4Ui
 import com.os4.musiccover.ui.util.isInDarkTheme
+import top.yukonga.miuix.kmp.material.isRenderEffectSupported
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
@@ -23,10 +26,17 @@ import top.yukonga.miuix.kmp.theme.ThemeController
 @Composable
 fun AppTheme(
     themeMode: ColorSchemeMode = ColorSchemeMode.System,
+    /**
+     * The user's choice of interface. Whether it is actually drawn also depends on the device:
+     * glass needs runtime shaders, and without them the whole app stays on the OS3 screens
+     * rather than showing glass bars over plain ones.
+     */
+    useOs4Ui: Boolean,
     content: @Composable () -> Unit
 ) {
     // 可用模式: System, Light, Dark, MonetSystem, MonetLight, MonetDark
     val controller = remember(themeMode) { ThemeController(themeMode) }
+    val os4Ui = remember(useOs4Ui) { useOs4Ui && isRenderEffectSupported() }
     MiuixTheme(
         controller = controller,
         content = {
@@ -43,7 +53,9 @@ fun AppTheme(
                     insetsController.isAppearanceLightNavigationBars = !isDark
                 }
             }
-            content()
+            CompositionLocalProvider(LocalOs4Ui provides os4Ui) {
+                content()
+            }
         }
     )
 }

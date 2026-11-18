@@ -31,7 +31,7 @@ class CreditsActivity : ComponentActivity() {
         }
 
         setContent {
-            AppTheme(themeMode = themeMode) {
+            AppTheme(themeMode = themeMode, useOs4Ui = savedSettings.useOs4Ui) {
                 CreditsPageContent(
                     onBack = { finish() },
                     isBlurEnabled = savedSettings.isBlurEnabled,

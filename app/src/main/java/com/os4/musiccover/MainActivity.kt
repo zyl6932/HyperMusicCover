@@ -199,6 +199,7 @@ class MainActivity : ComponentActivity() {
             var isFloatingNavbar by remember(settingsEpoch) { mutableStateOf(settings.isFloatingNavbar) }
             var isLiquidGlass by remember(settingsEpoch) { mutableStateOf(settings.isLiquidGlass) }
             var isBlurEnabled by remember(settingsEpoch) { mutableStateOf(settings.isBlurEnabled) }
+            var useOs4Ui by remember(settingsEpoch) { mutableStateOf(settings.useOs4Ui) }
             var welcomeShown by remember(settingsEpoch) { mutableStateOf(settings.welcomeShown) }
             // Read once, not keyed on the epoch: a trip to Settings must not bring the page back
             // by itself - only its own entry does that.
@@ -218,13 +219,14 @@ class MainActivity : ComponentActivity() {
                         isFloatingNavbar = isFloatingNavbar,
                         isLiquidGlass = isLiquidGlass,
                         isBlurEnabled = isBlurEnabled,
+                        useOs4Ui = useOs4Ui,
                         language = LocaleHelper.getSavedLanguage(this@MainActivity).code,
                         welcomeShown = welcomeShown,
                     )
                 )
             }
 
-            AppTheme(themeMode = themeMode) {
+            AppTheme(themeMode = themeMode, useOs4Ui = useOs4Ui) {
                 // What the pages actually draw on. Recording it here is what lets the next cold
                 // start paint the same colour before Compose exists - including the Monet modes
                 // and a theme forced against the system's.

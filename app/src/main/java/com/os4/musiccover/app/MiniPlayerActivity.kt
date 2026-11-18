@@ -49,7 +49,7 @@ class MiniPlayerActivity : ComponentActivity() {
         val theme = runCatching { ColorSchemeMode.valueOf(settings.themeMode) }
             .getOrDefault(ColorSchemeMode.System)
         setContent {
-            AppTheme(themeMode = theme) { MiniPlayerPage(settings.isBlurEnabled, resumes, ::finish) }
+            AppTheme(themeMode = theme, useOs4Ui = settings.useOs4Ui) { MiniPlayerPage(settings.isBlurEnabled, resumes, ::finish) }
         }
     }
 
