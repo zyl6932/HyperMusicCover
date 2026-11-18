@@ -45,18 +45,18 @@ import com.os4.musiccover.ui.util.nextCard
 import kotlin.math.roundToInt
 import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.ColorPicker
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import com.os4.musiccover.ui.util.AppTabRow
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import com.os4.musiccover.ui.util.AppDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import com.os4.musiccover.ui.util.AppDialog
+import com.os4.musiccover.ui.util.AppDialogButton
+import com.os4.musiccover.ui.util.AppDialogButtonRole
 
 /**
  * 歌词外观: how the lock screen's lyrics look (PR #103).
@@ -173,6 +173,70 @@ internal fun LyricStylePageView(
                         contentDescription = stringResource(R.string.lyrics_style_reset),
                         tint = MiuixTheme.colorScheme.onBackground,
                     )
+                }
+            }
+        },
+        // Inside the page's backdrop scope, outside the recorded body: the glass samples this
+        // page instead of the theme's flat surface fallback.
+        dialogs = {
+            // Asked first: one tap in the corner would otherwise undo every choice on the page.
+            AppDialog(
+                show = confirmReset,
+                title = stringResource(R.string.lyrics_style_reset),
+                summary = stringResource(R.string.lyrics_style_reset_summary),
+                onDismissRequest = { confirmReset = false },
+            ) {
+                Row {
+                    AppDialogButton(
+                        modifier = Modifier.weight(1f),
+                        text = stringResource(R.string.rules_cancel),
+                        onClick = { confirmReset = false },
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    AppDialogButton(
+                        modifier = Modifier.weight(1f),
+                        text = stringResource(R.string.lyrics_style_reset),
+                        role = AppDialogButtonRole.Primary,
+                        onClick = {
+                            reset()
+                            confirmReset = false
+                        },
+                    )
+                }
+            }
+
+            AppDialog(
+                show = picking != null,
+                title = stringResource(R.string.lyrics_color_custom),
+                onDismissRequest = { picking = null },
+            ) {
+                Column {
+                    // miuix's picker always has an alpha bar; it is the same value as the opacity
+                    // row, opened at it and written back to it.
+                    ColorPicker(color = draft, onColorChanged = { draft = it })
+                    Row(Modifier.fillMaxWidth().padding(top = 16.dp)) {
+                        AppDialogButton(
+                            modifier = Modifier.weight(1f),
+                            text = stringResource(R.string.rules_cancel),
+                            onClick = { picking = null },
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        AppDialogButton(
+                            modifier = Modifier.weight(1f),
+                            text = stringResource(R.string.lyrics_style_done),
+                            role = AppDialogButtonRole.Primary,
+                            onClick = {
+                                picking?.let {
+                                    setAppearance(
+                                        "${it}Mode" to LyricAppearance.CUSTOM,
+                                        "${it}Color" to draft.copy(alpha = 1f).toArgb(),
+                                        "${it}Opacity" to (draft.alpha * 100f).roundToInt() / 100.0,
+                                    )
+                                }
+                                picking = null
+                            },
+                        )
+                    }
                 }
             }
         },
@@ -406,66 +470,6 @@ internal fun LyricStylePageView(
         }
     }
 
-    // Asked first: one tap in the corner would otherwise undo every choice on the page.
-    AppDialog(
-        show = confirmReset,
-        title = stringResource(R.string.lyrics_style_reset),
-        summary = stringResource(R.string.lyrics_style_reset_summary),
-        onDismissRequest = { confirmReset = false },
-    ) {
-        Row {
-            TextButton(
-                modifier = Modifier.weight(1f),
-                text = stringResource(R.string.rules_cancel),
-                onClick = { confirmReset = false },
-            )
-            Spacer(Modifier.width(12.dp))
-            TextButton(
-                modifier = Modifier.weight(1f),
-                text = stringResource(R.string.lyrics_style_reset),
-                colors = ButtonDefaults.textButtonColorsPrimary(),
-                onClick = {
-                    reset()
-                    confirmReset = false
-                },
-            )
-        }
-    }
-
-    AppDialog(
-        show = picking != null,
-        title = stringResource(R.string.lyrics_color_custom),
-        onDismissRequest = { picking = null },
-    ) {
-        Column {
-            // miuix's picker always has an alpha bar; it is the same value as the opacity row,
-            // opened at it and written back to it.
-            ColorPicker(color = draft, onColorChanged = { draft = it })
-            Row(Modifier.fillMaxWidth().padding(top = 16.dp)) {
-                TextButton(
-                    modifier = Modifier.weight(1f),
-                    text = stringResource(R.string.rules_cancel),
-                    onClick = { picking = null },
-                )
-                Spacer(Modifier.width(12.dp))
-                TextButton(
-                    modifier = Modifier.weight(1f),
-                    text = stringResource(R.string.lyrics_style_done),
-                    colors = ButtonDefaults.textButtonColorsPrimary(),
-                    onClick = {
-                        picking?.let {
-                            setAppearance(
-                                "${it}Mode" to LyricAppearance.CUSTOM,
-                                "${it}Color" to draft.copy(alpha = 1f).toArgb(),
-                                "${it}Opacity" to (draft.alpha * 100f).roundToInt() / 100.0,
-                            )
-                        }
-                        picking = null
-                    },
-                )
-            }
-        }
-    }
 }
 
 /** The sizes the module ships with: LyricStyle.DEFAULT. */

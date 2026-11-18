@@ -54,7 +54,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * and the list with `overscrollEffect = null` (which miuix's damped overscroll requires - see
  * [pageScrollModifiers]) and the top inset in the right place.
  *
- * The one thing callers still own is what goes in the list.
+ * The one thing callers still own is what goes in the list - and, through [dialogs], the popups
+ * that belong to the page: a dialog left at the call site outside this frame samples the theme's
+ * flat surface fallback instead of the page, so glass over it has nothing to blur.
  */
 @Composable
 fun PageScaffold(
@@ -64,6 +66,7 @@ fun PageScaffold(
     onBack: (() -> Unit)? = null,
     actions: @Composable () -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
+    dialogs: @Composable () -> Unit = {},
     content: LazyListScope.() -> Unit,
 ) {
     if (LocalOs4Ui.current) {
@@ -73,6 +76,7 @@ fun PageScaffold(
             onBack = onBack,
             actions = actions,
             floatingActionButton = floatingActionButton,
+            dialogs = dialogs,
             content = content,
         )
     } else {
@@ -83,6 +87,7 @@ fun PageScaffold(
             onBack = onBack,
             actions = actions,
             floatingActionButton = floatingActionButton,
+            dialogs = dialogs,
             content = content,
         )
     }
@@ -104,6 +109,7 @@ private fun PageScaffoldOs4(
     onBack: (() -> Unit)?,
     actions: @Composable () -> Unit,
     floatingActionButton: @Composable () -> Unit,
+    dialogs: @Composable () -> Unit,
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
@@ -150,6 +156,11 @@ private fun PageScaffoldOs4(
                 )
             }
         }
+        // Inside the backdrop scope but outside the recorded body: a dialog here samples the
+        // page it covers, and the recording does not contain the dialog itself. A page that
+        // leaves its dialogs at the call site instead samples the theme's flat surface
+        // fallback, which is what made them look flatter than the demo on standalone screens.
+        dialogs()
     }
 }
 
@@ -162,6 +173,7 @@ private fun PageScaffoldOs3(
     onBack: (() -> Unit)?,
     actions: @Composable () -> Unit,
     floatingActionButton: @Composable () -> Unit,
+    dialogs: @Composable () -> Unit,
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
@@ -200,6 +212,9 @@ private fun PageScaffoldOs3(
             )
         }
     }
+    // OS3's dialogs are windows and draw outside this composition; the slot is only here so
+    // both branches of PageScaffold take the same call site.
+    dialogs()
 }
 
 @Composable

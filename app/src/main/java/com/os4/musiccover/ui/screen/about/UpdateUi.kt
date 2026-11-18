@@ -51,15 +51,15 @@ import com.os4.musiccover.updater.UpdateInstaller
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import com.os4.musiccover.ui.util.AppDialog
+import com.os4.musiccover.ui.util.AppDialogButton
+import com.os4.musiccover.ui.util.AppDialogButtonRole
 
 private const val POLL_MS = 200L
 
@@ -340,7 +340,7 @@ private fun UpdateStatusDialog(status: String?, onDismiss: () -> Unit) {
                 style = MiuixTheme.textStyles.body2,
                 color = colorScheme.onSurface,
             )
-            TextButton(
+            AppDialogButton(
                 modifier = Modifier.fillMaxWidth(),
                 text = stringResource(R.string.update_close),
                 onClick = { dismiss?.invoke() },
@@ -372,7 +372,7 @@ private fun UpdateLatestDialog(show: Boolean, onDismiss: () -> Unit) {
                 style = MiuixTheme.textStyles.body2,
                 color = colorScheme.onSurface,
             )
-            TextButton(
+            AppDialogButton(
                 modifier = Modifier.fillMaxWidth(),
                 text = stringResource(R.string.update_close),
                 onClick = { dismiss?.invoke() },
@@ -454,17 +454,17 @@ private fun UpdateNotesDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.padding(top = 12.dp),
             ) {
-                TextButton(
+                AppDialogButton(
                     modifier = Modifier.weight(1f),
                     text = stringResource(R.string.update_cancel),
                     onClick = { dismiss?.invoke() },
                 )
                 Spacer(Modifier.width(20.dp))
-                TextButton(
+                AppDialogButton(
                     modifier = Modifier.weight(1f),
                     text = stringResource(R.string.update_confirm),
                     onClick = onConfirm,
-                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    role = AppDialogButtonRole.Primary,
                 )
             }
         }
@@ -510,7 +510,7 @@ private fun UpdateLinksDialog(show: Boolean, onDismiss: () -> Unit) {
                     },
                 )
             }
-            TextButton(
+            AppDialogButton(
                 modifier = Modifier.fillMaxWidth(),
                 text = stringResource(R.string.update_cancel),
                 onClick = { dismiss?.invoke() },

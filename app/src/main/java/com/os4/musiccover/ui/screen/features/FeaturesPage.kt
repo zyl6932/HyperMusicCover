@@ -44,7 +44,6 @@ import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.SliderDefaults
-import top.yukonga.miuix.kmp.basic.TextButton
 import com.os4.musiccover.ui.util.AppTabRow
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -52,6 +51,7 @@ import com.os4.musiccover.ui.util.AppDropdownPreference
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import com.os4.musiccover.ui.util.AppDialog
+import com.os4.musiccover.ui.util.AppDialogButton
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 
@@ -563,7 +563,7 @@ private fun LyricsGroup(
         },
     ) {
         val dismiss = LocalDismissState.current
-        TextButton(
+        AppDialogButton(
             modifier = Modifier.fillMaxWidth(),
             text = if (countdown > 0) {
                 stringResource(R.string.lyrics_provider_got_it_wait, countdown)

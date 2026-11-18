@@ -100,7 +100,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Button
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.FloatingActionButton
@@ -114,7 +113,6 @@ import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
@@ -125,6 +123,8 @@ import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import com.os4.musiccover.ui.util.AppDialog
+import com.os4.musiccover.ui.util.AppDialogButton
+import com.os4.musiccover.ui.util.AppDialogButtonRole
 
 /**
  * 指纹快捷功能: the menu HyperOS opens when the finger stays on the sensor after unlocking, with
@@ -378,6 +378,32 @@ private fun FpQuickPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                     }
                 }
             }
+        },
+        // Every dialog this page opens is rendered inside the page's backdrop scope, so the
+        // glass samples the page rather than the theme's flat surface fallback.
+        dialogs = {
+            AddDialogs(dialog, config.filled.map { it.second },
+                onDismiss = { dialog = AddDialog.NONE },
+                onPick = { dialog = it },
+                onApp = { pick.launch(FpAppPickActivity.intent(context, it)) }, onAdd = { add(it) },
+                onReset = { save(config.copy(items = null)) })
+
+            // A place that holds something: change what is there, or open it again.
+            val slotEntry = target?.let { config.slots.getOrNull(it) }?.takeIf { !isEmpty(it) }
+            AppDialog(show = dialog == AddDialog.SLOT && slotEntry != null,
+                title = slotEntry?.let { itemInfo(it).title }.orEmpty(),
+                onDismissRequest = { dialog = AddDialog.NONE }) {
+                Column {
+                    BasicComponent(title = stringResource(R.string.fpquick_slot_replace),
+                        onClick = { dialog = AddDialog.TYPE })
+                    BasicComponent(title = stringResource(R.string.fpquick_slot_remove),
+                        onClick = {
+                            target?.let { save(config.withSlot(it, null)) }
+                            target = null
+                            dialog = AddDialog.NONE
+                        })
+                }
+            }
         }) {
         item(key = "switch") {
             AppCard(Modifier.firstCard()) {
@@ -454,27 +480,6 @@ private fun FpQuickPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
         item(key = "fab") { Spacer(Modifier.height(88.dp)) }
     }
 
-    AddDialogs(dialog, config.filled.map { it.second }, onDismiss = { dialog = AddDialog.NONE },
-        onPick = { dialog = it },
-        onApp = { pick.launch(FpAppPickActivity.intent(context, it)) }, onAdd = { add(it) },
-        onReset = { save(config.copy(items = null)) })
-
-    // A place that holds something: change what is there, or open it again.
-    val slotEntry = target?.let { config.slots.getOrNull(it) }?.takeIf { !isEmpty(it) }
-    AppDialog(show = dialog == AddDialog.SLOT && slotEntry != null,
-        title = slotEntry?.let { itemInfo(it).title }.orEmpty(),
-        onDismissRequest = { dialog = AddDialog.NONE }) {
-        Column {
-            BasicComponent(title = stringResource(R.string.fpquick_slot_replace),
-                onClick = { dialog = AddDialog.TYPE })
-            BasicComponent(title = stringResource(R.string.fpquick_slot_remove),
-                onClick = {
-                    target?.let { save(config.withSlot(it, null)) }
-                    target = null
-                    dialog = AddDialog.NONE
-                })
-        }
-    }
 }
 
 /**
@@ -815,13 +820,13 @@ private fun ItemList(items: List<JSONObject>, onMove: (List<JSONObject>) -> Unit
             Text(stringResource(R.string.fpquick_delete_confirm_desc, name))
             Spacer(Modifier.height(24.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(modifier = Modifier.weight(1f),
+                AppDialogButton(modifier = Modifier.weight(1f),
                     text = stringResource(R.string.update_cancel),
                     onClick = { confirm = null })
                 Spacer(Modifier.width(8.dp))
-                TextButton(modifier = Modifier.weight(1f),
+                AppDialogButton(modifier = Modifier.weight(1f),
                     text = stringResource(R.string.fpquick_delete),
-                    colors = ButtonDefaults.textButtonColors(textColor = MiuixTheme.colorScheme.error),
+                    role = AppDialogButtonRole.Destructive,
                     onClick = {
                         pending?.let(onRemove)
                         confirm = null
@@ -928,17 +933,17 @@ private fun AddDialogs(
     // 已满: the floating button stays live and says this rather than going grey.
     AppDialog(show = dialog == AddDialog.FULL, title = stringResource(R.string.fpquick_full_title),
         summary = stringResource(R.string.fpquick_full_desc, MAX_ITEMS), onDismissRequest = onDismiss) {
-        TextButton(modifier = Modifier.fillMaxWidth(), text = stringResource(R.string.fpquick_ok),
-            onClick = onDismiss, colors = ButtonDefaults.textButtonColorsPrimary())
+        AppDialogButton(modifier = Modifier.fillMaxWidth(), text = stringResource(R.string.fpquick_ok),
+            onClick = onDismiss, role = AppDialogButtonRole.Primary)
     }
     AppDialog(show = dialog == AddDialog.RESET, title = stringResource(R.string.fpquick_reset),
         summary = stringResource(R.string.fpquick_reset_desc), onDismissRequest = onDismiss) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(modifier = Modifier.weight(1f), text = stringResource(R.string.update_cancel),
+            AppDialogButton(modifier = Modifier.weight(1f), text = stringResource(R.string.update_cancel),
                 onClick = onDismiss)
             Spacer(Modifier.width(8.dp))
-            TextButton(modifier = Modifier.weight(1f), text = stringResource(R.string.fpquick_reset_do),
-                colors = ButtonDefaults.textButtonColors(textColor = MiuixTheme.colorScheme.error),
+            AppDialogButton(modifier = Modifier.weight(1f), text = stringResource(R.string.fpquick_reset_do),
+                role = AppDialogButtonRole.Destructive,
                 onClick = { onDismiss(); onReset() })
         }
     }
@@ -996,11 +1001,11 @@ private fun AddDialogs(
                 label = stringResource(R.string.fpquick_url_label), useLabelAsPlaceholder = true,
                 modifier = Modifier.padding(bottom = 16.dp))
             Row(horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(modifier = Modifier.weight(1f),
+                AppDialogButton(modifier = Modifier.weight(1f),
                     text = stringResource(R.string.update_cancel),
                     onClick = { dismiss?.invoke() })
                 Spacer(Modifier.width(20.dp))
-                TextButton(modifier = Modifier.weight(1f),
+                AppDialogButton(modifier = Modifier.weight(1f),
                     text = stringResource(R.string.fpquick_url_add),
                     enabled = url.isNotBlank(),
                     onClick = {
@@ -1011,7 +1016,7 @@ private fun AddDialogs(
                         onDismiss()
                         onAdd(e)
                     },
-                    colors = ButtonDefaults.textButtonColorsPrimary())
+                    role = AppDialogButtonRole.Primary)
             }
         }
     }

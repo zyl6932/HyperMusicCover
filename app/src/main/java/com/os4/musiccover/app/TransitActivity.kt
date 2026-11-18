@@ -34,12 +34,10 @@ import com.os4.musiccover.ui.theme.AppTheme
 import com.os4.musiccover.ui.util.PageScaffold
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -47,6 +45,8 @@ import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import com.os4.musiccover.ui.util.AppDialog
+import com.os4.musiccover.ui.util.AppDialogButton
+import com.os4.musiccover.ui.util.AppDialogButtonRole
 
 /**
  * 高德's bus and subway trip - its island (AmapTransitIsland) and its lock screen page
@@ -255,17 +255,17 @@ private fun CommuteSection(refreshKey: Int) {
         onDismissRequest = { confirming = false }) {
         val dismiss = LocalDismissState.current
         Row(horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(modifier = Modifier.weight(1f),
+            AppDialogButton(modifier = Modifier.weight(1f),
                 text = stringResource(R.string.update_cancel),
                 onClick = { dismiss?.invoke() })
             Spacer(Modifier.width(20.dp))
-            TextButton(modifier = Modifier.weight(1f),
+            AppDialogButton(modifier = Modifier.weight(1f),
                 text = stringResource(R.string.commute_forget_do),
                 onClick = {
                     confirming = false
                     scope.launch { state = ModuleBridge.commute(context, "forget") }
                 },
-                colors = ButtonDefaults.textButtonColorsPrimary())
+                role = AppDialogButtonRole.Primary)
         }
     }
 }

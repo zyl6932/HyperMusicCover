@@ -1,7 +1,7 @@
 # HyperMusicCover OS4 界面更新计划
 
 > 分支：`os4-ui`（2026-11-18 快进到 `main` `086dd05`）
-> 状态：第一轮已装机验收；2026-11-18 第二轮修复中（vc30）
+> 状态：第一轮已装机验收；第二轮修复 vc30 已装；2026-11-18 对话框对齐 demo 已出 vc31 装机
 > 按项目规矩：任何构建、单测、出包都先问；效果由维护者上机看。
 
 ## 0. 已定的决策（2026-11-18）
@@ -182,6 +182,25 @@
 - **通控中心返回键**：短页面列表滚不动，库的 `isContentScrolled` 恒为 false，
   返回键就永远不浮动；这是库的规则，不是我们的 bug。第一轮曾用
   `isContentScrolled = true` 强行常驻，维护者否掉，已撤回。
+
+## 3.6 第二轮：对话框对齐 miuix demo（2026-11-18，vc31）
+
+维护者要求：所有 dialog/bottomsheet 的材质与 miuix demo「Glass Component」页
+（`example/.../GlassPage.kt` + `GlassDemoDefaults`）完全一致。核对结果与改动：
+
+- **材质**：`AppDialog` 显式传 `GlassDialogDefaults.material()`（= `dialogGlass`），
+  与 demo 的 "Component default" 相同。
+- **描边**：demo 默认 `strokeIndex = 2`（Middle）；`GlassDialogDefaults.stroke()`
+  是 Small。`AppDialog` 改为按背景亮度取 `GlassEdgeStrokes.MiddleLight/MiddleDark`。
+- **按钮**：新增 `AppDialogButton`（Normal/Primary/Destructive）。OS4 用
+  `GlassDialogButton`，OS3 把三种角色映射回 `TextButton` 的三套颜色；21 个对话框的
+  24 个按钮全部改用它。
+- **采样**：`PageScaffold` 新增 `dialogs` 槽，槽在 `LocalPageBackdrop` 作用域内、
+  录制层之外渲染。歌词样式页（2 个）和指纹快捷页（8 个）原先在 PageScaffold 之外，
+  只能采到主题的纯色 `SurfaceBackdrop`；已搬进槽里，和页面内对话框一样能采到页面内容。
+- **底部弹窗**：全仓库没有 `GlassBottomSheet`，本轮不新增。demo 的 sheet 材质
+  （`GlassBottomSheetDefaults.material()` + Middle 描边）本身就是库默认值，
+  将来加 sheet 直接按 demo 调用即可。
 
 ## 4. 风险
 

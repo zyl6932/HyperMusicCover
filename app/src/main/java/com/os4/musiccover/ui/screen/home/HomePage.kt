@@ -64,8 +64,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -80,6 +78,8 @@ import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import com.os4.musiccover.ui.util.AppDialog
+import com.os4.musiccover.ui.util.AppDialogButton
+import com.os4.musiccover.ui.util.AppDialogButtonRole
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import androidx.compose.foundation.layout.size
 import com.os4.musiccover.ui.util.LocalOs4Ui
@@ -491,7 +491,7 @@ fun HomePageView(
         onDismissRequest = { showMissing = false },
     ) {
         val dismiss = LocalDismissState.current
-        TextButton(
+        AppDialogButton(
             modifier = Modifier.fillMaxWidth(),
             text = stringResource(R.string.home_features_missing_ok),
             onClick = { dismiss?.invoke() },
@@ -506,13 +506,13 @@ fun HomePageView(
     ) {
         val dismiss = LocalDismissState.current
         Row(horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(
+            AppDialogButton(
                 modifier = Modifier.weight(1f),
                 text = stringResource(R.string.update_cancel),
                 onClick = { dismiss?.invoke() },
             )
             Spacer(Modifier.width(20.dp))
-            TextButton(
+            AppDialogButton(
                 modifier = Modifier.weight(1f),
                 text = stringResource(R.string.restart_menu),
                 onClick = {
@@ -538,7 +538,7 @@ fun HomePageView(
                         }
                     }
                 },
-                colors = ButtonDefaults.textButtonColorsPrimary(),
+                role = AppDialogButtonRole.Primary,
             )
         }
     }
@@ -551,13 +551,13 @@ fun HomePageView(
     ) {
         val dismiss = LocalDismissState.current
         Row(horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(
+            AppDialogButton(
                 modifier = Modifier.weight(1f),
                 text = stringResource(R.string.update_cancel),
                 onClick = { dismiss?.invoke() },
             )
             Spacer(Modifier.width(20.dp))
-            TextButton(
+            AppDialogButton(
                 modifier = Modifier.weight(1f),
                 text = stringResource(R.string.restart_menu),
                 onClick = {
@@ -567,7 +567,7 @@ fun HomePageView(
                         refresh()
                     }
                 },
-                colors = ButtonDefaults.textButtonColorsPrimary(),
+                role = AppDialogButtonRole.Primary,
             )
         }
     }
