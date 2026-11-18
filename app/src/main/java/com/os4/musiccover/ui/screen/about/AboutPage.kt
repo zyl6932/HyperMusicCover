@@ -421,8 +421,8 @@ private fun AboutContent(
                             onClick = {
                                 // The group number, not the qm.qq.com link, is what QQ's card
                                 // route takes; the link is only here for the browser fallback.
-                                if (!ctx.openQqGroup("392493127")) {
-                                    uriHandler.openUri("https://qm.qq.com/q/RcLbYXgBy2")
+                                if (!ctx.openQqGroup("687710537")) {
+                                    uriHandler.openUri("https://qm.qq.com/q/loicCHi79")
                                 }
                             },
                         )

@@ -68,8 +68,8 @@ private const val POLL_MS = 200L
 /** Where the links dialog sends people. The QQ pair is the group's number and its share link. */
 private const val RELEASES_PAGE = "https://github.com/zyl6932/HyperMusicCover/releases"
 private const val TELEGRAM_GROUP = "https://t.me/HyperMusicCover"
-private const val QQ_GROUP_UIN = "392493127"
-private const val QQ_GROUP_LINK = "https://qm.qq.com/q/RcLbYXgBy2"
+private const val QQ_GROUP_UIN = "687710537"
+private const val QQ_GROUP_LINK = "https://qm.qq.com/q/loicCHi79"
 
 /**
  * Every piece of state the updater needs.
