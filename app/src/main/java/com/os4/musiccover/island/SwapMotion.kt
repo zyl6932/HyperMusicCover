@@ -422,7 +422,8 @@ internal class SwapMotion(
             val box = CoverMorphMotion.Box(shrunk.x, shrunk.y + drop, shrunk.w, shrunk.h)
             ghost.setMorphFrame(box, box.h / 2f, 1f)
             // Changing draw order with zero opacity avoids a visible jump at the crossing.
-            ghost.translationZ = if (q < 0.5f) view.translationZ + views.dp(1f) else 0f
+            ghost.translationZ = if (q < 0.5f) view.translationZ + views.dp(1f)
+                else (MORPH_Z - 1f)
             ghost.alpha = if (q < 0.5f) 1f - MiniCardMorph.smooth(0.15f, 0.45f, q)
                 else MiniPlayerGeometry.STACK_BACK_ALPHA *
                     MiniCardMorph.smooth(0.55f, 0.8f, q) *
@@ -455,6 +456,7 @@ internal class SwapMotion(
             if (s.kind == SWAP_STACK) it.alpha = 1f
         }
         if (!keepGhosts) endGhosts()
+        views.ensureStackOrder()
         if (smallDx != 0f) {
             smallDx = 0f
             rowHost.followShortcuts()
@@ -548,6 +550,7 @@ internal class SwapMotion(
             // BigIslandToSmallIsland, on CHANGE_EASE: the island's own pill shrinks into the
             // small island's circle, its lines going first and its picture staying.
             val view = ghostPill ?: return
+            view.translationZ = views.dp(1f).toFloat()
             val g = s.small.value
             val box = ghostSmallBox(s) ?: return
             view.setMorphFrame(box, box.h / 2f, 1f)
@@ -563,6 +566,7 @@ internal class SwapMotion(
         }
         if (!s.ghost) return
         val view = ghostPill ?: return
+        view.translationZ = 0f
         val from = s.ghostFrom ?: return
         val g = s.ghostBox.value
         val box = lerpBox(from, cutoutBox(s.pillTo), g)

@@ -7,7 +7,7 @@ import org.json.JSONObject
 /** Portable settings for the HyperChanger lockscreen mini player. */
 object MiniPlayerConfig {
     /** Sent by SystemUI so the settings app can reject an older loaded module. */
-    const val SCHEMA_VERSION = 9
+    const val SCHEMA_VERSION = 10
     const val ENABLED = "enabled"
     const val WIDTH = "widthDp"
     const val HEIGHT_RADIUS = "heightRadiusDp"
@@ -27,6 +27,7 @@ object MiniPlayerConfig {
     const val GROUP_NOTIFICATIONS_BY_APP = "groupNotificationsByApp"
     /** Ordinary notifications stay in the OEM list; focus notifications still become islands. */
     const val NORMALS_IN_STACK = "normalsInStack"
+    const val SPRING_EXPAND = "springExpand"
     const val STYLE = "style"
     const val STYLE_ROW = 0
     const val STYLE_STACK = 1
@@ -49,7 +50,7 @@ object MiniPlayerConfig {
     const val FOD_LIFT = "fodLift"
 
     private val switches = setOf(ENABLED, ADAPTIVE_WIDTH, NAV_KEEP_ON, FOD_LIFT,
-        NORMALS_IN_STACK, STATUS_AT_DATE)
+        NORMALS_IN_STACK, STATUS_AT_DATE, SPRING_EXPAND)
 
     private val defaults = linkedMapOf<String, Any>(
         ENABLED to false,
@@ -62,6 +63,7 @@ object MiniPlayerConfig {
         MEDIA_COLLAPSED_DEFAULT to false,
         GROUP_NOTIFICATIONS_BY_APP to false,
         NORMALS_IN_STACK to true,
+        SPRING_EXPAND to false,
         STYLE to STYLE_ROW,
         NAV_KEEP_ON to false,
         STATUS_AT_DATE to true,
@@ -72,7 +74,7 @@ object MiniPlayerConfig {
 
     /**
      * The config as the module will use it: the switches ([ENABLED], [ADAPTIVE_WIDTH],
-     * [NAV_KEEP_ON], [FOD_LIFT], [NORMALS_IN_STACK], [STATUS_AT_DATE]) and the height radius from
+     * [NAV_KEEP_ON], [FOD_LIFT], [NORMALS_IN_STACK], [STATUS_AT_DATE], [SPRING_EXPAND]) and the height radius from
      * the input, and the width and the artwork radius always at the values above. The height radius
      * is shared by the island and both shortcut discs.
      *

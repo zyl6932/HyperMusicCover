@@ -160,6 +160,11 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                     }
                     SmallTitle(text = stringResource(R.string.mini_section_notifications))
                     AppCard(Modifier.nextCard()) {
+                        SwitchPreference(title = stringResource(R.string.mini_spring_expand),
+                            summary = stringResource(R.string.mini_spring_expand_summary),
+                            checked = config.optBoolean(MiniPlayerConfig.SPRING_EXPAND),
+                            enabled = ready,
+                            onCheckedChange = { push(MiniPlayerConfig.SPRING_EXPAND, it) })
                         // Above the grouping it switches off: with ordinary notifications staying
                         // in the system list there is nothing for that row to group.
                         SwitchPreference(title = stringResource(R.string.mini_normals_in_stack),

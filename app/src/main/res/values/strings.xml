@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="mini_spring_expand">弹簧展开</string>
+    <string name="mini_spring_expand_summary">点击或上滑弹簧展开，下滑收起，支持反向打断与模糊过渡</string>
     <string name="app_name">HyperMusicCover</string>
     <string name="about_source_code_summary">https://github.com/zyl6932/HyperMusicCover</string>
     <string name="about_telegram">Telegram群组</string>

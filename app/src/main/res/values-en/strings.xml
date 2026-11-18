@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="mini_spring_expand">Spring expansion</string>
+    <string name="mini_spring_expand_summary">Tap or swipe up to expand, swipe down to collapse, with reversible springs and blur transitions</string>
     <string name="app_name">HyperMusicCover</string>
     <string name="about_source_code_summary">https://github.com/zyl6932/HyperMusicCover</string>
     <string name="about_telegram">Telegram Group</string>

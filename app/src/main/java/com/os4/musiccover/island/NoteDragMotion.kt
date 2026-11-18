@@ -94,12 +94,18 @@ internal class NoteDragMotion(
             // The pill stays where the finger has lifted it, and the morph starts from there
             // (startSpreadMorphs takes the nudge over). Sprung home here, it dropped back down
             // for the frame before the morph came up past it (#122).
-            val lift = (-(views.player?.nudgeY ?: 0f)).coerceAtLeast(0f)
-            views.player?.holdNudge()
-            views.springSmallNudgeBack(0f, 0f)
+            val lift = (-(if (fromSmall) views.smallNudgeY() else views.player?.nudgeY ?: 0f)).coerceAtLeast(0f)
+            if (fromSmall) {
+                views.player?.springNudgeBack(0f, 0f)
+            } else {
+                views.player?.holdNudge()
+                views.springSmallNudgeBack(0f, 0f)
+            }
             spreadMotion.openSpread("pull", SpreadFinger(startY, lift))
             // Refused (another motion under way): nothing takes the nudge over.
-            if (spreadMotion.spread == null) views.player?.springNudgeBack(0f, 0f)
+            if (spreadMotion.spread == null) {
+                if (fromSmall) views.springSmallNudgeBack(0f, 0f) else views.player?.springNudgeBack(0f, 0f)
+            }
             return true
         }
         if (busyForNoteDrag()) return false

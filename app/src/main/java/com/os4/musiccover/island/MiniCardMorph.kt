@@ -67,6 +67,8 @@ internal class MiniCardMorph(
      * the way out at the end, on the way home at the start (#122, filmed at 87fps 2026-11-04).
      */
     private val holdMaterial: Boolean = false,
+    private val stackedRole: Int = MorphStackLayer.ROLE_NONE,
+    private val springContent: Boolean = false,
 ) : Choreographer.FrameCallback {
     class Landing(val art: View?, val title: View?, val text: View?, val radius: Float, val artRadius: Float) {
         companion object {
@@ -86,8 +88,9 @@ internal class MiniCardMorph(
     }
 
     /**
-     * The OEM card's own values, put back when the morph ends. Its translation and scale are not
-     * among them because they are never written: the notification stack rewrites the card's
+     * The OEM card's own values, put back when the morph ends. The original matrix path leaves
+     * translation and scale alone; NativeRowMorph separately tracks the spring path's render
+     * overrides and restores the current OEM values. The notification stack rewrites the card's
      * translationY on its own frames (all through a clock collapse), and the first version, which
      * moved the card by that same property, read each of those rewrites as the stack moving the
      * card and chased it - a feedback loop that sent the card off the top of the screen. The
@@ -120,6 +123,11 @@ internal class MiniCardMorph(
     private val saved = Saved(header)
     private val nativeRadius = landing.radius
     private val nativeArtRadius = landing.artRadius
+    private val stackGeometry = StackRowGeometry(header)
+    private var stackLayer: MorphStackLayer? = null
+    private var nativeRow: NativeRowMorph? = null
+    private var springOpacity = if (toNative) 0f else 1f
+    private var springSharpness = springOpacity
     private val pieces = listOf(
         Piece(mini.artworkView, landing.art, text = false, art = true),
         Piece(mini.titleView, landing.title, text = true, art = false),
@@ -154,11 +162,17 @@ internal class MiniCardMorph(
     private var observed: View? = null
     private val preDraw = ViewTreeObserver.OnPreDrawListener { android.os.Trace.beginSection("MC cardMorphPreDraw"); try {
         val box = placedBox
-        if (running && box != null && header.matrix != placedOem) placeHeader(box, placedScale)
+        if (running && box != null && (nativeRow != null || header.matrix != placedOem)) {
+            runCatching { placeHeader(box, placedScale) }.onFailure {
+                lastCancel = "native row placement: $it"
+                finish(false)
+            }
+        }
         if (running && !liftOurTy.isNaN() && header.translationY != liftOurTy) {
             liftReadStack()
             liftWrite()
         }
+        if (running) updateStackClipping()
         true
     } finally { android.os.Trace.endSection() } }
 
@@ -168,6 +182,7 @@ internal class MiniCardMorph(
         if (!on) return
         Gen.preDraw(header, preDraw)
         observed = header
+        MorphStackLayer.orderLastFor(header)
     }
 
     /** The pill's artwork as this frame drew it, on screen. */
@@ -210,7 +225,13 @@ internal class MiniCardMorph(
     /** Lays out the first frame now, in the same pass as the switch, so no frame shows either end bare. */
     fun start(): Boolean {
         if (!measure()) return false
+        if (springContent && header.javaClass.name.contains("ExpandableNotificationRow")) {
+            nativeRow = runCatching { NativeRowMorph(header) }.onFailure {
+                Xp.w("MCMini: native spring morph unavailable: $it")
+            }.getOrNull() ?: return false
+        }
         mini.beginMorph()
+        stackLayer = MorphStackLayer.forRow(mini, header)?.also { it.setStackedRole(stackedRole) }
         running = true
         startedAt = SystemClock.uptimeMillis()
         // Leaving the row for the pill: the row stands where it is for a moment, its own glass
@@ -245,7 +266,7 @@ internal class MiniCardMorph(
         nudge.velocity = 0f
         nudgeX.value = nudgeXPx / NUDGE_UNIT
         nudgeX.velocity = 0f
-        apply()
+        if (!apply()) finish(false)
     }
 
     /**
@@ -267,25 +288,28 @@ internal class MiniCardMorph(
         nudgeX.value = if (invert) 0f else leader.nudgeX.value * share
         nudgeX.velocity = 0f
         ledAt = SystemClock.uptimeMillis()
-        apply()
+        if (!apply()) finish(false)
     }
 
     /**
-     * Posed from outside at [progress], nudged nowhere: the whole row spreading out as the stack's
+     * Posed from outside at [progress], optionally carrying the threshold's lift: the row spreading as the stack's
      * own list and folding back, every island's morph on the stack's scroll (the controller's
      * Spread). Started as dragged, so its own frame only keeps the far end live when nothing has
      * posed it this frame.
      */
-    fun led(progress: Float) {
+    fun led(progress: Float, nudgePx: Float = 0f, opacity: Float = progress,
+            sharpness: Float = progress) {
         if (!running) return
+        springOpacity = opacity.coerceIn(0f, 1f)
+        springSharpness = sharpness.coerceIn(0f, 1f)
         motion.value = progress
         motion.velocity = 0f
-        nudge.value = 0f
+        nudge.value = nudgePx / NUDGE_UNIT
         nudge.velocity = 0f
         nudgeX.value = 0f
         nudgeX.velocity = 0f
         ledAt = SystemClock.uptimeMillis()
-        apply()
+        if (!apply()) finish(false)
     }
 
     /** Still running: not finished, by its own springs, a cancel, or the lock screen's guard. */
@@ -471,6 +495,7 @@ internal class MiniCardMorph(
             val e = ((SystemClock.uptimeMillis() - tailAt) / CROSS_MS.toFloat()).coerceIn(0f, 1f)
             val k = 1f - smooth(0f, 1f, e)
             tailBox?.let { mini.setMorphFrame(it, tailRadius, k) }
+            tailBox?.let { stackLayer?.update(it, tailRadius, it.w / max(1, header.width), 1f) }
             pieces.forEachIndexed { i, piece -> if (i < tailAlpha.size) piece.view.alpha = tailAlpha[i] * k }
             if (e >= 1f || !Main.islandMorphStillEligible(mini)) endTail() else Gen.frame(this)
         }
@@ -530,7 +555,6 @@ internal class MiniCardMorph(
      */
     private fun measure(): Boolean {
         if (!header.isAttachedToWindow || header.width <= 0 || header.height <= 0) return false
-        cardContent = contentViews(header)
         pieces.forEach { piece ->
             val n = piece.native
             piece.paired = n != null && n.isAttachedToWindow && n.visibility == View.VISIBLE
@@ -540,7 +564,13 @@ internal class MiniCardMorph(
         return true
     }
 
-    private fun apply(): Boolean {
+    private fun apply(): Boolean = runCatching { applyFrame() }.getOrElse {
+        lastCancel = "morph frame: $it"
+        Xp.w("MCMini: morph frame failed: $it")
+        false
+    }
+
+    private fun applyFrame(): Boolean {
         val miniRest = traced("MC m.rest") { restBox?.invoke() ?: mini.restBoxOnScreen() } ?: return false
         miniEndDrawn = miniRest
         if (!liftOurTy.isNaN()) liftReadStack()
@@ -579,7 +609,7 @@ internal class MiniCardMorph(
             traced("MC m.place") { placeHeader(box, s) }
         }
         clipW = header.width.toFloat()
-        clipH = min(drawnHeight(), box.h / s)
+        clipH = if (nativeRow != null) box.h / s else min(drawnHeight(), box.h / s)
         clipR = radius / s
         // Still leaving, not cut: the row is whole where it stands.
         if (lift >= 1f) {
@@ -587,18 +617,23 @@ internal class MiniCardMorph(
             if (!header.clipToOutline) header.clipToOutline = true
             header.invalidateOutline()
         }
+        updateStackClipping(box, s)
         // Left by a cross-over, the row is gone for the rest of the way: the pill carries it.
-        if (lift >= 1f) header.transitionAlpha = if (liftAt != 0L) 0f else saved.transitionAlpha * nativeIn(c)
+        if (lift >= 1f && nativeRow == null)
+            header.transitionAlpha = if (liftAt != 0L) 0f else saved.transitionAlpha * nativeIn(c)
 
         // Both ends' whole content in and out of focus, the glass of neither: the pill's going
         // out as it heads for the card, the card's coming in once the pill's glass leaves it.
         // In the card's own pixels, which the stack's transform and the morph's scale s shrink.
-        blurCard(blurPx * (1f - cardFocus(c)) / max(s, 0.05f))
-        mini.setMorphContentBlur(blurPx * if (holdMaterial) heldPillBlur(c) else pillBlur(c))
+        blurCard(if (springContent) SpringMorphContent.rowBlur(springSharpness, s)
+            else blurPx * (1f - cardFocus(c)) / max(s, 0.05f))
+        mini.setMorphContentBlur(if (springContent) SpringMorphContent.islandBlur(springSharpness)
+            else blurPx * if (holdMaterial) heldPillBlur(c) else pillBlur(c))
 
         // The mini player's frame is the container itself; its material fades last.
         boxDrawn = box
         radiusDrawn = radius
+        stackLayer?.update(box, radius, s, c)
         traced("MC m.frame") {
             mini.setMorphFrame(box, radius, if (holdMaterial) lift * materialHeld(c) else materialOut(c))
         }
@@ -692,7 +727,7 @@ internal class MiniCardMorph(
             v.scaleY = ky
             v.translationX = tx - layoutX - ax * kx
             v.translationY = ty - layoutY - ay * ky
-            val asPill = if (piece.paired) handOver(c) else earlyOut(c)
+            val asPill = if (springContent) handOver(c) else if (piece.paired) handOver(c) else earlyOut(c)
             // The blur is on the two ends' whole content (blurCard, setMorphContentBlur), not the
             // pieces: per piece (2d269db, 2026-09-26) the unpaired buttons, rings and pictures
             // showed sharp through it, and it was taken out.
@@ -737,30 +772,7 @@ internal class MiniCardMorph(
     /** ColorOS's capsule content blur (SystemUIPlugin u4.k / u4.b0: 9dp at its far end). */
     private val blurPx = mini.resources.displayMetrics.density * BLUR_DP
 
-    /** The card's template: its content views, beside which its glass background is drawn. */
-    private var cardContent: List<View> = emptyList()
-    /** The radius last written; none yet, so the first is always written. */
-    private var cardBlurred = -1f
-
-    /**
-     * A notification row's content views - NotificationContentView, the template inside it and
-     * nothing of the row's background views, which draw its glass. A media card has none of
-     * them and is not blurred: its glass is inside its own content.
-     */
-    private fun contentViews(root: View): List<View> {
-        if (!root.javaClass.name.contains("ExpandableNotificationRow")) return emptyList()
-        val out = ArrayList<View>()
-        fun walk(v: View, depth: Int) {
-            if (v.javaClass.name.contains("NotificationContentView")) {
-                out.add(v)
-                return
-            }
-            if (depth >= 3 || v !is android.view.ViewGroup) return
-            for (i in 0 until v.childCount) walk(v.getChildAt(i), depth + 1)
-        }
-        walk(root, 0)
-        return out
-    }
+    private val cardBlur = NotificationContentBlur(header)
 
     /**
      * The pill's paired pieces handing over to the card's own. With the material held to the end
@@ -770,42 +782,22 @@ internal class MiniCardMorph(
      * card went sharp, blurred, and sharp again (#122, 2026-11-04).
      */
     private fun handOver(c: Float): Float =
-        if (holdMaterial) materialHeld(c) else pairedOut(c)
+        if (springContent) SpringMorphContent.islandAlpha(springSharpness)
+        else if (holdMaterial) materialHeld(c) else pairedOut(c)
 
     /**
      * DECAL, not CLAMP: clamped, the edge pixels were stretched out to the content view's bounds
      * and the blur stood there as a hard-edged block (filmed 2026-09-30, "竖状裁切").
      */
     private fun blurCard(radius: Float) {
-        val r = if (radius < 0.5f) 0f else radius
-        if (cardBlurred >= 0f && abs(r - cardBlurred) < 0.25f && (r == 0f) == (cardBlurred == 0f)) return
-        cardBlurred = r
-        val effect = if (r == 0f) null
-            else android.graphics.RenderEffect.createBlurEffect(r, r, android.graphics.Shader.TileMode.DECAL)
-        cardContent.forEach { v ->
-            runCatching { v.setRenderEffect(effect) }
-            if (effect == null) blurOwners.remove(v) else blurOwners[v] = this
-        }
+        cardBlur.apply(radius)
     }
 
     /**
-     * This morph's blur off its card - written through, whatever it thinks it wrote - and any
-     * other card's whose morph is no longer running: a morph dropped for the next one in a run of
-     * taps never finished, and its row stayed blurred at rest (filmed 2026-09-30).
+     * Release only this morph's effects; a following animation may already own the same row.
      */
     private fun clearBlur() {
-        cardContent.forEach { v ->
-            if (blurOwners[v].let { it == null || it === this }) {
-                runCatching { v.setRenderEffect(null) }
-                blurOwners.remove(v)
-            }
-        }
-        cardBlurred = 0f
-        val stale = blurOwners.entries.filter { !it.value.running }.map { it.key }
-        stale.forEach { v ->
-            runCatching { v.setRenderEffect(null) }
-            blurOwners.remove(v)
-        }
+        cardBlur.clear()
     }
 
     private fun restore() {
@@ -825,10 +817,14 @@ internal class MiniCardMorph(
         header.clipToOutline = saved.clip
         header.transitionAlpha = saved.transitionAlpha
         header.visibility = saved.visibility
+        nativeRow?.close()
+        nativeRow = null
     }
 
     /** The pill given back to itself: its pieces in their places, no blur, out of the morph. */
     private fun restoreMini() {
+        stackLayer?.close()
+        stackLayer = null
         mini.setMorphContentBlur(0f)
         pieces.forEach { piece ->
             val v = piece.view
@@ -846,12 +842,33 @@ internal class MiniCardMorph(
         mini.endMorph()
     }
 
+    /** Keep OEM bottom clipping when replacing its stacking outline for the morph. */
+    private fun updateStackClipping(box: CoverMorphMotion.Box? = boxDrawn, scale: Float = placedScale) {
+        if (box == null || scale <= 0f || placedBox == null) return
+        if (header.outlineProvider !== clipOutline) header.outlineProvider = clipOutline
+        if (!header.clipToOutline) header.clipToOutline = true
+        val clipHeight = StackOcclusion.morphClipHeight(box.h, stackGeometry.height(),
+            stackGeometry.visibleBottom(), scale, motion.value)
+        // A short notification may not fill the whole capsule height at the current width.
+        // Shortening the outline would also shrink its corner and expose it above the pill.
+        // Clip its pixels against the full capsule, then retain the native background bounds.
+        val height = if (nativeRow != null) clipHeight else min(drawnHeight(), clipHeight)
+        if (abs(height - clipH) > 0.01f) {
+            clipH = height
+            header.invalidateOutline()
+        }
+        // Parent clipping alone does not shape the wallpaper-sampling glass. The background
+        // must use this same capsule outline through the closing opacity tail as well.
+        nativeRow?.clip(clipW, clipH, clipR)
+    }
+
     /**
      * Where the stack has the card this frame, on screen: its slot plus the stack's own
      * transform, read live, so a stack that moves mid-morph simply moves the far end.
      */
     private fun headerRestBox(): CoverMorphMotion.Box? {
         if (!header.isAttachedToWindow || header.width <= 0 || header.height <= 0) return null
+        nativeRow?.let { return it.restBox(drawnHeight()) }
         val origin = headerOrigin() ?: return null
         oemMatrix.set(header.matrix)
         corner[0] = 0f
@@ -893,6 +910,12 @@ internal class MiniCardMorph(
      * out again then.
      */
     private fun placeHeader(box: CoverMorphMotion.Box, s: Float) {
+        nativeRow?.let {
+            placedBox = box
+            placedScale = s
+            it.place(box, s, springOpacity)
+            return
+        }
         val origin = headerOrigin() ?: return
         oemMatrix.set(header.matrix)
         placedBox = box
@@ -1064,9 +1087,6 @@ internal class MiniCardMorph(
 
         /** The two ends' content blur at its far end, ColorOS's 9dp. */
         const val BLUR_DP = 9f
-
-        /** Every card content view blurred now, and the morph that blurred it. */
-        private val blurOwners = java.util.WeakHashMap<View, MiniCardMorph>()
 
         /** The pill's content goes out of focus on its way to the card, all of it by the middle. */
         fun pillBlur(p: Float) = smooth(0f, 0.6f, p)
