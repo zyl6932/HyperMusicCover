@@ -75,12 +75,15 @@ import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
+import top.yukonga.miuix.kmp.glass.GlassNavigationBar
+import top.yukonga.miuix.kmp.glass.GlassNavigationItem
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Home
 import top.yukonga.miuix.kmp.icon.extended.Info
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.material.EdgeStrokes
+import top.yukonga.miuix.kmp.material.GlassDefaults
 import top.yukonga.miuix.kmp.material.edgeStroke
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -619,6 +622,19 @@ private fun BottomNavigationBar(
     blurActive: Boolean,
     onItemSelected: (Int) -> Unit,
 ) {
+    // In OS4 the bar is glass, whatever the OS3 trio was set to. Those settings stay stored,
+    // untouched, and come back with the OS3 interface.
+    if (LocalOs4Ui.current) {
+        BottomNavigationBarOs4(
+            items = items,
+            icons = icons,
+            selectedIndex = selectedIndex,
+            backdrop = backdrop,
+            onItemSelected = onItemSelected,
+        )
+        return
+    }
+
     when (mode) {
         2 -> {
             val navigationItems = remember(items, icons) {
@@ -712,4 +728,37 @@ private fun BottomNavigationBar(
             }
         }
     }
+}
+
+/**
+ * The OS4 bar: a floating glass capsule sampling the page behind it.
+ *
+ * The insets and the floating margin are the bar's own (defaultWindowInsetsPadding), so the
+ * height the Scaffold hands the pages includes them and the lists stop above it. Doing that
+ * here and not around it keeps one source for the gap under the content.
+ */
+@Composable
+private fun BottomNavigationBarOs4(
+    items: List<String>,
+    icons: List<androidx.compose.ui.graphics.vector.ImageVector>,
+    selectedIndex: Int,
+    backdrop: LayerBackdrop?,
+    onItemSelected: (Int) -> Unit,
+) {
+    val glassItems = remember(items, icons) {
+        List(items.size) { i ->
+            GlassNavigationItem(
+                icon = icons[i],
+                label = items[i],
+            )
+        }
+    }
+    GlassNavigationBar(
+        items = glassItems,
+        selectedIndex = selectedIndex,
+        onSelect = onItemSelected,
+        backdrop = backdrop,
+        modifier = Modifier.padding(horizontal = 24.dp),
+        style = GlassDefaults.style(isInDarkTheme()),
+    )
 }
