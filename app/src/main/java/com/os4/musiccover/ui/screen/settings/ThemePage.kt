@@ -71,7 +71,6 @@ fun ThemePageView(
                         )
                         AppDropdownPreference(
                             title = stringResource(R.string.ui_style),
-                            summary = stringResource(R.string.ui_style_summary),
                             items = styles,
                             selectedIndex = if (useOs4Ui) 0 else 1,
                             onSelectedIndexChange = { onUseOs4UiChange(it == 0) },

@@ -35,9 +35,8 @@
     <string name="settings_theme">主题</string>
     <string name="settings_theme_summary">主题模式、界面风格、导航栏样式与背景模糊</string>
     <string name="ui_style">界面风格</string>
-    <string name="ui_style_summary">玻璃材质的新版界面，或原来的外观</string>
-    <string name="ui_style_os4">OS4 玻璃</string>
-    <string name="ui_style_os3">OS3 经典</string>
+    <string name="ui_style_os4">OS4</string>
+    <string name="ui_style_os3">OS3</string>
     <string name="welcome_show_again">查看欢迎页</string>
     <string name="welcome_show_again_summary">重新播放首次启动时的开屏动画</string>
     <string name="settings_language">语言</string>
