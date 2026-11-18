@@ -24,7 +24,7 @@ import com.os4.musiccover.ui.util.isInDarkTheme
 import com.os4.musiccover.ui.util.shouldShowSplitPane
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
+import top.yukonga.miuix.kmp.material.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.floor
 

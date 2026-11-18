@@ -69,7 +69,6 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
-import top.yukonga.miuix.kmp.blur.highlight.Highlight
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
@@ -78,6 +77,8 @@ import top.yukonga.miuix.kmp.icon.extended.Home
 import top.yukonga.miuix.kmp.icon.extended.Info
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.icon.extended.Tune
+import top.yukonga.miuix.kmp.material.EdgeStrokes
+import top.yukonga.miuix.kmp.material.edgeStroke
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.abs
@@ -620,8 +621,8 @@ private fun BottomNavigationBar(
                 if (blurActive) Color.Transparent else MiuixTheme.colorScheme.surfaceContainer
             val floatingBarShape = RoundedCornerShape(FloatingToolbarDefaults.CornerRadius)
             val isDark = isInDarkTheme()
-            val floatingHighlight = remember(isDark) {
-                if (isDark) Highlight.GlassStrokeMiddleDark else Highlight.GlassStrokeMiddleLight
+            val floatingStroke = remember(isDark) {
+                if (isDark) EdgeStrokes.MiddleDark else EdgeStrokes.MiddleLight
             }
             FloatingNavigationBar(
                 modifier = if (blurActive && backdrop != null) {
@@ -634,8 +635,7 @@ private fun BottomNavigationBar(
                                 BlendColorEntry(color = MiuixTheme.colorScheme.surfaceContainer.copy(0.4f)),
                             ),
                         ),
-                        highlight = floatingHighlight,
-                    )
+                    ).edgeStroke(floatingBarShape, floatingStroke)
                 } else {
                     Modifier
                 },
