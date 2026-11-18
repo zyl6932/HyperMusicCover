@@ -60,6 +60,7 @@ import com.os4.musiccover.R
 import com.os4.musiccover.ui.component.effect.BgEffectBackground
 import com.os4.musiccover.ui.util.BlurredBar
 import com.os4.musiccover.ui.util.GlassPageBar
+import com.os4.musiccover.ui.util.PageBackButton
 import com.os4.musiccover.ui.util.LocalOs4Ui
 import com.os4.musiccover.ui.util.LocalPageBackdrop
 import com.os4.musiccover.ui.util.ColorBlendToken
@@ -84,12 +85,14 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
+import top.yukonga.miuix.kmp.utils.MiuixPopupUtils
 import kotlin.math.abs
 import androidx.compose.ui.graphics.BlendMode as ComposeBlendMode
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 
 @Composable
 fun AboutPageContent(
+    onBack: () -> Unit,
     openLicensePage: () -> Unit,
     openCreditsPage: () -> Unit,
     isBlurEnabled: Boolean = true,
@@ -127,9 +130,10 @@ fun AboutPageContent(
     // them too - otherwise they would sample nothing in OS4.
     CompositionLocalProvider(LocalPageBackdrop provides backdrop.takeIf { backdropActive }) {
         Scaffold(
-            // No popup host on OS3 (its dialogs are windows); OS4 is hosted by MainActivity's
-            // root Scaffold, which this page is inside.
-            popupHost = { },
+            // OS4's glass dialogs are Compose popups and need a Miuix popup host. This page used
+            // to sit inside MainActivity's root Scaffold, which was that host; as a screen of its
+            // own it has to bring one. OS3's dialogs are windows, so it keeps the empty host.
+            popupHost = if (os4) { { MiuixPopupUtils.MiuixPopupHost() } } else { { } },
             topBar = {
                 if (os4) {
                     // No large title: the big mark below is the page's own, and it is the thing
@@ -139,6 +143,7 @@ fun AboutPageContent(
                         title = stringResource(R.string.about),
                         backdrop = backdrop,
                         scrollBehavior = topAppBarScrollBehavior,
+                        onBack = onBack,
                         expandable = false,
                         defaultWindowInsetsPadding = false,
                         titleAlpha = {
@@ -160,6 +165,7 @@ fun AboutPageContent(
                             scrollBehavior = topAppBarScrollBehavior,
                             color = barColor,
                             titleColor = titleColor,
+                            navigationIcon = { PageBackButton(onBack) },
                             defaultWindowInsetsPadding = false,
                         )
                     }

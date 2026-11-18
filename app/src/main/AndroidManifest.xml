@@ -104,6 +104,14 @@
             </intent-filter>
         </receiver>
 
+        <!-- The About page, opened from its card at the bottom of the settings page. It used to
+             be the pager's fourth tab; declared like every other sub-screen above. -->
+        <activity
+            android:name=".app.AboutActivity"
+            android:exported="false"
+            android:label="@string/tab_about"
+            android:theme="@style/Theme.HyperMusicCover" />
+
         <activity
             android:name=".app.LicenseActivity"
             android:exported="false"

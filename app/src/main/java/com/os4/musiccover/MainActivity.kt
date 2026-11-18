@@ -2,13 +2,10 @@ package com.os4.musiccover
 
 import com.os4.musiccover.app.AppNightMode
 import com.os4.musiccover.app.AppSettings
-import com.os4.musiccover.app.CreditsActivity
 import com.os4.musiccover.app.LaunchBackground
-import com.os4.musiccover.app.LicenseActivity
 import com.os4.musiccover.app.LocaleHelper
 import com.os4.musiccover.app.LsposedService
 import android.content.Context
-import android.content.Intent
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
@@ -44,12 +41,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.os4.musiccover.ui.component.PagerNavigationSpringSpec
 import com.os4.musiccover.ui.component.liquid.IosLiquidGlassNavigationBar
-import com.os4.musiccover.ui.screen.about.AboutPageContent
 import com.os4.musiccover.updater.UpdateCheck
 import com.os4.musiccover.ui.screen.features.FeaturesPageView
 import com.os4.musiccover.ui.screen.home.HomePageView
@@ -79,7 +74,6 @@ import top.yukonga.miuix.kmp.glass.GlassNavigationBar
 import top.yukonga.miuix.kmp.glass.GlassNavigationItem
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Home
-import top.yukonga.miuix.kmp.icon.extended.Info
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.material.EdgeStrokes
@@ -447,8 +441,7 @@ private fun MainScreen(
     onBlurEnabledChange: (Boolean) -> Unit,
     onShowWelcome: () -> Unit,
 ) {
-    val context = LocalContext.current
-    val pagerState = rememberPagerState(pageCount = { 4 })
+    val pagerState = rememberPagerState(pageCount = { 3 })
     var selectedIndex by remember { mutableIntStateOf(0) }
     var isNavigating by remember { mutableStateOf(false) }
     var navJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
@@ -457,12 +450,11 @@ private fun MainScreen(
         stringResource(R.string.tab_home),
         stringResource(R.string.tab_features),
         stringResource(R.string.tab_settings),
-        stringResource(R.string.tab_about),
     )
-    val icons = listOf(MiuixIcons.Home, MiuixIcons.Tune, MiuixIcons.Settings, MiuixIcons.Info)
+    val icons = listOf(MiuixIcons.Home, MiuixIcons.Tune, MiuixIcons.Settings)
 
     /**
-     * One flag per page rather than one counter shared by all four.
+     * One flag per page rather than one counter shared by all of them.
      *
      * The pages re-ask the module when they come to the front, and a single counter bumped on
      * every tab change made that *every* page: a tap re-composed and re-queried the pages nobody
@@ -476,9 +468,7 @@ private fun MainScreen(
      * otherwise every page is unskippable and the split buys nothing.
      */
     val onHomePage = remember { derivedStateOf { pagerState.currentPage == 0 } }
-    val onAboutPage = remember { derivedStateOf { pagerState.currentPage == 3 } }
     val isHomeCurrent: () -> Boolean = remember(onHomePage) { { onHomePage.value } }
-    val isAboutCurrent: () -> Boolean = remember(onAboutPage) { { onAboutPage.value } }
 
     LaunchedEffect(pagerState.currentPage) {
         if (!isNavigating && selectedIndex != pagerState.currentPage) {
@@ -594,17 +584,6 @@ private fun MainScreen(
                             isBlurEnabled = isBlurEnabled,
                             extraBottomPadding = navBarHeight,
                             onShowWelcome = onShowWelcome,
-                        )
-
-                        3 -> AboutPageContent(
-                            openLicensePage = {
-                                context.startActivity(Intent(context, LicenseActivity::class.java))
-                            },
-                            openCreditsPage = {
-                                context.startActivity(Intent(context, CreditsActivity::class.java))
-                            },
-                            isBlurEnabled = isBlurEnabled,
-                            isCurrent = isAboutCurrent,
                         )
                     }
                 }
