@@ -23,8 +23,12 @@ import com.hchen.superlyricapi.model.Word
  * A device with no SuperLyric server gets a rejected register and a stream of nulls from
  * latest() - nothing else - so this can be asked unconditionally, exactly like the bridge.
  *
- * The registration survives on its own: the receiver reconnects when the server comes up. Once
- * attached it is only ever read, so the whole object is a snapshot and a listener.
+ * The registration is a call, not something that lives on by itself: the receiver keeps the
+ * listeners it was handed and the transport they were bound over, and nothing in it re-registers
+ * when that transport is replaced. Renewing it is therefore this side's job, and attach() does
+ * it on every keyguard container attach - which is also what picks the server up on a boot where
+ * it was not there yet. Once attached it is only ever read, so the whole object is a snapshot
+ * and a listener.
  */
 object SuperLyricSource {
 
@@ -123,12 +127,17 @@ object SuperLyricSource {
 
     /**
      * Registers the listener with the SuperLyric receiver. No Context: the transport is a
-     * system service lookup, not a bound app service. Idempotent, and cheap when the server is
-     * absent - the register is rejected locally and nothing retries.
+     * system service lookup, not a bound app service.
+     *
+     * Called on every keyguard container attach, not once, and that is the point: the receiver
+     * answers at once while it is still bound to the same transport - an identity check, no
+     * binder call - and binds again when the server has been replaced. Guarding this behind
+     * "we already registered" would leave the process deaf for the rest of its life after such
+     * a replacement, which is the state the old comment here wrongly said the receiver handled
+     * by itself (2026-11-18 review).
      */
     @JvmStatic
     fun attach() {
-        if (sAttached) return
         sAttached = true
         try {
             val result = SuperLyric.receiver().register(Listener)
@@ -305,7 +314,11 @@ object SuperLyricSource {
             built = LyricLine(shown, line.translation, LyricParse.romaOf(line.phonetic, shown),
                 begin, end, false, null, null, null)
         }
-        return LyricParse.unwrapBackground(built)
+        // Deliberately not unwrapBackground: that is for a line already drawn small and faint
+        // under the one it echoes, and this server has no background lane - every line arrives
+        // as a line. Stripping the brackets here would show "（笑）" as "笑" on this route only,
+        // while a file and Lyricon leave the line as published (2026-11-18 review).
+        return built
     }
 
     private fun fits(v: Long) = v in 0L..Int.MAX_VALUE.toLong()
