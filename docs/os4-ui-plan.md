@@ -1,7 +1,7 @@
 # HyperMusicCover OS4 界面更新计划
 
 > 分支：`os4-ui`（2026-11-18 快进到 `main` `086dd05`）
-> 状态：实现完成，vc25 已装机，**待维护者上机验收**
+> 状态：第一轮已装机验收；2026-11-18 第二轮修复中（vc30）
 > 按项目规矩：任何构建、单测、出包都先问；效果由维护者上机看。
 
 ## 0. 已定的决策（2026-11-18）
@@ -157,6 +157,31 @@
 **第 9 步 编译上机**：构建前问；维护者验收。
 
 **第 10 步 文档与行动计划表同步**；提交/推送按指示。
+
+## 3.5 第一轮上机后的修复（2026-11-18，vc26–vc30）
+
+- **顶栏/浮动玻璃缺失**：miuix 的浮动材质只在列表 `contentOffset < 0` 时出现；
+  且我们原来的带是“对页面背景做模糊”，白页上等于白。OS4 的带改
+  `BlurredBar(tint = surfaceContainer, alpha = 0.55)`，静止也有玻璃感；
+  按钮仍按库的滚动规则浮动（没有改成常驻）。
+- **页面背景**：按维护者要求回到 OS3 同款——普通页面纯色，只有 About 保留
+  原有渐变；上一轮的 `BgEffectBackground` 从 PageScaffold/License 撤掉。
+- **TabRow**：三处（功能分组、捐赠渠道、歌词声部）改
+  `GlassSegmentedTabRow`，采样只画页面底色的 `SurfaceBackdrop`（页面记录
+  含 tab 自己，不能自采样）。
+- **首页重启菜单**：`GlassIconDropdownMenu` 的内联全屏层被放进了顶栏 icon
+  大小的小 Box，菜单开在看不见的尺寸里。已把 anchor/状态提升到页面根 Box，
+  菜单在整页范围展开；触发器用 `GlassIconButton`（菜单要从它的 surface 长出来）。
+- **指纹快捷「+」无反应**：`AppDialog` 是在 `PageScaffold` 之外组合的，玻璃
+  对话框需要祖先 Scaffold 的 popup/dialog host；没有宿主时状态进了一个没人
+  渲染的列表。`AppTheme` 在 OS4 下给每个 Activity 包一层根 `Scaffold`。
+- **页面外的对话框是白板**：它们拿不到 `LocalPageBackdrop`。`AppTheme` 现在
+  提供只画页面底色的 `SurfaceBackdrop` 作为兜底，页面内部仍用自己的记录。
+- **About 卡片颜色**：`AppCard` 的底改回卡片本色（上一版用 0.72 透明叠色，
+  在 About 渐变上发暗）。About 页本身按要求暂停。
+- **通控中心返回键**：短页面列表滚不动，库的 `isContentScrolled` 恒为 false，
+  返回键就永远不浮动；这是库的规则，不是我们的 bug。第一轮曾用
+  `isContentScrolled = true` 强行常驻，维护者否掉，已撤回。
 
 ## 4. 风险
 
