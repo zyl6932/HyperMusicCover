@@ -23,6 +23,8 @@ val releaseStorePath = signingValue("storeFile", "SIGNING_STORE_FILE")
 android {
     namespace = "com.os4.musiccover"
     compileSdk = 37
+    // miuix 0.9.5's AAR metadata requires 37.2; the app's target stays 37.
+    compileSdkMinor = 2
 
     defaultConfig {
         // The GitHub identity the module ships under. LSPosed keys a module on this, so
