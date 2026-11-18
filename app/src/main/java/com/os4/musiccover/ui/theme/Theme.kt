@@ -17,7 +17,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.os4.musiccover.ui.util.LocalOs4Ui
 import com.os4.musiccover.ui.util.isInDarkTheme
-import top.yukonga.miuix.kmp.material.isRenderEffectSupported
+import top.yukonga.miuix.kmp.material.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
@@ -36,7 +36,10 @@ fun AppTheme(
 ) {
     // 可用模式: System, Light, Dark, MonetSystem, MonetLight, MonetDark
     val controller = remember(themeMode) { ThemeController(themeMode) }
-    val os4Ui = remember(useOs4Ui) { useOs4Ui && isRenderEffectSupported() }
+    // The same test the backdrops use, not the weaker RenderEffect one: OS4 is either wholly
+    // drawn or not at all, and the mix of half a glass frame over OS3 content is what this
+    // keeps out.
+    val os4Ui = remember(useOs4Ui) { useOs4Ui && isRuntimeShaderSupported() }
     MiuixTheme(
         controller = controller,
         content = {

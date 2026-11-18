@@ -1,7 +1,7 @@
 # HyperMusicCover OS4 界面更新计划
 
 > 分支：`os4-ui`（2026-11-18 快进到 `main` `086dd05`）
-> 状态：决策已定，实现中
+> 状态：实现完成，vc24 已装机，**待维护者上机验收**
 > 按项目规矩：任何构建、单测、出包都先问；效果由维护者上机看。
 
 ## 0. 已定的决策（2026-11-18）
@@ -124,8 +124,29 @@
 
 - 写 `AppCard`：OS4 时 `glassPanel` + `GlassEdgeStrokes` + 阴影，
   底色作为 fallback；OS3 原样 `Card`。替换 UI 文件里的 48 处。
-- 页面背景：OS4 保持主题 surface（玻璃卡片靠描边/阴影读出来）；
-  渐变背景（`BgEffectBackground`）先不开，待上机观感再定。
+  - 实现时改了一处：卡片**不采样** `LocalPageBackdrop`。页面记录里包含卡片
+    自己，采样会把自己的上一帧糊进去；且页面背景是纯色，采不到东西。
+    卡片改用 `glassPanel(backdrop = null)` 的描边 + 阴影分支，半透明底色。
+  - HomePage 的可点击状态卡保留原 `Card`（底色是状态色，不是设置面板）。
+- 页面背景：OS4 保持主题 surface；渐变背景先不开，待上机观感再定。
+
+**实现中和计划不同的地方（2026-11-18）**
+
+- `miuix 0.9.5-beta01` 的 AAR 元数据要求 compileSdk 37.2，本机补装了
+  `platforms;android-37.2`，`app/build.gradle.kts` 加 `compileSdkMinor = 2`
+  （targetSdk 仍是 37）。单独一个提交。
+- 增加了 `miuix-glass-icons`：OS4 返回键用 `MiuixIcons.Glass.ChevronBackward`。
+- OS4 判定统一用 `isRuntimeShaderSupported()`（SDK 33），与
+  `rememberBlurBackdrop` 同一个门，避免 31/32 上出现"半套玻璃"。
+- About / License 两个自建脚手架也走 OS4：共享 `GlassPageBar`；
+  About 不开 large title，标题仍按页面自己的 `scrollProgress` 渐显。
+- 弹层宿主结论：OS4 的 PageScaffold 用默认 `popupHost`；MainActivity 的页
+  由根 Scaffold 托管（`renderInRootScaffold = true`），子 Activity 由页
+  Scaffold 自己托管。OS3 仍是 `popupHost = {}` + 独立窗口。
+- 解析到的新 API 映射：`Highlight`/`BloomStroke` → `EdgeStroke`/
+  `EdgeLightSource`（同一 UV 原点，`dualPeak` → `EdgePeak.Dual`）；
+  `drawBackdrop(highlight=)` → `onDrawFront = { drawEdgeStroke(...) }`；
+  `CombinedBackdrop.downscaleFactor` 改 `Float`。
 
 **第 9 步 编译上机**：构建前问；维护者验收。
 

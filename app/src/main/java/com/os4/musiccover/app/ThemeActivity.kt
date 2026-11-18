@@ -10,7 +10,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.os4.musiccover.ui.screen.settings.ThemePageView
 import com.os4.musiccover.ui.theme.AppTheme
-import top.yukonga.miuix.kmp.material.isRenderEffectSupported
+import top.yukonga.miuix.kmp.material.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 
 /**
@@ -57,7 +57,7 @@ class ThemeActivity : ComponentActivity() {
                     currentMode = currentMode,
                     onModeChange = { mode -> update { it.copy(themeMode = mode.name) } },
                     useOs4Ui = settings.useOs4Ui,
-                    os4Supported = isRenderEffectSupported(),
+                    os4Supported = isRuntimeShaderSupported(),
                     onUseOs4UiChange = { on -> update { it.copy(useOs4Ui = on) } },
                     isFloatingNavbar = settings.isFloatingNavbar,
                     onFloatingNavbarChange = { on -> update { it.copy(isFloatingNavbar = on) } },
