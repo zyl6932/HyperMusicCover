@@ -16,6 +16,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -80,6 +81,16 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import com.os4.musiccover.ui.util.AppDialog
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import androidx.compose.foundation.layout.size
+import com.os4.musiccover.ui.util.LocalOs4Ui
+import top.yukonga.miuix.kmp.basic.DropdownEntry as MiuixDropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownItem as MiuixDropdownItem
+import top.yukonga.miuix.kmp.glass.GlassIconButton
+import top.yukonga.miuix.kmp.glass.GlassPopupAnchor
+import top.yukonga.miuix.kmp.glass.GlassIconDropdownMenu
+import top.yukonga.miuix.kmp.glass.glassPopupAnchor
+import top.yukonga.miuix.kmp.glass.glassPopupAnchorContent
+import top.yukonga.miuix.kmp.glass.rememberGlassPopupAnchor
 
 @SuppressLint("LocalContext")
 @Composable
@@ -186,11 +197,23 @@ fun HomePageView(
         }
     }
 
+    // The OS4 restart menu needs a full-size box to lay itself out in (see
+    // RestartMenuGlassTrigger); the bar's actions slot is only as big as an icon.
+    var restartMenuOpen by remember { mutableStateOf(false) }
+    val restartAnchor = rememberGlassPopupAnchor()
+
+    Box(Modifier.fillMaxSize()) {
     PageScaffold(
         title = title,
         isBlurEnabled = isBlurEnabled,
         extraBottomPadding = extraBottomPadding,
-        actions = { RestartMenu() },
+        actions = {
+            if (LocalOs4Ui.current) {
+                RestartMenuGlassTrigger(restartAnchor) { restartMenuOpen = true }
+            } else {
+                RestartMenu()
+            }
+        },
     ) {
         item(key = "status") {
             Box(
@@ -452,6 +475,15 @@ fun HomePageView(
         }
     }
 
+    if (LocalOs4Ui.current) {
+        RestartMenuGlass(
+            show = restartMenuOpen,
+            anchor = restartAnchor,
+            onDismiss = { restartMenuOpen = false },
+        )
+    }
+    }
+
     AppDialog(
         show = showMissing,
         title = stringResource(R.string.home_features_missing_dialog),
@@ -585,6 +617,14 @@ private fun RestartMenu() {
         stringResource(R.string.restart_wallpaper) to ModuleBridge::restartWallpaper,
     )
 
+    // No result is reported by either menu. A Toast is not a channel this app has - they are
+    // dropped whenever notifications are off, which is this app's default - and the restart is
+    // its own feedback: the screen blinks and the lock screen comes back.
+    fun run(action: () -> Unit) {
+        showMenu = false
+        scope.launch { withContext(Dispatchers.IO) { action() } }
+    }
+
     Box {
         // holdDownState keeps the button looking pressed while its menu is open, which is
         // the one thing tying the two together now that the popup is drawn by the root.
@@ -610,19 +650,83 @@ private fun RestartMenu() {
                         text = entry.first,
                         optionSize = entries.size,
                         index = index,
-                        onSelectedIndexChange = {
-                            showMenu = false
-                            // No result is reported. A Toast is not a channel this app has - they
-                            // are dropped whenever notifications are off, which is this app's
-                            // default - and the restart is its own feedback: the screen blinks and
-                            // the lock screen comes back.
-                            scope.launch { withContext(Dispatchers.IO) { entry.second() } }
-                        },
+                        onSelectedIndexChange = { run(entry.second) },
                     )
                 }
             }
         }
     }
+}
+
+/**
+ * The OS4 trigger: a glass button the menu can grow out of.
+ *
+ * The menu itself is not composed here. `GlassIconDropdownMenu` lays out at the size of the
+ * Box it is placed in - a full-screen dismiss layer - and this button sits in the top bar's
+ * actions row, a box the size of one icon. Composing the two together made the menu open into
+ * that icon-sized box, which is why the button hid itself and nothing appeared. The page-level
+ * [HomePageView] owns both the anchor and the open state and puts the menu in its own
+ * full-size Box.
+ */
+@Composable
+private fun RestartMenuGlassTrigger(anchor: GlassPopupAnchor, onOpen: () -> Unit) {
+    GlassIconButton(
+        onClick = onOpen,
+        modifier = Modifier.glassPopupAnchor(anchor, cornerRadius = 22.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Refresh,
+            contentDescription = stringResource(R.string.restart_menu),
+            tint = MiuixTheme.colorScheme.onBackground,
+            modifier = Modifier
+                .size(24.dp)
+                .glassPopupAnchorContent(anchor),
+        )
+    }
+}
+
+/** The OS4 menu, in the page's full-size box, anchored to the bar button. */
+@Composable
+private fun BoxScope.RestartMenuGlass(
+    show: Boolean,
+    anchor: GlassPopupAnchor,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val entries = listOf(
+        stringResource(R.string.restart_scope) to { ModuleBridge.restartScope(context) },
+        stringResource(R.string.restart_systemui) to ModuleBridge::restartSystemUi,
+        stringResource(R.string.restart_wallpaper) to ModuleBridge::restartWallpaper,
+    )
+    GlassIconDropdownMenu(
+        show = show,
+        onDismissRequest = onDismiss,
+        anchor = anchor,
+        anchorContent = {
+            Icon(
+                imageVector = Icons.Rounded.Refresh,
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.onBackground,
+            )
+        },
+        // Null on purpose: the menu opens over the page it is recorded in, and sampling that
+        // would blur a picture of the menu into itself.
+        backdrop = null,
+        entries = listOf(
+            MiuixDropdownEntry(
+                entries.map { entry ->
+                    MiuixDropdownItem(
+                        text = entry.first,
+                        onClick = {
+                            onDismiss()
+                            scope.launch { withContext(Dispatchers.IO) { entry.second() } }
+                        },
+                    )
+                },
+            ),
+        ),
+    )
 }
 
 /** A feature id from the module (`feature:xxx`) as the user reads it; the id itself if unknown. */

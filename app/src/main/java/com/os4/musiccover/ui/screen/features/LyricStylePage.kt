@@ -37,6 +37,8 @@ import com.os4.musiccover.lyrics.HdrDisplay
 import com.os4.musiccover.lyrics.LyricAppearance
 import com.os4.musiccover.ui.component.SettingsNotices
 import com.os4.musiccover.ui.util.PageScaffold
+import com.os4.musiccover.ui.util.LocalOs4Ui
+import top.yukonga.miuix.kmp.glass.GlassIconButton
 import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import com.os4.musiccover.ui.util.nextCard
@@ -49,7 +51,7 @@ import top.yukonga.miuix.kmp.basic.ColorPicker
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.TabRowWithContour
+import com.os4.musiccover.ui.util.AppTabRow
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import com.os4.musiccover.ui.util.AppDropdownPreference
@@ -152,12 +154,26 @@ internal fun LyricStylePageView(
         extraBottomPadding = extraBottomPadding,
         onBack = onBack,
         actions = {
-            IconButton(onClick = { if (enabled) confirmReset = true }, holdDownState = confirmReset) {
-                Icon(
-                    imageVector = Icons.Rounded.Refresh,
-                    contentDescription = stringResource(R.string.lyrics_style_reset),
-                    tint = MiuixTheme.colorScheme.onBackground,
-                )
+            if (LocalOs4Ui.current) {
+                // The glass bar's own button; a disabled state is the dimmed icon and a tap
+                // that goes nowhere, since the glass button has no enabled slot.
+                GlassIconButton(onClick = { if (enabled) confirmReset = true }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = stringResource(R.string.lyrics_style_reset),
+                        modifier = Modifier.size(24.dp),
+                        tint = if (enabled) MiuixTheme.colorScheme.onSurface
+                        else MiuixTheme.colorScheme.disabledOnSecondaryVariant,
+                    )
+                }
+            } else {
+                IconButton(onClick = { if (enabled) confirmReset = true }, holdDownState = confirmReset) {
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = stringResource(R.string.lyrics_style_reset),
+                        tint = MiuixTheme.colorScheme.onBackground,
+                    )
+                }
             }
         },
     ) {
@@ -250,7 +266,8 @@ internal fun LyricStylePageView(
             Column {
                 SmallTitle(text = stringResource(R.string.lyrics_style_text))
                 AppCard(modifier = Modifier.nextCard()) {
-                    TabRowWithContour(
+                    AppTabRow(
+                        contour = true,
                         tabs = listOf(
                             stringResource(R.string.lyrics_style_main),
                             stringResource(R.string.lyrics_style_trans),

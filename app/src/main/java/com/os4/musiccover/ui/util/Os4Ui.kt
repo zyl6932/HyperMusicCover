@@ -1,7 +1,16 @@
 package com.os4.musiccover.ui.util
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.unit.Density
+import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * Whether the glass (OS4) interface is the one being drawn.
@@ -21,4 +30,32 @@ val LocalOs4Ui = staticCompositionLocalOf { false }
  * dialogs - reads it from here; sampling the wrong layer would either show the popup itself or
  * come back empty.
  */
-val LocalPageBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
+val LocalPageBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+
+/**
+ * A backdrop that paints nothing but the page's surface colour.
+ *
+ * For glass that cannot sample a real recording without sampling itself - a tab row inside the
+ * recorded page body - and for glass whose call site sits outside any page recording at all:
+ * a dialog opened beside the page frame. It still gives the glass pipeline a body to colour and
+ * a rim to light, instead of falling back to an opaque panel.
+ */
+private class SurfaceBackdrop(private val color: Color) : Backdrop {
+
+    override val isCoordinatesDependent: Boolean = false
+
+    override fun DrawScope.drawBackdrop(
+        density: Density,
+        coordinates: LayoutCoordinates?,
+        layerBlock: (GraphicsLayerScope.() -> Unit)?,
+        downscaleFactor: Float,
+    ) {
+        drawRect(color)
+    }
+}
+
+@Composable
+fun rememberSurfaceBackdrop(): Backdrop {
+    val surface = MiuixTheme.colorScheme.surface
+    return remember(surface) { SurfaceBackdrop(surface) }
+}

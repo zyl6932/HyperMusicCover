@@ -63,7 +63,9 @@ fun AppCard(
             style = GlassDefaults.style(isDark),
             stroke = GlassEdgeStrokes.forTheme(isDark),
             shadow = GlassShadows.Regular,
-            fallback = Modifier.background(colors.color.copy(alpha = 0.72f), fallbackShape),
+            // The card colour itself, not a translucent copy of it: OS3's cards are opaque,
+            // and a see-through fill darkened them over the About page's gradient.
+            fallback = Modifier.background(colors.color, fallbackShape),
         ),
     ) {
         Card(

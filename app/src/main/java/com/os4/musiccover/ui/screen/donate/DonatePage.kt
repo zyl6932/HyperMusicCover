@@ -46,7 +46,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.TabRow
+import com.os4.musiccover.ui.util.AppTabRow
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -136,7 +136,7 @@ fun DonatePageContent(
         }
 
         item(key = "tabs") {
-            TabRow(
+            AppTabRow(
                 tabs = channels.map { it.name },
                 selectedTabIndex = selected,
                 onTabSelected = { selected = it },

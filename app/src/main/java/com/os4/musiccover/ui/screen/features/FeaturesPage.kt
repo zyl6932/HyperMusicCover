@@ -45,7 +45,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TabRow
+import com.os4.musiccover.ui.util.AppTabRow
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import com.os4.musiccover.ui.util.AppDropdownPreference
@@ -280,7 +280,7 @@ internal fun CoverPageView(
             }
         }
         item(key = "tabs") {
-            TabRow(
+            AppTabRow(
                 tabs = groups,
                 selectedTabIndex = group,
                 onTabSelected = { group = it },

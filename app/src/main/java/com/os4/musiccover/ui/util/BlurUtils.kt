@@ -87,6 +87,9 @@ fun BlurredBar(
     backdrop: LayerBackdrop?,
     blurEnabled: Boolean,
     scrollBehavior: ScrollBehavior? = null,
+    /** Colour blended over the blurred band; null keeps the OS3 bar's surface blend. */
+    tint: Color = MiuixTheme.colorScheme.surface,
+    tintAlpha: Float = TopBarBlurConfig.SurfaceAlpha,
     content: @Composable () -> Unit,
 ) {
     val blurActive = blurEnabled && backdrop != null
@@ -112,7 +115,7 @@ fun BlurredBar(
                         blurRadius = TopBarBlurConfig.BlurRadius,
                         colors = BlurDefaults.blurColors(
                             blendColors = listOf(
-                                BlendColorEntry(color = MiuixTheme.colorScheme.surface.copy(TopBarBlurConfig.SurfaceAlpha)),
+                                BlendColorEntry(color = tint.copy(tintAlpha)),
                             ),
                         ),
                     ),

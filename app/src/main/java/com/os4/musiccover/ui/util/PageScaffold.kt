@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.os4.musiccover.R
-import com.os4.musiccover.ui.component.effect.BgEffectBackground
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -137,24 +136,18 @@ private fun PageScaffoldOs4(
                     // shifts every blur that reads them.
                     .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
             ) {
-                // The page's background goes inside the recording, not behind it: the glass
-                // above samples this layer, and a layer whose body ended at the surface colour
-                // would show a flat band over a coloured page. Static on purpose - only the
-                // About page animates its colours, and it runs that loop only while it is the
-                // page on screen.
-                BgEffectBackground(
-                    dynamicBackground = false,
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    PageList(
-                        scrollBehavior = scrollBehavior,
-                        contentPadding = PaddingValues(
-                            top = innerPadding.calculateTopPadding(),
-                            bottom = innerPadding.calculateBottomPadding() + extraBottomPadding,
-                        ),
-                        content = content,
-                    )
-                }
+                // No page-level effect here: OS4's pages sit on the same surface as OS3's, and
+                // the gradient belongs to the About page, where it already was. Glass reads on
+                // that surface through its edges, and the bars blur the content scrolling under
+                // them.
+                PageList(
+                    scrollBehavior = scrollBehavior,
+                    contentPadding = PaddingValues(
+                        top = innerPadding.calculateTopPadding(),
+                        bottom = innerPadding.calculateBottomPadding() + extraBottomPadding,
+                    ),
+                    content = content,
+                )
             }
         }
     }
@@ -266,18 +259,40 @@ fun GlassPageBar(
     titleAlpha: () -> Float = { 1f },
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    GlassTopAppBar(
-        title = title,
-        scrollBehavior = scrollBehavior,
-        backdrop = backdrop,
-        progressiveBlur = backdrop != null,
-        style = GlassDefaults.style(isInDarkTheme()),
-        expandable = expandable,
-        defaultWindowInsetsPadding = defaultWindowInsetsPadding,
-        titleAlpha = titleAlpha,
-        navigationIcon = { if (onBack != null) PageBackButtonOs4(onBack) },
-        actions = actions,
-    )
+    val bar: @Composable () -> Unit = {
+        GlassTopAppBar(
+            title = title,
+            scrollBehavior = scrollBehavior,
+            backdrop = backdrop,
+            // The band is drawn below, through BlurredBar: the library's own band fades in only
+            // once the page scrolls, so every page that fits on screen showed no blur at all.
+            // The pages' bars have always been blurred at rest, and OS4 keeps that.
+            progressiveBlur = false,
+            backgroundAlpha = { 0f },
+            style = GlassDefaults.style(isInDarkTheme()),
+            expandable = expandable,
+            defaultWindowInsetsPadding = defaultWindowInsetsPadding,
+            titleAlpha = titleAlpha,
+            navigationIcon = { if (onBack != null) PageBackButtonOs4(onBack) },
+            actions = actions,
+        )
+    }
+    if (backdrop != null) {
+        // A bar surface that exists before anything scrolls under it. The blur alone is
+        // invisible on a page whose background is the same colour as the bar — which is every
+        // page at rest, and every page too short to put content behind it (Home, the shade
+        // settings with its rows folded) — so the band also carries a surfaceContainer tint.
+        // That is what makes the bar read as glass on all of them, not only on long lists.
+        BlurredBar(
+            backdrop = backdrop,
+            blurEnabled = true,
+            scrollBehavior = scrollBehavior,
+            tint = MiuixTheme.colorScheme.surfaceContainer,
+            tintAlpha = 0.55f,
+        ) { bar() }
+    } else {
+        bar()
+    }
 }
 
 /** The same control as a glass pill, inside the OS4 top bar. */

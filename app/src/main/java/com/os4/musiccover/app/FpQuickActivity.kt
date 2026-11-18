@@ -104,6 +104,10 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.FloatingActionButton
+import top.yukonga.miuix.kmp.glass.GlassFloatingActionButton
+import top.yukonga.miuix.kmp.glass.GlassIconButton
+import com.os4.musiccover.ui.util.LocalOs4Ui
+import com.os4.musiccover.ui.util.LocalPageBackdrop
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
@@ -324,10 +328,22 @@ private fun FpQuickPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
         actions = {
             if (editing) {
                 val can = config.items != null
-                IconButton(enabled = can, onClick = { dialog = AddDialog.RESET }) {
-                    Icon(Icons.Rounded.Refresh, stringResource(R.string.fpquick_reset),
-                        tint = if (can) MiuixTheme.colorScheme.onBackground
-                               else MiuixTheme.colorScheme.disabledOnSecondaryVariant)
+                if (LocalOs4Ui.current) {
+                    GlassIconButton(onClick = { if (can) dialog = AddDialog.RESET }) {
+                        Icon(
+                            Icons.Rounded.Refresh,
+                            stringResource(R.string.fpquick_reset),
+                            modifier = Modifier.size(24.dp),
+                            tint = if (can) MiuixTheme.colorScheme.onSurface
+                            else MiuixTheme.colorScheme.disabledOnSecondaryVariant,
+                        )
+                    }
+                } else {
+                    IconButton(enabled = can, onClick = { dialog = AddDialog.RESET }) {
+                        Icon(Icons.Rounded.Refresh, stringResource(R.string.fpquick_reset),
+                            tint = if (can) MiuixTheme.colorScheme.onBackground
+                                   else MiuixTheme.colorScheme.disabledOnSecondaryVariant)
+                    }
                 }
             }
         },
@@ -335,13 +351,31 @@ private fun FpQuickPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
         // Scaffold. Not greyed when full (the user's call): it says why instead.
         floatingActionButton = {
             if (editing) {
-                FloatingActionButton(
-                    modifier = Modifier.navigationBarsPadding(),
-                    onClick = {
-                        target = null
-                        dialog = if (config.firstOpen() == null) AddDialog.FULL else AddDialog.TYPE
-                    }) {
-                    Icon(MiuixIcons.Add, stringResource(R.string.fpquick_add_button), tint = Color.White)
+                val openAdd = {
+                    target = null
+                    dialog = if (config.firstOpen() == null) AddDialog.FULL else AddDialog.TYPE
+                }
+                if (LocalOs4Ui.current) {
+                    GlassFloatingActionButton(
+                        modifier = Modifier.navigationBarsPadding(),
+                        onClick = openAdd,
+                        // Safe to sample: the button is in the Scaffold's own slot, outside the
+                        // page body the backdrop records.
+                        backdrop = LocalPageBackdrop.current,
+                    ) {
+                        Icon(
+                            MiuixIcons.Add,
+                            stringResource(R.string.fpquick_add_button),
+                            tint = MiuixTheme.colorScheme.onSurface,
+                        )
+                    }
+                } else {
+                    FloatingActionButton(
+                        modifier = Modifier.navigationBarsPadding(),
+                        onClick = openAdd,
+                    ) {
+                        Icon(MiuixIcons.Add, stringResource(R.string.fpquick_add_button), tint = Color.White)
+                    }
                 }
             }
         }) {
