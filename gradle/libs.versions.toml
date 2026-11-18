@@ -1,10 +1,10 @@
 [versions]
-agp = "9.4.0"
-kotlin = "2.4.10"
+agp = "9.5.1"
+kotlin = "2.4.21"
 coreKtx = "1.19.0"
 lifecycleRuntimeKtx = "2.11.0"
 activityCompose = "1.13.0"
-composeBom = "2026.08.00"
+composeBom = "2026.09.00"
 miuix = "0.9.4-rc01"
 # The changelog renderer: CommonMark -> HTML, plus the WebView helpers that serve the
 # github-markdown-css sheets out of assets without file:// access.
