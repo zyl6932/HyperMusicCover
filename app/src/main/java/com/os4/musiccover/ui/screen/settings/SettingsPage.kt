@@ -34,7 +34,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
+import com.os4.musiccover.ui.util.AppDropdownPreference
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -155,7 +155,7 @@ fun SettingsPageView(
                         languageValues.indexOf(savedLanguage).takeIf { it >= 0 } ?: 0
                     var langExpanded by remember { mutableStateOf(false) }
 
-                    WindowDropdownPreference(
+                    AppDropdownPreference(
                         title = stringResource(R.string.settings_language),
                         summary = languageNames[langCurrentIndex],
                         items = languageNames,
@@ -181,7 +181,7 @@ fun SettingsPageView(
                     )
                     val levelValues = listOf(LogLevel.NORMAL, LogLevel.VERBOSE)
                     var level by remember { mutableStateOf(LsposedService.logLevel(context)) }
-                    WindowDropdownPreference(
+                    AppDropdownPreference(
                         title = stringResource(R.string.log_level),
                         summary = stringResource(R.string.log_level_summary),
                         items = levelNames,

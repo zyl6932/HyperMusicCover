@@ -51,7 +51,7 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.TabRowWithContour
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
+import com.os4.musiccover.ui.util.AppDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 
@@ -177,7 +177,7 @@ internal fun LyricStylePageView(
                         stringResource(R.string.lyrics_align_center),
                         stringResource(R.string.lyrics_align_right),
                     )
-                    WindowDropdownPreference(
+                    AppDropdownPreference(
                         title = stringResource(R.string.lyrics_align),
                         items = alignModes,
                         selectedIndex = module.lyricsAlign.coerceIn(0, alignModes.lastIndex),
@@ -338,7 +338,7 @@ internal fun LyricStylePageView(
                         picking = role
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        WindowDropdownPreference(
+                        AppDropdownPreference(
                             modifier = Modifier.weight(1f),
                             title = stringResource(R.string.lyrics_color),
                             summary = if (mode == LyricAppearance.COVER) {

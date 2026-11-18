@@ -23,7 +23,7 @@ import com.os4.musiccover.ui.util.PageScaffold
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
+import com.os4.musiccover.ui.util.AppDropdownPreference
 
 /**
  * The notification shade's settings: the album cover as a moving background behind the shade.
@@ -112,7 +112,7 @@ internal fun ShadePageView(
                                 stringResource(R.string.shade_mode_restore),
                                 stringResource(R.string.shade_mode_keep),
                             )
-                            WindowDropdownPreference(
+                            AppDropdownPreference(
                                 title = stringResource(R.string.shade_mode),
                                 items = modes,
                                 selectedIndex = (module.shade["mode"] ?: 0).coerceIn(0, modes.lastIndex),

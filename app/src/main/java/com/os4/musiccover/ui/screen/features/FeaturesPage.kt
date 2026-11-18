@@ -47,7 +47,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
+import com.os4.musiccover.ui.util.AppDropdownPreference
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
@@ -346,7 +346,7 @@ private fun CoverGroup(
 ) {
     val context = LocalContext.current
     Column {
-        WindowDropdownPreference(
+        AppDropdownPreference(
             title = stringResource(R.string.cover_style),
             items = listOf(stringResource(R.string.cover_style_full),
                 stringResource(R.string.cover_style_card),
@@ -718,7 +718,7 @@ private fun CardGroup(
             stringResource(R.string.fp_sink_never),
         )
         val avoidIndex = module.fpAvoid.coerceIn(0, avoidModes.lastIndex)
-        WindowDropdownPreference(
+        AppDropdownPreference(
             title = stringResource(R.string.fp_sink),
             items = avoidModes,
             selectedIndex = avoidIndex,

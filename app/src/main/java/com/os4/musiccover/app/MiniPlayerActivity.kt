@@ -33,7 +33,7 @@ import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
+import com.os4.musiccover.ui.util.AppDropdownPreference
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import kotlin.math.roundToInt
 
@@ -125,7 +125,7 @@ private fun MiniPlayerPage(blur: Boolean, refreshKey: Int, onBack: () -> Unit) {
                 Column {
                     SmallTitle(text = stringResource(R.string.mini_section_look))
                     Card(Modifier.nextCard()) {
-                        WindowDropdownPreference(
+                        AppDropdownPreference(
                             title = stringResource(R.string.mini_style),
                             items = listOf(stringResource(R.string.mini_style_row), stringResource(R.string.mini_style_stack)),
                             selectedIndex = config.optInt(MiniPlayerConfig.STYLE, MiniPlayerConfig.STYLE_ROW)

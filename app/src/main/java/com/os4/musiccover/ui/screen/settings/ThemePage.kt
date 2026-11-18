@@ -17,7 +17,7 @@ import com.os4.musiccover.R
 import com.os4.musiccover.ui.util.PageScaffold
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
+import com.os4.musiccover.ui.util.AppDropdownPreference
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 
 /**
@@ -68,7 +68,7 @@ fun ThemePageView(
                             stringResource(R.string.ui_style_os4),
                             stringResource(R.string.ui_style_os3),
                         )
-                        WindowDropdownPreference(
+                        AppDropdownPreference(
                             title = stringResource(R.string.ui_style),
                             summary = stringResource(R.string.ui_style_summary),
                             items = styles,
@@ -97,7 +97,7 @@ fun ThemePageView(
                     val currentIndex =
                         modesEnum.indexOf(currentMode).takeIf { it >= 0 } ?: 0
 
-                    WindowDropdownPreference(
+                    AppDropdownPreference(
                         title = stringResource(R.string.theme_mode),
                         summary = modes[currentIndex],
                         items = modes,
