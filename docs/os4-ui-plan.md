@@ -1,7 +1,7 @@
 # HyperMusicCover OS4 界面更新计划
 
 > 分支：`os4-ui`（2026-11-18 快进到 `main` `086dd05`）
-> 状态：第一轮已装机验收；第二轮修复 vc30 已装；2026-11-18 对话框对齐 demo 已出 vc31 装机
+> 状态：第一轮已装机验收；第二轮修复 vc30；对话框对齐 demo vc31；按 demo 收口 vc35 已装机
 > 按项目规矩：任何构建、单测、出包都先问；效果由维护者上机看。
 
 ## 0. 已定的决策（2026-11-18）
@@ -201,6 +201,25 @@
 - **底部弹窗**：全仓库没有 `GlassBottomSheet`，本轮不新增。demo 的 sheet 材质
   （`GlassBottomSheetDefaults.material()` + Middle 描边）本身就是库默认值，
   将来加 sheet 直接按 demo 调用即可。
+
+## 3.7 第三轮：按 miuix demo 收口（2026-11-18，vc32–vc35）
+
+- **界面风格行**：去掉副标题，两个选项就是 `OS4` / `OS3`（中英文都是这两个名字）。
+- **顶栏**：不再自绘模糊带/自建采样场景，改成 demo 的
+  `GlassTopAppBar(progressiveBlur = true, stroke = Middle)`。按钮采样的是库的
+  `progressiveBackdrop`（渲染后的带场景），underlay 材质路径也和 demo 一致。
+  代价：带只在滚动/上拉有位移时出现，且带内有库内置的 30% `surface` 混合。
+- **短页面浮动**：`pageScrollModifiers` 按 HyperLyric 把 `overScrollVertical`
+  的阻尼位移写进 `TopAppBarState.overscrollOffset`；内容撑不满一屏的页面
+  上拉时按钮也能浮起（松手回弹）。
+- **对话框**：`AppDialog` 已用 demo 的 `dialogGlass` + Middle；「获取更新」
+  对话框在 OS4 去掉内部的 `AppCard`（不透明卡会盖住对话框玻璃）。
+- **卡片**：About 页四张卡按 demo 用普通 `Card` + `textureBlur`（透渐变），
+  不再套 `AppCard` 的玻璃描边；About 卡颜色与其它页不同是 demo 的设计。
+  首页状态卡保留状态底色和点击，OS4 下额外取玻璃卡的描边+阴影；Tilt 改由
+  外层 `pressable` 包住整张卡（含描边/阴影），按压时一起动。
+- 浅色模式描边是 `GlassEdgeStrokes.MiddleLight` 的白色高光，属设计行为，
+  维护者决定保留（2026-11-18）。
 
 ## 4. 风险
 
