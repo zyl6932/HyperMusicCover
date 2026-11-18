@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.os4.musiccover.R
+import com.os4.musiccover.ui.component.effect.BgEffectBackground
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -136,14 +137,24 @@ private fun PageScaffoldOs4(
                     // shifts every blur that reads them.
                     .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
             ) {
-                PageList(
-                    scrollBehavior = scrollBehavior,
-                    contentPadding = PaddingValues(
-                        top = innerPadding.calculateTopPadding(),
-                        bottom = innerPadding.calculateBottomPadding() + extraBottomPadding,
-                    ),
-                    content = content,
-                )
+                // The page's background goes inside the recording, not behind it: the glass
+                // above samples this layer, and a layer whose body ended at the surface colour
+                // would show a flat band over a coloured page. Static on purpose - only the
+                // About page animates its colours, and it runs that loop only while it is the
+                // page on screen.
+                BgEffectBackground(
+                    dynamicBackground = false,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    PageList(
+                        scrollBehavior = scrollBehavior,
+                        contentPadding = PaddingValues(
+                            top = innerPadding.calculateTopPadding(),
+                            bottom = innerPadding.calculateBottomPadding() + extraBottomPadding,
+                        ),
+                        content = content,
+                    )
+                }
             }
         }
     }

@@ -28,9 +28,9 @@ import top.yukonga.miuix.kmp.material.GlassShadows
  * untouched: the same Card, with the same colours.
  *
  * The panel deliberately samples no backdrop. The page backdrop records the cards themselves,
- * so a card sampling it would blur a picture of itself and ring against the previous frame;
- * and with the page's background a flat surface colour there is nothing behind a card to show
- * through in the first place. The edge stroke and the shadow are what read as glass here.
+ * so a card sampling it would blur a picture of itself and ring against the previous frame.
+ * What reads as glass here is instead the edge stroke, the shadow, and the translucent fill,
+ * through which the page's own background shows.
  *
  * Only the plain card is wrapped. The clickable overload (HomePage's status card) keeps its
  * own colour and press feedback and is not routed through here.

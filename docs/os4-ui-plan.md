@@ -128,7 +128,11 @@
     自己，采样会把自己的上一帧糊进去；且页面背景是纯色，采不到东西。
     卡片改用 `glassPanel(backdrop = null)` 的描边 + 阴影分支，半透明底色。
   - HomePage 的可点击状态卡保留原 `Card`（底色是状态色，不是设置面板）。
-- 页面背景：OS4 保持主题 surface；渐变背景先不开，待上机观感再定。
+- 页面背景：OS4 用仓库现成的 `BgEffectBackground`（OS3 渐变预设、**静态**，
+  `dynamicBackground = false`），画在 PageScaffold 的正文记录**内部**——
+  顶栏/底栏玻璃采样到的就是真正在页面上的背景，而不是一层纯色。
+  子 Activity 走同一个 PageScaffold，License 单独接。About 页本来就有
+  （且只在当前页时动画）。
 
 **实现中和计划不同的地方（2026-11-18）**
 
@@ -140,6 +144,8 @@
   `rememberBlurBackdrop` 同一个门，避免 31/32 上出现"半套玻璃"。
 - About / License 两个自建脚手架也走 OS4：共享 `GlassPageBar`；
   About 不开 large title，标题仍按页面自己的 `scrollProgress` 渐显。
+- 页面背景按"全量"落地：静态渐变，跑帧动画的只有 About 页（且只在该页
+  在当前页时）。
 - 弹层宿主结论：OS4 的 PageScaffold 用默认 `popupHost`；MainActivity 的页
   由根 Scaffold 托管（`renderInRootScaffold = true`），子 Activity 由页
   Scaffold 自己托管。OS3 仍是 `popupHost = {}` + 独立窗口。

@@ -39,6 +39,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.os4.musiccover.R
+import com.os4.musiccover.ui.component.effect.BgEffectBackground
 import com.os4.musiccover.ui.util.BlurredBar
 import com.os4.musiccover.ui.util.GlassPageBar
 import com.os4.musiccover.ui.util.LocalOs4Ui
@@ -139,36 +140,45 @@ fun LicensePageContent(
                     .fillMaxSize()
                     .then(if (blurActive) Modifier.layerBackdrop(backdrop) else Modifier)
             ) {
-                    LazyColumn(
-                    overscrollEffect = null,
-                    state = lazyListState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pageScrollModifiers(
-                            showTopAppBar = true,
-                            topAppBarScrollBehavior = topAppBarScrollBehavior,
-                        )
-                        .padding(
-                            start = contentPadding.calculateStartPadding(layoutDirection),
-                            end = contentPadding.calculateEndPadding(layoutDirection),
-                        ),
-                    contentPadding = PaddingValues(
-                        top = contentPadding.calculateTopPadding(),
-                        bottom = contentPadding.calculateBottomPadding(),
-                    ),
+                // OS4's page background, for the same reason and under the same recording as
+                // every PageScaffold page (see PageScaffoldOs4). OS3 draws the surface it always
+                // did through the effectBackground switch, so the branch is not duplicated.
+                BgEffectBackground(
+                    dynamicBackground = false,
+                    modifier = Modifier.fillMaxSize(),
+                    effectBackground = os4,
                 ) {
-                    // One card of rows, as the credits page and miuix's example list theirs: a card
-                    // per library was a column of single-row islands (2026-10-14).
-                    item(key = "libraries") {
-                        AppCard(modifier = Modifier.firstCard()) {
-                            libraries.forEach { library ->
-                                ArrowPreference(
-                                    title = library.name,
-                                    summary = "${library.artifactVersion} · ${library.website}",
-                                    onClick = {
-                                        uriHandler.openUri(library.website)
-                                    },
-                                )
+                    LazyColumn(
+                        overscrollEffect = null,
+                        state = lazyListState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pageScrollModifiers(
+                                showTopAppBar = true,
+                                topAppBarScrollBehavior = topAppBarScrollBehavior,
+                            )
+                            .padding(
+                                start = contentPadding.calculateStartPadding(layoutDirection),
+                                end = contentPadding.calculateEndPadding(layoutDirection),
+                            ),
+                        contentPadding = PaddingValues(
+                            top = contentPadding.calculateTopPadding(),
+                            bottom = contentPadding.calculateBottomPadding(),
+                        ),
+                    ) {
+                        // One card of rows, as the credits page and miuix's example list theirs: a card
+                        // per library was a column of single-row islands (2026-10-14).
+                        item(key = "libraries") {
+                            AppCard(modifier = Modifier.firstCard()) {
+                                libraries.forEach { library ->
+                                    ArrowPreference(
+                                        title = library.name,
+                                        summary = "${library.artifactVersion} · ${library.website}",
+                                        onClick = {
+                                            uriHandler.openUri(library.website)
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
