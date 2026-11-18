@@ -14,10 +14,14 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -77,6 +81,8 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
+import top.yukonga.miuix.kmp.utils.TiltFeedback
+import top.yukonga.miuix.kmp.utils.pressable
 import com.os4.musiccover.ui.util.AppDialog
 import com.os4.musiccover.ui.util.AppDialogButton
 import com.os4.musiccover.ui.util.AppDialogButtonRole
@@ -89,8 +95,12 @@ import top.yukonga.miuix.kmp.glass.GlassIconButton
 import top.yukonga.miuix.kmp.glass.GlassPopupAnchor
 import top.yukonga.miuix.kmp.glass.GlassIconDropdownMenu
 import top.yukonga.miuix.kmp.glass.glassPopupAnchor
+import top.yukonga.miuix.kmp.glass.glassPanel
 import top.yukonga.miuix.kmp.glass.glassPopupAnchorContent
 import top.yukonga.miuix.kmp.glass.rememberGlassPopupAnchor
+import top.yukonga.miuix.kmp.material.GlassEdgeStrokes
+import top.yukonga.miuix.kmp.material.GlassShape
+import top.yukonga.miuix.kmp.material.GlassShadows
 
 @SuppressLint("LocalContext")
 @Composable
@@ -259,6 +269,20 @@ fun HomePageView(
                     if (dynamicColor) MiuixTheme.colorScheme.primary.copy(alpha = 0.8f)
                     else Color(0xFF36D167)
                 }
+                // The status card keeps its own status colour and press feedback; it only takes
+                // the card panels' rim and shadow so it does not look flat beside them. The
+                // fallback is the empty modifier: the card's own fill is what shows through.
+                val statusFrame = if (LocalOs4Ui.current) {
+                    Modifier.glassPanel(
+                        backdrop = null,
+                        shape = GlassShape(CardDefaults.CornerRadius),
+                        stroke = GlassEdgeStrokes.forTheme(isInDarkTheme()),
+                        shadow = GlassShadows.Regular,
+                        fallback = Modifier,
+                    )
+                } else {
+                    Modifier
+                }
                 val titleText = when {
                     !ok -> stringResource(R.string.home_status_inactive)
                     staleHere -> stringResource(R.string.home_stale_title)
@@ -299,28 +323,13 @@ fun HomePageView(
                 // The height comes from Row(IntrinsicSize.Min): the boxes inside all
                 // fillMaxSize and so contribute none of their own, and without this the
                 // card collapses to the height of the text.
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(IntrinsicSize.Min),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // Deliberately still a Card: this one's colour is the status (problem,
-                    // working, fine) and its press feedback is part of it, so it is not a
-                    // settings panel and does not become glass.
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.defaultColors(color = statusColor),
-                        // A card naming processes to restart restarts them, and asks first: a
-                        // restart blanks the screen and stops whatever the scoped apps were
-                        // doing. Every other answer this card gives is a report, and tapping a
-                        // report asks the module again.
-                        onClick = {
-                            if (staleHere) confirmRestart = true else scope.launch { refresh() }
-                        },
-                        showIndication = true,
-                        pressFeedbackType = PressFeedbackType.Tilt
-                    ) {
+                // A card naming processes to restart restarts them, and asks first: a restart
+                // blanks the screen and stops whatever the scoped apps were doing. Every other
+                // answer this card gives is a report, and tapping a report asks the module again.
+                val onStatusClick: () -> Unit = {
+                    if (staleHere) confirmRestart = true else scope.launch { refresh() }
+                }
+                val statusContent: @Composable ColumnScope.() -> Unit = {
                         Box {
                             Box(
                                 modifier = Modifier
@@ -370,6 +379,54 @@ fun HomePageView(
                                 }
                             }
                         }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Deliberately still a Card: this one's colour is the status (problem,
+                    // working, fine) and its press feedback is part of it, so it is not a
+                    // settings panel. It only takes the panels' rim and shadow (statusFrame),
+                    // not their glass, so the status colour stays the card's own.
+                    if (LocalOs4Ui.current) {
+                        // The tilt is applied around the framed card rather than by Card itself:
+                        // Card applies its press feedback to its own content, which sits inside
+                        // the glass frame, so the rim and the shadow used to stay still while the
+                        // card tilted under them.
+                        val interaction = remember { MutableInteractionSource() }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .pressable(
+                                    interactionSource = interaction,
+                                    indication = TiltFeedback(),
+                                    delay = null,
+                                )
+                                .combinedClickable(
+                                    interactionSource = interaction,
+                                    indication = LocalIndication.current,
+                                    onClick = onStatusClick,
+                                ),
+                        ) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().then(statusFrame),
+                                colors = CardDefaults.defaultColors(color = statusColor),
+                                pressFeedbackType = PressFeedbackType.None,
+                                showIndication = false,
+                                content = statusContent,
+                            )
+                        }
+                    } else {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.defaultColors(color = statusColor),
+                            onClick = onStatusClick,
+                            showIndication = true,
+                            pressFeedbackType = PressFeedbackType.Tilt,
+                            content = statusContent,
+                        )
                     }
                 }
 

@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -60,6 +61,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import com.os4.musiccover.ui.util.AppDialog
 import com.os4.musiccover.ui.util.AppDialogButton
 import com.os4.musiccover.ui.util.AppDialogButtonRole
+import com.os4.musiccover.ui.util.LocalOs4Ui
 
 private const val POLL_MS = 200L
 
@@ -482,33 +484,41 @@ private fun UpdateLinksDialog(show: Boolean, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
     ) {
         val dismiss = LocalDismissState.current
+        val rows: @Composable ColumnScope.() -> Unit = {
+            BasicComponent(
+                title = "GitHub",
+                onClick = {
+                    uriHandler.openUri(RELEASES_PAGE)
+                    dismiss?.invoke()
+                },
+            )
+            BasicComponent(
+                title = stringResource(R.string.about_telegram),
+                onClick = {
+                    if (!context.openTelegramGroup(TELEGRAM_GROUP)) {
+                        uriHandler.openUri(TELEGRAM_GROUP)
+                    }
+                    dismiss?.invoke()
+                },
+            )
+            BasicComponent(
+                title = stringResource(R.string.about_qq_group),
+                onClick = {
+                    if (!context.openQqGroup(QQ_GROUP_UIN)) {
+                        uriHandler.openUri(QQ_GROUP_LINK)
+                    }
+                    dismiss?.invoke()
+                },
+            )
+        }
         Column {
-            AppCard(modifier = Modifier.padding(bottom = 8.dp)) {
-                BasicComponent(
-                    title = "GitHub",
-                    onClick = {
-                        uriHandler.openUri(RELEASES_PAGE)
-                        dismiss?.invoke()
-                    },
-                )
-                BasicComponent(
-                    title = stringResource(R.string.about_telegram),
-                    onClick = {
-                        if (!context.openTelegramGroup(TELEGRAM_GROUP)) {
-                            uriHandler.openUri(TELEGRAM_GROUP)
-                        }
-                        dismiss?.invoke()
-                    },
-                )
-                BasicComponent(
-                    title = stringResource(R.string.about_qq_group),
-                    onClick = {
-                        if (!context.openQqGroup(QQ_GROUP_UIN)) {
-                            uriHandler.openUri(QQ_GROUP_LINK)
-                        }
-                        dismiss?.invoke()
-                    },
-                )
+            if (LocalOs4Ui.current) {
+                // The dialog's own glass is the surface. A card here paints an opaque card over
+                // it, which is what made this one dialog look solid while every other one was
+                // glass.
+                Column(modifier = Modifier.padding(bottom = 8.dp), content = rows)
+            } else {
+                AppCard(modifier = Modifier.padding(bottom = 8.dp), content = rows)
             }
             AppDialogButton(
                 modifier = Modifier.fillMaxWidth(),

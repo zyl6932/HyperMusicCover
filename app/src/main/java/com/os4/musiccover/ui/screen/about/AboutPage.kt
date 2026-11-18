@@ -8,7 +8,6 @@
 package com.os4.musiccover.ui.screen.about
 
 import com.os4.musiccover.ui.util.nextCard
-import com.os4.musiccover.ui.util.AppCard
 import com.os4.musiccover.ui.util.firstCard
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -308,7 +307,7 @@ private fun AboutContent(
                         .fillParentMaxHeight()
                         .padding(bottom = scrollPadding.calculateBottomPadding()),
                 ) {
-                    AppCard(
+                    Card(
                         modifier = Modifier
                             .nextCard()
                             .then(
@@ -344,7 +343,7 @@ private fun AboutContent(
                     // Credits has a card of its own, right under the update rows: it is the one
                     // page here that names people instead of licences, and inside the licence card
                     // it read as one more licence.
-                    AppCard(
+                    Card(
                         modifier = Modifier
                             .nextCard()
                             .then(
@@ -375,7 +374,7 @@ private fun AboutContent(
                             onClick = openCreditsPage,
                         )
                     }
-                    AppCard(
+                    Card(
                         modifier = Modifier
                             .nextCard()
                             .then(
@@ -433,7 +432,7 @@ private fun AboutContent(
                             onClick = { uriHandler.openUri("https://github.com/zyl6932/HyperMusicCover/issues") },
                         )
                     }
-                    AppCard(
+                    Card(
                         modifier = Modifier
                             .nextCard()
                             .then(
