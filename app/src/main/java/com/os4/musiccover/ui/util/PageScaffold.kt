@@ -18,6 +18,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
@@ -38,6 +39,7 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.glass.ChevronBackward
 import top.yukonga.miuix.kmp.material.GlassDefaults
+import top.yukonga.miuix.kmp.material.GlassEdgeStrokes
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -274,40 +276,30 @@ fun GlassPageBar(
     titleAlpha: () -> Float = { 1f },
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    val bar: @Composable () -> Unit = {
-        GlassTopAppBar(
-            title = title,
-            scrollBehavior = scrollBehavior,
-            backdrop = backdrop,
-            // The band is drawn below, through BlurredBar: the library's own band fades in only
-            // once the page scrolls, so every page that fits on screen showed no blur at all.
-            // The pages' bars have always been blurred at rest, and OS4 keeps that.
-            progressiveBlur = false,
-            backgroundAlpha = { 0f },
-            style = GlassDefaults.style(isInDarkTheme()),
-            expandable = expandable,
-            defaultWindowInsetsPadding = defaultWindowInsetsPadding,
-            titleAlpha = titleAlpha,
-            navigationIcon = { if (onBack != null) PageBackButtonOs4(onBack) },
-            actions = actions,
-        )
-    }
-    if (backdrop != null) {
-        // A bar surface that exists before anything scrolls under it. The blur alone is
-        // invisible on a page whose background is the same colour as the bar — which is every
-        // page at rest, and every page too short to put content behind it (Home, the shade
-        // settings with its rows folded) — so the band also carries a surfaceContainer tint.
-        // That is what makes the bar read as glass on all of them, not only on long lists.
-        BlurredBar(
-            backdrop = backdrop,
-            blurEnabled = true,
-            scrollBehavior = scrollBehavior,
-            tint = MiuixTheme.colorScheme.surfaceContainer,
-            tintAlpha = 0.55f,
-        ) { bar() }
-    } else {
-        bar()
-    }
+    // The demo's bar, exactly: the library draws its progressive band and, because
+    // `progressiveBlur` is on, the bar's buttons sample that rendered scene
+    // (`GlassTopAppBarContext.buttonBackdrop`) instead of the raw page. Hand-rolling the band
+    // and the scene produced a near miss every time - a different band curve, a different
+    // underlay material, a hole under the band's translucent tail - so this takes the library's
+    // own path and keeps the two ends of the comparison identical.
+    GlassTopAppBar(
+        title = title,
+        scrollBehavior = scrollBehavior,
+        backdrop = backdrop,
+        progressiveBlur = true,
+        style = GlassDefaults.style(isInDarkTheme()),
+        // The demo's bar and buttons use the Middle stroke; the library default is Small.
+        stroke = GlassEdgeStrokes.forTheme(
+            isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f,
+            light = GlassEdgeStrokes.MiddleLight,
+            dark = GlassEdgeStrokes.MiddleDark,
+        ),
+        expandable = expandable,
+        defaultWindowInsetsPadding = defaultWindowInsetsPadding,
+        titleAlpha = titleAlpha,
+        navigationIcon = { if (onBack != null) PageBackButtonOs4(onBack) },
+        actions = actions,
+    )
 }
 
 /** The same control as a glass pill, inside the OS4 top bar. */
