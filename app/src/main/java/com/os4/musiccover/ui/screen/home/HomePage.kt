@@ -77,7 +77,7 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
-import top.yukonga.miuix.kmp.window.WindowDialog
+import com.os4.musiccover.ui.util.AppDialog
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 
 @SuppressLint("LocalContext")
@@ -448,7 +448,7 @@ fun HomePageView(
         }
     }
 
-    WindowDialog(
+    AppDialog(
         show = showMissing,
         title = stringResource(R.string.home_features_missing_dialog),
         summary = state.featuresMissing.map { featureName(it) }.joinToString("\n"),
@@ -462,7 +462,7 @@ fun HomePageView(
         )
     }
 
-    WindowDialog(
+    AppDialog(
         show = confirmRestart,
         title = stringResource(R.string.restart_stale),
         summary = stringResource(R.string.restart_confirm_summary),
@@ -507,7 +507,7 @@ fun HomePageView(
         }
     }
 
-    WindowDialog(
+    AppDialog(
         show = confirmInstallRestart,
         title = stringResource(R.string.home_install_restart),
         summary = stringResource(R.string.home_install_restart_confirm),

@@ -58,7 +58,7 @@ import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
-import top.yukonga.miuix.kmp.window.WindowDialog
+import com.os4.musiccover.ui.util.AppDialog
 
 private const val POLL_MS = 200L
 
@@ -322,7 +322,7 @@ fun UpdateDialogs(controller: UpdateController) {
 @Composable
 private fun UpdateStatusDialog(status: String?, onDismiss: () -> Unit) {
     if (status == null) return
-    WindowDialog(
+    AppDialog(
         show = true,
         title = stringResource(R.string.update_status_title),
         onDismissRequest = onDismiss,
@@ -357,7 +357,7 @@ private fun UpdateStatusDialog(status: String?, onDismiss: () -> Unit) {
  */
 @Composable
 private fun UpdateLatestDialog(show: Boolean, onDismiss: () -> Unit) {
-    WindowDialog(
+    AppDialog(
         show = show,
         title = stringResource(R.string.update_status_title),
         summary = stringResource(R.string.update_current_version, BuildConfig.VERSION_NAME),
@@ -389,7 +389,7 @@ private fun UpdateLatestDialog(show: Boolean, onDismiss: () -> Unit) {
  */
 @Composable
 private fun UpdateProgressDialog(show: Boolean, progress: Float?, onCancel: () -> Unit) {
-    WindowDialog(
+    AppDialog(
         show = show,
         title = stringResource(R.string.update_downloading),
         onDismissRequest = onCancel,
@@ -424,7 +424,7 @@ private fun UpdateNotesDialog(
     onConfirm: () -> Unit,
 ) {
     if (update == null) return
-    WindowDialog(
+    AppDialog(
         show = show,
         title = stringResource(R.string.update_notes_title),
         summary = update.versionName,
@@ -475,7 +475,7 @@ private fun UpdateNotesDialog(
 private fun UpdateLinksDialog(show: Boolean, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
-    WindowDialog(
+    AppDialog(
         show = show,
         title = stringResource(R.string.get_update),
         onDismissRequest = onDismiss,

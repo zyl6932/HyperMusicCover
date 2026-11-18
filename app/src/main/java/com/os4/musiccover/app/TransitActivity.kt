@@ -45,7 +45,7 @@ import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
+import com.os4.musiccover.ui.util.AppDialog
 
 /**
  * 高德's bus and subway trip - its island (AmapTransitIsland) and its lock screen page
@@ -248,7 +248,7 @@ private fun CommuteSection(refreshKey: Int) {
                 onClick = { confirming = true })
         }
     }
-    WindowDialog(show = confirming,
+    AppDialog(show = confirming,
         title = stringResource(R.string.commute_forget_confirm),
         summary = stringResource(R.string.commute_forget_confirm_summary, state.trips),
         onDismissRequest = { confirming = false }) {

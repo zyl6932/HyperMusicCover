@@ -50,7 +50,7 @@ import top.yukonga.miuix.kmp.preference.SwitchPreference
 import com.os4.musiccover.ui.util.AppDropdownPreference
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
+import com.os4.musiccover.ui.util.AppDialog
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 
@@ -546,7 +546,7 @@ private fun LyricsGroup(
             countdown--
         }
     }
-    WindowDialog(
+    AppDialog(
         show = showNotice,
         title = title,
         summary = stringResource(R.string.lyrics_provider_missing),

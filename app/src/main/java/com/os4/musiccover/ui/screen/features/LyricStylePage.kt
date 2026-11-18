@@ -53,7 +53,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import com.os4.musiccover.ui.util.AppDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
+import com.os4.musiccover.ui.util.AppDialog
 
 /**
  * 歌词外观: how the lock screen's lyrics look (PR #103).
@@ -389,7 +389,7 @@ internal fun LyricStylePageView(
     }
 
     // Asked first: one tap in the corner would otherwise undo every choice on the page.
-    WindowDialog(
+    AppDialog(
         show = confirmReset,
         title = stringResource(R.string.lyrics_style_reset),
         summary = stringResource(R.string.lyrics_style_reset_summary),
@@ -414,7 +414,7 @@ internal fun LyricStylePageView(
         }
     }
 
-    WindowDialog(
+    AppDialog(
         show = picking != null,
         title = stringResource(R.string.lyrics_color_custom),
         onDismissRequest = { picking = null },
