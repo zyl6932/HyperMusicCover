@@ -16,6 +16,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,6 +48,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -273,10 +275,11 @@ fun HomePageView(
                 // The status card keeps its own status colour and press feedback; it only takes
                 // the card panels' rim and shadow so it does not look flat beside them. The
                 // fallback is the empty modifier: the card's own fill is what shows through.
+                val statusShape = remember { GlassShape(CardDefaults.CornerRadius) }
                 val statusFrame = if (LocalOs4Ui.current && LocalCardGlass.current) {
                     Modifier.glassPanel(
                         backdrop = null,
-                        shape = GlassShape(CardDefaults.CornerRadius),
+                        shape = statusShape,
                         stroke = GlassEdgeStrokes.forTheme(isInDarkTheme()),
                         shadow = GlassShadows.Regular,
                         fallback = Modifier,
@@ -405,14 +408,25 @@ fun HomePageView(
                                     indication = TiltFeedback(),
                                     delay = null,
                                 )
+                                // The press overlay is hung on the card below instead of here.
+                                // This box is the glass frame's outline and nothing clips it,
+                                // and miuix's indication paints a plain rectangle - it showed
+                                // square corners over the page outside the card's rounded ones.
                                 .combinedClickable(
                                     interactionSource = interaction,
-                                    indication = LocalIndication.current,
+                                    indication = null,
                                     onClick = onStatusClick,
                                 ),
                         ) {
                             Card(
-                                modifier = Modifier.fillMaxWidth().then(statusFrame),
+                                // Clipped to the shape the frame is drawn with, so the overlay
+                                // follows the card's corners. statusFrame draws the shadow and
+                                // the rim above this clip, so neither is cut by it.
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(statusFrame)
+                                    .clip(statusShape)
+                                    .indication(interaction, LocalIndication.current),
                                 colors = CardDefaults.defaultColors(color = statusColor),
                                 pressFeedbackType = PressFeedbackType.None,
                                 showIndication = false,
