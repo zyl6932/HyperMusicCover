@@ -67,6 +67,15 @@ public final class LockLyrics {
     private static MediaController sController;
     private static volatile PlaybackState sState;
     private static long sStateReadAt;
+    /**
+     * The playing song's length when its metadata can be believed - the same rule the song key
+     * uses (TrackIdentity: above zero, and not QQ's 60000ms placeholder) - else 0.
+     *
+     * Two things need an end that the lyric lines do not give: a position that runs past it is a
+     * repeat-one loop the session never published (see positionMs), and a page with no line left
+     * to move at has the song's end as its next move (see scheduleStillWake).
+     */
+    private static volatile long sDurMs;
 
     private static boolean sHolding;
 
@@ -818,6 +827,13 @@ public final class LockLyrics {
         if (s.getState() == PlaybackState.STATE_PLAYING) {
             long dt = SystemClock.elapsedRealtime() - s.getLastPositionUpdateTime();
             if (dt > 0) pos += (long) (dt * s.getPlaybackSpeed());
+            // Apple Music's session publishes a position on play and on the loop and never in
+            // between, so the extrapolation is the only thing moving. A player that loops the
+            // track without publishing a state of its own leaves that running past the end,
+            // where the lyric would sit on its last line for ever: take the song round again.
+            // Only while playing - paused at the last millisecond is not a loop.
+            long dur = sDurMs;
+            if (dur > 0L && pos >= dur) pos %= dur;
         }
         return pos < 0 ? 0 : (int) Math.min(pos, Integer.MAX_VALUE);
     }
@@ -1242,18 +1258,29 @@ public final class LockLyrics {
         String fallback = cardKey == null ? "" : cardKey;
         if (c == null || fallback.isEmpty()) return fallback;
         try {
-            String key = TrackIdentity.of(c).songKey();
+            TrackIdentity id = TrackIdentity.of(c);
+            // Read here because the identity is built here and nowhere else on a track change.
+            sDurMs = id.durationMs;
+            String key = id.songKey();
             return key.isEmpty() ? fallback : key;
         } catch (Throwable t) {
+            sDurMs = 0L;
             return fallback;
         }
     }
 
     public static void onPlaybackState(PlaybackState s) {
+        int was = positionMs();
         sState = s;
         sStateReadAt = SystemClock.uptimeMillis();
         LyricView v = sView;
-        if (v != null) v.kick();
+        if (v == null) return;
+        // In the still mode a kick draws a frame the held-down display never takes, so a loop
+        // or a seek has to be drawn the way every other still frame is: with the lock. Without
+        // this the page only found out at the next scheduled move - which, at the end of a song
+        // that loops, is a whole intro away (2026-11-19).
+        if (sStill && positionMs() + 1000 < was) drawStill();
+        else v.kick();
     }
 
     /**
@@ -1998,6 +2025,12 @@ public final class LockLyrics {
         }
     };
 
+    /**
+     * A move further away than this is not a move the page is waiting for; it is a time that
+     * does not exist. Arm nothing and let the tick ask again rather than trust it.
+     */
+    private static final long STILL_MAX_MOVE_MS = 30L * 60_000L;
+
     /** A wake at the next moment the stack moves, or none if it will not. See STILL_WAKE. */
     private static void scheduleStillWake() {
         LyricView v = sView;
@@ -2008,11 +2041,25 @@ public final class LockLyrics {
         }
         int pos = positionMs();
         long at = v.nextMoveAfter(pos);
-        if (at < 0) {
+        long dur = sDurMs;
+        if (dur > 0L && (at < 0 || at > dur)) {
+            // Nothing left in the song to move the page: the last line is up and the rest is
+            // outro. The song's own end is what moves it next - it loops, and with a repeat
+            // that ends here the session's position comes back to the top (or positionMs takes
+            // it round). Waking there is what brings a repeat-one back at the loop instead of
+            // at the first line's switch, an intro's length later, or never (2026-11-19).
+            at = dur;
+        } else if (at < 0 || at - pos > STILL_MAX_MOVE_MS) {
             cancelStillWake();
             return;
         }
         long delay = at - pos + STILL_WAKE_SLACK_MS;
+        if (delay <= 0L) {
+            // pos is already at or past the song's end with the session not saying so yet;
+            // an immediate wake would only ask again in the same place.
+            cancelStillWake();
+            return;
+        }
         Main.main().removeCallbacks(STILL_WAKE_NOW);
         Main.main().postDelayed(STILL_WAKE_NOW, delay);
         sStillDueAt = SystemClock.uptimeMillis() + delay;

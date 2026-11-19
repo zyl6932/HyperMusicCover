@@ -512,8 +512,13 @@ final class LyricView extends View {
         long best = Long.MAX_VALUE;
         for (LyricLine line : lines) {
             int start = LyricFocus.startOf(line), end = LyricFocus.endOf(line);
-            if (start > pos && start < best) best = start;
-            if (end > pos && end < best) best = end;
+            // Int.MAX_VALUE is lyrics-core's "this line has no end" - the last line gets it to
+            // mean "sings until the song does" (EnhancedLrcParser.rearrangeUncheckedLineTime
+            // copies the next line's start in, and there is no next line). It is a real end for
+            // drawing and for keeping the focus, but it is not a time the stack moves at, and
+            // taken as one it parked the still mode's next wake 24.8 days out (2026-11-19).
+            if (start > pos && start != Integer.MAX_VALUE && start < best) best = start;
+            if (end > pos && end != Integer.MAX_VALUE && end < best) best = end;
         }
         for (int k = Math.max(0, idx); k <= Math.min(n - 1, idx + 2); k++) {
             long t = switchAt(k);
