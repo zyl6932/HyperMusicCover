@@ -92,7 +92,12 @@ public final class CoverPush {
         boolean keep = on && Main.keepsWallpaper();
         if (keep) on = false;
         Intent out = wallpaperIntent("art");
-        out.putExtra("cardmode", Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD);
+        boolean card = Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD;
+        out.putExtra("cardmode", card);
+        // The wallpaper process has to know the card's background is the native wallpaper
+        // (blurred over there), so that on the lyric page it can hand the texture back to the
+        // sharp wallpaper the way 保留壁纸 does, instead of frosting this blurred copy.
+        out.putExtra("wpbg", card && Settings.CARD_WALLPAPER.on());
         // The blur travels with the cover. A lyricblur broadcast is one shot - dropped, or
         // overtaken on the other side - and nothing else ever corrected it, so a song could play
         // out sharp under its lyrics. This makes every track change an agreement between the two
@@ -145,6 +150,22 @@ public final class CoverPush {
         if (Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD) CoverCardLayer.publish(art);
         MotionCover.onCover(Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD);
         int w = Main.sScreenW, h = Main.sScreenH;
+        // The square card's second background: the user's wallpaper, blurred over there by the
+        // very code that blurs the cover. Only the picture handed to the wallpaper process
+        // changes - the card still shows the track's artwork (publish above), and the prekey, the
+        // tint and the composition all follow this one source, so the two backgrounds differ in
+        // which picture they blur and in nothing else.
+        Bitmap bgSrc = art;
+        if (Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD && Settings.CARD_WALLPAPER.on()) {
+            Bitmap wp = CardWallpaper.forScreen(ctx, w, h);
+            if (wp != null) {
+                bgSrc = wp;
+                Xp.log(Main.TAG + "card background: the wallpaper, " + wp.getWidth() + "x"
+                        + wp.getHeight());
+            } else {
+                Xp.log(Main.TAG + "card background: no wallpaper read, keeping the blurred cover");
+            }
+        }
         if (!Main.sVideoWallpaper && Main.sWpComposes) {
             // The source goes over instead of the composed picture, and the wallpaper process
             // composes it for itself. Measured before this, on the path below: composing took
@@ -156,17 +177,19 @@ public final class CoverPush {
             String shared = null;
             try {
                 android.os.Trace.beginSection("MC push.source");
-                src = CoverCompose.prepareSource(art, w);
+                src = CoverCompose.prepareSource(bgSrc, w);
                 // The picture the lock screen handed over ahead of this tap (precomposeAsync) is
                 // already on disk: the wallpaper process is pointed at it rather than given the
                 // same megabyte again. 20-68ms of a busy phone's entry went on that write.
-                shared = preSourceFor(art, w, h);
+                shared = preSourceFor(bgSrc, w, h);
                 if (shared == null) shared = writeSharedSource(src, w, h, Settings.BIAS.get());
                 // Named, so the wallpaper process keeps it under this key and the next tap can
                 // ask for it by name - and so a push for the picture the tap already put up
                 // (sendKeptFirst) is let pass.
-                boolean card = Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD;
-                String keptKey = preKey(art, w, h, card);
+                // Named, so the wallpaper process keeps it under this key and the next tap can
+                // ask for it by name - and so a push for the picture the tap already put up
+                // (sendKeptFirst) is let pass.
+                String keptKey = preKey(bgSrc, w, h, card);
                 out.putExtra("prekey", keptKey);
                 noteKept(keptKey, layoutKey(w, h, card), Long.MAX_VALUE);
             } catch (Throwable t) {
@@ -209,9 +232,13 @@ public final class CoverPush {
                 AodColour.measureCover(sTintPic, w / (float) sTintPic.getWidth());
                 if (Main.sCoverMode) AodColour.recolorClock();
                 // The shade builds its background from the square source and keeps nothing.
+                // It is the module's own surface rather than the lock screen's: with the
+                // wallpaper as the card's background this still shows the track's artwork, so a
+                // blur of the wallpaper there would read as a second wallpaper behind the
+                // notifications instead of the cover the module is about.
                 android.os.Trace.beginSection("MC push.shade");
                 try {
-                    ShadeLayer.setArt(src);
+                    ShadeLayer.setArt(bgSrc == art ? src : art);
                 } finally {
                     android.os.Trace.endSection();
                 }
@@ -239,7 +266,7 @@ public final class CoverPush {
         }
         Bitmap full;
         try {
-            full = composeWallpaper(art, w, h, Settings.BIAS.get());
+            full = composeWallpaper(bgSrc, w, h, Settings.BIAS.get());
         } catch (Throwable t) {
             // This runs on a HandlerThread, and an uncaught throw on one reaches
             // KillApplicationHandler - so an OutOfMemoryError composing a full-screen cover
@@ -1175,6 +1202,10 @@ public final class CoverPush {
         if (c == null) return;
         Intent out = wallpaperIntent(op);
         out.putExtra("on", on);
+        // The card-on-wallpaper mode rides the lyric message too, so a wallpaper process that
+        // came back between pushes learns it from here as well as from the art push.
+        out.putExtra("wpbg", Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD
+                && Settings.CARD_WALLPAPER.on());
         if (decidedAt > 0L) out.putExtra("blurseq", decidedAt);
         ProbeGuard.send(c, out);
     }
@@ -1478,6 +1509,7 @@ public final class CoverPush {
         try {
             Intent out = wallpaperIntent("art");
             out.putExtra("cardmode", card);
+            out.putExtra("wpbg", card && Settings.CARD_WALLPAPER.on());
             LockLyrics.putBlurOn(out);
             out.putExtra("fade", Settings.FADE_WALLPAPER.on() && Main.sScreenOn);
             out.putExtra("prekey", key);
@@ -1508,6 +1540,12 @@ public final class CoverPush {
 
     /** Only where a cover would be composed from the source by the wallpaper process. */
     private static boolean precomposeWanted() {
+        // The square card on the wallpaper's background composes from the wallpaper, which the
+        // lock screen does not know ahead of the tap - a cover composed ahead would be kept
+        // under a key this push never asks for, so it would only be work nobody reads.
+        if (Settings.COVER_STYLE.get().mode == CoverCardStyle.CARD && Settings.CARD_WALLPAPER.on()) {
+            return false;
+        }
         return !Main.sCoverMode && Settings.COVER_FEATURE.on() && Main.sWpComposes && Main.sScreenOn
                 && !Main.sVideoWallpaper && !Main.keepsWallpaper() && MediaCard.sCardPresent;
     }

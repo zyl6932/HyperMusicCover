@@ -651,8 +651,9 @@ public final class Settings {
                 if (Main.sCoverMode && next.mode != was.mode) {
                     // Leaving 保留壁纸, the dim belongs to the style that is going away. The
                     // clock may well stay held (another style's cover), so no exit frame will
-                    // clear it.
-                    if (!Main.keepsWallpaper()) KeepDim.apply(0f);
+                    // clear it. A style whose wallpaper stays behind - the square card set to
+                    // keep it - has already said what its veil should be.
+                    if (!Main.wallpapersBehind()) KeepDim.apply(0f);
                     if (next.mode == CoverCardStyle.CARD) {
                         CoverCardLayer.attach(CoverPush.coverLayer());
                         CoverCardLayer.playback(Main.sCoverCardPlaying);
@@ -909,6 +910,14 @@ public final class Settings {
                 if (Settings.MOTION_ON_DATA.on()) Main.main().post(MotionCover::retry);
             })
             .file("motiondata");
+
+    /** Square card background: off blurred cover, on blurred native wallpaper. Off by default. */
+    public static final Bool CARD_WALLPAPER = new Bool(SettingSpec.CARD_WALLPAPER)
+            .op("cardwallpaper", "on", Absent.IGNORE).absent(false)
+            .then(c -> {
+                if (Main.sCoverMode) CoverPush.pushArtAsync(true, false);
+            })
+            .file("cardwallpaper");
 
     /**
      * Whether the COVER VIDEO ITSELF crossfades into the cover, in the wallpaper window.

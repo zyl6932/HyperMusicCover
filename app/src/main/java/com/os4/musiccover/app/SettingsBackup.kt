@@ -27,6 +27,7 @@ object SettingsBackup {
     private const val KEY_HIDE_FINGERPRINT = "hideFingerprint"
     private const val KEY_MOTION_COVER = "motionCover"
     private const val KEY_MOTION_ON_DATA = "motionOnData"
+    private const val KEY_CARD_WALLPAPER = "cardWallpaper"
     private const val KEY_FORCE_COLON = "forceClockColon"
     private const val KEY_MEDIA_BAR_GLOW = "mediaBarGlow"
     private const val KEY_LYRICS_KEEP_ON = "lyricsKeepOn"
@@ -75,6 +76,7 @@ object SettingsBackup {
             json.put(KEY_HIDE_FINGERPRINT, module.hideFingerprint)
             json.put(KEY_MOTION_COVER, module.motionCover)
             json.put(KEY_MOTION_ON_DATA, module.motionOnData)
+            json.put(KEY_CARD_WALLPAPER, module.cardWallpaper)
             json.put(KEY_FORCE_COLON, module.forceColon)
             json.put(KEY_MEDIA_BAR_GLOW, module.mediaBarGlow)
             json.put(KEY_LYRICS_KEEP_ON, module.lyricsKeepOn)
@@ -148,6 +150,9 @@ object SettingsBackup {
             }
             if (obj.has(KEY_MOTION_ON_DATA)) {
                 ModuleBridge.setMotionOnData(context, obj.getBoolean(KEY_MOTION_ON_DATA))
+            }
+            if (obj.has(KEY_CARD_WALLPAPER)) {
+                ModuleBridge.setCardWallpaper(context, obj.getBoolean(KEY_CARD_WALLPAPER))
             }
             if (obj.has(KEY_FORCE_COLON)) {
                 ModuleBridge.setForceColon(context, obj.getBoolean(KEY_FORCE_COLON))

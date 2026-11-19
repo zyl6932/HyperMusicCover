@@ -69,7 +69,11 @@ public final class WallpaperArt {
     }
 
     public static Bitmap frostedIfWanted(Bitmap sharp) {
-        return sharp == null || !WallpaperProbe.sLyricBlur ? sharp : frostedOf(sharp);
+        if (sharp == null || !WallpaperProbe.sLyricBlur) return sharp;
+        // The square card on the wallpaper's background: the lyrics sit over the sharp wallpaper,
+        // the keep-dim veil being the only treatment - do not frost this copy like a cover.
+        if (WallpaperProbe.sWallpaperBg) return sharp;
+        return frostedOf(sharp);
     }
 
     /**
@@ -132,6 +136,21 @@ public final class WallpaperArt {
     }
 
     public static Bitmap sharpFittedArt() {
+        // The square card on the wallpaper's background: while the lyric page is up the background
+        // is the sharp native wallpaper with the keep-dim veil over it, exactly the 保留壁纸
+        // answer - not a second frosting of the blurred picture sent ahead of the lyrics.
+        Bitmap orig = WallpaperProbe.sOrig;
+        boolean origOk = orig != null && !orig.isRecycled();
+        if (WallpaperProbe.sWallpaperBg && WallpaperProbe.sLyricBlurWant && origOk) {
+            return orig;
+        }
+        // Diagnostic for the wake fallback: when the card-on-wallpaper mode is on but the page
+        // still reads blurred after a screen off/on, this names which gate bit dropped it.
+        if (WallpaperProbe.sWallpaperBg) {
+            Xp.log(WallpaperProbe.TAG + "wpbg sharp gate falls back: wpbg=" + WallpaperProbe.sWallpaperBg
+                    + " blurWant=" + WallpaperProbe.sLyricBlurWant
+                    + " orig=" + (orig == null ? "null" : origOk ? "ok" : "recycled"));
+        }
         Bitmap art = WallpaperProbe.sArt;
         if (art == null) return null;
         int targetW = WallpaperProbe.sReportedW;

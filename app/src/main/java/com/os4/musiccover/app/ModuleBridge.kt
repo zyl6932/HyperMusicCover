@@ -125,6 +125,8 @@ object ModuleBridge {
         /** Apple Music motion artwork in place of the still cover. Off by default. */
         val motionCover: Boolean = SettingSpec.MOTION.defBool,
         val motionOnData: Boolean = SettingSpec.MOTION_ON_DATA.defBool,
+        /** Square card background: off blurred cover, on blurred native wallpaper. Off by default. */
+        val cardWallpaper: Boolean = SettingSpec.CARD_WALLPAPER.defBool,
         /** Draw the big clock's colon on the styles that drop it. */
         val forceColon: Boolean = SettingSpec.COLON.defBool,
         /** Light the media card's progress bar the way the island's is lit (#49). On by default. */
@@ -558,6 +560,11 @@ object ModuleBridge {
     fun setMotionOnData(context: Context, on: Boolean) =
         setting(context, SettingSpec.MOTION_ON_DATA, on) {
             send(context, "motion") { putExtra("data", on) }
+        }
+
+    fun setCardWallpaper(context: Context, on: Boolean) =
+        setting(context, SettingSpec.CARD_WALLPAPER, on) {
+            send(context, "cardwallpaper") { putExtra("on", on) }
         }
 
     /** See the note above [setClockHeight]: no row offers this any more, the op still works. */
@@ -1161,6 +1168,7 @@ object ModuleBridge {
             hideFingerprint = b.bool(SettingSpec.HIDE_FP),
             motionCover = b.bool(SettingSpec.MOTION),
             motionOnData = b.bool(SettingSpec.MOTION_ON_DATA),
+            cardWallpaper = b.bool(SettingSpec.CARD_WALLPAPER),
             forceColon = b.bool(SettingSpec.COLON),
             mediaBarGlow = b.bool(SettingSpec.SEEK_GLOW),
             lyrics = b.bool(SettingSpec.LYRICS),

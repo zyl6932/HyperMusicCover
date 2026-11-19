@@ -6,7 +6,7 @@ import com.os4.musiccover.SettingSpec
  * The settings the app keeps in its own preferences (architecture plan, stage 5.3), and the keys
  * one of them is read back under.
  *
- * The module's half of the table is Settings.persisted(): thirty entries and thirty-five keys,
+ * The module's half of the table is Settings.persisted(): thirty-one entries and thirty-six keys,
  * because the lyric style has six. The list is repeated here rather than read from there, because
  * this process must not load Settings - it reaches Main, and Main extends XposedModule, which the
  * app has no libxposed to resolve. SettingsPlanTest holds the two lists equal.
@@ -32,6 +32,7 @@ internal object SettingsPlan {
         SettingSpec.FADE_WALLPAPER,
         SettingSpec.MOTION,
         SettingSpec.MOTION_ON_DATA,
+        SettingSpec.CARD_WALLPAPER,
         SettingSpec.VIDEO_FADE,
         SettingSpec.FADE_MODE,
         SettingSpec.HIDE_FP,

@@ -115,6 +115,8 @@ public final class SettingSpec {
     /** Apple Music's motion artwork in place of the still cover, and fetching it on data. */
     public static final SettingSpec MOTION = bool("motion", false);
     public static final SettingSpec MOTION_ON_DATA = bool("motiondata", false);
+    /** Square card background only: off = blurred cover (default), on = blurred native wallpaper. */
+    public static final SettingSpec CARD_WALLPAPER = bool("cardwallpaper", false);
 
     // ---------------------------------------------------------------- the fingerprint
 

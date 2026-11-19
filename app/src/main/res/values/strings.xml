@@ -11,6 +11,8 @@
     <string name="cover_bias">封面纵向位置</string>
     <string name="cover_motion">动态封面</string>
     <string name="cover_motion_on_data">使用流量下载</string>
+    <string name="cover_card_wallpaper">卡片背景用模糊壁纸</string>
+    <string name="cover_card_wallpaper_summary">方形卡片下保留原生壁纸并模糊；关闭则背景用模糊封面</string>
     <string name="cover_enabled">启用音乐锁屏封面</string>
     <string name="cover_style">封面展现形式</string>
     <string name="cover_style_full">全屏封面</string>

@@ -6,6 +6,7 @@ import com.os4.musiccover.clock.ClockCollapse;
 import com.os4.musiccover.cover.CoverCardLayer;
 import com.os4.musiccover.cover.CoverMorphRoute;
 import com.os4.musiccover.cover.CoverPush;
+import com.os4.musiccover.wallpaper.KeepDim;
 import com.os4.musiccover.Main;
 import com.os4.musiccover.Gen;
 import com.os4.musiccover.Xp;
@@ -394,6 +395,37 @@ public final class LockLyrics {
     /** Whether the view belongs in the keyguard right now. */
     public static boolean wantsAttached() {
         return wanted() && Main.coverModeOn() && hasLyrics();
+    }
+
+    /**
+     * The lyric page's veil, asked for again whenever whether it is up has changed: 保留壁纸
+     * rides the clock's own progress, but the square card keeps the wallpaper as its BACKGROUND
+     * with the clock already small, so there is no progress to ride - what the veil follows there
+     * is the page itself, on and off.
+     */
+    public static void syncWallpaperVeil() {
+        if (!Main.wallpapersBehind()) return;
+        if (Main.keepsWallpaper()) return;
+        KeepDim.apply(wantsAttached() ? 1f : 0f);
+    }
+
+    /**
+     * Wake re-entry: while the display was dark the wallpaper side may have dropped its blur
+     * answer (a doze recreate, a process reload, or a broadcast that went missing). Our own
+     * answer has not changed, so an ordinary refresh leaves it unsent; here we tell it again
+     * anyway, and let the veil follow the still-attached page.
+     */
+    public static void resendOnWake() {
+        updateBlur(true);
+        syncWallpaperVeil();
+        // A doze-reloaded texture can still hold the blurred picture even once the sharp answer
+        // is restored; after the blur answer has landed, re-read the texture on the current gate.
+        Main.main().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                CoverPush.sendToWallpaper("reload", false);
+            }
+        }, 200L);
     }
 
     /**
@@ -1422,6 +1454,9 @@ public final class LockLyrics {
         Main.syncCoverHold(Main.screenOnCached());
         updateBlur();
         updateHdr();
+        // The square card on the wallpaper's background: the veil over it follows the page,
+        // and this is the only place that sees it arrive and leave.
+        syncWallpaperVeil();
         if (wantsAttached()) attach();
         LyricView v = sView;
         if (v != null) v.kick();

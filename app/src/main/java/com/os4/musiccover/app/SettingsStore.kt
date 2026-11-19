@@ -234,6 +234,7 @@ object SettingsStore {
             hideFingerprint = p.getBoolean(SettingSpec.HIDE_FP.key, state.hideFingerprint),
             motionCover = p.getBoolean(SettingSpec.MOTION.key, state.motionCover),
             motionOnData = p.getBoolean(SettingSpec.MOTION_ON_DATA.key, state.motionOnData),
+            cardWallpaper = p.getBoolean(SettingSpec.CARD_WALLPAPER.key, state.cardWallpaper),
             lyrics = p.getBoolean(SettingSpec.LYRICS.key, state.lyrics),
             lyricsKeepOn = p.getBoolean(SettingSpec.LYRIC_KEEP_ON.key, state.lyricsKeepOn),
             lyricsHdr = p.getBoolean(SettingSpec.LYRIC_HDR.key, state.lyricsHdr),
