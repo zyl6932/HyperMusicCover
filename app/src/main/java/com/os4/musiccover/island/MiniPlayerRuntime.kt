@@ -257,6 +257,13 @@ object MiniPlayerRuntime {
                 if (args.size == 1 && args[0] == View.VISIBLE && keepNativeHeaderInvisible()) {
                     args[0] = View.INVISIBLE
                 }
+                // A tablet keyguard never inflates the shortcut buttons, so addShortcutViews
+                // - the only place that starts the row - is never called there. The media
+                // header visibility changes on every keyguard build, so start the row from
+                // here when no controller has been built yet.
+                if (synchronized(controllers) { controllers.isEmpty() }) {
+                    (chain.thisObject as? View)?.rootView?.let { scheduleInstall(it, null) }
+                }
                 chain.proceed(args)
             }
         }.onFailure { Xp.w("MCMini: native header visibility hook unavailable: $it") }
@@ -936,7 +943,8 @@ object MiniPlayerRuntime {
             synchronized(controllers) { controllers.remove(host) }
             return
         }
-        val (left, right) = resolveShortcuts(shortcutController) ?: findShortcuts(root) ?: return
+        val (left, right) = resolveShortcuts(shortcutController) ?: findShortcuts(root)
+            ?: standInSlots(host) ?: return
         if (left === right) return
         if (old != null && old.left === left && old.right === right) {
             old.controller.refresh()
@@ -990,6 +998,40 @@ object MiniPlayerRuntime {
         val l = left ?: return null
         val r = right ?: return null
         return l to r
+    }
+
+    /** The stand-in slots of each host, so scheduleInstall's retries see the same pair. */
+    private val standIns = WeakHashMap<ViewGroup, Pair<View, View>>()
+
+    /**
+     * The pair for a lock screen with no shortcut buttons at all.
+     *
+     * A tablet's keyguard keeps `keyguard_shortcut_container` but never inflates the torch and
+     * the camera into it - the container is laid out 0-high and empty - so neither
+     * `shortcut_view_left_layout` nor `shortcut_view_right_layout` is in the tree and
+     * findShortcuts answers null. The row was never built then, and with it went the whole
+     * island system on those devices: no media pill, no notification islands, nothing.
+     *
+     * Two zero-sized views are all the geometry needs. They go unplaced (placesRow), so
+     * pillRest centres the row on the host and rowCentreY falls back to where a row was last
+     * seen, which is where a phone's row would have been. Held per host so the retries in
+     * scheduleInstall find the same pair and only refresh the controller instead of tearing
+     * it down and building it again; Gen owns them so a retiring generation takes them back.
+     */
+    private fun standInSlots(host: ViewGroup): Pair<View, View>? = synchronized(standIns) {
+        standIns[host]?.let { (l, r) ->
+            if (l.parent === host && r.parent === host) return it
+        }
+        runCatching {
+            val lp = ViewGroup.LayoutParams(0, 0)
+            val l = View(host.context).apply { visibility = View.GONE }
+            val r = View(host.context).apply { visibility = View.GONE }
+            host.addView(l, lp)
+            host.addView(r, lp)
+            Gen.ownView(host, l)
+            Gen.ownView(host, r)
+            (l to r).also { standIns[host] = it }
+        }.getOrNull()
     }
 
     @JvmStatic fun wantsNativeArtworkGesture(): Boolean =
