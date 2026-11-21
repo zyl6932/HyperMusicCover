@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">HyperMusicCover</string>
+    <string name="module_description" translatable="false">HyperMusicCover by zyl6932 - album art as the HyperOS lock screen wallpaper, with the clock collapsed</string>
     <string name="about_source_code_summary">https://github.com/zyl6932/HyperMusicCover</string>
     <string name="about_telegram">Telegram群组</string>
     <string name="about_telegram_summary">https://t.me/HyperMusicCover</string>

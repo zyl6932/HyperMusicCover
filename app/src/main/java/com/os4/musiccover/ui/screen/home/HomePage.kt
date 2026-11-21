@@ -630,12 +630,11 @@ fun HomePageView(
  */
 @Composable
 private fun RestartMenu() {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showMenu by remember { mutableStateOf(false) }
 
     val entries = listOf(
-        stringResource(R.string.restart_scope) to { ModuleBridge.restartScope(context) },
+        stringResource(R.string.restart_scope) to ModuleBridge::restartScope,
         stringResource(R.string.restart_systemui) to ModuleBridge::restartSystemUi,
         stringResource(R.string.restart_wallpaper) to ModuleBridge::restartWallpaper,
     )
@@ -715,10 +714,9 @@ private fun BoxScope.RestartMenuGlass(
     anchor: GlassPopupAnchor,
     onDismiss: () -> Unit,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val entries = listOf(
-        stringResource(R.string.restart_scope) to { ModuleBridge.restartScope(context) },
+        stringResource(R.string.restart_scope) to ModuleBridge::restartScope,
         stringResource(R.string.restart_systemui) to ModuleBridge::restartSystemUi,
         stringResource(R.string.restart_wallpaper) to ModuleBridge::restartWallpaper,
     )
