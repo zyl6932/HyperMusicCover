@@ -162,6 +162,7 @@
     <string name="lyrics_source_none">No lyric source</string>
     <string name="lyrics_source_session">the player</string>
     <string name="lyrics_source_lyricon">Lyricon plugin</string>
+    <string name="lyrics_source_superlyric">SuperLyric</string>
     <string name="lyrics_source_local">song file</string>
     <string name="lyrics_source_amll">AMLL database</string>
     <string name="lyrics_source_ttmlhub">AMLL TTML library</string>

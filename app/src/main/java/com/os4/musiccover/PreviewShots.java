@@ -7,6 +7,7 @@ import com.os4.musiccover.clock.ClockViews;
 import com.os4.musiccover.cover.AlbumArt;
 import com.os4.musiccover.cover.CoverPush;
 import com.os4.musiccover.lyrics.LockLyrics;
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -50,6 +51,8 @@ public final class PreviewShots {
      * layout on and back off, so the full reply on that poll was work thrown away while the page
      * stayed open.
      */
+    // The live views and the encoded thumbnail belong to the same synchronous preview reply.
+    @SuppressLint("ThreadConstraint")
     static android.os.Bundle previewBundle(Context c, Intent i) {
         if (!i.getBooleanExtra("shots", true)) {
             android.os.Bundle out = new android.os.Bundle();
@@ -304,6 +307,8 @@ public final class PreviewShots {
      * else. The refracting glass is a RuntimeShader and does not, so what comes back is the
      * digits as they are filled at the moment of the capture.
      */
+    // The ordered preview reply needs the PNG from this main-thread draw.
+    @SuppressLint("ThreadConstraint")
     static byte[] shootClock(int which) {
         if (!sClockShot) return null;
         View[] roots = Main.clockRoots();
@@ -478,6 +483,8 @@ public final class PreviewShots {
      * extraBg is a child whose BACKGROUND has to be drawn by hand, for views MIUI's blur path
      * skips on a software canvas.
      */
+    // Encode the bounded capture before returning it to the ordered preview reply.
+    @SuppressLint("ThreadConstraint")
     static byte[] shoot(View v, int maxW, View extraBg) {
         int w = v.getWidth(), h = v.getHeight();
         if (w <= 0 || h <= 0) return null;
