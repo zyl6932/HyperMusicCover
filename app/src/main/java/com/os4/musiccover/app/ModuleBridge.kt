@@ -1262,22 +1262,19 @@ object ModuleBridge {
      * enabled, their sub-processes included, and nothing that is not running - a player or 高德
      * the module is not enabled in is left alone.
      *
-     * Without the service, the scope the APK ships, from META-INF/xposed/scope.list - the list
-     * LSPosed itself installs the module by. It was read from the legacy `xposedscope` array, which
-     * nothing kept in step: 高德 and 小爱建议 were added to scope.list only, so their processes went
-     * on running the old module after an update (2026-10-07). The array is the last fallback, and
-     * ScopeListTest holds the two equal.
+     * Without a running target list, fall back to the packages in the APK's static scope,
+     * META-INF/xposed/scope.list.
      *
      * A package's own name is not enough any more. The lock screen editor runs as
      * `com.miui.aod:keyguardeditor`, and `pidof` matches a process name exactly - so the entry
      * that was added for the editor restarted everything except the editor, which is the one
      * process the hooks on it had to be re-read into. [killTree] takes the sub-processes too.
      */
-    fun restartScope(context: Context): Boolean {
+    fun restartScope(): Boolean {
         restartingSince = SystemClock.elapsedRealtime()
         val running = LsposedService.runningTargets()
         if (!running.isNullOrEmpty()) return running.map { killPid(it.pid) }.all { it }
-        val scoped = shippedScope() ?: context.resources.getStringArray(R.array.xposedscope).toList()
+        val scoped = shippedScope() ?: return false
         var all = true
         for (pkg in scoped) if (!killTree(pkg)) all = false
         return all
@@ -1323,8 +1320,8 @@ object ModuleBridge {
 
     /** The packages in the APK's own scope.list, one a line; null when it cannot be read. */
     private fun shippedScope(): List<String>? = runCatching {
-        ModuleBridge::class.java.classLoader!!.getResourceAsStream("META-INF/xposed/scope.list")
-            .bufferedReader().useLines { lines ->
+        ModuleBridge::class.java.classLoader?.getResourceAsStream("META-INF/xposed/scope.list")
+            ?.bufferedReader()?.useLines { lines ->
                 lines.map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }.toList()
             }
     }.getOrNull()?.takeIf { it.isNotEmpty() }

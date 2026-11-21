@@ -1,9 +1,8 @@
 # Modern Xposed module metadata (API 102). The name and description come from the app's own
-# android:label / android:description; only the API versions belong here.
+# android:label / android:description.
 minApiVersion=102
 targetApiVersion=102
-# The module hooks two specific system packages and does nothing anywhere else, so the scope
-# is not something a user should widen.
+# Keep the module's scope restricted to the packages in scope.list.
 staticScope=true
 # Installing an update asks every running process to take the new code without a restart. The
 # module's own check decides which processes accept (HotReloadPolicy.SUPPORTED); the rest stay
