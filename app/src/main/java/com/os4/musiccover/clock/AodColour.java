@@ -3,9 +3,11 @@ package com.os4.musiccover.clock;
 import com.os4.musiccover.Gen;
 import com.os4.musiccover.Main;
 import com.os4.musiccover.Xp;
+import android.annotation.SuppressLint;
 import android.graphics.Bitmap;
 import android.view.ViewGroup;
 import android.view.View;
+import androidx.annotation.AnyThread;
 
 /**
  * The clock's colour in the always-on display and over the cover: holding the AOD's colour as
@@ -200,8 +202,11 @@ public final class AodColour {
      * would keep the previous cover's decision, which on the way from a light cover to a dark
      * one means a dark clock left dark on a dark picture: worse than the problem this exists to
      * fix. The values handed over are the OEM's own, off the style it is already holding; the
-     * setter hooks are what make them come out legible.
+     * setter hooks are what make them come out legible. The colour update runs on the view's
+     * thread, including when the art worker requests it.
      */
+    @AnyThread
+    @SuppressLint("ThreadConstraint") // Gen.postOn runs the callback on the view's thread.
     public static void recolorClock() {
         final View v = Main.sContainer;
         if (v == null) return;

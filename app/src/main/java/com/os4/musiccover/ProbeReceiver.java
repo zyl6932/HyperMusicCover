@@ -39,6 +39,7 @@ import com.os4.musiccover.transit.AmapTransitScene;
 import com.os4.musiccover.pickup.PickupCloud;
 import com.os4.musiccover.pickup.PickupCodeIsland;
 import com.os4.musiccover.pickup.PickupPark;
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.media.session.MediaController;
@@ -117,6 +118,8 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
      * A setting from the app's pages: written, applied, and saved by the module. False when the op
      * is not one of these.
      */
+    // minicfg commits before the ordered broadcast acknowledges the write, then refreshes the UI.
+    @SuppressLint("ThreadConstraint")
     private boolean appSetting(Context c, Intent i, String op) throws Exception {
         if ("pushart".equals(op)) {
             boolean on = i.getBooleanExtra("on", true);

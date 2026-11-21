@@ -22,6 +22,7 @@ import android.widget.ImageView;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewTreeObserver;
+import androidx.annotation.WorkerThread;
 
 /**
  * Getting the album art into the wallpaper, and keeping the lock wallpaper fit to take it.
@@ -83,6 +84,7 @@ public final class CoverPush {
         pushArtToWallpaper(ctx, on, on ? AlbumArt.albumArt(ctx) : null);
     }
 
+    @WorkerThread
     private static void pushArtToWallpaper(Context ctx, boolean on, Bitmap art) {
         long t0 = android.os.SystemClock.uptimeMillis();
         // 保留壁纸: the wallpaper is the user's own throughout. Sent as the way out, so a cover
@@ -325,20 +327,10 @@ public final class CoverPush {
      * Cheaper than the image path, too: no JPEG round trip and no cross-process broadcast, so
      * the composed bitmap goes straight onto the view.
      */
+    @WorkerThread
     private static void showVideoCover(Context ctx, boolean on, final Bitmap full,
                                        final Bitmap frosted, final int artPrint) {
-        if (!on) {
-            // Held and faded out rather than dropped on the spot: see armCoverFadeOut(). The
-            // wallpaper's cut-out subject comes back with the view going, not now - it draws in
-            // FRONT of the clock, so handed back at the start of a fade-out that is held for the
-            // window's reload (a second, measured) it sat on top of the still-opaque cover:
-            // the "mask is wrong" recording, pine branches and a sheep over the album art.
-            armCoverFadeOut();
-            Main.sVideoCoverBlurred = false;
-            Xp.log(Main.TAG + "video cover off");
-            return;
-        }
-        if (full == null) {
+        if (on && full == null) {
             Xp.log(Main.TAG + "video cover: no album art");
             if (frosted != null) frosted.recycle();
             return;
@@ -347,6 +339,15 @@ public final class CoverPush {
             @Override
             public void run() {
                 try {
+                    if (!on) {
+                        // Keep the wallpaper's cut-out subject hidden until the fade ends.
+                        // Restoring it while the fade waits for the wallpaper reload draws it
+                        // in front of the still-opaque album cover.
+                        armCoverFadeOut();
+                        Main.sVideoCoverBlurred = false;
+                        Xp.log(Main.TAG + "video cover off");
+                        return;
+                    }
                     ViewGroup layer = coverLayer();
                     if (layer == null) {
                         Xp.log(Main.TAG + "keyguard_background_layer not found for the video cover");
