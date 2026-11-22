@@ -32,7 +32,7 @@ applicationId 是 `com.github.zyl6932.HyperMusicCover`，Java 包名和探针广
 
 ## HyperOS 的坑（读代码看不出来，都在真机上踩过）
 
-- 时钟玻璃和媒体卡片的模糊采样的是壁纸窗口，不是 SystemUI 的视图树。在 SystemUI 里加 View 压暗或遮挡，玻璃和模糊都看不到；要变就变进壁纸纹理（#90/#96）。
+- 时钟玻璃和媒体卡片的模糊由合成器 backdrop 提供，采样的是该窗口之下已合成的图层，同一个 SystemUI 窗口里的视图树不在内。所以在锁屏窗口内部加 View 压暗或遮挡采不到；要让它们变，得让内容出现在锁屏窗口下面——换壁纸，或垫一个独立 overlay 窗口。
 - 给 time_group 设 scale 是 RenderNode 属性，不触发重绘；玻璃边缘宽度在 TimeView.onDraw 里按缩放算，所以缩放变了（包括交还时回到 1）要让玻璃重画（`ClockCollapse.glassFollowsScale`）。
 - 在 `setNotifY` 钩子里量位置（`getLocationOnScreen`）量到的是上一帧：OEM 在它返回后才应用这一帧的位移；刚从 AOD 醒来的头几帧还是 AOD 布局。
 - 时钟收缩要钩 `setNotifY`，只钩 `notifStateChange` 会被系统直接打进 `setNotifY` 的回抢顶掉。
