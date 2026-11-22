@@ -1460,7 +1460,19 @@ object MiniPlayerRuntime {
             // back out; the same way as it was going just carries on.
             owner.releaseMorph(toNative, v)
             if (toNative && !Main.coverModeOn()) {
-                if (takeRestoreScene()) Main.miniPlayerTurnScene(true)
+                // Up while it was leaving puts the cover back, whoever took it away - a tap
+                // included. Let go toward the card instead, the morph rested on an end the
+                // choice did not know: the card suppressed, the pill held down for a scene
+                // that never came, both gone for SCENE_WAIT_MS (#146).
+                Main.miniPlayerTurnScene(true)
+                if (Main.coverModeOn()) {
+                    // The scene has the intent now; the next pull is the plain card's again.
+                    forgetRestoreScene()
+                } else {
+                    // Refused (the lock screen on its way out, a bouncer, the cover off): home
+                    // to the pill rather than rest where nothing draws it.
+                    owner.releaseMorph(false, v)
+                }
             } else if (!toNative && Main.coverModeOn()) {
                 preferMini()
                 rememberScene()
