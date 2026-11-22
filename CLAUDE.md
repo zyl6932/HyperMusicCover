@@ -36,7 +36,6 @@ applicationId 是 `com.github.zyl6932.HyperMusicCover`，Java 包名和探针广
 - 给 time_group 设 scale 是 RenderNode 属性，不触发重绘；玻璃边缘宽度在 TimeView.onDraw 里按缩放算，所以缩放变了（包括交还时回到 1）要让玻璃重画（`ClockCollapse.glassFollowsScale`）。
 - 在 `setNotifY` 钩子里量位置（`getLocationOnScreen`）量到的是上一帧：OEM 在它返回后才应用这一帧的位移；刚从 AOD 醒来的头几帧还是 AOD 布局。
 - 时钟收缩要钩 `setNotifY`，只钩 `notifStateChange` 会被系统直接打进 `setNotifY` 的回抢顶掉。
-- SystemUI 刚重启时时钟容器是 0x0。只在 OEM 帧里执行的放置，量不到就返回，而 hold notifY 又会让 OEM 不再出帧，于是一次放弃就是永久放弃；要自己补帧重试。
 - 锁屏通知列表 LIST 静止时 scrollY 就是正的（把列表放到时钟下面）；判断"在顶部"要和静止偏移比，不是和 0 比。
 - 锁屏上的媒体卡片可能被通知顶到屏幕上方 1/3 以上；不能靠屏幕位置区分锁屏卡片和下拉面板里的副本，要看父链（在 NotificationStackScrollLayout 里、不在岛布局下）（#78/#82）。
 - 锁屏上只有焦点通知和音乐时，永远录不到普通通知行；"等录到再用"的值要有不依赖录制的默认值（#91）。
