@@ -5,7 +5,7 @@ coreKtx = "1.19.0"
 lifecycleRuntimeKtx = "2.11.0"
 activityCompose = "1.13.0"
 composeBom = "2026.09.00"
-miuix = "0.9.5-beta01"
+miuix = "0.9.5-beta03"
 # The changelog renderer: CommonMark -> HTML, plus the WebView helpers that serve the
 # github-markdown-css sheets out of assets without file:// access.
 commonmark = "0.30.0"
