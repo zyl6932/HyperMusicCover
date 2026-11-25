@@ -92,6 +92,7 @@ import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import androidx.compose.foundation.layout.size
 import com.os4.musiccover.ui.util.LocalCardGlass
 import com.os4.musiccover.ui.util.LocalOs4Ui
+import com.os4.musiccover.ui.util.LocalPageBackdrop
 import top.yukonga.miuix.kmp.basic.DropdownEntry as MiuixDropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem as MiuixDropdownItem
 import top.yukonga.miuix.kmp.glass.GlassIconButton
@@ -192,12 +193,11 @@ fun HomePageView(
         }
     }
 
-    // The OS4 restart menu needs a full-size box to lay itself out in (see
-    // RestartMenuGlassTrigger); the bar's actions slot is only as big as an icon.
+    // The OS4 restart menu's state. The menu itself goes in PageScaffold's `dialogs` slot, so
+    // it is composed inside the page backdrop scope and samples the page below it (#159).
     var restartMenuOpen by remember { mutableStateOf(false) }
     val restartAnchor = rememberGlassPopupAnchor()
 
-    Box(Modifier.fillMaxSize()) {
     PageScaffold(
         title = title,
         isBlurEnabled = isBlurEnabled,
@@ -207,6 +207,19 @@ fun HomePageView(
                 RestartMenuGlassTrigger(restartAnchor) { restartMenuOpen = true }
             } else {
                 RestartMenu()
+            }
+        },
+        dialogs = {
+            if (LocalOs4Ui.current) {
+                // A full-size Box: GlassIconDropdownMenu is a BoxScope overlay that lays out at
+                // the size of its parent, and the bar's actions slot is one icon wide.
+                Box(Modifier.fillMaxSize()) {
+                    RestartMenuGlass(
+                        show = restartMenuOpen,
+                        anchor = restartAnchor,
+                        onDismiss = { restartMenuOpen = false },
+                    )
+                }
             }
         },
     ) {
@@ -521,15 +534,6 @@ fun HomePageView(
         }
     }
 
-    if (LocalOs4Ui.current) {
-        RestartMenuGlass(
-            show = restartMenuOpen,
-            anchor = restartAnchor,
-            onDismiss = { restartMenuOpen = false },
-        )
-    }
-    }
-
     AppDialog(
         show = showMissing,
         title = stringResource(R.string.home_features_missing_dialog),
@@ -707,7 +711,7 @@ private fun RestartMenuGlassTrigger(anchor: GlassPopupAnchor, onOpen: () -> Unit
     }
 }
 
-/** The OS4 menu, in the page's full-size box, anchored to the bar button. */
+/** The OS4 menu, in the page's dialogs slot, anchored to the bar button. */
 @Composable
 private fun BoxScope.RestartMenuGlass(
     show: Boolean,
@@ -731,9 +735,12 @@ private fun BoxScope.RestartMenuGlass(
                 tint = MiuixTheme.colorScheme.onBackground,
             )
         },
-        // Null on purpose: the menu opens over the page it is recorded in, and sampling that
-        // would blur a picture of the menu into itself.
-        backdrop = null,
+        // The page's own recording, which PageScaffold keeps live at every scroll position. The
+        // anchor button's backdrop is only captured while the bar's material or band is active
+        // (miuix's idle-capture optimization), so with the list at the top it holds nothing and
+        // the panel drew as bare rim and shadow (#159). The dialogs slot is outside the recorded
+        // body, so this samples the page and not the menu itself.
+        backdrop = LocalPageBackdrop.current,
         entries = listOf(
             MiuixDropdownEntry(
                 entries.map { entry ->

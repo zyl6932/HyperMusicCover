@@ -59,6 +59,12 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * The one thing callers still own is what goes in the list - and, through [dialogs], the popups
  * that belong to the page: a dialog left at the call site outside this frame samples the theme's
  * flat surface fallback instead of the page, so glass over it has nothing to blur.
+ *
+ * The branches are wrapped in one full-size [Box] on purpose: a page is one item of the pager,
+ * and a lazy item lays its roots out along the scroll axis rather than stacking them. Emitting
+ * the [dialogs] layer as a second root would place it a whole page to the right - composed but
+ * off-screen, so an in-page popup (the restart menu, #159) gets no placement while its anchor
+ * still hides itself.
  */
 @Composable
 fun PageScaffold(
@@ -71,27 +77,29 @@ fun PageScaffold(
     dialogs: @Composable () -> Unit = {},
     content: LazyListScope.() -> Unit,
 ) {
-    if (LocalOs4Ui.current) {
-        PageScaffoldOs4(
-            title = title,
-            extraBottomPadding = extraBottomPadding,
-            onBack = onBack,
-            actions = actions,
-            floatingActionButton = floatingActionButton,
-            dialogs = dialogs,
-            content = content,
-        )
-    } else {
-        PageScaffoldOs3(
-            title = title,
-            isBlurEnabled = isBlurEnabled,
-            extraBottomPadding = extraBottomPadding,
-            onBack = onBack,
-            actions = actions,
-            floatingActionButton = floatingActionButton,
-            dialogs = dialogs,
-            content = content,
-        )
+    Box(Modifier.fillMaxSize()) {
+        if (LocalOs4Ui.current) {
+            PageScaffoldOs4(
+                title = title,
+                extraBottomPadding = extraBottomPadding,
+                onBack = onBack,
+                actions = actions,
+                floatingActionButton = floatingActionButton,
+                dialogs = dialogs,
+                content = content,
+            )
+        } else {
+            PageScaffoldOs3(
+                title = title,
+                isBlurEnabled = isBlurEnabled,
+                extraBottomPadding = extraBottomPadding,
+                onBack = onBack,
+                actions = actions,
+                floatingActionButton = floatingActionButton,
+                dialogs = dialogs,
+                content = content,
+            )
+        }
     }
 }
 
