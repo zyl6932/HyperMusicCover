@@ -15,7 +15,7 @@ public interface Feature {
      * Stable across versions; what {@code op features} and the app's home page name. Written
      * {@code feature:xxx} - never in the shape of a hook id (HookIdTest would take it for one and
      * ask for it in hook-ids.txt), and not tied to the hook ids it installs: one installer can put
-     * in hooks under several prefixes (HyperTweaks.systemUi has four).
+     * in hooks under several prefixes (HyperChanger.systemUi has four).
      */
     String id();
 

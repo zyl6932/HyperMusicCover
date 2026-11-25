@@ -1,6 +1,6 @@
 package com.os4.musiccover.feature;
 
-import com.os4.musiccover.HyperTweaks;
+import com.os4.musiccover.HyperChanger;
 import com.os4.musiccover.Main;
 import com.os4.musiccover.WallpaperProbe;
 import com.os4.musiccover.lyrics.AppleLyrics;
@@ -95,7 +95,7 @@ public final class FeatureRegistry {
             single("AOD",
                     packages("com.miui.aod"),
                     processes("com.miui.aod"),
-                    Feature.of("feature:aod", false, c -> HyperTweaks.aod(c.host))),
+                    Feature.of("feature:aod", false, c -> HyperChanger.aod(c.host))),
             // The back screen's app. Its own allow-list decides what it draws, and SystemUI is
             // not on it - see RearScreen.
             single("rear screen",

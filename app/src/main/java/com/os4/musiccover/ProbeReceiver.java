@@ -175,14 +175,14 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
         if ("seekglow".equals(op)) {
             // The card on screen was built before this switch was read, so it is
             // changed in place - lit as applyBarGlow lights a new one, or put back to
-            // the flat bar it was built as (HyperTweaks.clearBarGlow).
+            // the flat bar it was built as (HyperChanger.clearBarGlow).
             View bar = Main.findLockScreenView("media_progress_bar");
             // With advanced material off the stock flat bar stays (#121); the switch is
             // kept, and the bar lights when the material comes back on.
             String r = bar == null ? "no card up" : !Settings.SEEK_GLOW.on()
-                    ? HyperTweaks.clearBarGlow(bar)
-                    : HyperTweaks.materialOn(bar.getContext())
-                            ? HyperTweaks.applyBarGlow(bar) : "advanced material off, left flat";
+                    ? HyperChanger.clearBarGlow(bar)
+                    : HyperChanger.materialOn(bar.getContext())
+                            ? HyperChanger.applyBarGlow(bar) : "advanced material off, left flat";
             Xp.log(Main.TAG + "media bar glow " + (Settings.SEEK_GLOW.on() ? "on" : "off")
                     + " - " + r);
             setResultData((Settings.SEEK_GLOW.on() ? "on " : "off ") + r);
@@ -772,7 +772,7 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             // Which of the HyperOS restrictions actually came off in this process.
             // Over the probe rather than the log because the module's INFO lines are
             // not readable on this device - LSPosed keeps error level only.
-            setResultData(HyperTweaks.describe());
+            setResultData(HyperChanger.describe());
         } else if ("clockshot".equals(op)) {
             // For telling the two candidate causes apart by hand: with this off the
             // module never draws the live clock, and the preview falls back to its

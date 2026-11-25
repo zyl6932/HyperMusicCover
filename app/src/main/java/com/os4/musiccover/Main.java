@@ -782,7 +782,7 @@ public class Main extends XposedModule {
         // After the effects are bound: a migrated group only sets values here (stage 5.2).
         SettingsPrefs.install();
         return java.util.Arrays.asList(
-                Feature.of("feature:tweaks", false, c -> HyperTweaks.systemUi(c.host)),
+                Feature.of("feature:tweaks", false, c -> HyperChanger.systemUi(c.host)),
                 // The home screen magnified behind the shade, after the lock screen.
                 Feature.of("feature:pass_blur_scale", false, c -> PassBlurScaleFix.install()),
                 // The mini player hangs off the shortcut row, not the clock container.
@@ -1666,7 +1666,7 @@ public class Main extends XposedModule {
         // Again at startup, not only when the switch is touched: the flag the always-on display
         // reads is written by this process, and a phone that was rebooted with the switch on has
         // nothing in it otherwise.
-        HyperTweaks.publishColon(ctx);
+        HyperChanger.publishColon(ctx);
         // The icon views can already exist by now - the file is read when the keyguard attaches,
         // which is not necessarily before the fingerprint view is built.
         Fingerprint.applyHideFp();

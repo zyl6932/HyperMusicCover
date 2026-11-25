@@ -1,6 +1,6 @@
 /*
- * Adapted from HyperChanger (https://github.com/ColdP/HyperChanger),
- * licensed under the Apache License, Version 2.0.
+ * Adapted from HyperChanger (https://github.com/ColdP/HyperChanger), licensed under the Apache
+ * License, Version 2.0, and named after it for that reason.
  *
  * Changes in HyperMusicCover: rewritten against this module's libxposed helpers, every hook made
  * to fail on its own, and the three restrictions that are always lifted here carry no setting of
@@ -29,9 +29,9 @@ import java.lang.reflect.Method;
  * builds, and a lookup that throws must cost its own feature and nothing else - see the module's
  * history of one missing class taking the whole of SystemUI unhooked with it.
  */
-public final class HyperTweaks {
+public final class HyperChanger {
 
-    private HyperTweaks() {
+    private HyperChanger() {
     }
 
     private static final String TAG = "MCTweak: ";
@@ -535,7 +535,7 @@ public final class HyperTweaks {
         historyTrimLimit(cl);
         // The always-on clock is drawn in this process, by the same clock library, so the same
         // hook works - it just has to ask a different place what the switch says.
-        clockColon(cl, "aod", "aod.clock.colon", HyperTweaks::aodColonWanted);
+        clockColon(cl, "aod", "aod.clock.colon", HyperChanger::aodColonWanted);
         reportTo("/data/user/0/com.miui.aod/cache/mc_tweaks.txt");
     }
 

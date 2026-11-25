@@ -790,7 +790,7 @@ public final class Settings {
      */
     public static final Bool COLON = new Bool(SettingSpec.COLON)
             .op("colon", "on", Absent.TOGGLE)
-            .then(c -> HyperTweaks.publishColon(Main.sAppCtx))
+            .then(c -> HyperChanger.publishColon(Main.sAppCtx))
             .file("colon");
 
     // The media card. One op for the four, saved and applied once whichever came.
