@@ -4,7 +4,6 @@ import com.os4.musiccover.BuildConfig;
 import com.os4.musiccover.Gen;
 import com.os4.musiccover.HandleStore;
 import com.os4.musiccover.HotReloadPolicy;
-import com.os4.musiccover.HyperTweaks;
 import com.os4.musiccover.Main;
 import com.os4.musiccover.ModuleState;
 import com.os4.musiccover.ProbeGuard;
@@ -806,10 +805,11 @@ public final class HotReload {
 
     /**
      * Hooks a feature installs the first time it sees a class loader that is not SystemUI's -
-     * the control-centre plugin, mostly. That loader was constructed long ago, so the watcher
-     * that found it will not fire again; the new generation re-runs the same soft installs
-     * against the loader the old handles name. Everything else either re-arms from the attach
-     * path or is installed by SystemUI's feature list ({@link Main#systemUiFeatures}).
+     * the control centre plugin's APK, which AmapFocus still looks through. That loader was
+     * constructed long ago, so the watcher that found it will not fire again; the new generation
+     * re-runs the same soft installs against the loader the old handles name. Everything else
+     * either re-arms from the attach path or is installed by SystemUI's feature list
+     * ({@link Main#systemUiFeatures}).
      */
     private static void backfill(ClassLoader host, List<XposedInterface.HookHandle> old) {
         // A framework class answers BootClassLoader, not null, on Android (Object's included);
@@ -825,11 +825,6 @@ public final class HotReload {
             others.add(l);
         }
         for (ClassLoader l : others) {
-            try {
-                HyperTweaks.adoptPlugin(l);
-            } catch (Throwable t) {
-                Xp.w(TAG + "soft-glass backfill from " + l + " failed: " + t);
-            }
             try {
                 AmapFocus.adopt(l);
             } catch (Throwable t) {

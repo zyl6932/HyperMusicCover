@@ -18,7 +18,8 @@ import java.lang.reflect.Method;
  *
  * They are here because they are what a music lock screen runs into: the depth effect refuses
  * most wallpapers, the editor stops at ten saved lock screens, the big clock drops its colon, and
- * a global theme switches the soft glass off under everything.
+ * a global theme switches the soft glass off in SystemUI's own views (the control centre plugin
+ * was left out of that one - see {@link #softGlassTheme}).
  *
  * Three of the four are unconditional - there is no setting, because a restriction that only
  * exists to be worked around is not a preference. The colon is the exception: it changes what the
@@ -90,10 +91,6 @@ public final class HyperTweaks {
     private static final String CLS_MATERIAL_UTILS = "com.miui.systemui.controlcenter.utils.MiuiMaterialUtils";
     private static final String CLS_SYSUI_THEME_UTILS = "com.miui.utils.MiuiThemeUtils";
     private static final String CLS_CONFIG_CONTROLLER = "com.android.systemui.statusbar.phone.ConfigurationControllerImpl";
-    private static final String CLS_PLUGIN_THEME_UTILS = "miui.systemui.util.ThemeUtils";
-    private static final String CLS_MI_BLUR_COMPAT = "miui.systemui.util.MiBlurCompat";
-    private static final String CLS_DEFAULT_THEME_CONTROLLER =
-            "miui.systemui.controlcenter.windowview.MiuiDefaultThemeControllerImpl";
 
     /** The stock threshold: a picture whose subject covers less than a fifth is refused. */
     private static final double DEPTH_THRESHOLD_STOCK = 0.2;
@@ -118,10 +115,6 @@ public final class HyperTweaks {
         keyguardDepth(cl);
         thirdPartyWallpaperDepth(cl);
         softGlassTheme(cl);
-        softGlassPlugin(cl, "systemui", "sysui");
-        // Nothing found from SystemUI's own loader, which is the normal case: wait for the
-        // plugin's loader to be built.
-        if (!sPluginHooked) watchForPlugin();
         clockColon(cl, "systemui", "sysui.clock.colon", () -> Settings.COLON.on());
         mediaBarGlow(cl, () -> Settings.SEEK_GLOW.on());
         coverUnlockFade(cl, Main::coverModeOn);
@@ -567,11 +560,6 @@ public final class HyperTweaks {
         }
     }
 
-    /** The control centre, where the soft glass a global theme switched off actually shows. */
-    public static void plugin(ClassLoader cl) {
-        softGlassPlugin(cl, "plugin", "plugin");
-    }
-
     // ------------------------------------------------------------------ depth
 
     /**
@@ -979,11 +967,17 @@ public final class HyperTweaks {
     // ------------------------------------------------------------------ soft glass
 
     /**
-     * A global theme turns the soft glass off system-wide, and nothing puts it back.
+     * A global theme turns the soft glass off in SystemUI's own views, and nothing puts it back.
      *
-     * The answer is the same in both halves: whatever is asked, the theme is the default one.
-     * The static flag is written as well as hooked, because a configuration change recomputes it
-     * from the theme and the hooks below only cover the paths that ask.
+     * Whatever is asked, the theme is the default one. The static flag is written as well as
+     * hooked, because a configuration change recomputes it from the theme and the hooks below only
+     * cover the paths that ask.
+     *
+     * <p>The control centre's half of this is gone (2026-11-25, #160). It lived in the plugin's
+     * ThemeUtils and in MiBlurCompat.getBackgroundMaterialOpenedInDefaultTheme, and on 4.0.8.0 the
+     * tiles it made take the material path are drawn as plain squares with a zero corner radius:
+     * the theme's own tile drawables were what kept them round. Answering "default theme" is only
+     * safe while nothing downstream reads it for a shape.
      */
     private static void softGlassTheme(ClassLoader cl) {
         try {
@@ -1018,118 +1012,6 @@ public final class HyperTweaks {
         }
     }
 
-    /**
-     * The control centre plugin, which caches the same answer in three more places.
-     *
-     * Tried from SystemUI's own loader first because the plugin is usually loaded into it; the
-     * plugin's package callback tries again with its own, and whichever runs second finds the
-     * hooks already installed and does nothing.
-     */
-    private static volatile boolean sPluginHooked;
-
-    /**
-     * The control centre plugin is a second APK with a class loader of its own, built inside
-     * SystemUI long after this module's hooks go in - and it never arrives as a package of its
-     * own, so `miui.systemui.plugin` in the scope list buys nothing. Trying SystemUI's loader at
-     * startup, which is what this used to do alone, could only ever say "not visible": the
-     * plugin had not been loaded yet and its classes are in no parent of that loader.
-     *
-     * So the arrival is what gets watched. Every class loader in the process passes through
-     * BaseDexClassLoader's constructor, of which there are a handful in a process's whole life -
-     * compared with hooking `loadClass`, which is the same watch run tens of thousands of times.
-     * The first one that can see the plugin's ThemeUtils is the plugin's, and once its hooks are
-     * in the body below does nothing but read a flag.
-     */
-    private static void watchForPlugin() {
-        try {
-            Class<?> base = Class.forName("dalvik.system.BaseDexClassLoader");
-            for (Constructor<?> ctor : base.getDeclaredConstructors()) {
-                ctor.setAccessible(true);
-                Xp.hook("sysui.glass.loader_watch", ctor, chain -> {
-                    Object result = chain.proceed();
-                    if (!sPluginHooked) {
-                        Object loader = chain.getThisObject();
-                        if (loader instanceof ClassLoader) {
-                            // The plugin's loader, but still SystemUI's process: the id
-                            // prefix is the process, not where the loader came from.
-                            softGlassPlugin((ClassLoader) loader, "plugin", "sysui");
-                        }
-                    }
-                    return result;
-                });
-            }
-            ok("glass-plugin-watch");
-        } catch (Throwable t) {
-            failed("glass-plugin-watch", t);
-        }
-    }
-
-    /**
-     * A hot-reloaded generation's half of {@link #watchForPlugin()}: the plugin's loader exists
-     * already, so the constructor watch will not fire again. Re-running the soft install with
-     * that loader replaces the old hooks by id.
-     */
-    public static void adoptPlugin(ClassLoader cl) {
-        softGlassPlugin(cl, "adopt", "sysui");
-    }
-
-    private static void softGlassPlugin(ClassLoader cl, String where, String idPrefix) {
-        if (sPluginHooked) return;
-        Class<?> themeUtils;
-        try {
-            themeUtils = Xp.findClass(CLS_PLUGIN_THEME_UTILS, cl);
-        } catch (Throwable t) {
-            // Not an error, and not worth a line each time: most loaders are not the plugin's.
-            // Only the startup attempt records anything, so the report says what was tried.
-            if (!"plugin".equals(where)) STATUS.put("glass-plugin", "not visible from " + where);
-            return;
-        }
-        try {
-            for (String name : new String[] {"getDefaultPluginTheme", "getDefaultSysUiTheme"}) {
-                try {
-                    Xp.hookAll(idPrefix + ".glass.default_get." + Xp.slug(name), themeUtils, name,
-                            chain -> Boolean.TRUE);
-                } catch (Throwable ignored) {
-                    // Not on this build; the other answers still stand.
-                }
-            }
-            for (String name : new String[] {"updateDefaultPluginTheme", "updateDefaultSysUiTheme"}) {
-                try {
-                    Xp.hookAll(idPrefix + ".glass.default_update." + Xp.slug(name), themeUtils, name,
-                            chain -> {
-                                Object result = chain.proceed();
-                                forceThemeFlags(themeUtils);
-                                return result;
-                            });
-                } catch (Throwable ignored) {
-                    // As above.
-                }
-            }
-            forceThemeFlags(themeUtils);
-            pluginMaterialGuards(
-                    themeUtils.getClassLoader() == null ? cl : themeUtils.getClassLoader(),
-                    idPrefix);
-            sPluginHooked = true;
-            ok("glass-plugin:" + where);
-        } catch (Throwable t) {
-            failed("glass-plugin:" + where, t);
-        }
-    }
-
-    private static void forceThemeFlags(Class<?> themeUtils) {
-        for (String name : new String[] {"defaultPluginTheme", "defaultSysUiTheme"}) {
-            try {
-                Field f = themeUtils.getDeclaredField(name);
-                f.setAccessible(true);
-                // Written from the plugin's watch and its update hooks, after install: a dry run
-                // does not come back through here, so it must not give these back either.
-                forceStatic(f, "plugin ThemeUtils." + name, true);
-            } catch (Throwable ignored) {
-                // One of the two is missing on some builds; the other still holds.
-            }
-        }
-    }
-
     /** Set when the threshold hook turned a stock value open; see openDepthThreshold. */
     private static volatile boolean sOpenedStock;
 
@@ -1143,7 +1025,7 @@ public final class HyperTweaks {
 
     /**
      * Sets a static boolean to true, recording the first time what it held so the retirement
-     * gives it back. The hooks that write it again later find it recorded already.
+     * gives it back. The configuration hook writes it again later and finds it recorded already.
      */
     private static void forceStatic(final Field f, String what, boolean outlivesDryRun)
             throws IllegalAccessException {
@@ -1158,46 +1040,5 @@ public final class HyperTweaks {
             }, outlivesDryRun);
         }
         f.setBoolean(null, true);
-    }
-
-    /** Newer builds keep their own copy of the answer; these are the two that ask. */
-    private static void pluginMaterialGuards(ClassLoader cl, String idPrefix) {
-        try {
-            Class<?> blurCompat = Xp.findClass(CLS_MI_BLUR_COMPAT, cl);
-            // The stock answer is "material supported AND the user's advanced material switch is
-            // on (getBlurCompat == 1) AND the default theme". Only the theme half is ours to lift.
-            // Answering true outright also overrode the switch: with advanced material off, the
-            // control centre took the material path anyway, skipped its plain card backgrounds,
-            // and drew no blur either - a media card with no backdrop at all (#121). Without the
-            // switch's own reader there is nothing safe to say, so the hook is left out.
-            final java.lang.reflect.Method blurOf = blurCompat.getDeclaredMethod(
-                    "getBlurCompat", android.content.res.Configuration.class);
-            blurOf.setAccessible(true);
-            Xp.hookAll(idPrefix + ".glass.blur_compat",
-                    blurCompat, "getBackgroundMaterialOpenedInDefaultTheme", chain -> {
-                        Object stock = chain.proceed();
-                        if (Boolean.TRUE.equals(stock)) return stock;
-                        try {
-                            Object arg = chain.getArgs().isEmpty() ? null : chain.getArgs().get(0);
-                            if (!(arg instanceof android.content.Context)) return stock;
-                            android.content.res.Configuration config =
-                                    ((android.content.Context) arg).getResources().getConfiguration();
-                            Object blur = blurOf.invoke(null, config);
-                            return (blur instanceof Integer && (Integer) blur == 1) ? Boolean.TRUE : stock;
-                        } catch (Throwable t) {
-                            // Unreadable switch: the stock answer, not glass the user turned off.
-                            return stock;
-                        }
-                    });
-        } catch (Throwable t) {
-            failed("glass-blur-compat", t);
-        }
-        try {
-            Class<?> controller = Xp.findClass(CLS_DEFAULT_THEME_CONTROLLER, cl);
-            Xp.hookAll(idPrefix + ".glass.default_theme_controller",
-                    controller, "isDefaultTheme", chain -> Boolean.TRUE);
-        } catch (Throwable t) {
-            failed("glass-default-theme-controller", t);
-        }
     }
 }

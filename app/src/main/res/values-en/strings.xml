@@ -93,7 +93,7 @@
     <string name="credits_aritxonly">The stacked lock screen islands, and the AOD updates and customisation around them</string>
     <string name="credits_daguduiyuan">Left, centre and right lock screen lyric alignment, and sweeping the last word without cutting it</string>
     <string name="credits_oyuvaa">Fixes to where the lyrics come from and how they are parsed</string>
-    <string name="credits_hyperchanger">The lock screen super island (ported by btm_m), and lifting the depth, saved-lock-screen, clock colon and global-theme glass restrictions</string>
+    <string name="credits_hyperchanger">The lock screen super island (ported by btm_m), and lifting the depth, saved-lock-screen and clock colon restrictions</string>
     <string name="credits_leaf">Video and depth video wallpaper support</string>
     <string name="credits_hypertweak">Hiding the lock screen\'s fingerprint print and its animation</string>
     <string name="credits_amll">How the lock screen lyrics move</string>

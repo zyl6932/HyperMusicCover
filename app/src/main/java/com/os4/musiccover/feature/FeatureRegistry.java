@@ -18,9 +18,9 @@ import java.util.function.Supplier;
  * A cold start looks a target up by the package LSPosed names (Main.onPackageLoaded); a
  * hot-reload adoption by the process it is running in (HotReload.install). The two are not the
  * same key: 高德's :locationservice and :widgetProvider are its package under other process names,
- * and the control-centre plugin is a package with no process of its own - an adoption puts its
- * hooks back through HotReload.backfill instead, which stays out of this table because what it
- * installs depends on what the generation before had.
+ * and a loader rather than a process (the control centre plugin's APK, which AmapFocus looks
+ * through) is picked up by HotReload.backfill instead, which stays out of this table because what
+ * it installs depends on what the generation before had.
  *
  * <p>Process names are written out as literals, not constants: HotReloadProcessTest reads them
  * off this file and holds them equal to HotReloadPolicy.SUPPORTED, since this class cannot be
@@ -40,20 +40,17 @@ public final class FeatureRegistry {
         public final String name;
         final List<String> packages;
         final List<String> processes;
-        /** The plugin's package: its default loader is the plugin's, not a host's. */
-        final boolean pluginLoader;
         /** Gen.markInstallScope after the last feature; SystemUI only (the wallpaper does its own). */
         final boolean marksInstallScope;
         final ContainerLookup container;
         private final Supplier<List<Feature>> features;
 
-        Target(String name, String[] packages, String[] processes, boolean pluginLoader,
+        Target(String name, String[] packages, String[] processes,
                boolean marksInstallScope, ContainerLookup container,
                Supplier<List<Feature>> features) {
             this.name = name;
             this.packages = Arrays.asList(packages);
             this.processes = Arrays.asList(processes);
-            this.pluginLoader = pluginLoader;
             this.marksInstallScope = marksInstallScope;
             this.container = container;
             this.features = features;
@@ -65,7 +62,7 @@ public final class FeatureRegistry {
         }
 
         public Feature.Ctx ctx(ClassLoader cl) {
-            return pluginLoader ? new Feature.Ctx(null, cl) : new Feature.Ctx(cl, null);
+            return new Feature.Ctx(cl);
         }
     }
 
@@ -79,7 +76,7 @@ public final class FeatureRegistry {
 
     private static Target single(String name, String[] packages, String[] processes,
                                  Feature feature) {
-        return new Target(name, packages, processes, false, false, null,
+        return new Target(name, packages, processes, false, null,
                 () -> Collections.singletonList(feature));
     }
 
@@ -87,7 +84,7 @@ public final class FeatureRegistry {
             new Target("SystemUI",
                     packages("com.android.systemui"),
                     processes("com.android.systemui"),
-                    false, true, Main::findContainer, Main::systemUiFeatures),
+                    true, Main::findContainer, Main::systemUiFeatures),
             single("MiWallpaper",
                     packages("com.miui.miwallpaper"),
                     processes("com.miui.miwallpaper"),
@@ -105,14 +102,6 @@ public final class FeatureRegistry {
                     packages("com.xiaomi.subscreencenter"),
                     processes("com.xiaomi.subscreencenter"),
                     Feature.of("feature:rear_screen", false, c -> RearScreen.handle(c.host))),
-            // The control centre plugin. Usually loaded into SystemUI's own loader, in which case
-            // this never fires and the attempt inside HyperTweaks.systemUi is the one that lands.
-            new Target("control centre plugin",
-                    packages("miui.systemui.plugin"),
-                    processes(),
-                    true, false, null,
-                    () -> Collections.singletonList(Feature.of("feature:plugin", false,
-                            c -> HyperTweaks.plugin(c.plugin)))),
             // The one player we hook. Its lyric never reaches the session on its own, so it is
             // fetched and published from inside the app - see AppleLyrics. Nothing else about
             // the module runs in this process.

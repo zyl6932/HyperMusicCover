@@ -109,7 +109,7 @@ HyperMusicCover 是一个**澎湃 OS 4（HyperOS 4）** 的音乐锁屏模块，
 - [HyperNavBar](https://github.com/HyperNavBar/HyperNavBar) — 界面骨架、主题
 - [miuix](https://github.com/compose-miuix-ui/miuix) — 设置界面使用的全部 Compose 组件与动效参数
 - [AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) — 液态玻璃组件库
-- [HyperChanger](https://github.com/ColdP/HyperChanger) — 景深限制解除、锁屏搭配数量上限、时钟冒号与柔光玻璃
+- [HyperChanger](https://github.com/ColdP/HyperChanger) — 景深限制解除、锁屏搭配数量上限与时钟冒号
 - [HyperLyrics Enhanced](https://github.com/juren233/HyperLyrics-Enhanced) — QQ 音乐取词与解密、TTML Hub 目录、歌曲匹配规则
 - [accompanist-lyrics-core](https://github.com/6xingyv/accompanist-lyrics-core) — TTML、LRC、YRC、KRC 解析
 - [InstallerX Revived](https://github.com/wxxsfxyzm/InstallerX-Revived) — 更新交给系统安装器、隐藏图标与拨号密令的做法

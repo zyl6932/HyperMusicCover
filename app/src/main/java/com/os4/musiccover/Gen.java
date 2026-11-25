@@ -1403,8 +1403,8 @@ public final class Gen {
 
     /**
      * The same, for a value written after SystemUI's features are in, from a path a dry run
-     * does not run again (the control-centre plugin's watch): [outlivesDryRun] keeps a dry run
-     * from giving it back, as markInstallScope does for what install wrote.
+     * does not run again: [outlivesDryRun] keeps a dry run from giving it back, as
+     * markInstallScope does for what install wrote.
      */
     public static <T> void swap(Object owner, String what, T original, Runnable restore,
                                 boolean outlivesDryRun) {

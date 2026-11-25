@@ -94,7 +94,7 @@
     <string name="credits_aritxonly">锁屏岛的堆叠样式、AOD 显示优化与自定义</string>
     <string name="credits_daguduiyuan">锁屏歌词的左中右对齐，以及末词扫光不截断</string>
     <string name="credits_oyuvaa">歌词来源与歌词解析的修复</string>
-    <string name="credits_hyperchanger">锁屏超级岛（由 btm_m 移植），以及解除景深限制、锁屏搭配数量上限、时钟冒号、全局主题下的柔光玻璃</string>
+    <string name="credits_hyperchanger">锁屏超级岛（由 btm_m 移植），以及解除景深限制、锁屏搭配数量上限、时钟冒号</string>
     <string name="credits_leaf">视频壁纸和景深视频壁纸的支持</string>
     <string name="credits_hypertweak">隐藏锁屏指纹图案和指纹动画的做法</string>
     <string name="credits_amll">锁屏歌词的动画手感</string>

@@ -24,21 +24,12 @@ public interface Feature {
 
     void install(Ctx c) throws Throwable;
 
-    /**
-     * What an install is given. Not a bare ClassLoader: the control-centre plugin is installed
-     * from three places (HyperTweaks.plugin on its own package, an attempt inside
-     * HyperTweaks.systemUi, and HotReload's backfill), held apart by HyperTweaks.sPluginHooked,
-     * and its loader is not the host's.
-     */
+    /** What an install is given: the process's own class loader. */
     final class Ctx {
-        /** The process's own loader; null for the plugin's package, which has none of its own. */
         public final ClassLoader host;
-        /** The control-centre plugin's loader, on that package only; null everywhere else. */
-        final ClassLoader plugin;
 
-        Ctx(ClassLoader host, ClassLoader plugin) {
+        Ctx(ClassLoader host) {
             this.host = host;
-            this.plugin = plugin;
         }
     }
 

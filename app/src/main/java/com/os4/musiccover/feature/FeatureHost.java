@@ -56,8 +56,8 @@ public final class FeatureHost {
 
     /**
      * Every feature installed in this process by this generation, in install order. Keyed by
-     * target and id rather than cleared per call: SystemUI's process can also be told about the
-     * control-centre plugin's package, and that must not wipe SystemUI's own record.
+     * target and id rather than cleared per call, so a later install adds to what an earlier one
+     * recorded instead of replacing it.
      */
     private static final Map<String, Result> RESULTS = new LinkedHashMap<>();
     /** What the clock container lookup said; null where nothing asked (other processes). */
@@ -135,12 +135,7 @@ public final class FeatureHost {
         return b.toString();
     }
 
-    /**
-     * The ids of SystemUI's own features that are not INSTALLED, for the app's home page. The
-     * control-centre plugin's package is left out: when it is told about at all, its soft glass
-     * may already be in from HyperTweaks.systemUi's attempt, and then it hooks nothing on
-     * purpose - op features still lists it.
-     */
+    /** The ids of SystemUI's own features that are not INSTALLED, for the app's home page. */
     public static String[] missing() {
         List<String> out = new ArrayList<>();
         for (Result r : results()) {

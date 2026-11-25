@@ -131,8 +131,7 @@ public final class InstallFingerprint {
             delete(files, "mc_apple.txt");
         }
         // 小爱建议's commute memory is what the user taught it, not a cache of ours: it stays
-        // (user, 2026-11-11). The back screen, 高德 and the control centre plugin write no
-        // files of their own.
+        // (user, 2026-11-11). The back screen and 高德 write no files of their own.
     }
 
     private static void delete(File dir, String... names) {

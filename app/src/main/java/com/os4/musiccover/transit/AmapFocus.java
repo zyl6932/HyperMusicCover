@@ -33,9 +33,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * Both live on `miui.systemui.notification.NotificationSettingsManager`, which is defined in the
  * control centre plugin's own APK and loaded by a class loader built inside SystemUI long after
- * this module's hooks go in - the same late arrival HyperTweaks watches for. That is what is
- * watched here: every class loader the process builds passes through BaseDexClassLoader's
- * constructor, and the first one that can see the class is the plugin's.
+ * this module's hooks go in. That is what is watched here: every class loader the process builds
+ * passes through BaseDexClassLoader's constructor, and the first one that can see the class is
+ * the plugin's.
  */
 public final class AmapFocus {
 
